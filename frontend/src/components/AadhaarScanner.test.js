@@ -400,4 +400,81 @@ describe("AadhaarScanner component", () => {
 
     expect(mockStop).toHaveBeenCalled();
   });
+
+  test("calculates responsive qrbox boundaries without exceeding viewport", async () => {
+    let capturedScanConfig = null;
+    const mockStart = jest.fn().mockImplementation((cameraId, config) => {
+      capturedScanConfig = config;
+      return Promise.resolve();
+    });
+
+    Html5Qrcode.getCameras = jest.fn().mockResolvedValue([{ id: "cam1" }]);
+    Html5Qrcode.mockImplementation(() => ({
+      start: mockStart,
+      stop: jest.fn().mockResolvedValue(),
+      clear: jest.fn().mockResolvedValue(),
+      isScanning: true,
+    }));
+
+    act(() => {
+      root.render(<AadhaarScanner onScanned={jest.fn()} />);
+    });
+
+    const cameraBtn = container.querySelector('[data-testid="aadhaar-camera-button"]');
+    await act(async () => {
+      cameraBtn.click();
+    });
+
+    expect(capturedScanConfig).toBeDefined();
+    expect(typeof capturedScanConfig.qrbox).toBe("function");
+
+    // Standard viewport (400x400) -> 85% = 340
+    const resStandard = capturedScanConfig.qrbox(400, 400);
+    expect(resStandard.width).toBe(340);
+    expect(resStandard.height).toBe(340);
+
+    // Small viewport (180x180) -> 85% = 153, never exceeds 180
+    const resSmall = capturedScanConfig.qrbox(180, 180);
+    expect(resSmall.width).toBeLessThanOrEqual(180);
+    expect(resSmall.height).toBeLessThanOrEqual(180);
+    expect(resSmall.width).toBe(153);
+  });
+
+  test("trims leading and trailing whitespace on manual decode button click", async () => {
+    api.post.mockResolvedValueOnce({
+      data: {
+        outcome: "card",
+        source: "demo",
+        data: { full_name: "Trim Test", aadhaar_last4: "9999" },
+      },
+    });
+
+    act(() => {
+      root.render(<AadhaarScanner onScanned={jest.fn()} />);
+    });
+
+    const manualBtn = container.querySelector('[data-testid="aadhaar-manual-toggle"]');
+    act(() => {
+      manualBtn.click();
+    });
+
+    const textarea = container.querySelector('[data-testid="aadhaar-qr-input"]');
+    act(() => {
+      const nativeSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        "value"
+      ).set;
+      nativeSetter.call(textarea, "   AADHAAR|Trim Test|M|1990-01-01|9999|Address   \n");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    const decodeBtn = container.querySelector('[data-testid="aadhaar-scan-button"]');
+    await act(async () => {
+      decodeBtn.click();
+    });
+
+    expect(api.post).toHaveBeenCalledWith("/aadhaar/decode", {
+      payload: "AADHAAR|Trim Test|M|1990-01-01|9999|Address",
+    });
+  });
 });
