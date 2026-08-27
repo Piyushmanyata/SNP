@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from db import get_db, init_indexes
-from security import hash_password, verify_password
+from security import hash_password
 from helpers import now_utc
 
 import routes_auth
@@ -41,7 +41,7 @@ app.include_router(routes_templates.router)
 
 async def seed_admin():
     db = get_db()
-    email = os.environ["ADMIN_EMAIL"].lower()
+    email = os.environ["ADMIN_EMAIL"].lower().strip()
     password = os.environ["ADMIN_PASSWORD"]
     existing = await db.users.find_one({"email": email})
     if existing is None:
@@ -50,9 +50,6 @@ async def seed_admin():
             "name": "Camp Administrator", "role": "admin", "phone": None,
             "team_lead_id": None, "disabled_at": None, "created_at": now_utc(),
         })
-    elif not verify_password(password, existing["password_hash"]):
-        await db.users.update_one({"email": email},
-                                  {"$set": {"password_hash": hash_password(password)}})
 
 
 @app.on_event("startup")

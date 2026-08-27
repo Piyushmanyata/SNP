@@ -65,11 +65,13 @@ Copy `.env.example` to `.env` or set environment variables:
 # Backend
 MONGO_URL=mongodb://localhost:27017
 DB_NAME=snp_camps
-AADHAAR_HASH_PEPPER=your_secure_random_pepper
-JWT_SECRET=your_secure_jwt_secret
+AADHAAR_HASH_PEPPER=local-dev-aadhaar-pepper-not-for-production
+JWT_SECRET=local-dev-jwt-secret-not-for-production
 ADMIN_EMAIL=admin@snpcamps.org
 ADMIN_PASSWORD=AdminCamp@2026
-CORS_ORIGINS=*
+CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+COOKIE_SECURE=false
+COOKIE_SAMESITE=lax
 
 # Frontend
 REACT_APP_BACKEND_URL=http://localhost:8000
@@ -79,7 +81,35 @@ REACT_APP_BACKEND_URL=http://localhost:8000
 
 ## Local Development
 
-### 1. Backend (FastAPI)
+### Docker (recommended)
+
+Start Docker Desktop, then from the repository root:
+
+```powershell
+docker compose up --build
+```
+
+| What | URL |
+|---|---|
+| Frontend | http://localhost:3000 |
+| Backend API | http://localhost:8000 |
+| Swagger | http://localhost:8000/docs |
+| Health | http://localhost:8000/api/health |
+
+MongoDB is not published; the backend reaches it as `mongodb://mongo:27017`. Data lives in the `mongo_data` Docker volume and survives `docker compose down`.
+
+Local admin login (see `memory/test_credentials.md`):
+
+- Email: `admin@snpcamps.org`
+- Password: `AdminCamp@2026`
+
+Copy `.env.example` to `.env` to override secrets. Compose also works with no `.env` file.
+
+Stop with `Ctrl+C`, or `docker compose down`. Add `-v` only if you intend to delete MongoDB data.
+
+### Without Docker
+
+#### 1. Backend (FastAPI)
 
 ```bash
 cd backend
@@ -91,7 +121,7 @@ Backend API documentation is available at:
 - Swagger UI: `http://localhost:8000/docs`
 - Health Check: `http://localhost:8000/api/health`
 
-### 2. Frontend (React)
+#### 2. Frontend (React)
 
 ```bash
 cd frontend

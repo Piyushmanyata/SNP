@@ -1,3 +1,4 @@
+import os
 from datetime import timedelta
 from fastapi import APIRouter, Request, Response, HTTPException, Depends
 from db import get_db
@@ -18,10 +19,12 @@ LOCK_MINUTES = 15
 
 
 def set_auth_cookies(response: Response, access: str, refresh: str):
-    response.set_cookie("access_token", access, httponly=True, secure=True,
-                        samesite="none", max_age=43200, path="/")
-    response.set_cookie("refresh_token", refresh, httponly=True, secure=True,
-                        samesite="none", max_age=604800, path="/")
+    secure = os.environ.get("COOKIE_SECURE", "true").lower() == "true"
+    samesite = os.environ.get("COOKIE_SAMESITE", "none")
+    response.set_cookie("access_token", access, httponly=True, secure=secure,
+                        samesite=samesite, max_age=43200, path="/")
+    response.set_cookie("refresh_token", refresh, httponly=True, secure=secure,
+                        samesite=samesite, max_age=604800, path="/")
 
 
 @router.post("/login")
@@ -59,8 +62,10 @@ async def login(body: LoginBody, request: Request, response: Response):
 
 @router.post("/logout")
 async def logout(response: Response, user: dict = Depends(get_current_user)):
-    response.delete_cookie("access_token", path="/")
-    response.delete_cookie("refresh_token", path="/")
+    secure = os.environ.get("COOKIE_SECURE", "true").lower() == "true"
+    samesite = os.environ.get("COOKIE_SAMESITE", "none")
+    response.delete_cookie("access_token", path="/", secure=secure, httponly=True, samesite=samesite)
+    response.delete_cookie("refresh_token", path="/", secure=secure, httponly=True, samesite=samesite)
     return {"ok": True}
 
 
