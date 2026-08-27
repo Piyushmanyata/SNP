@@ -3,7 +3,10 @@ import re
 from pathlib import Path
 
 import pytest
-import requests
+try:
+    import requests
+except ImportError:
+    requests = None
 from dotenv import dotenv_values
 
 _root = Path(__file__).resolve().parents[2]
@@ -29,6 +32,8 @@ def admin_credentials():
 
 @pytest.fixture(scope="session")
 def admin_token(admin_credentials):
+    if requests is None:
+        pytest.skip("requests not installed")
     r = requests.post(f"{API}/auth/login", json=admin_credentials, timeout=30)
     if r.status_code != 200:
         pytest.fail(f"admin login failed {r.status_code}: {r.text[:300]}")
@@ -39,6 +44,8 @@ def admin_token(admin_credentials):
 
 @pytest.fixture(scope="session")
 def admin(admin_token):
+    if requests is None:
+        pytest.skip("requests not installed")
     s = requests.Session()
     s.headers.update({"Authorization": f"Bearer {admin_token}", "Content-Type": "application/json"})
     return s
@@ -46,6 +53,8 @@ def admin(admin_token):
 
 @pytest.fixture(scope="session")
 def anon():
+    if requests is None:
+        pytest.skip("requests not installed")
     s = requests.Session()
     s.headers.update({"Content-Type": "application/json"})
     return s
