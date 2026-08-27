@@ -176,8 +176,8 @@ export default function AadhaarScanner({ onScanned, disabled }) {
             const minDim = Math.min(viewfinderWidth, viewfinderHeight);
             const size = Math.floor(minDim * 0.85);
             return {
-              width: Math.max(200, Math.min(size, 340)),
-              height: Math.max(200, Math.min(size, 340)),
+              width: Math.max(200, size),
+              height: Math.max(200, size),
             };
           },
           aspectRatio: 1.0,
@@ -426,8 +426,14 @@ export default function AadhaarScanner({ onScanned, disabled }) {
           variant="outline"
           size="sm"
           type="button"
-          onClick={() => fileRef.current?.click()}
-          disabled={disabled || busy || mode === "camera"}
+          onClick={async () => {
+            if (mode === "camera") {
+              await stopCamera();
+              setMode("idle");
+            }
+            fileRef.current?.click();
+          }}
+          disabled={disabled || busy || cameraState === "starting"}
           data-testid="aadhaar-upload-button"
         >
           <Upload className="w-4 h-4" /> Upload photo
@@ -504,13 +510,13 @@ export default function AadhaarScanner({ onScanned, disabled }) {
 
         {/* Viewfinder guide frame overlay */}
         {cameraState === "scanning" && (
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center p-6">
-            <div className="relative w-56 h-56 sm:w-64 sm:h-64 border-2 border-dashed border-emerald-400/80 rounded-2xl flex items-center justify-center">
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center p-4">
+            <div className="relative w-4/5 max-w-[280px] sm:max-w-[320px] aspect-square border-2 border-dashed border-emerald-400/80 rounded-2xl flex items-center justify-center">
               <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-emerald-400 rounded-tl-lg" />
               <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-emerald-400 rounded-tr-lg" />
               <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-emerald-400 rounded-bl-lg" />
               <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-emerald-400 rounded-br-lg" />
-              <p className="text-[11px] font-medium text-emerald-200 bg-slate-950/70 px-2 py-0.5 rounded-full shadow">
+              <p className="text-[11px] font-medium text-emerald-200 bg-slate-950/70 px-2 py-0.5 rounded-full shadow text-center">
                 Align Aadhaar QR inside frame
               </p>
             </div>
@@ -533,7 +539,13 @@ export default function AadhaarScanner({ onScanned, disabled }) {
             className="w-full min-h-[70px] px-3.5 py-2.5 rounded-xl border border-slate-300 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
             value={payload}
             onChange={(e) => setPayload(e.target.value)}
-            placeholder="Paste the big-number Secure QR, or a demo AADHAAR|... string"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && payload.trim()) {
+                e.preventDefault();
+                decode(payload.trim());
+              }
+            }}
+            placeholder="Paste the big-number Secure QR, or a demo AADHAAR|... string (Press Enter to decode)"
             disabled={disabled || busy}
             data-testid="aadhaar-qr-input"
           />
