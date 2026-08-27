@@ -1,0 +1,65 @@
+{
+  "summary": "Full backend + frontend E2E test of SNP Camps Phase 1. Created pytest suite (67 tests) covering health, auth/JWT/cookies/lockout, camps (one-active, print window), registration (validation, idempotency, Aadhaar mock, self-register), desk (presence-once, never_printed, PRINT_WINDOW_CLOSED), clinical (seen-only eligibility, transcription lock, append-only corrections, OT seats/slips), staff RBAC + password policy, KPIs/leaderboard/CSV exports. 64/67 backend tests pass. Frontend flows verified via Playwright on desktop (1920x1080) and mobile (390x844): admin login/role-aware home, camp+day+print-window admin, Aadhaar mock scan with identity field locking, registration, A4 prescription print with QR + presence, mark-seen/never_printed refusal, clinical lookup (not_seen refusal without PHI), transcription -> lock -> correction, OT deferral seat consumption + 58mm slip, staff creation with password policy, leaderboards, CSV download, role guards for volunteer/clinical operator. 3 confirmed defects (1 critical, 2 high) plus UI issues.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/desk/undo-seen/{id}", "issue": "500 TypeError: can't compare offset-naive and offset-aware datetimes (routes_desk.py:113 `p['seen_at'] < now_utc() - timedelta(...)`). Mongo returns naive UTC datetimes. Undo-seen is completely broken (UI 'Undo' button always fails), and the 'blocked once a clinical transcription exists' invariant returns 500 instead of 409.", "priority": "CRITICAL"},
+      {"endpoint": "POST /api/auth/login (lockout)", "issue": "Brute-force lockout broken: routes_auth.py:36 compares naive `locked_until` from Mongo with aware now_utc() -> 500 instead of 429 (reproduced on localhost: 401,401,401,401,401,500,500). Additionally the rate-limit identifier is `client_ip:email` and the ingress forwards from multiple pod IPs (observed 10.208.134.66 and 10.208.134.70 for the same email), so attempts split across identifiers and the 5-attempt threshold is never reached through the public URL -> no effective lockout.", "priority": "HIGH"},
+      {"endpoint": "GET /api/camps/active (used by public /self-register)", "issue": "Endpoint requires staff auth (require_any) but the public patient self-registration page calls it on mount -> 401 -> the page renders only 'Not authenticated' and no form. Patient self-registration is entirely unusable. Needs a public read-only endpoint (e.g. GET /api/camps/active/public returning camp name/venue + today's day ids).", "priority": "CRITICAL"}
+    ],
+    "minor": [
+      {"endpoint": "POST /api/clinical/fulfilment", "issue": "OT seat leak: existing fulfilment of the same item_type is deleted (line 206) without decrementing seats_taken on the previously booked ot_schedule_day. Re-recording/changing an OT deferral consumes an extra seat permanently."},
+      {"endpoint": "POST /api/register", "issue": "Phone is optional server-side (null accepted) although the UI marks it required and the spec says required; validation inconsistent. Also is_dummy_phone() rejects any phone whose length != 10 including partial input, returning the same generic message."},
+      {"endpoint": "server.py CORS", "issue": "CORS_ORIGINS defaults to '*' with allow_credentials=True for a PHI application; recommend explicit origin list."},
+      {"endpoint": "db.login_attempts", "issue": "No TTL/cleanup index on login_attempts; lock documents accumulate forever."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "ui.js Modal (New Registration / Add Staff / Correction)", "issue": "Modal panel renders partially ABOVE the viewport (measured bounding rect top = -32.5px, height 855 in a 1080px viewport). The sticky header with the title and the close 'X' is off-screen and un-clickable (Playwright: 'element is outside of the viewport'). Root cause: modal is not portaled to document.body, so `fixed inset-0` is resolved against a transformed/animated ancestor inside Layout. Body scroll is also not locked.", "selector": "[data-testid=\"modal-close-button\"]", "priority": "HIGH"},
+      {"component": "Clinical.js CorrectionForm", "issue": "After submitting a correction the server value updates (verified in DB: bp 118/76 -> 150/95 + correction row) but the on-screen transcription form still shows the stale value; no refetch after correction.", "selector": "[data-testid=\"correction-submit-button\"], [data-testid=\"bp-input\"]", "priority": "MEDIUM"},
+      {"component": "Login.js", "issue": "React console error: 'Cannot update a component (BrowserRouter) while rendering a different component (Login)' - navigate()/setState called during render.", "selector": "[data-testid=\"login-form\"]", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "Patient self-registration (/self-register)", "issue": "Page dead on arrival for unauthenticated patients: GET /api/camps/active returns 401 and the whole form is replaced by the 'Not authenticated' alert. Could not test receipt/QR through the UI (verified only via API).", "affected_selectors": ["[data-testid=\"generate-demo-aadhaar-button\"]", "[data-testid=\"self-register-submit\"]", "[data-testid=\"self-receipt\"]"]},
+      {"flow": "Undo seen from desk", "issue": "Clicking Undo hits the 500 above; the row stays 'Seen' and the surfaced message is a generic axios error (no actionable text).", "affected_selectors": ["[data-testid=\"undo-seen-button-2\"]"]}
+    ],
+    "design_issues": [
+      {"screen": "Registration modal (desktop 1920x1080)", "issues": ["Modal header/close button clipped above the viewport", "Modal taller than viewport with no internal scroll reachable to the header"]},
+      {"screen": "/print/prescription/:id error state", "issues": ["Bare page with only a red alert and 'Back to desk'; no header/branding, content pinned top-centre with large empty area"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix naive/aware datetime comparisons: routes_desk.py:113 (undo-seen) and routes_auth.py:36 (lockout) — normalise Mongo datetimes to UTC-aware (or store/compare naive UTC consistently). Audit all other datetime comparisons.",
+    "Make login lockout proxy-safe: key on email (optionally plus X-Forwarded-For first hop) instead of raw request.client.host, and return 429 (currently 500).",
+    "Add a public (unauthenticated) endpoint for active camp/day info and use it in SelfRegister.js so /self-register works for patients.",
+    "Portal the Modal to document.body (createPortal) and lock body scroll so the modal header/close button is always visible and clickable.",
+    "Refetch the clinical record after a correction is submitted so the displayed transcription reflects the applied change.",
+    "Release the previously consumed OT seat (decrement seats_taken) when an OT deferral fulfilment is replaced/changed.",
+    "Fix Login.js navigate-during-render React warning."
+  ],
+  "critical_code_review_comments": [
+    "Any datetime read back from MongoDB is naive; every direct comparison with helpers.now_utc() (aware) raises TypeError at runtime — two such bugs already reach production paths (undo-seen, login lockout). Add a helper `as_utc(dt)` and use it everywhere.",
+    "routes_clinical.record_fulfilment deletes the prior fulfilment of the same item_type without compensating side effects (OT seat), breaking the seat-count invariant that the $expr conditional increment is meant to protect.",
+    "Brute-force protection keyed on request.client.host is meaningless behind the k8s ingress (multiple proxy IPs observed for one client).",
+    "SelfRegister.js depends on an authenticated endpoint — the public route has no unauthenticated data source; add a public projection that exposes no PHI.",
+    "ui.js Modal relies on `fixed inset-0` while rendered deep inside Layout; use a portal to avoid containing-block surprises (already breaking today).",
+    "Prescription print/mark-seen refusals return structured detail objects, but the frontend only renders detail.message/code — 500s (plain text) surface as raw axios messages; add a generic fallback message."
+  ],
+  "updated_files": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/iteration_1.json"
+  ],
+  "success_rate": {"backend": "96% (64/67 pytest cases)", "frontend": "80% (self-register page and undo-seen broken, modal close button unreachable)"},
+  "seed_data_creation": "Active camp 'TEST_Camp_7c2f9b' (venue TEST Venue) with camp-day 2026-08-27 (today IST, print window OPEN); patients #1 TESTPATIENT Alpha (seen, locked transcription + medicine/specs/ot fulfilments), #2 TESTPATIENT Beta (seen, locked transcription, OT deferred to 2026-12-20), #3 TESTSELF (self-registered), #4 Lakshmi Nair (Aadhaar mock scan, printed); OT days 2026-12-01 (1/1 full) and 2026-12-20 (1/3); staff TEST_vol_7c2f9b@snpcamps.org / TEST_lead_7c2f9b@snpcamps.org / TEST_clin_7c2f9b@snpcamps.org (passwords VolunteerPass@1 / TeamLeadPass@1 / ClinicalPass@1), plus testui_vol@snpcamps.org / VolunteerPass@1. A second inactive camp TEST_Camp2_7c2f9b exists.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "admin@snpcamps.org / AdminCamp@2026 (from /app/memory/test_credentials.md, bcrypt hash verified $2b$12$). volunteer1@snpcamps.org / VolunteerPass@1 works. Clinical operator for retest: TEST_clin_7c2f9b@snpcamps.org / ClinicalPass@1.",
+  "context_for_next_testing_agent": "Regression suite lives at /app/backend/tests/backend_test.py (+conftest.py); tests share module-level STATE and MUST run in file order (no -p xdist/random). Run: python -m pytest /app/backend/tests/backend_test.py -v --junitxml=/app/test_reports/pytest/pytest_results.xml. Expected pre-fix failures: test_brute_force_lockout, test_undo_seen_within_window, test_undo_seen_blocked_after_transcription. The suite leaves the TEST camp active with today's print window open so UI testing works immediately. Not yet retested after fixes: /self-register UI receipt+QR flow, undo-seen 10-minute window expiry, medicine/specs stations in the clinical UI (backend covered), MSG91/cron (intentionally not implemented).",
+  "rca_of_the_issue": "1) undo-seen + login lockout 500s: PyMongo/Motor return naive UTC datetimes; the code compares them directly with timezone-aware datetime.now(timezone.utc) -> TypeError -> 500 (traceback in /var/log/supervisor/backend.err.log at routes_desk.py:113). 2) Lockout never triggers over the public URL because request.client.host is the ingress pod IP which rotates, splitting the per-identifier counter. 3) /self-register is blank because the page bootstraps from the staff-only GET /api/camps/active (401). 4) Modal header off-screen because the fixed-position modal is nested inside Layout instead of being portaled, so its containing block is an ancestor with a transform/animation, giving the panel a negative top offset."
+}
