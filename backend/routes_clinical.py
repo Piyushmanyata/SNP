@@ -161,23 +161,18 @@ async def create_transcription(body: TranscriptionBody, actor: dict = Depends(re
     return {"transcription": ser_trans(doc)}
 
 
-@router.post("/fulfilment")
-async def record_fulfilment(body: FulfilmentBody, actor: dict = Depends(require_clinical)):
-    db = get_db()
-    t = await db.transcriptions.find_one({"_id": ObjectId(body.transcription_id)})
-    if not t:
-        raise HTTPException(status_code=404, detail="Transcription not found")
-
+def _validate_fulfilment_matrix(item_type: str, status: str):
     valid = {
         "medicine": {"fulfilled", "not_available", "not_required"},
         "specs": {"fulfilled", "deferred", "not_required"},
         "ot": {"fulfilled", "deferred", "not_required"},
     }
-    if body.item_type not in valid or body.status not in valid[body.item_type]:
+    if item_type not in valid or status not in valid[item_type]:
         raise HTTPException(status_code=400, detail="Invalid fulfilment item/status")
 
+
+async def _process_deferral(db, t: dict, body: FulfilmentBody):
     slip = None
-    # deferral readiness + slip generation
     if body.status == "deferred":
         if body.item_type == "specs":
             if not body.collection_date or not body.collection_venue:
@@ -198,6 +193,29 @@ async def record_fulfilment(body: FulfilmentBody, actor: dict = Depends(require_
             slip = await _make_slip(t, "ot", ot_day["day_date"], ot_day["venue"],
                                     "Report for surgery on the scheduled OT date.",
                                     ot_schedule_day_id=ot_day["_id"])
+    return slip
+
+
+async def _cleanup_prior_fulfilment(db, transcription_id, item_type: str):
+    prior = await db.fulfilments.find({"transcription_id": transcription_id, "item_type": item_type}).to_list(20)
+    for pf in prior:
+        if pf.get("ot_schedule_day_id"):
+            await db.ot_schedule_days.update_one(
+                {"_id": pf["ot_schedule_day_id"], "seats_taken": {"$gt": 0}},
+                {"$inc": {"seats_taken": -1}},
+            )
+    await db.fulfilments.delete_many({"transcription_id": transcription_id, "item_type": item_type})
+
+
+@router.post("/fulfilment")
+async def record_fulfilment(body: FulfilmentBody, actor: dict = Depends(require_clinical)):
+    db = get_db()
+    t = await db.transcriptions.find_one({"_id": ObjectId(body.transcription_id)})
+    if not t:
+        raise HTTPException(status_code=404, detail="Transcription not found")
+
+    _validate_fulfilment_matrix(body.item_type, body.status)
+    slip = await _process_deferral(db, t, body)
 
     doc = {
         "transcription_id": t["_id"],
@@ -210,14 +228,7 @@ async def record_fulfilment(body: FulfilmentBody, actor: dict = Depends(require_
         "created_at": now_utc(),
     }
     # replace existing fulfilment of same type; release any previously booked OT seat
-    prior = await db.fulfilments.find({"transcription_id": t["_id"], "item_type": body.item_type}).to_list(20)
-    for pf in prior:
-        if pf.get("ot_schedule_day_id"):
-            await db.ot_schedule_days.update_one(
-                {"_id": pf["ot_schedule_day_id"], "seats_taken": {"$gt": 0}},
-                {"$inc": {"seats_taken": -1}},
-            )
-    await db.fulfilments.delete_many({"transcription_id": t["_id"], "item_type": body.item_type})
+    await _cleanup_prior_fulfilment(db, t["_id"], body.item_type)
     res = await db.fulfilments.insert_one(doc)
     doc["_id"] = res.inserted_id
 

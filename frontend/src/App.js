@@ -1,6 +1,7 @@
 import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth, roleHome } from "./context/AuthContext";
+import { ADMIN_ROLES, DESK_ROLES, CLINICAL_ROLES } from "./constants/roles";
 import { Spinner } from "./components/ui";
 import Login from "./pages/Login";
 import SelfRegister from "./pages/SelfRegister";
@@ -41,11 +42,11 @@ export default function App() {
           <Route path="/" element={<HomeRedirect />} />
           <Route path="/login" element={<Login />} />
           <Route path="/self-register" element={<SelfRegister />} />
-          <Route path="/admin" element={<Protected roles={["admin"]}><AdminDashboard /></Protected>} />
-          <Route path="/desk" element={<Protected roles={["admin", "team_lead", "volunteer"]}><Desk /></Protected>} />
-          <Route path="/clinical" element={<Protected roles={["admin", "clinical_desk_operator"]}><Clinical /></Protected>} />
-          <Route path="/print/prescription/:id" element={<Protected roles={["admin", "team_lead", "volunteer"]}><PrintPrescription /></Protected>} />
-          <Route path="/print/slip/:id" element={<Protected roles={["admin", "clinical_desk_operator"]}><PrintSlip /></Protected>} />
+          <Route path="/admin" element={<Protected roles={ADMIN_ROLES}><AdminDashboard /></Protected>} />
+          <Route path="/desk" element={<Protected roles={DESK_ROLES}><Desk /></Protected>} />
+          <Route path="/clinical" element={<Protected roles={CLINICAL_ROLES}><Clinical /></Protected>} />
+          <Route path="/print/prescription/:id" element={<Protected roles={DESK_ROLES}><PrintPrescription /></Protected>} />
+          <Route path="/print/slip/:id" element={<Protected roles={CLINICAL_ROLES}><PrintSlip /></Protected>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </BrowserRouter>

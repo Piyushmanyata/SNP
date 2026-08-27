@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from "react";
 import api from "../lib/api";
 
 const AuthContext = createContext(null);
@@ -15,19 +15,28 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const login = async (email, password) => {
+  const login = useCallback(async (email, password) => {
     const r = await api.post("/auth/login", { email, password });
     setUser(r.data.user);
     return r.data.user;
-  };
+  }, []);
 
-  const logout = async () => {
-    try { await api.post("/auth/logout"); } catch (e) {}
+  const logout = useCallback(async () => {
+    try {
+      await api.post("/auth/logout");
+    } catch (e) {
+      console.warn("Logout request failed:", e);
+    }
     setUser(false);
-  };
+  }, []);
+
+  const value = useMemo(
+    () => ({ user, setUser, login, logout, loading }),
+    [user, login, logout, loading]
+  );
 
   return (
-    <AuthContext.Provider value={{ user, setUser, login, logout, loading }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );

@@ -41,7 +41,7 @@ export default function Desk() {
 
   useEffect(() => { load(); }, [load]);
 
-  const doLookup = async (e) => {
+  const doLookup = useCallback(async (e) => {
     e?.preventDefault();
     if (!lookupVal.trim()) return;
     setBanner("");
@@ -55,27 +55,28 @@ export default function Desk() {
     } catch (err) {
       setBanner(formatApiError(err));
     }
-  };
+  }, [lookupVal, load]);
 
-  const doSearch = async (e) => {
+  const doSearch = useCallback(async (e) => {
     e?.preventDefault();
     if (!searchVal.trim()) { setSearchResults(null); return; }
     try {
       const { data } = await api.get(`/patients/search?q=${encodeURIComponent(searchVal.trim())}`);
       setSearchResults(data.results);
     } catch (err) { setBanner(formatApiError(err)); }
-  };
+  }, [searchVal]);
 
-  const markSeen = async (id) => {
+  const markSeen = useCallback(async (id) => {
     setBanner("");
     try { await api.post(`/desk/mark-seen/${id}`); await load(); }
     catch (err) { setBanner(formatApiError(err)); }
-  };
-  const undoSeen = async (id) => {
+  }, [load]);
+
+  const undoSeen = useCallback(async (id) => {
     setBanner("");
     try { await api.post(`/desk/undo-seen/${id}`); await load(); }
     catch (err) { setBanner(formatApiError(err)); }
-  };
+  }, [load]);
 
   if (loadErr) return <Layout title="Desk"><ErrorCard message={loadErr} onRetry={load} /></Layout>;
 
@@ -170,9 +171,18 @@ function PatientList({ patients, onMarkSeen, onUndo, navigate }) {
   );
 }
 
+const EMPTY_REG_FORM = Object.freeze({
+  full_name: "",
+  age: "",
+  phone: "",
+  gender: "",
+  address: "",
+  aadhaar_last4: "",
+  dob: "",
+});
+
 function RegisterModal({ open, onClose, days, onDone, setBanner }) {
-  const empty = { full_name: "", age: "", phone: "", gender: "", address: "", aadhaar_last4: "", dob: "" };
-  const [form, setForm] = useState(empty);
+  const [form, setForm] = useState(EMPTY_REG_FORM);
   const [scanned, setScanned] = useState(false);
   const [dayId, setDayId] = useState("");
   const [manualEx, setManualEx] = useState(false);
@@ -184,22 +194,27 @@ function RegisterModal({ open, onClose, days, onDone, setBanner }) {
 
   useEffect(() => {
     if (open) {
-      setForm(empty); setScanned(false); setManualEx(false); setManualReason("");
+      setForm(EMPTY_REG_FORM); setScanned(false); setManualEx(false); setManualReason("");
       setError(""); setDups(null); setReqId(v4());
       const today = days.find((d) => d.is_today);
       setDayId(today ? today.id : (days[0]?.id || ""));
     }
-  }, [open]); // eslint-disable-line
+  }, [open, days]);
 
-  const onScan = (data) => {
-    setForm({
-      full_name: data.full_name, age: data.age ?? "", phone: form.phone,
-      gender: data.gender, address: data.address, aadhaar_last4: data.aadhaar_last4, dob: data.dob,
-    });
+  const onScan = useCallback((data) => {
+    setForm((prev) => ({
+      full_name: data.full_name,
+      age: data.age ?? "",
+      phone: prev.phone,
+      gender: data.gender,
+      address: data.address,
+      aadhaar_last4: data.aadhaar_last4,
+      dob: data.dob,
+    }));
     setScanned(true);
-  };
+  }, []);
 
-  const submit = async (override = false) => {
+  const submit = useCallback(async (override = false) => {
     setBusy(true); setError("");
     try {
       if (!override) {
@@ -234,7 +249,7 @@ function RegisterModal({ open, onClose, days, onDone, setBanner }) {
         setError(formatApiError(err));
       }
     } finally { setBusy(false); }
-  };
+  }, [form, scanned, dayId, reqId, manualEx, manualReason, onClose, onDone, setBanner]);
 
   return (
     <Modal open={open} onClose={onClose} title="New Registration" size="lg">

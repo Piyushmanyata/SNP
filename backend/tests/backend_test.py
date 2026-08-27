@@ -30,7 +30,7 @@ class TestHealth:
         r = anon.get(f"{API}/health/ready", timeout=30)
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body["ready"] is True
+        assert body["ready"] == True
         assert body["db"] == "reachable"
 
 
@@ -80,7 +80,7 @@ class TestCamps:
                                              "camp_date": TODAY_IST}, timeout=30)
         assert r.status_code == 200, r.text
         camp = r.json()["camp"]
-        assert camp["is_active"] is False
+        assert camp["is_active"] == False
         STATE["camp_id"] = camp["id"]
 
         r = admin.post(f"{API}/camps/{camp['id']}/activate", timeout=30)
@@ -106,8 +106,8 @@ class TestCamps:
         assert r.status_code == 200, r.text
         day = r.json()["day"]
         assert day["day_date"] == TODAY_IST
-        assert day["is_today"] is True
-        assert day["printing_open"] is False
+        assert day["is_today"] == True
+        assert day["printing_open"] == False
         STATE["day_id"] = day["id"]
 
     def test_camp_endpoints_require_admin(self, anon):
@@ -169,7 +169,7 @@ class TestRegistration:
         }, timeout=30)
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body["created"] is True
+        assert body["created"] == True
         reg = body["registration"]
         assert "_id" not in reg and isinstance(reg["id"], str)
         assert reg["queue_status"] == "registered"
@@ -190,7 +190,7 @@ class TestRegistration:
         }, timeout=30)
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body["created"] is False
+        assert body["created"] == False
         assert body["registration"]["reg_no"] == STATE["p1"]["reg_no"]
 
     def test_name_search_prefix(self, admin):
@@ -257,7 +257,7 @@ class TestDeskPrintWindow:
         r = admin.patch(f"{API}/camps/days/{STATE['day_id']}/print-window",
                         json={"printing_open": True}, timeout=30)
         assert r.status_code == 200, r.text
-        assert r.json()["day"]["printing_open"] is True
+        assert r.json()["day"]["printing_open"] == True
 
     def test_print_records_presence_once(self, admin):
         r = admin.post(f"{API}/desk/print/{STATE['p1']['id']}", timeout=30)
@@ -292,13 +292,13 @@ class TestDeskPrintWindow:
         r = admin.post(f"{API}/desk/mark-seen/{STATE['p1']['id']}", timeout=30)
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body["changed"] is True
+        assert body["changed"] == True
         assert body["registration"]["queue_status"] == "seen"
         assert body["registration"]["seen_at"]
 
         r2 = admin.post(f"{API}/desk/mark-seen/{STATE['p1']['id']}", timeout=30)
         assert r2.status_code == 200
-        assert r2.json()["changed"] is False
+        assert r2.json()["changed"] == False
 
     def test_undo_seen_within_window(self, admin):
         r = admin.post(f"{API}/desk/undo-seen/{STATE['p1']['id']}", timeout=30)
@@ -348,7 +348,7 @@ class TestClinical:
         }, timeout=30)
         assert r.status_code == 200, r.text
         t = r.json()["transcription"]
-        assert t["locked"] is False
+        assert t["locked"] == False
         assert t["diagnosis_options"] == ["Cataract", "Presbyopia"]
         assert t["bp"] == "130/85"
         STATE["trans_id"] = t["id"]
@@ -364,7 +364,7 @@ class TestClinical:
         }, timeout=30)
         assert r.status_code == 200, r.text
         assert r.json()["transcription"]["bp"] == "120/80"
-        assert r.json()["transcription"]["locked"] is False
+        assert r.json()["transcription"]["locked"] == False
 
     def test_create_ot_day(self, admin):
         r = admin.post(f"{API}/clinical/ot-days", json={
@@ -385,7 +385,7 @@ class TestClinical:
         assert r.json()["slip"] is None
 
         r = admin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
-        assert r.json()["transcription"]["locked"] is True
+        assert r.json()["transcription"]["locked"] == True
 
     def test_transcription_edit_blocked_after_lock(self, admin):
         r = admin.post(f"{API}/clinical/transcription", json={
@@ -414,7 +414,7 @@ class TestClinical:
         slip = r.json()["slip"]
         assert slip["item_type"] == "specs"
         assert slip["collection_date"] == "2026-12-05"
-        assert slip["active"] is True
+        assert slip["active"] == True
         STATE["specs_slip_id"] = slip["id"]
 
     def test_ot_deferral_consumes_seat_and_prints_slip(self, admin):

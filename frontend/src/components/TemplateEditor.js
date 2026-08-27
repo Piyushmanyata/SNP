@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useMemo } from "react";
 import api, { formatApiError } from "../lib/api";
 import { Button, Card, Input, Field, Alert, Badge } from "./ui";
 import { PrescriptionSheet } from "../pages/PrintPrescription";
@@ -42,41 +42,61 @@ export default function TemplateEditor() {
   useEffect(() => { load(); }, [load]);
 
   const camp = camps.find((c) => c.id === campId);
-  const sampleRx = {
+  const sampleRx = useMemo(() => ({
     reg_no: 101, full_name: "Sample Patient", date: new Date().toISOString().slice(0, 10),
     age: 52, gender: "M", phone: "9876543210", address: "12 MG Road, Kolkata",
     patient_qr: "sample-preview-uuid", camp_name: camp?.name, venue: camp?.venue,
-  };
+  }), [camp?.name, camp?.venue]);
 
-  const setBlock = (i, patch) => setTpl((t) => ({ ...t, blocks: t.blocks.map((b, j) => j === i ? { ...b, ...patch } : b) }));
-  const move = (i, dir) => setTpl((t) => {
-    const b = [...t.blocks]; const j = i + dir;
-    if (j < 0 || j >= b.length) return t;
-    [b[i], b[j]] = [b[j], b[i]]; return { ...t, blocks: b };
-  });
+  const setBlock = useCallback((i, patch) => {
+    setTpl((t) => (t ? { ...t, blocks: t.blocks.map((b, j) => (j === i ? { ...b, ...patch } : b)) } : t));
+  }, []);
 
-  const addLogo = (file) => {
+  const move = useCallback((i, dir) => {
+    setTpl((t) => {
+      if (!t) return t;
+      const b = [...t.blocks];
+      const j = i + dir;
+      if (j < 0 || j >= b.length) return t;
+      [b[i], b[j]] = [b[j], b[i]];
+      return { ...t, blocks: b };
+    });
+  }, []);
+
+  const addLogo = useCallback((file) => {
     if (!file) return;
     if (file.size > MAX_LOGO) { setErr("Logo must be 2 MB or smaller."); return; }
     if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) { setErr("Use PNG, JPEG or WebP."); return; }
     const reader = new FileReader();
-    reader.onload = () => setTpl((t) => ({ ...t, logos: [...t.logos, { id: v4(), name: file.name, data_url: reader.result, order: t.logos.length }] }));
+    reader.onload = () => setTpl((t) => (t ? { ...t, logos: [...t.logos, { id: v4(), name: file.name, data_url: reader.result, order: t.logos.length }] } : t));
     reader.readAsDataURL(file);
-  };
-  const moveLogo = (i, dir) => setTpl((t) => {
-    const l = [...t.logos]; const j = i + dir;
-    if (j < 0 || j >= l.length) return t;
-    [l[i], l[j]] = [l[j], l[i]]; return { ...t, logos: l };
-  });
-  const removeLogo = (i) => setTpl((t) => ({ ...t, logos: t.logos.filter((_, j) => j !== i) }));
+  }, []);
 
-  const saveDraft = async () => {
+  const moveLogo = useCallback((i, dir) => {
+    setTpl((t) => {
+      if (!t) return t;
+      const l = [...t.logos];
+      const j = i + dir;
+      if (j < 0 || j >= l.length) return t;
+      [l[i], l[j]] = [l[j], l[i]];
+      return { ...t, logos: l };
+    });
+  }, []);
+
+  const removeLogo = useCallback((i) => {
+    setTpl((t) => (t ? { ...t, logos: t.logos.filter((_, j) => j !== i) } : t));
+  }, []);
+
+  const saveDraft = useCallback(async () => {
+    if (!campId || !tpl) return;
     setBusy(true); setErr(""); setMsg("");
     try { await api.post("/templates/draft", { camp_id: campId, ...tpl }); setMsg("Draft saved."); }
     catch (e) { setErr(formatApiError(e)); }
     finally { setBusy(false); }
-  };
-  const publish = async () => {
+  }, [campId, tpl]);
+
+  const publish = useCallback(async () => {
+    if (!campId || !tpl) return;
     setBusy(true); setErr(""); setMsg("");
     try {
       await api.post("/templates/draft", { camp_id: campId, ...tpl });
@@ -85,13 +105,20 @@ export default function TemplateEditor() {
       setMsg(`Published v${r.data.published.version}.`);
     } catch (e) { setErr(formatApiError(e)); }
     finally { setBusy(false); }
-  };
-  const restore = async () => {
+  }, [campId, tpl]);
+
+  const restore = useCallback(async () => {
+    if (!campId) return;
     setBusy(true); setErr(""); setMsg("");
-    try { const r = await api.post("/templates/restore-defaults", { camp_id: campId }); const d = r.data.draft; setTpl({ header_title: d.header_title, header_subtitle: d.header_subtitle, footer_note: d.footer_note, blocks: d.blocks, logos: d.logos || [] }); setMsg("Restored defaults."); }
+    try {
+      const r = await api.post("/templates/restore-defaults", { camp_id: campId });
+      const d = r.data.draft;
+      setTpl({ header_title: d.header_title, header_subtitle: d.header_subtitle, footer_note: d.footer_note, blocks: d.blocks, logos: d.logos || [] });
+      setMsg("Restored defaults.");
+    }
     catch (e) { setErr(formatApiError(e)); }
     finally { setBusy(false); }
-  };
+  }, [campId]);
 
   if (!campId) return <Alert tone="amber">Create a camp first to design its prescription template.</Alert>;
   if (!tpl) return null;
@@ -139,7 +166,7 @@ export default function TemplateEditor() {
             {tpl.logos.length === 0 ? <p className="text-slate-400 text-sm">No logos. PNG/JPEG/WebP ≤ 2 MB.</p> : (
               <div className="space-y-2" data-testid="tpl-logos-list">
                 {tpl.logos.map((lg, i) => (
-                  <div key={lg.id || i} className="flex items-center gap-3 p-2 rounded-xl border border-slate-200">
+                  <div key={lg.id || `logo-${lg.name}-${i}`} className="flex items-center gap-3 p-2 rounded-xl border border-slate-200">
                     <img src={lg.data_url} alt={lg.name} className="h-10 w-10 object-contain rounded bg-slate-50" />
                     <span className="flex-1 text-sm text-slate-700 truncate">{lg.name}</span>
                     <Button size="sm" variant="ghost" onClick={() => moveLogo(i, -1)}><ArrowUp className="w-4 h-4" /></Button>

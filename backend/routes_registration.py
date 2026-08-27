@@ -65,59 +65,51 @@ async def _resolve_person(data: dict):
     return doc, True
 
 
-async def _create_registration(body: RegisterBody, actor_id, is_self: bool, request: Request):
-    db = get_db()
+async def _validate_camp_and_day(db, camp_day_id: str) -> tuple[dict, dict]:
     camp = await db.camps.find_one({"is_active": True})
     if not camp:
         raise HTTPException(status_code=409, detail="No active camp")
 
-    day = await db.camp_days.find_one({"_id": ObjectId(body.camp_day_id), "camp_id": camp["_id"]})
+    day = await db.camp_days.find_one({"_id": ObjectId(camp_day_id), "camp_id": camp["_id"]})
     if not day:
         raise HTTPException(status_code=404, detail="Camp day not found")
+    return camp, day
 
-    # idempotency
-    if body.registration_request_id:
-        existing = await db.patients.find_one({"registration_request_id": body.registration_request_id})
-        if existing:
-            return ser_patient(existing), False
 
-    # phone rule (household) - required for desk unless manual/self handled by caller
-    phone = normalize_phone(body.phone)
-    if phone and is_dummy_phone(phone):
-        raise HTTPException(status_code=400, detail="Please enter a valid 10-digit mobile number")
-
-    person = None
-    if body.aadhaar_scanned and body.aadhaar_last4 and body.dob:
-        person, _ = await _resolve_person({
-            "aadhaar_last4": body.aadhaar_last4,
-            "full_name": body.full_name,
-            "dob": body.dob,
-            "gender": body.gender,
-            "latin_display_name": body.latin_display_name,
-        })
-        # existing registration in this camp?
-        existing_reg = await db.patients.find_one({"person_id": person["_id"], "camp_id": camp["_id"]})
+async def _check_registration_duplicates(db, camp_id, body: RegisterBody, person: dict | None = None):
+    if person:
+        existing_reg = await db.patients.find_one({"person_id": person["_id"], "camp_id": camp_id})
         if existing_reg:
-            return ser_patient(existing_reg), False
+            return existing_reg
 
     norm = normalize_name(body.full_name)
-    # hard per-camp (last4, normalized name) uniqueness
     if body.aadhaar_last4 and not body.override_duplicate:
         clash = await db.patients.find_one({
-            "camp_id": camp["_id"], "aadhaar_last4": body.aadhaar_last4,
+            "camp_id": camp_id,
+            "aadhaar_last4": body.aadhaar_last4,
             "full_name_normalized": norm,
         })
         if clash:
             raise HTTPException(status_code=409, detail={
-                "code": "DUPLICATE_IN_CAMP", "message": "Already registered in this camp",
+                "code": "DUPLICATE_IN_CAMP",
+                "message": "Already registered in this camp",
                 "registration": ser_patient(clash),
             })
+    return None
 
-    reg_no = await next_seq("reg_no")
-    age = body.age
-    if age is None and body.dob:
-        age = age_from_dob(body.dob)
 
+def _build_patient_document(
+    camp_id,
+    camp_day_id,
+    reg_no: int,
+    body: RegisterBody,
+    person_id,
+    phone: str | None,
+    age: int | None,
+    actor_id,
+    is_self: bool,
+) -> dict:
+    norm = normalize_name(body.full_name)
     manual = None
     if body.manual_exception:
         manual = {
@@ -127,10 +119,10 @@ async def _create_registration(body: RegisterBody, actor_id, is_self: bool, requ
             "at": now_utc(),
         }
 
-    doc = {
-        "person_id": person["_id"] if person else None,
-        "camp_id": camp["_id"],
-        "camp_day_id": day["_id"],
+    return {
+        "person_id": person_id,
+        "camp_id": camp_id,
+        "camp_day_id": camp_day_id,
         "reg_no": reg_no,
         "full_name": body.full_name,
         "full_name_normalized": norm,
@@ -155,6 +147,53 @@ async def _create_registration(body: RegisterBody, actor_id, is_self: bool, requ
         "reminder_sms_sent_at": None,
         "created_at": now_utc(),
     }
+
+
+async def _create_registration(body: RegisterBody, actor_id, is_self: bool, request: Request):
+    db = get_db()
+    camp, day = await _validate_camp_and_day(db, body.camp_day_id)
+
+    # idempotency
+    if body.registration_request_id:
+        existing = await db.patients.find_one({"registration_request_id": body.registration_request_id})
+        if existing:
+            return ser_patient(existing), False
+
+    # phone rule (household) - required for desk unless manual/self handled by caller
+    phone = normalize_phone(body.phone)
+    if phone and is_dummy_phone(phone):
+        raise HTTPException(status_code=400, detail="Please enter a valid 10-digit mobile number")
+
+    person = None
+    if body.aadhaar_scanned and body.aadhaar_last4 and body.dob:
+        person, _ = await _resolve_person({
+            "aadhaar_last4": body.aadhaar_last4,
+            "full_name": body.full_name,
+            "dob": body.dob,
+            "gender": body.gender,
+            "latin_display_name": body.latin_display_name,
+        })
+
+    existing_dup = await _check_registration_duplicates(db, camp["_id"], body, person)
+    if existing_dup:
+        return ser_patient(existing_dup), False
+
+    reg_no = await next_seq("reg_no")
+    age = body.age
+    if age is None and body.dob:
+        age = age_from_dob(body.dob)
+
+    doc = _build_patient_document(
+        camp_id=camp["_id"],
+        camp_day_id=day["_id"],
+        reg_no=reg_no,
+        body=body,
+        person_id=person["_id"] if person else None,
+        phone=phone,
+        age=age,
+        actor_id=actor_id,
+        is_self=is_self,
+    )
     res = await db.patients.insert_one(doc)
     doc["_id"] = res.inserted_id
     return ser_patient(doc), True

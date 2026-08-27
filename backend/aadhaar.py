@@ -58,6 +58,11 @@ def _calc_age(dob: str | None) -> int | None:
         return None
 
 
+def _normalize_gender(g: str | None) -> str:
+    gender = (g or "").strip().upper()[:1]
+    return gender if gender in ("M", "F") else "O"
+
+
 def _decompress(qr: str) -> bytes:
     big = int(qr)
     byte_array = big.to_bytes((big.bit_length() + 7) // 8, "big")
@@ -101,9 +106,7 @@ def parse_secure_qr(qr: str) -> dict:
         raise ValueError("No name field decoded")
     ref = (fields.get("referenceid", "") or "").strip()
     last4 = ref[:4] if len(ref) >= 4 else ref
-    gender = (fields.get("gender", "") or "").strip().upper()[:1]
-    if gender not in ("M", "F"):
-        gender = "O"
+    gender = _normalize_gender(fields.get("gender", ""))
     dob_iso = _to_iso_dob(fields.get("dob", ""))
     addr_keys = ["house", "street", "landmark", "location", "postoffice", "vtc", "subdistrict", "district", "state", "pincode"]
     address = ", ".join(fields.get(k, "").strip() for k in addr_keys if fields.get(k, "").strip())
@@ -117,34 +120,24 @@ def parse_secure_qr(qr: str) -> dict:
     }
 
 
-def parse_xml_qr(qr: str) -> dict:
-    """Parse the older (pre-2018) XML PrintLetterBarcodeData QR."""
-    raw_xml = qr.strip().lstrip("\ufeff")
-    attrs = {}
+def _parse_xml_attributes(raw_xml: str) -> dict:
+    cleaned = raw_xml.strip().lstrip("\ufeff")
     try:
-        root = ET.fromstring(raw_xml)
-        attrs = {k.lower(): v for k, v in root.attrib.items()}
+        root = ET.fromstring(cleaned)
+        return {k.lower(): v for k, v in root.attrib.items()}
     except Exception:
         # Sanitize unescaped ampersands or malformed XML entities
-        sanitized = re.sub(r"&(?!amp;|lt;|gt;|quot;|apos;)", "&amp;", raw_xml)
+        sanitized = re.sub(r"&(?!amp;|lt;|gt;|quot;|apos;)", "&amp;", cleaned)
         try:
             root = ET.fromstring(sanitized)
-            attrs = {k.lower(): v for k, v in root.attrib.items()}
+            return {k.lower(): v for k, v in root.attrib.items()}
         except Exception:
             # Fallback regex extraction of XML attributes
-            matches = re.findall(r'([a-zA-Z_:][a-zA-Z0-9._:-]*)\s*=\s*["\']([^"\']*)["\']', raw_xml)
-            attrs = {k.lower(): v for k, v in matches}
+            matches = re.findall(r'([a-zA-Z_:][a-zA-Z0-9._:-]*)\s*=\s*["\']([^"\']*)["\']', cleaned)
+            return {k.lower(): v for k, v in matches}
 
-    name = (attrs.get("name") or "").strip()
-    if not name:
-        raise ValueError("No name in XML QR")
-    gender = (attrs.get("gender") or "").strip().upper()[:1]
-    if gender not in ("M", "F"):
-        gender = "O"
-    uid = (attrs.get("uid") or "").strip()
-    dob = attrs.get("dob") or attrs.get("yob") or ""
-    dob_iso = _to_iso_dob(dob)
-    
+
+def _extract_xml_address(attrs: dict) -> str:
     addr_parts = [
         attrs.get("house"),
         attrs.get("street"),
@@ -157,7 +150,20 @@ def parse_xml_qr(qr: str) -> dict:
         attrs.get("state"),
         attrs.get("pincode") or attrs.get("pc"),
     ]
-    address = ", ".join(p.strip() for p in addr_parts if p and p.strip())
+    return ", ".join(p.strip() for p in addr_parts if p and p.strip())
+
+
+def parse_xml_qr(qr: str) -> dict:
+    """Parse the older (pre-2018) XML PrintLetterBarcodeData QR."""
+    attrs = _parse_xml_attributes(qr)
+    name = (attrs.get("name") or "").strip()
+    if not name:
+        raise ValueError("No name in XML QR")
+    gender = _normalize_gender(attrs.get("gender"))
+    uid = (attrs.get("uid") or "").strip()
+    dob = attrs.get("dob") or attrs.get("yob") or ""
+    dob_iso = _to_iso_dob(dob)
+    address = _extract_xml_address(attrs)
     return {
         "full_name": name,
         "gender": gender,
@@ -166,6 +172,22 @@ def parse_xml_qr(qr: str) -> dict:
         "aadhaar_last4": uid[-4:] if uid else "",
         "address": address,
     }
+
+
+def _decode_demo_payload(raw: str) -> dict:
+    parts = raw.split("|")
+    if len(parts) < 6:
+        return {"outcome": "garbage", "message": "Aadhaar QR data is incomplete."}
+    gender = _normalize_gender(parts[2])
+    dob_iso = _to_iso_dob(parts[3]) or parts[3].strip()
+    return {"outcome": "card", "source": "demo", "data": {
+        "full_name": parts[1].strip(),
+        "gender": gender,
+        "dob": dob_iso,
+        "age": _calc_age(dob_iso),
+        "aadhaar_last4": parts[4].strip()[-4:].zfill(4),
+        "address": "|".join(parts[5:]).strip(),
+    }}
 
 
 def decode_aadhaar(raw: str) -> dict:
@@ -178,20 +200,7 @@ def decode_aadhaar(raw: str) -> dict:
 
     # Demo/simulated card (kept for testing without a real card)
     if raw.upper().startswith("AADHAAR|"):
-        parts = raw.split("|")
-        if len(parts) < 6:
-            return {"outcome": "garbage", "message": "Aadhaar QR data is incomplete."}
-        gender = (parts[2] or "").upper()[:1]
-        gender = gender if gender in ("M", "F", "O") else "O"
-        dob_iso = _to_iso_dob(parts[3]) or parts[3].strip()
-        return {"outcome": "card", "source": "demo", "data": {
-            "full_name": parts[1].strip(),
-            "gender": gender,
-            "dob": dob_iso,
-            "age": _calc_age(dob_iso),
-            "aadhaar_last4": parts[4].strip()[-4:].zfill(4),
-            "address": "|".join(parts[5:]).strip(),
-        }}
+        return _decode_demo_payload(raw)
 
     # Old XML QR
     if raw.startswith("<") or "<PrintLetterBarcodeData" in raw:
