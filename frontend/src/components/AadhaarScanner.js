@@ -251,16 +251,33 @@ export default function AadhaarScanner({ onScanned, disabled }) {
           }
         }
 
-        if (mountedRef.current) {
-          setCameraState("scanning");
-          // Check torch capability
+        if (!mountedRef.current) {
           try {
-            const capabilities = scanner.getRunningTrackCapabilities?.();
-            if (capabilities && capabilities.torch) {
-              setTorchAvailable(true);
+            if (scanner.isScanning) await scanner.stop();
+          } catch (e) {}
+          try {
+            await scanner.clear();
+          } catch (e) {}
+          return;
+        }
+
+        setCameraState("scanning");
+        // Re-enumerate cameras if labels or extra devices became available after permission grant
+        if (availableCameras.length <= 1) {
+          try {
+            const updatedCameras = (await Html5Qrcode.getCameras()) || [];
+            if (mountedRef.current && updatedCameras.length > 0) {
+              setCameras(updatedCameras);
             }
           } catch (e) {}
         }
+        // Check torch capability
+        try {
+          const capabilities = scanner.getRunningTrackCapabilities?.();
+          if (capabilities && capabilities.torch) {
+            setTorchAvailable(true);
+          }
+        } catch (e) {}
       } catch (err) {
         await stopCamera();
         if (mountedRef.current) {
@@ -269,6 +286,13 @@ export default function AadhaarScanner({ onScanned, disabled }) {
           const msg = String(err?.message || err || "");
           const name = String(err?.name || "");
           if (
+            typeof window !== "undefined" &&
+            window.isSecureContext === false
+          ) {
+            setError(
+              "Camera access requires HTTPS or localhost. Please use a secure connection, photo upload, or USB scanner."
+            );
+          } else if (
             name === "NotAllowedError" ||
             name === "PermissionDeniedError" ||
             /permission|denied|allowed/i.test(msg)
@@ -435,68 +459,72 @@ export default function AadhaarScanner({ onScanned, disabled }) {
         </Button>
       </div>
 
-      {mode === "camera" && (
-        <div className="relative mb-3 rounded-xl overflow-hidden border-2 border-emerald-500 bg-black shadow-lg">
-          <div
-            id={readerId}
-            className="w-full min-h-[260px] sm:min-h-[320px]"
-            data-testid="aadhaar-camera-region"
-          />
+      <div
+        className={
+          mode === "camera"
+            ? "relative mb-3 rounded-xl overflow-hidden border-2 border-emerald-500 bg-black shadow-lg"
+            : "hidden"
+        }
+      >
+        <div
+          id={readerId}
+          className="w-full min-h-[260px] sm:min-h-[320px]"
+          data-testid="aadhaar-camera-region"
+        />
 
-          {/* Camera controls toolbar overlay */}
-          <div className="absolute top-2 right-2 flex items-center gap-1.5 z-20">
-            {torchAvailable && (
-              <button
-                type="button"
-                onClick={toggleTorch}
-                className={`p-2 rounded-lg backdrop-blur-md transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center ${
-                  torchOn
-                    ? "bg-amber-400 text-slate-900"
-                    : "bg-slate-900/70 text-white hover:bg-slate-900"
-                }`}
-                title={torchOn ? "Turn off torch" : "Turn on torch"}
-                data-testid="aadhaar-torch-toggle"
-              >
-                {torchOn ? <Zap className="w-4 h-4 fill-current" /> : <ZapOff className="w-4 h-4" />}
-              </button>
-            )}
-            {cameras.length > 1 && (
-              <button
-                type="button"
-                onClick={switchCamera}
-                className="p-2 rounded-lg bg-slate-900/70 hover:bg-slate-900 text-white backdrop-blur-md transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
-                title="Switch Camera"
-                data-testid="aadhaar-switch-camera"
-              >
-                <SwitchCamera className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-
-          {/* Viewfinder guide frame overlay */}
-          {cameraState === "scanning" && (
-            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center p-6">
-              <div className="relative w-56 h-56 sm:w-64 sm:h-64 border-2 border-dashed border-emerald-400/80 rounded-2xl flex items-center justify-center">
-                <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-emerald-400 rounded-tl-lg" />
-                <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-emerald-400 rounded-tr-lg" />
-                <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-emerald-400 rounded-bl-lg" />
-                <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-emerald-400 rounded-br-lg" />
-                <p className="text-[11px] font-medium text-emerald-200 bg-slate-950/70 px-2 py-0.5 rounded-full shadow">
-                  Align Aadhaar QR inside frame
-                </p>
-              </div>
-            </div>
+        {/* Camera controls toolbar overlay */}
+        <div className="absolute top-2 right-2 flex items-center gap-1.5 z-20">
+          {torchAvailable && (
+            <button
+              type="button"
+              onClick={toggleTorch}
+              className={`p-2 rounded-lg backdrop-blur-md transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center ${
+                torchOn
+                  ? "bg-amber-400 text-slate-900"
+                  : "bg-slate-900/70 text-white hover:bg-slate-900"
+              }`}
+              title={torchOn ? "Turn off torch" : "Turn on torch"}
+              data-testid="aadhaar-torch-toggle"
+            >
+              {torchOn ? <Zap className="w-4 h-4 fill-current" /> : <ZapOff className="w-4 h-4" />}
+            </button>
           )}
-
-          {cameraState === "starting" && (
-            <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center text-white p-4">
-              <Spinner className="w-8 h-8 text-emerald-400 mb-2" />
-              <p className="text-sm font-medium">Starting camera…</p>
-              <p className="text-xs text-slate-400 mt-1">Requesting device access</p>
-            </div>
+          {cameras.length > 1 && (
+            <button
+              type="button"
+              onClick={switchCamera}
+              className="p-2 rounded-lg bg-slate-900/70 hover:bg-slate-900 text-white backdrop-blur-md transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
+              title="Switch Camera"
+              data-testid="aadhaar-switch-camera"
+            >
+              <SwitchCamera className="w-4 h-4" />
+            </button>
           )}
         </div>
-      )}
+
+        {/* Viewfinder guide frame overlay */}
+        {cameraState === "scanning" && (
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center p-6">
+            <div className="relative w-56 h-56 sm:w-64 sm:h-64 border-2 border-dashed border-emerald-400/80 rounded-2xl flex items-center justify-center">
+              <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-emerald-400 rounded-tl-lg" />
+              <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-emerald-400 rounded-tr-lg" />
+              <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-emerald-400 rounded-bl-lg" />
+              <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-emerald-400 rounded-br-lg" />
+              <p className="text-[11px] font-medium text-emerald-200 bg-slate-950/70 px-2 py-0.5 rounded-full shadow">
+                Align Aadhaar QR inside frame
+              </p>
+            </div>
+          </div>
+        )}
+
+        {cameraState === "starting" && (
+          <div className="absolute inset-0 bg-slate-900/90 flex flex-col items-center justify-center text-white p-4">
+            <Spinner className="w-8 h-8 text-emerald-400 mb-2" />
+            <p className="text-sm font-medium">Starting camera…</p>
+            <p className="text-xs text-slate-400 mt-1">Requesting device access</p>
+          </div>
+        )}
+      </div>
       <div id={`${readerId}-file`} className="hidden" />
 
       {mode === "manual" && (
