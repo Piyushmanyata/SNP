@@ -6,6 +6,7 @@ import {
   decodeImageMultiPass,
   loadZbar,
   loadZxing,
+  preloadDecoders,
   type QrPayload,
 } from "@/lib/qr-decode-pipeline";
 import {
@@ -42,7 +43,7 @@ async function toOutcome(payload: QrPayload): Promise<DecodeOutcome> {
 
 const api = {
   async warmUp(): Promise<void> {
-    await loadZxing();
+    await preloadDecoders();
   },
 
   async decodeFrame(image: ImageData, thorough = false): Promise<DecodeOutcome> {

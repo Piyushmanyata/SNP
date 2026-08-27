@@ -64,7 +64,8 @@ export async function applyBestEffortCameraConstraints(
     const caps = track?.getCapabilities?.() as
       | { focusMode?: string[]; zoom?: { min: number; max: number } }
       | undefined;
-    if (caps?.focusMode?.includes("continuous")) {
+    const hasAutofocus = caps?.focusMode?.includes("continuous");
+    if (hasAutofocus) {
       await track
         .applyConstraints({
           advanced: [{ focusMode: "continuous" }],
@@ -77,9 +78,13 @@ export async function applyBestEffortCameraConstraints(
         2,
         Math.max(caps.zoom.min, (caps.zoom.min + caps.zoom.max) * 0.25),
       );
+      const advanced: Record<string, unknown>[] = [{ zoom }];
+      if (hasAutofocus) {
+        advanced.push({ focusMode: "continuous" });
+      }
       await track
         .applyConstraints({
-          advanced: [{ zoom }],
+          advanced,
         } as unknown as MediaTrackConstraints)
         .catch(() => {});
     }
