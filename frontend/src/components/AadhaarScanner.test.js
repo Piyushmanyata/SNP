@@ -258,4 +258,76 @@ describe("AadhaarScanner component", () => {
       expect.objectContaining({ full_name: "Test Person", aadhaar_last4: "1234" })
     );
   });
+
+  test("supports camera switching and torch toggle when available", async () => {
+    const mockApplyVideoConstraints = jest.fn().mockResolvedValue();
+    Html5Qrcode.getCameras = jest
+      .fn()
+      .mockResolvedValue([
+        { id: "cam1", label: "Rear Camera 1" },
+        { id: "cam2", label: "Front Camera 2" },
+      ]);
+
+    Html5Qrcode.mockImplementation(() => ({
+      start: jest.fn().mockResolvedValue(),
+      stop: jest.fn().mockResolvedValue(),
+      clear: jest.fn().mockResolvedValue(),
+      isScanning: true,
+      getRunningTrackCapabilities: jest.fn().mockReturnValue({ torch: true }),
+      applyVideoConstraints: mockApplyVideoConstraints,
+    }));
+
+    act(() => {
+      root.render(<AadhaarScanner onScanned={jest.fn()} />);
+    });
+
+    const cameraBtn = container.querySelector('[data-testid="aadhaar-camera-button"]');
+    await act(async () => {
+      cameraBtn.click();
+    });
+
+    const torchBtn = container.querySelector('[data-testid="aadhaar-torch-toggle"]');
+    const switchBtn = container.querySelector('[data-testid="aadhaar-switch-camera"]');
+
+    expect(torchBtn).not.toBeNull();
+    expect(switchBtn).not.toBeNull();
+
+    await act(async () => {
+      torchBtn.click();
+    });
+
+    expect(mockApplyVideoConstraints).toHaveBeenCalledWith({
+      advanced: [{ torch: true }],
+    });
+
+    await act(async () => {
+      switchBtn.click();
+    });
+  });
+
+  test("handles insecure context (non-HTTPS) with helpful error message", async () => {
+    const originalSecureContext = window.isSecureContext;
+    Object.defineProperty(window, "isSecureContext", { value: false, configurable: true });
+
+    Html5Qrcode.getCameras = jest.fn().mockRejectedValue(new Error("Insecure"));
+    Html5Qrcode.mockImplementation(() => ({
+      start: jest.fn().mockRejectedValue(new Error("MediaDevices not supported")),
+      stop: jest.fn().mockResolvedValue(),
+      clear: jest.fn().mockResolvedValue(),
+      isScanning: false,
+    }));
+
+    act(() => {
+      root.render(<AadhaarScanner onScanned={jest.fn()} />);
+    });
+
+    const cameraBtn = container.querySelector('[data-testid="aadhaar-camera-button"]');
+    await act(async () => {
+      cameraBtn.click();
+    });
+
+    expect(container.textContent).toContain("Camera access requires HTTPS or localhost");
+
+    Object.defineProperty(window, "isSecureContext", { value: originalSecureContext, configurable: true });
+  });
 });

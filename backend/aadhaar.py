@@ -4,6 +4,7 @@ Decodes on our own server (no UIDAI API call, no per-scan cost). We parse the
 identity fields only; we do NOT verify the RSA signature (matches original ADR:
 "not cryptographically verified"). Only the last-4 of Aadhaar is ever surfaced.
 """
+import re
 import sys
 import zlib
 import xml.etree.ElementTree as ET
@@ -25,7 +26,7 @@ FIELDS = [
 
 def _to_iso_dob(raw: str):
     raw = (raw or "").strip()
-    for fmt in ("%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%y"):
+    for fmt in ("%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%y", "%d.%m.%Y"):
         try:
             return datetime.strptime(raw, fmt).strftime("%Y-%m-%d")
         except ValueError:
@@ -87,17 +88,17 @@ def parse_secure_qr(qr: str) -> dict:
 def parse_xml_qr(qr: str) -> dict:
     """Parse the older (pre-2018) XML PrintLetterBarcodeData QR."""
     root = ET.fromstring(qr.strip())
-    a = root.attrib
-    name = (a.get("name") or "").strip()
+    attrs = {k.lower(): v for k, v in root.attrib.items()}
+    name = (attrs.get("name") or "").strip()
     if not name:
         raise ValueError("No name in XML QR")
-    gender = (a.get("gender") or "").strip().upper()[:1]
+    gender = (attrs.get("gender") or "").strip().upper()[:1]
     if gender not in ("M", "F"):
         gender = "O"
-    uid = a.get("uid", "")
-    dob = a.get("dob") or a.get("yob") or ""
+    uid = attrs.get("uid", "")
+    dob = attrs.get("dob") or attrs.get("yob") or ""
     addr_keys = ["house", "street", "lm", "loc", "vtc", "subdist", "dist", "state", "pc"]
-    address = ", ".join((a.get(k) or "").strip() for k in addr_keys if (a.get(k) or "").strip())
+    address = ", ".join((attrs.get(k) or "").strip() for k in addr_keys if (attrs.get(k) or "").strip())
     return {
         "full_name": name,
         "gender": gender,
@@ -135,7 +136,7 @@ def decode_aadhaar(raw: str) -> dict:
             return {"outcome": "garbage", "message": "Could not read the Aadhaar QR (XML)."}
 
     # Secure QR v2 big-integer payload
-    digits = raw.replace(" ", "").replace("\n", "")
+    digits = re.sub(r"\s+", "", raw)
     if digits.isdigit() and len(digits) > 40:
         try:
             return {"outcome": "card", "source": "secure_qr", "data": parse_secure_qr(digits)}

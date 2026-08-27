@@ -109,6 +109,40 @@ def test_decode_secure_qr_large_digits():
     assert res["data"]["full_name"] == "Ramesh Kumar"
 
 
+def test_decode_xml_case_insensitive():
+    xml = ('<?xml version="1.0"?><PrintLetterBarcodeData UID="998877664321" '
+           'Name="Sunita Patel" Gender="F" DOB="12/05/1988" House="Flat 402" '
+           'Dist="Surat" State="Gujarat" PC="395007"/>')
+    res = decode_aadhaar(xml)
+    assert res["outcome"] == "card"
+    assert res["source"] == "secure_qr_xml"
+    assert res["data"]["full_name"] == "Sunita Patel"
+    assert res["data"]["gender"] == "F"
+    assert res["data"]["dob"] == "1988-05-12"
+    assert res["data"]["aadhaar_last4"] == "4321"
+    assert "Surat" in res["data"]["address"]
+
+
+def test_decode_secure_qr_multiline_crlf():
+    payload = build_secure_qr(SAMPLE, use_gzip=True)
+    # Simulate hardware USB barcode scanner sending chunks separated by CRLF and tabs
+    chunked = "\r\n".join([payload[i:i + 50] for i in range(0, len(payload), 50)]) + "\r\n\t "
+    res = decode_aadhaar(chunked)
+    assert res["outcome"] == "card"
+    assert res["source"] == "secure_qr"
+    assert res["data"]["full_name"] == "Ramesh Kumar"
+    assert res["data"]["aadhaar_last4"] == "5678"
+
+
+def test_decode_date_dotted_format():
+    vals = list(SAMPLE)
+    vals[3] = "15.08.1975"
+    payload = build_secure_qr(vals, use_gzip=True)
+    res = decode_aadhaar(payload)
+    assert res["outcome"] == "card"
+    assert res["data"]["dob"] == "1975-08-15"
+
+
 def test_decode_garbage_text():
     res = decode_aadhaar("invalid random text here")
     assert res["outcome"] == "garbage"
