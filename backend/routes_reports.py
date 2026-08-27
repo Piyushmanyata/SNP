@@ -1,5 +1,6 @@
 import io
 import csv
+from bson import ObjectId
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
 from db import get_db
@@ -42,7 +43,6 @@ async def leaderboard(actor: dict = Depends(require_staff)):
     agg = await db.patients.aggregate(pipeline).to_list(1000)
     points_map = {r["_id"]: r["points"] for r in agg}
 
-    from bson import ObjectId
     users = await db.users.find({"role": {"$in": ["volunteer", "team_lead"]}}).to_list(1000)
     volunteers, tl_points = [], {}
     for u in users:

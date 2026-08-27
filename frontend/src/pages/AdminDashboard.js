@@ -96,13 +96,31 @@ function Camps() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const createCamp = async () => {
-    try { await api.post("/camps", form); setShowCamp(false); setForm({ name: "", venue: "", camp_date: "" }); load(); }
+  const createCamp = useCallback(async () => {
+    try {
+      await api.post("/camps", form);
+      setShowCamp(false);
+      setForm({ name: "", venue: "", camp_date: "" });
+      load();
+    } catch (e) {
+      setErr(formatApiError(e));
+    }
+  }, [form, load]);
+
+  const activate = useCallback(async (id) => {
+    try { await api.post(`/camps/${id}/activate`); load(); }
     catch (e) { setErr(formatApiError(e)); }
-  };
-  const activate = async (id) => { try { await api.post(`/camps/${id}/activate`); load(); } catch (e) { setErr(formatApiError(e)); } };
-  const deactivate = async (id) => { try { await api.post(`/camps/${id}/deactivate`); load(); } catch (e) { setErr(formatApiError(e)); } };
-  const del = async (id) => { try { await api.delete(`/camps/${id}`); load(); } catch (e) { setErr(formatApiError(e)); } };
+  }, [load]);
+
+  const deactivate = useCallback(async (id) => {
+    try { await api.post(`/camps/${id}/deactivate`); load(); }
+    catch (e) { setErr(formatApiError(e)); }
+  }, [load]);
+
+  const del = useCallback(async (id) => {
+    try { await api.delete(`/camps/${id}`); load(); }
+    catch (e) { setErr(formatApiError(e)); }
+  }, [load]);
 
   return (
     <div className="space-y-4">
@@ -150,15 +168,26 @@ function CampDays({ campId }) {
   }, [campId]);
   useEffect(() => { load(); }, [load]);
 
-  const add = async () => {
-    try { await api.post("/camps/days", { camp_id: campId, day_date: date, seat_limit: Number(seat) }); setDate(""); setSeat(0); load(); }
-    catch (e) { setErr(formatApiError(e)); }
-  };
-  const togglePrint = async (id, val) => {
+  const add = useCallback(async () => {
+    try {
+      await api.post("/camps/days", { camp_id: campId, day_date: date, seat_limit: Number(seat) });
+      setDate("");
+      setSeat(0);
+      load();
+    } catch (e) {
+      setErr(formatApiError(e));
+    }
+  }, [campId, date, seat, load]);
+
+  const togglePrint = useCallback(async (id, val) => {
     try { await api.patch(`/camps/days/${id}/print-window`, { printing_open: val }); load(); }
     catch (e) { setErr(formatApiError(e)); }
-  };
-  const del = async (id) => { try { await api.delete(`/camps/days/${id}`); load(); } catch (e) { setErr(formatApiError(e)); } };
+  }, [load]);
+
+  const del = useCallback(async (id) => {
+    try { await api.delete(`/camps/days/${id}`); load(); }
+    catch (e) { setErr(formatApiError(e)); }
+  }, [load]);
 
   return (
     <div className="mt-4 pt-4 border-t border-slate-100 space-y-2" data-testid={`camp-days-${campId}`}>
@@ -201,7 +230,7 @@ function Staff() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const create = async () => {
+  const create = useCallback(async () => {
     setErr("");
     try {
       await api.post("/staff", { ...form, team_lead_id: form.role === "volunteer" ? (form.team_lead_id || null) : null });
@@ -209,9 +238,9 @@ function Staff() {
       setForm({ email: "", password: "", name: "", role: "volunteer", phone: "", team_lead_id: "" });
       load();
     } catch (e) { setErr(formatApiError(e)); }
-  };
-  const disable = async (id) => { try { await api.patch(`/staff/${id}/disable`); load(); } catch (e) { setErr(formatApiError(e)); } };
-  const enable = async (id) => { try { await api.patch(`/staff/${id}/enable`); load(); } catch (e) { setErr(formatApiError(e)); } };
+  }, [form, load]);
+  const disable = useCallback(async (id) => { try { await api.patch(`/staff/${id}/disable`); load(); } catch (e) { setErr(formatApiError(e)); } }, [load]);
+  const enable = useCallback(async (id) => { try { await api.patch(`/staff/${id}/enable`); load(); } catch (e) { setErr(formatApiError(e)); } }, [load]);
 
   const roleLabel = { admin: "Admin", team_lead: "Team Lead", volunteer: "Volunteer", clinical_desk_operator: "Clinical Desk" };
 
@@ -279,12 +308,12 @@ function OtSchedule() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const add = async () => {
+  const add = useCallback(async () => {
     setErr("");
     if (!camp) { setErr("Activate a camp first."); return; }
     try { await api.post("/clinical/ot-days", { camp_id: camp.id, ...form, seat_limit: Number(form.seat_limit) }); setForm({ day_date: "", venue: "", seat_limit: 10 }); load(); }
     catch (e) { setErr(formatApiError(e)); }
-  };
+  }, [camp, form, load]);
 
   return (
     <div className="space-y-4">
@@ -313,6 +342,28 @@ function OtSchedule() {
   );
 }
 
+function Board({ title, rows, testid }) {
+  return (
+    <Card>
+      <h3 className="font-display font-bold text-slate-900 mb-3 flex items-center gap-2">
+        <Trophy className="w-5 h-5 text-amber-500" /> {title}
+      </h3>
+      <div className="space-y-2" data-testid={testid}>
+        {rows.length === 0 && <p className="text-slate-400 text-sm">No points yet.</p>}
+        {rows.map((r, i) => (
+          <div key={r.user_id || r.id || r.name || i} className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-50">
+            <span className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold ${i === 0 ? "bg-amber-400 text-white" : "bg-slate-200 text-slate-600"}`}>
+              {i + 1}
+            </span>
+            <span className="flex-1 font-medium text-slate-800">{r.name}</span>
+            <Badge tone="emerald">{r.points} pts</Badge>
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 function Leaderboards() {
   const [data, setData] = useState(null);
   const [err, setErr] = useState("");
@@ -323,21 +374,6 @@ function Leaderboards() {
   if (err) return <ErrorCard message={err} onRetry={load} />;
   if (!data) return null;
 
-  const Board = ({ title, rows, testid }) => (
-    <Card>
-      <h3 className="font-display font-bold text-slate-900 mb-3 flex items-center gap-2"><Trophy className="w-5 h-5 text-amber-500" /> {title}</h3>
-      <div className="space-y-2" data-testid={testid}>
-        {rows.length === 0 && <p className="text-slate-400 text-sm">No points yet.</p>}
-        {rows.map((r, i) => (
-          <div key={i} className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-50">
-            <span className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold ${i === 0 ? "bg-amber-400 text-white" : "bg-slate-200 text-slate-600"}`}>{i + 1}</span>
-            <span className="flex-1 font-medium text-slate-800">{r.name}</span>
-            <Badge tone="emerald">{r.points} pts</Badge>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
       <Board title="Volunteers" rows={data.volunteers} testid="leaderboard-volunteers-table" />
@@ -348,7 +384,7 @@ function Leaderboards() {
 
 function Exports() {
   const [msg, setMsg] = useState("");
-  const download = async (path, filename) => {
+  const download = useCallback(async (path, filename) => {
     setMsg("");
     try {
       const res = await api.get(path, { responseType: "blob" });
@@ -358,7 +394,7 @@ function Exports() {
       window.URL.revokeObjectURL(url);
       setMsg(`Downloaded ${filename}`);
     } catch (e) { setMsg(formatApiError(e)); }
-  };
+  }, []);
   return (
     <div className="space-y-4">
       {msg && <Alert tone="emerald">{msg}</Alert>}

@@ -21,7 +21,10 @@ export default function PrintPrescription() {
         try {
           const t = await api.get(`/templates/active?camp_id=${r.data.prescription.camp_id}`);
           setTpl(t.data.template);
-        } catch (e) { /* fall back to default render */ }
+        } catch (e) {
+          console.warn("Failed to fetch active template for camp, falling back to default render:", e);
+          setTpl(null);
+        }
       } catch (e) {
         setError(formatApiError(e));
       } finally {
@@ -32,9 +35,9 @@ export default function PrintPrescription() {
 
   if (loading) return <div className="min-h-screen flex items-center justify-center"><Spinner className="w-8 h-8 text-emerald-500" /></div>;
 
-  if (error) return (
+  if (error || !rx) return (
     <div className="max-w-md mx-auto p-6">
-      <Alert className="mb-4">{error}</Alert>
+      <Alert className="mb-4">{error || "Prescription not found."}</Alert>
       <Button variant="outline" onClick={() => navigate(-1)}><ArrowLeft className="w-4 h-4" /> Back to desk</Button>
     </div>
   );

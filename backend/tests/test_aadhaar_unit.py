@@ -9,7 +9,18 @@ if str(backend_dir) not in sys.path:
 import io
 import gzip
 import zlib
-from aadhaar import decode_aadhaar, parse_secure_qr, parse_xml_qr
+import os
+from aadhaar import (
+    decode_aadhaar,
+    parse_secure_qr,
+    parse_xml_qr,
+    _to_iso_dob,
+    _calc_age,
+    _normalize_gender,
+    _parse_xml_attributes,
+    _extract_xml_address,
+    _decode_demo_payload,
+)
 
 SAMPLE = [
     "2", "567820190301120000", "Ramesh Kumar", "15-08-1975", "M", "S/O Suresh",
@@ -96,7 +107,6 @@ def test_decode_secure_qr_zlib():
 
 
 def test_decode_secure_qr_large_digits():
-    import os
     vals = list(SAMPLE)
     raw = b"\xff".join(v.encode("ISO-8859-1") for v in vals) + b"\xff" + os.urandom(2500)
     buf = io.BytesIO()
@@ -189,7 +199,6 @@ def test_decode_secure_qr_utf8_payload():
 
 
 def test_decode_additional_date_formats():
-    from aadhaar import _to_iso_dob
     assert _to_iso_dob("15/08/1975") == "1975-08-15"
     assert _to_iso_dob("1975/08/15") == "1975-08-15"
     assert _to_iso_dob("1975.08.15") == "1975-08-15"
@@ -202,7 +211,6 @@ def test_decode_additional_date_formats():
 
 
 def test_decode_age_calculation():
-    from aadhaar import _calc_age
     assert _calc_age("1990-01-01") is not None
     assert _calc_age("1990-01-01") > 30
     assert _calc_age(None) is None
@@ -243,5 +251,51 @@ def test_decode_secure_qr_double_zero_padding():
     res = decode_aadhaar(payload)
     assert res["outcome"] == "card"
     assert res["data"]["full_name"] == "Ramesh Kumar"
+
+
+def test_normalize_gender_helper():
+    assert _normalize_gender("M") == "M"
+    assert _normalize_gender("Male") == "M"
+    assert _normalize_gender("m") == "M"
+    assert _normalize_gender("F") == "F"
+    assert _normalize_gender("Female") == "F"
+    assert _normalize_gender("Other") == "O"
+    assert _normalize_gender("") == "O"
+    assert _normalize_gender(None) == "O"
+
+
+def test_parse_xml_attributes_helper():
+    xml = '<PrintLetterBarcodeData uid="1234" name="Test User" gender="F" />'
+    attrs = _parse_xml_attributes(xml)
+    assert attrs["uid"] == "1234"
+    assert attrs["name"] == "Test User"
+    assert attrs["gender"] == "F"
+
+
+def test_extract_xml_address_helper():
+    attrs = {
+        "house": "42",
+        "street": "Main St",
+        "district": "City",
+        "state": "State",
+        "pincode": "123456",
+    }
+    addr = _extract_xml_address(attrs)
+    assert addr == "42, Main St, City, State, 123456"
+
+
+def test_decode_demo_payload_helper():
+    res = _decode_demo_payload("AADHAAR|Jane Doe|F|1995-05-20|1122|Mumbai")
+    assert res["outcome"] == "card"
+    assert res["source"] == "demo"
+    assert res["data"]["full_name"] == "Jane Doe"
+    assert res["data"]["gender"] == "F"
+    assert res["data"]["dob"] == "1995-05-20"
+    assert res["data"]["aadhaar_last4"] == "1122"
+    assert res["data"]["address"] == "Mumbai"
+
+    incomplete = _decode_demo_payload("AADHAAR|Jane|F")
+    assert incomplete["outcome"] == "garbage"
+
 
 

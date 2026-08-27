@@ -1,3 +1,4 @@
+from datetime import timedelta
 from fastapi import APIRouter, Request, Response, HTTPException, Depends
 from db import get_db
 from models import LoginBody
@@ -38,7 +39,6 @@ async def login(body: LoginBody, request: Request, response: Response):
 
     user = await db.users.find_one({"email": email})
     if not user or not verify_password(body.password, user["password_hash"]):
-        from datetime import timedelta
         await db.login_attempts.update_one(
             {"identifier": identifier},
             {"$inc": {"count": 1}, "$set": {"locked_until": now_utc() + timedelta(minutes=LOCK_MINUTES)}},
