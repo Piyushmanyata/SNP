@@ -330,4 +330,74 @@ describe("AadhaarScanner component", () => {
 
     Object.defineProperty(window, "isSecureContext", { value: originalSecureContext, configurable: true });
   });
+
+  test("triggers decode on Enter keypress in manual USB scanner textarea", async () => {
+    const onScannedMock = jest.fn();
+    api.post.mockResolvedValueOnce({
+      data: {
+        outcome: "card",
+        source: "demo",
+        data: { full_name: "Anita Rao", aadhaar_last4: "4321" },
+      },
+    });
+
+    act(() => {
+      root.render(<AadhaarScanner onScanned={onScannedMock} />);
+    });
+
+    const manualBtn = container.querySelector('[data-testid="aadhaar-manual-toggle"]');
+    act(() => {
+      manualBtn.click();
+    });
+
+    const textarea = container.querySelector('[data-testid="aadhaar-qr-input"]');
+    act(() => {
+      const nativeSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLTextAreaElement.prototype,
+        "value"
+      ).set;
+      nativeSetter.call(textarea, "AADHAAR|Anita Rao|F|1990-02-14|4321|MG Road");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+
+    expect(api.post).toHaveBeenCalledWith("/aadhaar/decode", {
+      payload: "AADHAAR|Anita Rao|F|1990-02-14|4321|MG Road",
+    });
+    expect(onScannedMock).toHaveBeenCalledWith(
+      expect.objectContaining({ full_name: "Anita Rao", aadhaar_last4: "4321" })
+    );
+  });
+
+  test("stops camera and switches to idle when upload button is clicked in camera mode", async () => {
+    const mockStop = jest.fn().mockResolvedValue();
+    const mockClear = jest.fn().mockResolvedValue();
+
+    Html5Qrcode.getCameras = jest.fn().mockResolvedValue([{ id: "cam1" }]);
+    Html5Qrcode.mockImplementation(() => ({
+      start: jest.fn().mockResolvedValue(),
+      stop: mockStop,
+      clear: mockClear,
+      isScanning: true,
+    }));
+
+    act(() => {
+      root.render(<AadhaarScanner onScanned={jest.fn()} />);
+    });
+
+    const cameraBtn = container.querySelector('[data-testid="aadhaar-camera-button"]');
+    await act(async () => {
+      cameraBtn.click();
+    });
+
+    const uploadBtn = container.querySelector('[data-testid="aadhaar-upload-button"]');
+    await act(async () => {
+      uploadBtn.click();
+    });
+
+    expect(mockStop).toHaveBeenCalled();
+  });
 });

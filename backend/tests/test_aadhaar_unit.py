@@ -151,3 +151,50 @@ def test_decode_garbage_text():
 def test_decode_garbage_long_digits():
     res = decode_aadhaar("9" * 100)
     assert res["outcome"] == "garbage"
+
+
+def test_decode_xml_with_unescaped_ampersand():
+    xml = ('<PrintLetterBarcodeData uid="112233445566" '
+           'name="M/S Ramesh & Sons" gender="M" dob="1982-03-25" '
+           'house="Shop 4 & 5" street="Main & Market Rd" dist="Kolkata" state="West Bengal" pc="700001"/>')
+    res = decode_aadhaar(xml)
+    assert res["outcome"] == "card"
+    assert res["source"] == "secure_qr_xml"
+    assert res["data"]["full_name"] == "M/S Ramesh & Sons"
+    assert res["data"]["aadhaar_last4"] == "5566"
+    assert "Shop 4 & 5" in res["data"]["address"]
+
+
+def test_decode_xml_with_bom():
+    xml = ('\ufeff<?xml version="1.0"?><PrintLetterBarcodeData uid="111122223333" '
+           'name="Ananya Roy" gender="F" dob="1995-11-20" state="West Bengal" pc="700029"/>')
+    res = decode_aadhaar(xml)
+    assert res["outcome"] == "card"
+    assert res["data"]["full_name"] == "Ananya Roy"
+    assert res["data"]["aadhaar_last4"] == "3333"
+
+
+def test_decode_secure_qr_utf8_payload():
+    vals = list(SAMPLE)
+    vals[2] = "Aarav Sharma"
+    vals[12] = "Maharashtra"
+    raw = b"\xff".join(v.encode("utf-8") for v in vals) + b"\xff" + b"SIG" * 10
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode="wb") as f:
+        f.write(raw)
+    payload = str(int.from_bytes(buf.getvalue(), "big"))
+    res = decode_aadhaar(payload)
+    assert res["outcome"] == "card"
+    assert res["data"]["full_name"] == "Aarav Sharma"
+
+
+def test_decode_additional_date_formats():
+    from aadhaar import _to_iso_dob
+    assert _to_iso_dob("15/08/1975") == "1975-08-15"
+    assert _to_iso_dob("1975/08/15") == "1975-08-15"
+    assert _to_iso_dob("1975.08.15") == "1975-08-15"
+    assert _to_iso_dob("15-Aug-1975") == "1975-08-15"
+    assert _to_iso_dob("15 Aug 1975") == "1975-08-15"
+    assert _to_iso_dob("1975") == "1975-01-01"
+    assert _to_iso_dob("invalid") is None
+
