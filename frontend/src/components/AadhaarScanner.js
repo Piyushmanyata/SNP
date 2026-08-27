@@ -173,11 +173,11 @@ export default function AadhaarScanner({ onScanned, disabled }) {
         const scanConfig = {
           fps: 15,
           qrbox: (viewfinderWidth, viewfinderHeight) => {
-            const minDim = Math.min(viewfinderWidth, viewfinderHeight);
-            const size = Math.floor(minDim * 0.85);
+            const minDim = Math.min(viewfinderWidth || 250, viewfinderHeight || 250);
+            const size = Math.max(50, Math.floor(minDim * 0.85));
             return {
-              width: Math.max(200, size),
-              height: Math.max(200, size),
+              width: Math.min(viewfinderWidth || size, size),
+              height: Math.min(viewfinderHeight || size, size),
             };
           },
           aspectRatio: 1.0,
@@ -392,10 +392,11 @@ export default function AadhaarScanner({ onScanned, disabled }) {
         {mode !== "camera" ? (
           <Button
             variant="secondary"
-            size="sm"
+            size="md"
             type="button"
             onClick={() => startCamera()}
             disabled={disabled || busy || cameraState === "starting"}
+            className="min-h-[44px]"
             data-testid="aadhaar-camera-button"
           >
             {cameraState === "starting" ? (
@@ -411,12 +412,13 @@ export default function AadhaarScanner({ onScanned, disabled }) {
         ) : (
           <Button
             variant="danger"
-            size="sm"
+            size="md"
             type="button"
             onClick={async () => {
               await stopCamera();
               setMode("idle");
             }}
+            className="min-h-[44px]"
             data-testid="aadhaar-camera-stop"
           >
             <X className="w-4 h-4" /> Stop camera
@@ -424,7 +426,7 @@ export default function AadhaarScanner({ onScanned, disabled }) {
         )}
         <Button
           variant="outline"
-          size="sm"
+          size="md"
           type="button"
           onClick={async () => {
             if (mode === "camera") {
@@ -434,6 +436,7 @@ export default function AadhaarScanner({ onScanned, disabled }) {
             fileRef.current?.click();
           }}
           disabled={disabled || busy || cameraState === "starting"}
+          className="min-h-[44px]"
           data-testid="aadhaar-upload-button"
         >
           <Upload className="w-4 h-4" /> Upload photo
@@ -452,13 +455,14 @@ export default function AadhaarScanner({ onScanned, disabled }) {
         />
         <Button
           variant="outline"
-          size="sm"
+          size="md"
           type="button"
           onClick={async () => {
             if (mode === "camera") await stopCamera();
             setMode(mode === "manual" ? "idle" : "manual");
           }}
           disabled={disabled || busy}
+          className="min-h-[44px]"
           data-testid="aadhaar-manual-toggle"
         >
           <Keyboard className="w-4 h-4" /> USB / paste
@@ -563,8 +567,8 @@ export default function AadhaarScanner({ onScanned, disabled }) {
             <Button
               size="sm"
               type="button"
-              onClick={() => decode(payload)}
-              disabled={disabled || busy || !payload}
+              onClick={() => decode(payload.trim())}
+              disabled={disabled || busy || !payload.trim()}
               data-testid="aadhaar-scan-button"
             >
               {busy ? "Decoding…" : "Decode"}

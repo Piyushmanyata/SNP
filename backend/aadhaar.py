@@ -26,6 +26,12 @@ FIELDS = [
 
 def _to_iso_dob(raw: str):
     raw = (raw or "").strip(" '\"`\t\r\n")
+    if "T" in raw:
+        raw = raw.split("T")[0]
+    elif " " in raw and len(raw.split(" ")[0]) >= 4:
+        first_part = raw.split(" ")[0]
+        if any(c in first_part for c in "-/.") or (len(first_part) == 4 and first_part.isdigit()):
+            raw = first_part
     for fmt in (
         "%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%y", "%d/%m/%y",
         "%d.%m.%Y", "%Y.%m.%d", "%Y/%m/%d", "%d-%b-%Y", "%d %b %Y",
@@ -41,10 +47,21 @@ def _to_iso_dob(raw: str):
     return None
 
 
+def _calc_age(dob: str | None) -> int | None:
+    if not dob:
+        return None
+    try:
+        d = datetime.strptime(dob, "%Y-%m-%d")
+        today = datetime.now()
+        return today.year - d.year - ((today.month, today.day) < (d.month, d.day))
+    except Exception:
+        return None
+
+
 def _decompress(qr: str) -> bytes:
     big = int(qr)
     byte_array = big.to_bytes((big.bit_length() + 7) // 8, "big")
-    for b_arr in (byte_array, b"\x00" + byte_array):
+    for b_arr in (byte_array, b"\x00" + byte_array, b"\x00\x00" + byte_array):
         try:
             return zlib.decompress(b_arr, 16 + zlib.MAX_WBITS)  # gzip header
         except zlib.error:
@@ -87,12 +104,14 @@ def parse_secure_qr(qr: str) -> dict:
     gender = (fields.get("gender", "") or "").strip().upper()[:1]
     if gender not in ("M", "F"):
         gender = "O"
-    addr_keys = ["house", "street", "landmark", "location", "vtc", "subdistrict", "district", "state", "pincode"]
+    dob_iso = _to_iso_dob(fields.get("dob", ""))
+    addr_keys = ["house", "street", "landmark", "location", "postoffice", "vtc", "subdistrict", "district", "state", "pincode"]
     address = ", ".join(fields.get(k, "").strip() for k in addr_keys if fields.get(k, "").strip())
     return {
         "full_name": name,
         "gender": gender,
-        "dob": _to_iso_dob(fields.get("dob", "")),
+        "dob": dob_iso,
+        "age": _calc_age(dob_iso),
         "aadhaar_last4": last4.zfill(4) if last4 else "",
         "address": address,
     }
@@ -124,12 +143,26 @@ def parse_xml_qr(qr: str) -> dict:
         gender = "O"
     uid = (attrs.get("uid") or "").strip()
     dob = attrs.get("dob") or attrs.get("yob") or ""
-    addr_keys = ["house", "street", "lm", "loc", "vtc", "subdist", "dist", "state", "pc"]
-    address = ", ".join((attrs.get(k) or "").strip() for k in addr_keys if (attrs.get(k) or "").strip())
+    dob_iso = _to_iso_dob(dob)
+    
+    addr_parts = [
+        attrs.get("house"),
+        attrs.get("street"),
+        attrs.get("landmark") or attrs.get("lm"),
+        attrs.get("location") or attrs.get("loc"),
+        attrs.get("postoffice") or attrs.get("po"),
+        attrs.get("vtc") or attrs.get("village"),
+        attrs.get("subdistrict") or attrs.get("subdist"),
+        attrs.get("district") or attrs.get("dist"),
+        attrs.get("state"),
+        attrs.get("pincode") or attrs.get("pc"),
+    ]
+    address = ", ".join(p.strip() for p in addr_parts if p and p.strip())
     return {
         "full_name": name,
         "gender": gender,
-        "dob": _to_iso_dob(dob),
+        "dob": dob_iso,
+        "age": _calc_age(dob_iso),
         "aadhaar_last4": uid[-4:] if uid else "",
         "address": address,
     }
@@ -150,9 +183,14 @@ def decode_aadhaar(raw: str) -> dict:
             return {"outcome": "garbage", "message": "Aadhaar QR data is incomplete."}
         gender = (parts[2] or "").upper()[:1]
         gender = gender if gender in ("M", "F", "O") else "O"
+        dob_iso = _to_iso_dob(parts[3]) or parts[3].strip()
         return {"outcome": "card", "source": "demo", "data": {
-            "full_name": parts[1].strip(), "gender": gender, "dob": _to_iso_dob(parts[3]) or parts[3].strip(),
-            "aadhaar_last4": parts[4].strip()[-4:].zfill(4), "address": "|".join(parts[5:]).strip(),
+            "full_name": parts[1].strip(),
+            "gender": gender,
+            "dob": dob_iso,
+            "age": _calc_age(dob_iso),
+            "aadhaar_last4": parts[4].strip()[-4:].zfill(4),
+            "address": "|".join(parts[5:]).strip(),
         }}
 
     # Old XML QR

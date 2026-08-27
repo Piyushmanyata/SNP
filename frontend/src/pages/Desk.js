@@ -243,13 +243,13 @@ function RegisterModal({ open, onClose, days, onDone, setBanner }) {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Full name" required>
-            <Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} readOnly={scanned} className={scanned ? "bg-slate-100" : ""} data-testid="reg-fullname-input" />
+            <Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} readOnly={scanned && Boolean(form.full_name)} className={scanned && form.full_name ? "bg-slate-100" : ""} data-testid="reg-fullname-input" />
           </Field>
           <Field label="Age" required>
-            <Input type="number" value={form.age} onChange={(e) => setForm({ ...form, age: e.target.value })} readOnly={scanned} className={scanned ? "bg-slate-100" : ""} data-testid="reg-age-input" />
+            <Input type="number" value={form.age} onChange={(e) => setForm({ ...form, age: e.target.value })} readOnly={scanned && form.age !== "" && form.age !== null && form.age !== undefined} className={scanned && form.age !== "" && form.age !== null && form.age !== undefined ? "bg-slate-100" : ""} data-testid="reg-age-input" />
           </Field>
           <Field label="Gender">
-            <select className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300 disabled:bg-slate-100" value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })} disabled={scanned} data-testid="reg-gender-select">
+            <select className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300 disabled:bg-slate-100" value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })} disabled={scanned && Boolean(form.gender)} data-testid="reg-gender-select">
               <option value="">—</option><option value="M">Male</option><option value="F">Female</option><option value="O">Other</option>
             </select>
           </Field>
@@ -257,7 +257,7 @@ function RegisterModal({ open, onClose, days, onDone, setBanner }) {
             <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} inputMode="numeric" data-testid="reg-phone-input" />
           </Field>
           <Field label="Aadhaar last-4">
-            <Input value={form.aadhaar_last4} onChange={(e) => setForm({ ...form, aadhaar_last4: e.target.value })} readOnly={scanned} className={scanned ? "bg-slate-100" : ""} maxLength={4} data-testid="reg-last4-input" />
+            <Input value={form.aadhaar_last4} onChange={(e) => setForm({ ...form, aadhaar_last4: e.target.value })} readOnly={scanned && Boolean(form.aadhaar_last4)} className={scanned && form.aadhaar_last4 ? "bg-slate-100" : ""} maxLength={4} data-testid="reg-last4-input" />
           </Field>
           <Field label="Camp day">
             <select className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300" value={dayId} onChange={(e) => setDayId(e.target.value)} data-testid="reg-day-select">
@@ -266,7 +266,7 @@ function RegisterModal({ open, onClose, days, onDone, setBanner }) {
           </Field>
         </div>
         <Field label="Address">
-          <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} readOnly={scanned} className={scanned ? "bg-slate-100" : ""} data-testid="reg-address-input" />
+          <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} readOnly={scanned && Boolean(form.address)} className={scanned && form.address ? "bg-slate-100" : ""} data-testid="reg-address-input" />
         </Field>
 
         {!scanned && (

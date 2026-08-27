@@ -196,5 +196,52 @@ def test_decode_additional_date_formats():
     assert _to_iso_dob("15-Aug-1975") == "1975-08-15"
     assert _to_iso_dob("15 Aug 1975") == "1975-08-15"
     assert _to_iso_dob("1975") == "1975-01-01"
+    assert _to_iso_dob("1985-04-12T10:30:00") == "1985-04-12"
+    assert _to_iso_dob("1985-04-12 00:00:00") == "1985-04-12"
     assert _to_iso_dob("invalid") is None
+
+
+def test_decode_age_calculation():
+    from aadhaar import _calc_age
+    assert _calc_age("1990-01-01") is not None
+    assert _calc_age("1990-01-01") > 30
+    assert _calc_age(None) is None
+    assert _calc_age("invalid") is None
+
+    res = decode_aadhaar("AADHAAR|Ravi Kumar|M|1990-01-01|5544|Delhi")
+    assert res["outcome"] == "card"
+    assert res["data"]["age"] is not None
+    assert res["data"]["age"] > 30
+
+
+def test_decode_xml_full_attribute_names():
+    xml = ('<PrintLetterBarcodeData uid="998877665544" '
+           'name="Deepak Joshi" gender="M" dob="1984-06-15" '
+           'house="Flat 101" street="Ring Road" landmark="Opp Police Station" '
+           'location="Sector 62" postoffice="Noida PO" vtc="Noida" '
+           'subdistrict="Dadri" district="Gautam Buddha Nagar" state="Uttar Pradesh" pincode="201309"/>')
+    res = decode_aadhaar(xml)
+    assert res["outcome"] == "card"
+    assert res["source"] == "secure_qr_xml"
+    assert res["data"]["full_name"] == "Deepak Joshi"
+    assert res["data"]["aadhaar_last4"] == "5544"
+    assert "Opp Police Station" in res["data"]["address"]
+    assert "Noida PO" in res["data"]["address"]
+    assert "201309" in res["data"]["address"]
+
+
+def test_decode_secure_qr_double_zero_padding():
+    vals = list(SAMPLE)
+    raw = b"\xff".join(v.encode("ISO-8859-1") for v in vals) + b"\xff" + b"SIG" * 10
+    buf = io.BytesIO()
+    with gzip.GzipFile(fileobj=buf, mode="wb") as f:
+        f.write(raw)
+    comp = buf.getvalue()
+    # Prepend 2 zero bytes before integer conversion
+    big_int = int.from_bytes(b"\x00\x00" + comp, "big")
+    payload = str(big_int)
+    res = decode_aadhaar(payload)
+    assert res["outcome"] == "card"
+    assert res["data"]["full_name"] == "Ramesh Kumar"
+
 

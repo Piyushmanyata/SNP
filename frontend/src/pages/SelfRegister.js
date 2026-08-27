@@ -91,7 +91,7 @@ export default function SelfRegister() {
                   </div>
                   <Row k="Name" v={scanned.full_name} />
                   <Row k="Gender" v={scanned.gender} />
-                  <Row k="DOB / Age" v={`${scanned.dob} · ${scanned.age ?? "-"}`} />
+                  <Row k="DOB / Age" v={`${scanned.dob || "-"} · ${scanned.age ?? "-"}`} />
                   <Row k="Aadhaar last-4" v={scanned.aadhaar_last4} />
                   <Row k="Address" v={scanned.address} />
                 </div>
