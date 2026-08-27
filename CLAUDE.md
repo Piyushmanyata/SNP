@@ -1,15 +1,11 @@
 @AGENTS.md
 
-## Agent skills
+## SNP Camps — Emergent Application
 
-### Issue tracker
+Authoritative stack:
+- `frontend/`: React + Tailwind CSS (CRA)
+- `backend/`: FastAPI + Motor async MongoDB
+- `memory/`: PRD and test credentials
+- `.emergent/`: Deployment and cron configurations
 
-GitHub Issues on `Piyushmanyata/snp-camps` via `gh`. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Default roles: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
+Do not introduce Next.js, Supabase, or Vercel dependencies.
