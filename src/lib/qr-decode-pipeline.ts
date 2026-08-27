@@ -88,7 +88,7 @@ export function toGrayscale(image: ImageData): Uint8ClampedArray {
   const { data, width, height } = image;
   const gray = new Uint8ClampedArray(width * height);
   for (let i = 0, p = 0; p < gray.length; i += 4, p++) {
-    gray[p] = (data[i] * 299 + data[i + 1] * 587 + data[i + 2] * 114) / 1000;
+    gray[p] = (data[i] * 77 + data[i + 1] * 150 + data[i + 2] * 29) >> 8;
   }
   return gray;
 }
@@ -165,7 +165,7 @@ function adaptiveBinarize(
   width: number,
   height: number,
 ): Uint8ClampedArray {
-  const integral = new Float64Array((width + 1) * (height + 1));
+  const integral = new Uint32Array((width + 1) * (height + 1));
   for (let y = 0; y < height; y++) {
     let rowSum = 0;
     for (let x = 0; x < width; x++) {

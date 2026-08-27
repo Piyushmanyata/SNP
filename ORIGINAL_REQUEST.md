@@ -1,36 +1,46 @@
 # Original User Request
 
-## Initial Request — 2026-08-14T07:06:49Z
+## 2026-08-27T13:24:12Z
 
-Comprehensive codebase review, defect remediation, performance optimization, and rigorous automated verification for the SNP Camps eye camp desk tracker application.
+Fix Aadhaar camera scanning to make it fast and reliable during desk registration. Open a PR, monitor CI and resolve any failures until green, then merge to main, push upstream, and purge the working branch.
 
-Working directory: c:/Users/piyus/Downloads/snp-camps-main/snp-camps-main
+Working directory: c:/Users/piyus/OneDrive/Documents/SNP
 Integrity mode: development
 
 ## Requirements
 
-### R1. Deep Codebase Audit & Defect Remediation
-Audit the entire application (Next.js App Router, Supabase Postgres migrations/RPCs, role security boundaries, and data mutations) to identify and fix all syntax, type, logic, security, and edge-case errors while maintaining established domain invariants (ADR 0013, ADR 0008, and CONTEXT.md).
+### R1. Aadhaar Camera Scanning Reliability & Speed
+Ensure camera-based Aadhaar QR code and text detection reliably detects and decodes Aadhaar cards quickly across varied lighting and video feed conditions without hanging or failing to initialize.
 
-### R2. Optimization & Code Quality Hardening
-Eliminate dead code, streamline data access paths, optimize database RPC locks and indexing, ensure strict adherence to repo governance (no client Supabase Realtime subscriptions on patients table, strict `is_staff()` gate on desk operations, zero code comments), and harden accessibility and WCAG 2.2 AA standards.
+### R2. Test Suite & Verification Compliance
+Maintain full test suite integrity: all unit tests, typechecks, linter checks, and database tests must pass cleanly with zero regressions.
 
-### R3. Database Safety & Incremental Migrations
-Ensure all database schema changes adhere to append-only migration policies with clean replayability (`npm run test:db:replay`). Do not drop active tables or alter locked capacity serialization logic.
-
-### R4. Automated Verification Gate
-Execute and pass all verification seams: TypeScript typecheck (`tsc --noEmit`), ESLint, Node unit tests, and Supabase database tests with zero skipped tests.
-
-### R5. Staged Git Preparation
-Stage verified changes into atomic, descriptive git commits prepared for main branch release.
+### R3. Git & CI Automation Lifecycle
+Execute the complete delivery lifecycle:
+1. Create a dedicated feature branch for the changes.
+2. Commit changes and push branch to origin.
+3. Open a Pull Request on GitHub.
+4. Monitor CI workflow run(s), diagnose and fix any test/build failures until all checks pass green.
+5. Merge the PR into the target default branch (main / master).
+6. Push updated default branch to remote and purge/delete the feature branch locally and remotely.
 
 ## Acceptance Criteria
 
-### Automated Verification
-- [ ] `npm run verify` (or equivalent typecheck, lint, and test suites) runs completely green with 0 errors and 0 skipped tests.
-- [ ] Database migration replay (`npm run test:db:replay`) passes cleanly on a fresh schema.
+### Camera Scanning Functionality
+- [ ] Camera stream starts cleanly and Aadhaar QR codes / text scans trigger decoding promptly.
+- [ ] Decode pipeline handles valid Aadhaar QR and text extracts accurately without unhandled errors.
 
-### Domain & Security Invariants
-- [ ] The `patients` table remains strictly absent from the `supabase_realtime` publication.
-- [ ] `is_staff()` correctly gates all desk RPCs and status lookups remain least-privilege token-based.
-- [ ] Patient desk lifecycle strictly adheres to `registered -> seen` and prescription printing semantics without adding unapproved queue states.
+### Quality & Regression Verification
+- [ ] Local verification commands (
+pm test, 
+pm run typecheck, 
+pm run lint, and 
+pm run build or repo equivalents) pass with 0 errors.
+- [ ] Existing Aadhaar component and utility tests remain green.
+
+### PR, CI & Git Lifecycle
+- [ ] Pull Request is successfully created for the feature branch.
+- [ ] GitHub Actions / CI status checks run and pass completely green.
+- [ ] Pull Request is merged into the default branch.
+- [ ] Upstream repository is synced with the merge commit.
+- [ ] Temporary feature branch is purged both locally and on the remote.

@@ -10,10 +10,9 @@
  * Run from `prebuild`; safe to re-run.
  */
 import { copyFileSync, mkdirSync, statSync } from "node:fs";
-import { createRequire } from "node:module";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const require = createRequire(import.meta.url);
 const outDir = join(process.cwd(), "public", "wasm");
 
 // Resolved through Node, not guessed paths, so a package layout change fails
@@ -21,11 +20,11 @@ const outDir = join(process.cwd(), "public", "wasm");
 // Both packages export their .wasm as a resolvable subpath.
 const assets = [
   {
-    from: require.resolve("zxing-wasm/reader/zxing_reader.wasm"),
+    from: fileURLToPath(import.meta.resolve("zxing-wasm/reader/zxing_reader.wasm")),
     to: "zxing_reader.wasm",
   },
   {
-    from: require.resolve("@undecaf/zbar-wasm/dist/zbar.wasm"),
+    from: fileURLToPath(import.meta.resolve("@undecaf/zbar-wasm/dist/zbar.wasm")),
     to: "zbar.wasm",
   },
 ];

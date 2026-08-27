@@ -204,6 +204,22 @@ export function useAadhaarScanner(
             audio: false,
           },
           {
+            video: {
+              facingMode: { ideal: "environment" },
+              width: { ideal: 1920 },
+              height: { ideal: 1080 },
+            },
+            audio: false,
+          },
+          {
+            video: {
+              facingMode: { ideal: "environment" },
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            },
+            audio: false,
+          },
+          {
             video: { facingMode: { ideal: "environment" } },
             audio: false,
           },
@@ -243,12 +259,17 @@ export function useAadhaarScanner(
       let consecutiveDecodeErrors = 0;
 
       function video(): HTMLVideoElement | null {
-        return videoRef.current;
+        const v = videoRef.current;
+        if (v && v.srcObject !== stream) {
+          v.srcObject = stream;
+          void v.play().catch(() => {});
+        }
+        return v;
       }
 
       const probeImage = (probe: Probe): ImageData | null => {
-        if (!ctx || !video()) return null;
-        const v = video()!;
+        const v = video();
+        if (!ctx || !v || v.readyState < 2 || v.videoWidth === 0) return null;
         const surface = probeSurface(v.videoWidth, v.videoHeight, probe);
         if (!surface) return null;
         const { sx, sy, cw, ch, dw, dh } = surface;
@@ -261,46 +282,69 @@ export function useAadhaarScanner(
       };
 
       const processFrame = async () => {
-        if (!sessionRef.current.isCurrent(token) || !video()) return;
+        if (!sessionRef.current.isCurrent(token)) return;
 
+        const v = video();
         const now = performance.now();
-        if (!busy && now - lastFrameAt >= SCAN_FRAME_INTERVAL_MS) {
+        if (
+          !busy &&
+          v &&
+          v.readyState >= 2 &&
+          v.videoWidth > 0 &&
+          now - lastFrameAt >= SCAN_FRAME_INTERVAL_MS
+        ) {
           lastFrameAt = now;
           busy = true;
           try {
-            const v = video()!;
-            if (v.readyState >= 2 && v.videoWidth > 0) {
-              frameTick += 1;
+            frameTick += 1;
 
-              const thorough =
-                frameTick > ESCALATE_AFTER_FRAMES &&
-                frameTick % THOROUGH_EVERY_N_FRAMES === 0;
-
-              const image =
-                probeImage(
-                  AADHAAR_PROBES[frameTick % AADHAAR_PROBES.length],
-                );
-              if (image) {
-                let nativeText: string | null = null;
-                if (detector) {
-                  try {
-                    const hits = await detector.detect(canvas);
-                    if (!sessionRef.current.isCurrent(token)) return;
-                    nativeText = hits[0]?.rawValue ?? null;
-                  } catch {
-                    detector = null;
-                  }
-                }
-                const outcome = await attemptAadhaarDecode({
-                  image,
-                  nativeText,
-                  client,
-                  thorough,
-                });
-                consecutiveDecodeErrors = 0;
+            if (detector) {
+              try {
+                const hits = await detector.detect(v);
                 if (!sessionRef.current.isCurrent(token)) return;
-                if (await handleOutcome(outcome, token)) return;
+                const raw = hits[0]?.rawValue;
+                if (raw) {
+                  const outcome = await attemptAadhaarDecode({
+                    nativeText: raw,
+                    client,
+                  });
+                  consecutiveDecodeErrors = 0;
+                  if (!sessionRef.current.isCurrent(token)) return;
+                  if (await handleOutcome(outcome, token)) return;
+                }
+              } catch {
+                detector = null;
               }
+            }
+
+            const thorough =
+              frameTick > ESCALATE_AFTER_FRAMES &&
+              frameTick % THOROUGH_EVERY_N_FRAMES === 0;
+
+            const image =
+              probeImage(
+                AADHAAR_PROBES[frameTick % AADHAAR_PROBES.length],
+              );
+            if (image) {
+              let nativeText: string | null = null;
+              if (detector) {
+                try {
+                  const hits = await detector.detect(canvas);
+                  if (!sessionRef.current.isCurrent(token)) return;
+                  nativeText = hits[0]?.rawValue ?? null;
+                } catch {
+                  detector = null;
+                }
+              }
+              const outcome = await attemptAadhaarDecode({
+                image,
+                nativeText,
+                client,
+                thorough,
+              });
+              consecutiveDecodeErrors = 0;
+              if (!sessionRef.current.isCurrent(token)) return;
+              if (await handleOutcome(outcome, token)) return;
             }
           } catch {
             consecutiveDecodeErrors += 1;
