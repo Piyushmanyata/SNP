@@ -8,6 +8,7 @@ from helpers import (
 )
 from serializers import ser_patient, ser_person
 from security import require_staff, require_any
+from aadhaar import decode_aadhaar
 from datetime import timedelta
 
 router = APIRouter(prefix="/api", tags=["registration"])
@@ -16,38 +17,13 @@ router = APIRouter(prefix="/api", tags=["registration"])
 _rl: dict = {}
 
 
-# ---------- Aadhaar mock decode ----------
+# ---------- Aadhaar Secure QR decode (genuine offline parse; demo payload also supported) ----------
 @router.post("/aadhaar/decode")
 async def aadhaar_decode(body: AadhaarDecodeBody):
-    """Simulated offline Aadhaar Secure QR decode.
-    Demo payload format: AADHAAR|<name>|<gender M/F>|<dob YYYY-MM-DD>|<last4>|<address>
-    Outcomes: card / garbage / not-aadhaar
-    """
-    raw = (body.payload or "").strip()
-    if not raw:
-        return {"outcome": "not-aadhaar", "message": "No data captured."}
-    if raw.startswith("snp:") or "/p/" in raw:
-        return {"outcome": "not-aadhaar", "message": "This is a patient QR, not an Aadhaar card."}
-    if not raw.upper().startswith("AADHAAR|"):
-        return {"outcome": "garbage", "message": "Could not read an Aadhaar Secure QR."}
-    parts = raw.split("|")
-    if len(parts) < 6:
-        return {"outcome": "garbage", "message": "Aadhaar QR data is incomplete."}
-    _, name, gender, dob, last4, address = parts[0], parts[1], parts[2], parts[3], parts[4], "|".join(parts[5:])
-    gender = (gender or "").upper()[:1]
-    if gender not in ("M", "F", "O"):
-        gender = "O"
-    return {
-        "outcome": "card",
-        "data": {
-            "full_name": name.strip(),
-            "gender": gender,
-            "dob": dob.strip(),
-            "age": age_from_dob(dob.strip()),
-            "aadhaar_last4": last4.strip()[-4:].zfill(4),
-            "address": address.strip(),
-        },
-    }
+    result = decode_aadhaar(body.payload or "")
+    if result["outcome"] == "card":
+        result["data"]["age"] = age_from_dob(result["data"].get("dob") or "")
+    return result
 
 
 # ---------- soft duplicate check ----------

@@ -9,14 +9,25 @@ export default function PrintPrescription() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [rx, setRx] = useState(null);
+  const [tpl, setTpl] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.post(`/desk/print/${id}`)
-      .then((r) => setRx(r.data.prescription))
-      .catch((e) => setError(formatApiError(e)))
-      .finally(() => setLoading(false));
+    (async () => {
+      try {
+        const r = await api.post(`/desk/print/${id}`);
+        setRx(r.data.prescription);
+        try {
+          const t = await api.get(`/templates/active?camp_id=${r.data.prescription.camp_id}`);
+          setTpl(t.data.template);
+        } catch (e) { /* fall back to default render */ }
+      } catch (e) {
+        setError(formatApiError(e));
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, [id]);
 
   if (loading) return <div className="min-h-screen flex items-center justify-center"><Spinner className="w-8 h-8 text-emerald-500" /></div>;
@@ -28,66 +39,90 @@ export default function PrintPrescription() {
     </div>
   );
 
-  return (
-    <div className="bg-slate-100 min-h-screen py-6">
-      <div className="no-print max-w-[210mm] mx-auto px-4 mb-4 flex gap-2">
-        <Button variant="outline" onClick={() => navigate("/desk")}><ArrowLeft className="w-4 h-4" /> Desk</Button>
-        <Button onClick={() => window.print()} data-testid="print-a4-prescription-button"><Printer className="w-4 h-4" /> Print A4</Button>
-      </div>
+  return <PrescriptionSheet rx={rx} tpl={tpl} navigate={navigate} />;
+}
 
-      <div className="print-a4 bg-white mx-auto shadow-lg" style={{ width: "210mm", minHeight: "297mm", padding: "16mm" }} data-testid="a4-prescription-sheet">
+export function PrescriptionSheet({ rx, tpl, navigate, preview }) {
+  const title = tpl?.header_title || rx.camp_name;
+  const subtitle = tpl?.header_subtitle || rx.venue;
+  const blocks = (tpl?.blocks || []).filter((b) => b.visible);
+  const logos = tpl?.logos || [];
+
+  return (
+    <div className={preview ? "" : "bg-slate-100 min-h-screen py-6"}>
+      {!preview && (
+        <div className="no-print max-w-[210mm] mx-auto px-4 mb-4 flex gap-2">
+          <Button variant="outline" onClick={() => navigate("/desk")}><ArrowLeft className="w-4 h-4" /> Desk</Button>
+          <Button onClick={() => window.print()} data-testid="print-a4-prescription-button"><Printer className="w-4 h-4" /> Print A4</Button>
+        </div>
+      )}
+
+      <div className="print-a4 bg-white mx-auto shadow-lg" style={{ width: "210mm", minHeight: preview ? "auto" : "297mm", padding: "16mm" }} data-testid="a4-prescription-sheet">
         {/* Letterhead */}
-        <div className="flex items-start justify-between border-b-2 border-slate-900 pb-4">
-          <div>
-            <h1 className="font-display text-2xl font-extrabold text-slate-900">{rx.camp_name}</h1>
-            <p className="text-sm text-slate-600">{rx.venue}</p>
-            <p className="text-xs text-slate-500 mt-1">SNP Free Eye Camp · Prescription</p>
+        <div className="flex items-start justify-between border-b-2 border-slate-900 pb-4 gap-4">
+          <div className="flex items-center gap-3">
+            {logos.map((lg, i) => (
+              <img key={lg.id || i} src={lg.data_url} alt={lg.name} className="h-12 w-auto object-contain" />
+            ))}
+            <div>
+              <h1 className="font-display text-2xl font-extrabold text-slate-900">{title}</h1>
+              <p className="text-sm text-slate-600">{subtitle}</p>
+              <p className="text-xs text-slate-500 mt-1">SNP Free Eye Camp · Prescription</p>
+            </div>
           </div>
-          <div className="text-center">
+          <div className="text-center shrink-0">
             <QRCodeSVG value={`snp:${rx.patient_qr}`} size={90} />
             <p className="font-mono text-xs mt-1">#{rx.reg_no}</p>
           </div>
         </div>
 
-        {/* Identity block */}
-        <div className="grid grid-cols-2 gap-x-8 gap-y-2 mt-5 text-sm">
-          <Line k="Reg No" v={`#${rx.reg_no}`} />
-          <Line k="Date" v={rx.date} />
-          <Line k="Name" v={rx.full_name} />
-          <Line k="Age / Sex" v={`${rx.age ?? "-"} / ${rx.gender || "-"}`} />
-          <Line k="Phone" v={rx.phone || "-"} />
-          <Line k="Address" v={rx.address || "-"} />
+        {/* Dynamic blocks */}
+        <div className="mt-5 space-y-5">
+          {(blocks.length ? blocks : DEFAULT_RENDER).map((b) => {
+            if (b.type === "identity") {
+              return (
+                <div key={b.id} className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm" data-testid="rx-block-identity">
+                  <Line k="Reg No" v={`#${rx.reg_no}`} />
+                  <Line k="Date" v={rx.date} />
+                  <Line k="Name" v={rx.full_name} />
+                  <Line k="Age / Sex" v={`${rx.age ?? "-"} / ${rx.gender || "-"}`} />
+                  <Line k="Phone" v={rx.phone || "-"} />
+                  <Line k="Address" v={rx.address || "-"} />
+                </div>
+              );
+            }
+            if (b.type === "signature") {
+              return (
+                <div key={b.id} className="flex justify-end pt-6 text-sm text-slate-500">
+                  <span className="border-t border-slate-400 pt-1 px-8">{b.label}</span>
+                </div>
+              );
+            }
+            return (
+              <div key={b.id} data-testid={`rx-block-${b.id}`}>
+                <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{b.label}</p>
+                <div style={{ height: `${b.height || 20}mm` }} className="border-b border-slate-300 mt-1" />
+              </div>
+            );
+          })}
         </div>
 
-        {/* Blank clinical area */}
-        <div className="mt-6 border-t border-slate-300 pt-4">
-          <p className="font-mono text-xs uppercase tracking-widest text-slate-500 mb-3">Rx / Clinical Findings</p>
-          <div className="space-y-6" style={{ minHeight: "150mm" }}>
-            <BlankRow label="Diagnosis" />
-            <BlankRow label="Vision (R / L)" />
-            <BlankRow label="Prescription" />
-            <BlankRow label="BP / Blood Sugar" />
-            <BlankRow label="Advice" />
-          </div>
-        </div>
-
-        <div className="flex justify-between items-end border-t border-slate-300 pt-3 mt-4 text-xs text-slate-500">
-          <span>Paper prescription is the source of truth.</span>
-          <span>Doctor's Signature</span>
+        <div className="border-t border-slate-300 pt-3 mt-6 text-xs text-slate-500">
+          {tpl?.footer_note || "Paper prescription is the source of truth."}
         </div>
       </div>
     </div>
   );
 }
 
+const DEFAULT_RENDER = [
+  { id: "identity", type: "identity", label: "Identity", visible: true },
+  { id: "diagnosis", type: "lines", label: "Diagnosis", height: 24 },
+  { id: "prescription", type: "lines", label: "Prescription", height: 48 },
+  { id: "advice", type: "lines", label: "Advice", height: 24 },
+  { id: "signature", type: "signature", label: "Doctor's Signature" },
+];
+
 function Line({ k, v }) {
   return <div><span className="text-slate-400 mr-2">{k}:</span><span className="font-semibold text-slate-900">{v}</span></div>;
-}
-function BlankRow({ label }) {
-  return (
-    <div>
-      <p className="text-xs font-semibold text-slate-600 mb-6">{label}</p>
-      <div className="border-b border-slate-300" />
-    </div>
-  );
 }

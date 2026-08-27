@@ -7,13 +7,15 @@ import {
 } from "../components/ui";
 import {
   Tent, Users, CalendarDays, Trophy, Download, Scissors, Power, Trash2,
-  Plus, PrinterCheck, ClipboardList, Stethoscope, CheckCircle2,
+  Plus, PrinterCheck, ClipboardList, Stethoscope, CheckCircle2, FileText,
 } from "lucide-react";
+import TemplateEditor from "../components/TemplateEditor";
 
 const TABS = [
   { id: "overview", label: "Overview", icon: ClipboardList },
   { id: "camps", label: "Camps & Days", icon: Tent },
   { id: "staff", label: "Staff", icon: Users },
+  { id: "template", label: "Rx Template", icon: FileText },
   { id: "ot", label: "OT Schedule", icon: Scissors },
   { id: "board", label: "Leaderboards", icon: Trophy },
   { id: "exports", label: "Exports", icon: Download },
@@ -38,6 +40,7 @@ export default function AdminDashboard() {
       {tab === "overview" && <Overview />}
       {tab === "camps" && <Camps />}
       {tab === "staff" && <Staff />}
+      {tab === "template" && <TemplateEditor />}
       {tab === "ot" && <OtSchedule />}
       {tab === "board" && <Leaderboards />}
       {tab === "exports" && <Exports />}

@@ -67,6 +67,7 @@ async def print_prescription(patient_id: str, actor: dict = Depends(require_staf
     return {
         "registration": ser_patient(p),
         "prescription": {
+            "camp_id": str(p["camp_id"]),
             "camp_name": camp["name"] if camp else None,
             "venue": camp["venue"] if camp else None,
             "reg_no": p["reg_no"],
