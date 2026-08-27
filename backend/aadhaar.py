@@ -4,9 +4,16 @@ Decodes on our own server (no UIDAI API call, no per-scan cost). We parse the
 identity fields only; we do NOT verify the RSA signature (matches original ADR:
 "not cryptographically verified"). Only the last-4 of Aadhaar is ever surfaced.
 """
+import sys
 import zlib
 import xml.etree.ElementTree as ET
 from datetime import datetime
+
+if hasattr(sys, "set_int_max_str_digits"):
+    try:
+        sys.set_int_max_str_digits(200000)
+    except Exception:
+        pass
 
 # Secure QR v2 delimiter-separated text fields (delimiter = byte 0xFF)
 FIELDS = [
@@ -35,7 +42,11 @@ def _decompress(qr: str) -> bytes:
     try:
         return zlib.decompress(byte_array, 16 + zlib.MAX_WBITS)  # gzip header
     except zlib.error:
+        pass
+    try:
         return zlib.decompress(byte_array)  # raw zlib fallback
+    except zlib.error:
+        return zlib.decompress(byte_array, -zlib.MAX_WBITS)  # raw deflate fallback
 
 
 def parse_secure_qr(qr: str) -> dict:
