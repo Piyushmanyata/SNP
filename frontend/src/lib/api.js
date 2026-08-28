@@ -1,9 +1,32 @@
 import axios from "axios";
 
-const BACKEND = process.env.REACT_APP_BACKEND_URL;
+function isLoopback(host) {
+  return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
+}
+
+export function backendOrigin() {
+  const env = process.env.REACT_APP_BACKEND_URL || "";
+  const loc = window.location;
+  const pageHost = loc.hostname;
+
+  let envHost = "";
+  try {
+    if (env) envHost = new URL(env).hostname;
+  } catch {
+    envHost = "";
+  }
+
+  if (pageHost && !isLoopback(pageHost) && (!envHost || isLoopback(envHost))) {
+    const u = new URL(loc.origin);
+    u.port = "8000";
+    return u.origin;
+  }
+  if (env) return env;
+  return "http://localhost:8000";
+}
 
 const api = axios.create({
-  baseURL: `${BACKEND}/api`,
+  baseURL: `${backendOrigin()}/api`,
   withCredentials: true,
 });
 

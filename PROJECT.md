@@ -2,7 +2,7 @@
 
 ## Architecture
 The application stack consists of:
-- `frontend/`: React single-page application (React 18 + Tailwind CSS + Lucide + html5-qrcode)
+- `frontend/`: React single-page application (React 18 + Tailwind CSS + Lucide + getUserMedia / BarcodeDetector + zxing-wasm)
 - `backend/`: FastAPI async Python application with Motor MongoDB driver
 - `tests/`: Automated pytest suites (`test_aadhaar_unit.py`, `test_iter3.py`, `backend_test.py`) and Jest frontend test suites
 

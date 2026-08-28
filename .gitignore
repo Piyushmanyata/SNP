@@ -16,6 +16,8 @@ env/
 build/
 frontend/build/
 dist/
+frontend/public/wasm/
+frontend/public/zxing-wasm-reader.js
 
 # Testing and coverage
 coverage/

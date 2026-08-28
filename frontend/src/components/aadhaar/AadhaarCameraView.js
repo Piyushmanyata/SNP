@@ -4,7 +4,7 @@ import { SwitchCamera, Zap, ZapOff } from "lucide-react";
 
 export function AadhaarCameraView({
   mode,
-  readerId,
+  videoRef,
   cameraState,
   torchAvailable,
   torchOn,
@@ -21,13 +21,15 @@ export function AadhaarCameraView({
             : "hidden"
         }
       >
-        <div
-          id={readerId}
-          className="w-full min-h-[260px] sm:min-h-[320px]"
+        <video
+          ref={videoRef}
+          className="w-full min-h-[260px] sm:min-h-[320px] object-contain bg-black"
+          autoPlay
+          playsInline
+          muted
           data-testid="aadhaar-camera-region"
         />
 
-        {/* Camera controls toolbar overlay */}
         <div className="absolute top-2 right-2 flex items-center gap-1.5 z-20">
           {torchAvailable && (
             <button
@@ -57,10 +59,9 @@ export function AadhaarCameraView({
           )}
         </div>
 
-        {/* Viewfinder guide frame overlay */}
         {cameraState === "scanning" && (
-          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center p-4">
-            <div className="relative w-4/5 max-w-[280px] sm:max-w-[320px] aspect-square border-2 border-dashed border-emerald-400/80 rounded-2xl flex items-center justify-center">
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center p-4">
+            <div className="relative w-[90%] max-h-[90%] aspect-square border-2 border-dashed border-emerald-400/80 rounded-2xl flex items-center justify-center">
               <div className="absolute top-0 left-0 w-4 h-4 border-t-2 border-l-2 border-emerald-400 rounded-tl-lg" />
               <div className="absolute top-0 right-0 w-4 h-4 border-t-2 border-r-2 border-emerald-400 rounded-tr-lg" />
               <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-emerald-400 rounded-bl-lg" />
@@ -80,7 +81,6 @@ export function AadhaarCameraView({
           </div>
         )}
       </div>
-      <div id={`${readerId}-file`} className="hidden" />
     </>
   );
 }

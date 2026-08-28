@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from db import get_db, init_indexes
-from security import hash_password, verify_password
+from security import hash_password
 from helpers import now_utc
 
 import routes_auth
@@ -20,10 +20,22 @@ import routes_templates
 
 app = FastAPI(title="SNP Camps API")
 
+LAN_ORIGIN_REGEX = (
+    r"^https?://("
+    r"localhost|"
+    r"127\.0\.0\.1|"
+    r"\[::1\]|"
+    r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+    r"192\.168\.\d{1,3}\.\d{1,3}|"
+    r"172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}"
+    r")(:\d+)?$"
+)
+
 origins = os.environ.get("CORS_ORIGINS", "*")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if origins == "*" else [o.strip() for o in origins.split(",")],
+    allow_origins=["*"] if origins == "*" else [o.strip() for o in origins.split(",") if o.strip()],
+    allow_origin_regex=LAN_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -41,7 +53,7 @@ app.include_router(routes_templates.router)
 
 async def seed_admin():
     db = get_db()
-    email = os.environ["ADMIN_EMAIL"].lower()
+    email = os.environ["ADMIN_EMAIL"].lower().strip()
     password = os.environ["ADMIN_PASSWORD"]
     existing = await db.users.find_one({"email": email})
     if existing is None:
@@ -50,9 +62,6 @@ async def seed_admin():
             "name": "Camp Administrator", "role": "admin", "phone": None,
             "team_lead_id": None, "disabled_at": None, "created_at": now_utc(),
         })
-    elif not verify_password(password, existing["password_hash"]):
-        await db.users.update_one({"email": email},
-                                  {"$set": {"password_hash": hash_password(password)}})
 
 
 @app.on_event("startup")
