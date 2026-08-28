@@ -11,7 +11,7 @@ import {
 } from "./aadhaar";
 
 export default function AadhaarScanner({ onScanned, disabled }) {
-  const [mode, setMode] = useState("idle"); // idle | camera | manual
+  const [mode, setMode] = useState("idle");
   const fileRef = useRef(null);
 
   const {
@@ -27,14 +27,9 @@ export default function AadhaarScanner({ onScanned, disabled }) {
     scanFile,
   } = useAadhaarDecode({ onScanned });
 
-  const handleScanSuccess = useCallback(
-    (decodedText) => {
-      setMode("idle");
-      setPayload(decodedText);
-      decode(decodedText);
-    },
-    [decode, setPayload]
-  );
+  const handleLock = useCallback(() => {
+    setMode("idle");
+  }, []);
 
   const handleCameraError = useCallback(
     (errorMsg) => {
@@ -43,6 +38,10 @@ export default function AadhaarScanner({ onScanned, disabled }) {
     },
     [setError]
   );
+
+  const handleHintFallbacks = useCallback(() => {
+    setError("Can't read the QR. Try a photo or USB scanner.");
+  }, [setError]);
 
   const {
     cameraState,
@@ -53,11 +52,12 @@ export default function AadhaarScanner({ onScanned, disabled }) {
     stopCamera,
     switchCamera,
     toggleTorch,
-    readerId,
+    videoRef,
   } = useAadhaarCamera({
-    readerId: "aadhaar-reader-region",
-    onScanSuccess: handleScanSuccess,
+    decode,
+    onLock: handleLock,
     onError: handleCameraError,
+    onHintFallbacks: handleHintFallbacks,
   });
 
   const startCamera = useCallback(
@@ -83,7 +83,6 @@ export default function AadhaarScanner({ onScanned, disabled }) {
         Scan the QR on the Aadhaar card / e-Aadhaar. Camera, USB scanner, or photo upload — decoded on-device, no UIDAI call, only last-4 stored.
       </p>
 
-      {/* Capture modes */}
       <AadhaarModeButtons
         mode={mode}
         setMode={setMode}
@@ -92,14 +91,13 @@ export default function AadhaarScanner({ onScanned, disabled }) {
         cameraState={cameraState}
         startCamera={startCamera}
         stopCamera={stopCamera}
-        scanFile={(file) => scanFile(file, `${readerId}-file`)}
+        scanFile={scanFile}
         fileRef={fileRef}
       />
 
-      {/* Camera viewfinder */}
       <AadhaarCameraView
         mode={mode}
-        readerId={readerId}
+        videoRef={videoRef}
         cameraState={cameraState}
         torchAvailable={torchAvailable}
         torchOn={torchOn}
@@ -108,7 +106,6 @@ export default function AadhaarScanner({ onScanned, disabled }) {
         switchCamera={switchCamera}
       />
 
-      {/* USB wedge / manual textarea */}
       <AadhaarManualInput
         mode={mode}
         payload={payload}
@@ -118,7 +115,6 @@ export default function AadhaarScanner({ onScanned, disabled }) {
         decode={decode}
       />
 
-      {/* Status alerts and error handling */}
       <AadhaarScannerStatus
         busy={busy}
         mode={mode}

@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import api, { formatApiError } from "../../lib/api";
+import * as grab from "./liveScan/grabFrame";
+import * as nativeDetector from "./liveScan/nativeDetector";
+import * as wasmDetector from "./liveScan/wasmDetector";
 
 export function useAadhaarDecode({ onScanned } = {}) {
   const [payload, setPayload] = useState("");
@@ -20,8 +22,9 @@ export function useAadhaarDecode({ onScanned } = {}) {
 
   const decode = useCallback(
     async (text) => {
-      if (!text) return;
+      if (!text) return null;
       if (mountedRef.current) {
+        setPayload(text);
         setBusy(true);
         setError("");
         setOutcome("");
@@ -37,10 +40,12 @@ export function useAadhaarDecode({ onScanned } = {}) {
             setError(data.message || "Unable to read Aadhaar QR data.");
           }
         }
+        return data;
       } catch (err) {
         if (mountedRef.current) {
           setError(formatApiError(err));
         }
+        return null;
       } finally {
         if (mountedRef.current) {
           setBusy(false);
@@ -51,24 +56,30 @@ export function useAadhaarDecode({ onScanned } = {}) {
   );
 
   const scanFile = useCallback(
-    async (file, tempReaderId = "aadhaar-reader-region-file") => {
+    async (file) => {
       if (!file) return;
       if (mountedRef.current) {
         setError("");
         setOutcome("");
         setBusy(true);
       }
-
-      const scanner = new Html5Qrcode(tempReaderId, {
-        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
-        verbose: false,
-        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-      });
-
       try {
-        const text = await scanner.scanFile(file, false);
-        if (mountedRef.current) {
-          setPayload(text);
+        const bitmap = await createImageBitmap(file);
+        const imageData = grab.bitmapToImageData(bitmap);
+        if (bitmap.close) bitmap.close();
+        let text = null;
+        if (nativeDetector.hasNativeBarcodeDetector()) {
+          text = await nativeDetector.detectNativeImageData(imageData);
+        }
+        if (!text) {
+          await wasmDetector.loadZxingWorker();
+          text = await wasmDetector.detectWasmImageData(imageData);
+        }
+        if (!text) {
+          if (mountedRef.current) {
+            setError("No Aadhaar QR found in the image. Try a clearer photo.");
+          }
+          return;
         }
         await decode(text);
       } catch (e) {
@@ -77,11 +88,6 @@ export function useAadhaarDecode({ onScanned } = {}) {
           setError("No Aadhaar QR found in the image. Try a clearer photo.");
         }
       } finally {
-        try {
-          await scanner.clear();
-        } catch (er) {
-          console.warn("Failed to clear file scanner element:", er);
-        }
         if (mountedRef.current) {
           setBusy(false);
         }

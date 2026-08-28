@@ -10,7 +10,7 @@ Ship a root `docker-compose.yml` with three services: `mongo`, `backend`, `front
 
 - MongoDB uses a named volume `mongo_data` and is not published to the host.
 - Backend connects with `MONGO_URL=mongodb://mongo:27017` and database `snp_camps`.
-- Frontend `REACT_APP_BACKEND_URL` is `http://localhost:8000` because the browser, not the frontend container, calls the API.
+- Frontend `REACT_APP_BACKEND_URL` defaults to `http://localhost:8000` for the browser. LAN devices rewrite loopback API hosts to `window.location.hostname:8000` (ADR 0006).
 - Source trees are bind-mounted; uvicorn `--reload` and CRA `npm start` provide hot reload.
 - Local HTTP cookies use `COOKIE_SECURE=false` and `COOKIE_SAMESITE=lax`. Production defaults stay `secure=true` / `samesite=none`.
 

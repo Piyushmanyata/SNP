@@ -55,7 +55,6 @@ services:
       HOST: "0.0.0.0"
       CHOKIDAR_USEPOLLING: "true"
       WATCHPACK_POLLING: "true"
-      WDS_SOCKET_HOST: localhost
       WDS_SOCKET_PORT: "3000"
       DANGEROUSLY_DISABLE_HOST_CHECK: "true"
     stdin_open: true

@@ -95,6 +95,7 @@ docker compose up --build
 | Backend API | http://localhost:8000 |
 | Swagger | http://localhost:8000/docs |
 | Health | http://localhost:8000/api/health |
+| Same LAN (phone/laptop) | http://<PC-LAN-IP>:3000 — API host is derived from the page hostname, port 8000 |
 
 MongoDB is not published; the backend reaches it as `mongodb://mongo:27017`. Data lives in the `mongo_data` Docker volume and survives `docker compose down`.
 

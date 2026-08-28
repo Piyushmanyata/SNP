@@ -2,21 +2,78 @@ import React, { act } from "react";
 import ReactDOM from "react-dom/client";
 import AadhaarScanner from "./AadhaarScanner";
 import api from "../lib/api";
-import { Html5Qrcode } from "html5-qrcode";
+import * as nativeDetector from "./aadhaar/liveScan/nativeDetector";
+import * as grab from "./aadhaar/liveScan/grabFrame";
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
 jest.mock("../lib/api");
-jest.mock("html5-qrcode");
+jest.mock("./aadhaar/liveScan/wasmDetector", () => ({
+  loadZxingWorker: jest.fn().mockResolvedValue(),
+  detectWasmImageData: jest.fn().mockResolvedValue(null),
+}));
 
 let container = null;
 let root = null;
+let mediaTrack = null;
+let mediaStream = null;
 
 beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = ReactDOM.createRoot(container);
   jest.clearAllMocks();
+  jest.spyOn(nativeDetector, "hasNativeBarcodeDetector").mockReturnValue(true);
+  jest.spyOn(nativeDetector, "detectNativeImageData").mockResolvedValue(null);
+  jest.spyOn(grab, "grabFrame").mockReturnValue({
+    width: 4,
+    height: 4,
+    data: new Uint8ClampedArray(64),
+  });
+  jest.spyOn(grab, "bitmapToImageData").mockReturnValue({
+    width: 4,
+    height: 4,
+    data: new Uint8ClampedArray(64),
+  });
+
+  mediaTrack = {
+    stop: jest.fn(),
+    getCapabilities: jest.fn().mockReturnValue({ torch: true }),
+    applyConstraints: jest.fn().mockResolvedValue(),
+    getSettings: jest.fn().mockReturnValue({ width: 1280, height: 720 }),
+  };
+  mediaStream = {
+    getTracks: () => [mediaTrack],
+    getVideoTracks: () => [mediaTrack],
+  };
+
+  Object.defineProperty(window.HTMLMediaElement.prototype, "play", {
+    configurable: true,
+    value: jest.fn().mockResolvedValue(),
+  });
+  Object.defineProperty(window.HTMLMediaElement.prototype, "pause", {
+    configurable: true,
+    value: jest.fn(),
+  });
+  Object.defineProperty(window.HTMLVideoElement.prototype, "videoWidth", {
+    configurable: true,
+    get() {
+      return 1280;
+    },
+  });
+  Object.defineProperty(window.HTMLVideoElement.prototype, "videoHeight", {
+    configurable: true,
+    get() {
+      return 720;
+    },
+  });
+
+  navigator.mediaDevices = {
+    getUserMedia: jest.fn().mockResolvedValue(mediaStream),
+    enumerateDevices: jest.fn().mockResolvedValue([{ kind: "videoinput", deviceId: "cam1", label: "Back Camera" }]),
+  };
+
+  global.createImageBitmap = jest.fn().mockResolvedValue({ width: 8, height: 8, close: jest.fn() });
 });
 
 afterEach(() => {
@@ -25,6 +82,7 @@ afterEach(() => {
   });
   container.remove();
   container = null;
+  jest.restoreAllMocks();
 });
 
 describe("AadhaarScanner component", () => {
@@ -115,27 +173,10 @@ describe("AadhaarScanner component", () => {
     expect(container.textContent).toContain("Identity locked from card");
   });
 
-  test("initializes camera scanner with environment facingMode and handles successful scan", async () => {
+  test("starts environment camera and Locks after Decode card", async () => {
     const onScannedMock = jest.fn();
-    let scanSuccessCallback = null;
-
-    const mockStart = jest.fn().mockImplementation((cameraId, config, onSuccess) => {
-      scanSuccessCallback = onSuccess;
-      return Promise.resolve();
-    });
-    const mockStop = jest.fn().mockResolvedValue();
-    const mockClear = jest.fn().mockResolvedValue();
-
-    Html5Qrcode.getCameras = jest.fn().mockResolvedValue([{ id: "cam1", label: "Back Camera" }]);
-    Html5Qrcode.mockImplementation(() => ({
-      start: mockStart,
-      stop: mockStop,
-      clear: mockClear,
-      isScanning: true,
-      getRunningTrackCapabilities: jest.fn().mockReturnValue({ torch: true }),
-    }));
-
-    api.post.mockResolvedValueOnce({
+    nativeDetector.detectNativeImageData.mockResolvedValue("2567820190301120000...");
+    api.post.mockResolvedValue({
       data: {
         outcome: "card",
         source: "secure_qr",
@@ -158,13 +199,9 @@ describe("AadhaarScanner component", () => {
       cameraBtn.click();
     });
 
-    expect(mockStart).toHaveBeenCalled();
-
-    const stopBtn = container.querySelector('[data-testid="aadhaar-camera-stop"]');
-    expect(stopBtn).not.toBeNull();
-
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled();
     await act(async () => {
-      await scanSuccessCallback("2567820190301120000...");
+      await new Promise((r) => setTimeout(r, 50));
     });
 
     expect(api.post).toHaveBeenCalledWith("/aadhaar/decode", {
@@ -179,16 +216,10 @@ describe("AadhaarScanner component", () => {
   });
 
   test("handles camera permission denial gracefully with clear feedback and retry", async () => {
-    Html5Qrcode.getCameras = jest.fn().mockRejectedValue(new Error("Permission denied"));
     const permError = new Error("NotAllowedError: Permission denied");
     permError.name = "NotAllowedError";
-
-    Html5Qrcode.mockImplementation(() => ({
-      start: jest.fn().mockRejectedValue(permError),
-      stop: jest.fn().mockResolvedValue(),
-      clear: jest.fn().mockResolvedValue(),
-      isScanning: false,
-    }));
+    navigator.mediaDevices.getUserMedia.mockRejectedValue(permError);
+    navigator.mediaDevices.enumerateDevices.mockRejectedValue(new Error("Permission denied"));
 
     act(() => {
       root.render(<AadhaarScanner onScanned={jest.fn()} />);
@@ -220,14 +251,9 @@ describe("AadhaarScanner component", () => {
 
   test("handles file upload QR scan successfully", async () => {
     const onScannedMock = jest.fn();
-    const mockScanFile = jest.fn().mockResolvedValue("AADHAAR|Test Person|M|1980-01-01|1234|Test Address");
-    const mockClear = jest.fn().mockResolvedValue();
-
-    Html5Qrcode.mockImplementation(() => ({
-      scanFile: mockScanFile,
-      clear: mockClear,
-    }));
-
+    nativeDetector.detectNativeImageData.mockResolvedValue(
+      "AADHAAR|Test Person|M|1980-01-01|1234|Test Address"
+    );
     api.post.mockResolvedValueOnce({
       data: {
         outcome: "card",
@@ -248,9 +274,11 @@ describe("AadhaarScanner component", () => {
         value: [file],
       });
       fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 50));
     });
 
-    expect(mockScanFile).toHaveBeenCalledWith(file, false);
+    expect(global.createImageBitmap).toHaveBeenCalledWith(file);
+    expect(nativeDetector.detectNativeImageData).toHaveBeenCalled();
     expect(api.post).toHaveBeenCalledWith("/aadhaar/decode", {
       payload: "AADHAAR|Test Person|M|1980-01-01|1234|Test Address",
     });
@@ -260,22 +288,10 @@ describe("AadhaarScanner component", () => {
   });
 
   test("supports camera switching and torch toggle when available", async () => {
-    const mockApplyVideoConstraints = jest.fn().mockResolvedValue();
-    Html5Qrcode.getCameras = jest
-      .fn()
-      .mockResolvedValue([
-        { id: "cam1", label: "Rear Camera 1" },
-        { id: "cam2", label: "Front Camera 2" },
-      ]);
-
-    Html5Qrcode.mockImplementation(() => ({
-      start: jest.fn().mockResolvedValue(),
-      stop: jest.fn().mockResolvedValue(),
-      clear: jest.fn().mockResolvedValue(),
-      isScanning: true,
-      getRunningTrackCapabilities: jest.fn().mockReturnValue({ torch: true }),
-      applyVideoConstraints: mockApplyVideoConstraints,
-    }));
+    navigator.mediaDevices.enumerateDevices.mockResolvedValue([
+      { kind: "videoinput", deviceId: "cam1", label: "Rear Camera 1" },
+      { kind: "videoinput", deviceId: "cam2", label: "Front Camera 2" },
+    ]);
 
     act(() => {
       root.render(<AadhaarScanner onScanned={jest.fn()} />);
@@ -296,26 +312,22 @@ describe("AadhaarScanner component", () => {
       torchBtn.click();
     });
 
-    expect(mockApplyVideoConstraints).toHaveBeenCalledWith({
+    expect(mediaTrack.applyConstraints).toHaveBeenCalledWith({
       advanced: [{ torch: true }],
     });
 
     await act(async () => {
       switchBtn.click();
     });
+
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled();
   });
 
   test("handles insecure context (non-HTTPS) with helpful error message", async () => {
     const originalSecureContext = window.isSecureContext;
     Object.defineProperty(window, "isSecureContext", { value: false, configurable: true });
-
-    Html5Qrcode.getCameras = jest.fn().mockRejectedValue(new Error("Insecure"));
-    Html5Qrcode.mockImplementation(() => ({
-      start: jest.fn().mockRejectedValue(new Error("MediaDevices not supported")),
-      stop: jest.fn().mockResolvedValue(),
-      clear: jest.fn().mockResolvedValue(),
-      isScanning: false,
-    }));
+    navigator.mediaDevices.getUserMedia.mockRejectedValue(new Error("MediaDevices not supported"));
+    navigator.mediaDevices.enumerateDevices.mockRejectedValue(new Error("Insecure"));
 
     act(() => {
       root.render(<AadhaarScanner onScanned={jest.fn()} />);
@@ -373,17 +385,6 @@ describe("AadhaarScanner component", () => {
   });
 
   test("stops camera and switches to idle when upload button is clicked in camera mode", async () => {
-    const mockStop = jest.fn().mockResolvedValue();
-    const mockClear = jest.fn().mockResolvedValue();
-
-    Html5Qrcode.getCameras = jest.fn().mockResolvedValue([{ id: "cam1" }]);
-    Html5Qrcode.mockImplementation(() => ({
-      start: jest.fn().mockResolvedValue(),
-      stop: mockStop,
-      clear: mockClear,
-      isScanning: true,
-    }));
-
     act(() => {
       root.render(<AadhaarScanner onScanned={jest.fn()} />);
     });
@@ -398,23 +399,11 @@ describe("AadhaarScanner component", () => {
       uploadBtn.click();
     });
 
-    expect(mockStop).toHaveBeenCalled();
+    expect(mediaTrack.stop).toHaveBeenCalled();
   });
 
-  test("calculates responsive qrbox boundaries without exceeding viewport", async () => {
-    let capturedScanConfig = null;
-    const mockStart = jest.fn().mockImplementation((cameraId, config) => {
-      capturedScanConfig = config;
-      return Promise.resolve();
-    });
-
-    Html5Qrcode.getCameras = jest.fn().mockResolvedValue([{ id: "cam1" }]);
-    Html5Qrcode.mockImplementation(() => ({
-      start: mockStart,
-      stop: jest.fn().mockResolvedValue(),
-      clear: jest.fn().mockResolvedValue(),
-      isScanning: true,
-    }));
+  test("requests 720p as ideal and still starts if the track is 640x480", async () => {
+    mediaTrack.getSettings.mockReturnValue({ width: 640, height: 480 });
 
     act(() => {
       root.render(<AadhaarScanner onScanned={jest.fn()} />);
@@ -425,19 +414,15 @@ describe("AadhaarScanner component", () => {
       cameraBtn.click();
     });
 
-    expect(capturedScanConfig).toBeDefined();
-    expect(typeof capturedScanConfig.qrbox).toBe("function");
-
-    // Standard viewport (400x400) -> 85% = 340
-    const resStandard = capturedScanConfig.qrbox(400, 400);
-    expect(resStandard.width).toBe(340);
-    expect(resStandard.height).toBe(340);
-
-    // Small viewport (180x180) -> 85% = 153, never exceeds 180
-    const resSmall = capturedScanConfig.qrbox(180, 180);
-    expect(resSmall.width).toBeLessThanOrEqual(180);
-    expect(resSmall.height).toBeLessThanOrEqual(180);
-    expect(resSmall.width).toBe(153);
+    expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        video: expect.objectContaining({
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        }),
+      })
+    );
+    expect(container.querySelector('[data-testid="aadhaar-camera-stop"]')).not.toBeNull();
   });
 
   test("trims leading and trailing whitespace on manual decode button click", async () => {
