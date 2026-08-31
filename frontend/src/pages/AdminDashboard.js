@@ -6,7 +6,7 @@ import {
   Button, Card, Input, Field, Alert, Modal, Stat, Badge, ErrorCard,
 } from "../components/ui";
 import {
-  Tent, Users, CalendarDays, Trophy, Download, Scissors, Power, Trash2,
+  Tent, Users, CalendarDays, Trophy, Download, Scissors, Glasses, Power, Trash2,
   Plus, PrinterCheck, ClipboardList, Stethoscope, CheckCircle2, FileText,
 } from "lucide-react";
 import TemplateEditor from "../components/TemplateEditor";
@@ -17,6 +17,7 @@ const TABS = [
   { id: "staff", label: "Staff", icon: Users },
   { id: "template", label: "Rx Template", icon: FileText },
   { id: "ot", label: "OT Schedule", icon: Scissors },
+  { id: "specs", label: "Specs collection", icon: Glasses },
   { id: "board", label: "Leaderboards", icon: Trophy },
   { id: "exports", label: "Exports", icon: Download },
 ];
@@ -42,6 +43,7 @@ export default function AdminDashboard() {
       {tab === "staff" && <Staff />}
       {tab === "template" && <TemplateEditor />}
       {tab === "ot" && <OtSchedule />}
+      {tab === "specs" && <SpecsCollectionDays />}
       {tab === "board" && <Leaderboards />}
       {tab === "exports" && <Exports />}
     </Layout>
@@ -336,6 +338,53 @@ function OtSchedule() {
           <div><label className="text-[10px] font-mono text-slate-400 uppercase">Venue</label><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="ot-venue-input" /></div>
           <div><label className="text-[10px] font-mono text-slate-400 uppercase">Seats</label><Input type="number" value={form.seat_limit} onChange={(e) => setForm({ ...form, seat_limit: e.target.value })} className="w-24" data-testid="ot-seat-input" /></div>
           <Button size="sm" onClick={add} disabled={!form.day_date || !form.venue} data-testid="add-ot-day-button"><Plus className="w-4 h-4" /> Add</Button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function SpecsCollectionDays() {
+  const [days, setDays] = useState([]);
+  const [camp, setCamp] = useState(null);
+  const [err, setErr] = useState("");
+  const [form, setForm] = useState({ day_date: "", venue: "", seat_limit: 10 });
+
+  const load = useCallback(() => {
+    Promise.all([api.get("/clinical/specs-days"), api.get("/camps/active")])
+      .then(([o, a]) => { setDays(o.data.specs_days); setCamp(a.data.camp); })
+      .catch((e) => setErr(formatApiError(e)));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const add = useCallback(async () => {
+    setErr("");
+    if (!camp) { setErr("Activate a camp first."); return; }
+    try { await api.post("/clinical/specs-days", { camp_id: camp.id, ...form, seat_limit: Number(form.seat_limit) }); setForm({ day_date: "", venue: "", seat_limit: 10 }); load(); }
+    catch (e) { setErr(formatApiError(e)); }
+  }, [camp, form, load]);
+
+  return (
+    <div className="space-y-4">
+      {err && <Alert>{err}</Alert>}
+      <Card>
+        <h3 className="font-display font-bold text-slate-900 mb-3">Specs collection days</h3>
+        <div className="space-y-2" data-testid="specs-days-list">
+          {days.length === 0 && <p className="text-slate-400 text-sm">No Specs collection days yet.</p>}
+          {days.map((d) => (
+            <div key={d.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50" data-testid={`specs-day-${d.id}`}>
+              <Glasses className="w-4 h-4 text-emerald-600" />
+              <span className="font-medium text-slate-800 text-sm">{d.day_date}</span>
+              <span className="text-xs text-slate-400">{d.venue}</span>
+              <Badge tone={d.seats_free > 0 ? "emerald" : "rose"} className="ml-auto">{d.seats_taken}/{d.seat_limit} seats</Badge>
+            </div>
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-2 items-end pt-4 mt-3 border-t border-slate-100">
+          <div><label className="text-[10px] font-mono text-slate-400 uppercase">Date</label><Input type="date" value={form.day_date} onChange={(e) => setForm({ ...form, day_date: e.target.value })} data-testid="specs-date-input" /></div>
+          <div><label className="text-[10px] font-mono text-slate-400 uppercase">Venue</label><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="specs-venue-input" /></div>
+          <div><label className="text-[10px] font-mono text-slate-400 uppercase">Seats</label><Input type="number" value={form.seat_limit} onChange={(e) => setForm({ ...form, seat_limit: e.target.value })} className="w-24" data-testid="specs-seat-input" /></div>
+          <Button size="sm" onClick={add} disabled={!form.day_date || !form.venue} data-testid="add-specs-day-button"><Plus className="w-4 h-4" /> Add</Button>
         </div>
       </Card>
     </div>

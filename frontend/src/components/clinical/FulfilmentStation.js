@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import api, { formatApiError } from "../../lib/api";
-import { Button, Input, Badge } from "../ui";
+import { Button, Badge } from "../ui";
 import { Pill, Glasses, Scissors, Printer } from "lucide-react";
 
 export const STATION_OPTS = {
@@ -19,6 +19,7 @@ export function FulfilmentStation({
   type,
   data,
   otDays = [],
+  specsDays = [],
   onDone,
   navigate,
   setBanner,
@@ -30,9 +31,8 @@ export function FulfilmentStation({
   const slip = data?.slips?.find((s) => s.item_type === type && s.active);
 
   const [status, setStatus] = useState(existing?.status || "");
-  const [collDate, setCollDate] = useState(existing?.collection_date || "");
-  const [collVenue, setCollVenue] = useState(existing?.collection_venue || "");
   const [otDayId, setOtDayId] = useState(existing?.ot_schedule_day_id || "");
+  const [specsDayId, setSpecsDayId] = useState(existing?.specs_collection_day_id || "");
   const [busy, setBusy] = useState(false);
 
   const save = async () => {
@@ -43,9 +43,8 @@ export function FulfilmentStation({
         transcription_id: data.transcription.id,
         item_type: type,
         status,
-        collection_date: type === "specs" ? collDate : null,
-        collection_venue: type === "specs" ? collVenue : null,
         ot_schedule_day_id: type === "ot" ? otDayId : null,
+        specs_collection_day_id: type === "specs" ? specsDayId : null,
       });
       setBanner(`${meta.label}: ${status}`);
       if (res.slip) {
@@ -81,20 +80,19 @@ export function FulfilmentStation({
       </select>
 
       {status === "deferred" && type === "specs" && (
-        <div className="mt-2 space-y-2">
-          <Input
-            type="date"
-            value={collDate}
-            onChange={(e) => setCollDate(e.target.value)}
-            data-testid="specs-collection-date"
-          />
-          <Input
-            placeholder="Collection venue"
-            value={collVenue}
-            onChange={(e) => setCollVenue(e.target.value)}
-            data-testid="specs-collection-venue"
-          />
-        </div>
+        <select
+          className="w-full mt-2 min-h-[44px] px-3 rounded-xl border border-slate-300 text-sm"
+          value={specsDayId}
+          onChange={(e) => setSpecsDayId(e.target.value)}
+          data-testid="specs-day-select-fulfil"
+        >
+          <option value="">Select Specs collection day…</option>
+          {specsDays.map((d) => (
+            <option key={d.id} value={d.id} disabled={d.seats_free <= 0 && d.id !== specsDayId}>
+              {d.day_date} · {d.venue} ({d.seats_free} free)
+            </option>
+          ))}
+        </select>
       )}
       {status === "deferred" && type === "ot" && (
         <select
@@ -105,7 +103,7 @@ export function FulfilmentStation({
         >
           <option value="">Select OT day…</option>
           {otDays.map((d) => (
-            <option key={d.id} value={d.id} disabled={d.seats_free <= 0}>
+            <option key={d.id} value={d.id} disabled={d.seats_free <= 0 && d.id !== otDayId}>
               {d.day_date} · {d.venue} ({d.seats_free} free)
             </option>
           ))}
@@ -136,9 +134,9 @@ export function FulfilmentStation({
           variant="outline"
           className="w-full mt-2"
           onClick={() => navigate(`/print/slip/${slip.id}`)}
-          data-testid={`station-${type}-print-slip`}
+          data-testid={`station-${type}-print-token`}
         >
-          <Printer className="w-4 h-4" /> Reprint slip
+          <Printer className="w-4 h-4" /> Reprint Token
         </Button>
       )}
     </div>

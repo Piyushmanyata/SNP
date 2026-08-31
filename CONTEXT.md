@@ -67,3 +67,31 @@ _Avoid_: scan, gallery scan
 **USB wedge**:
 A hardware scanner that types the QR payload into the page.
 _Avoid_: USB scanner as a synonym for desk camera
+
+**OT Schedule Day**:
+An admin-created day, unique per camp and date, on which deferred OT patients are assigned. It has a venue and a finite seat limit.
+_Avoid_: OT slot, surgery day, OT appointment
+
+**Spectacles to be made**:
+The clinical fulfilment outcome for spectacles that cannot be issued at camp and must be collected later. Deferral assigns the patient to a Specs collection day.
+_Avoid_: to-be specs, TBD specs, specs order, glasses order
+
+**Specs collection day**:
+An admin-created day, unique per camp and date, on which patients deferred for Spectacles to be made are assigned. Same shape as an OT Schedule Day: venue and finite seat limit.
+_Avoid_: specs slot, collection appointment, specs schedule
+
+**Token**:
+The paper printed when OT or Spectacles to be made is deferred. Hindi and English labels; name and venue as stored. The patient brings it to the OT Schedule Day or Specs collection day. A new deferral of the same type cancels the previous Token.
+_Avoid_: slip, deferred slip, thermal slip, queue ticket, final token
+
+**Camp reminder**:
+The Devanagari SMS sent the calendar day before a camp day, one per unique household number among patients registered for that day. Date and venue only; no patient names.
+_Avoid_: camp SMS, registration reminder
+
+**OT reminder**:
+The Devanagari SMS sent the calendar day before an OT Schedule Day, one per unique household number among patients with an OT Token for that day. Date and venue only; no patient names.
+_Avoid_: OT SMS, surgery SMS, follow-up reminder
+
+**Specs reminder**:
+The Devanagari SMS sent the calendar day before a Specs collection day, one per unique household number among patients with a Spectacles-to-be-made Token for that day. Date and venue only; no patient names.
+_Avoid_: specs SMS, glasses SMS, follow-up reminder

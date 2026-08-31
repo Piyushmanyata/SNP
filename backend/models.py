@@ -90,6 +90,7 @@ class FulfilmentBody(BaseModel):
     collection_date: Optional[str] = None
     collection_venue: Optional[str] = None
     ot_schedule_day_id: Optional[str] = None
+    specs_collection_day_id: Optional[str] = None
 
 
 class CorrectionBody(BaseModel):
@@ -99,6 +100,13 @@ class CorrectionBody(BaseModel):
 
 
 class OtScheduleBody(BaseModel):
+    camp_id: str
+    day_date: str
+    venue: str
+    seat_limit: int
+
+
+class SpecsScheduleBody(BaseModel):
     camp_id: str
     day_date: str
     venue: str

@@ -582,40 +582,244 @@ class TestFulfilmentDecomposedAndInvariants:
             mock_db = setup_mock_db(monkeypatch)
             t_id = ObjectId()
             p_id = ObjectId()
+            day1 = ObjectId()
+            day2 = ObjectId()
             await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False})
+            await mock_db.specs_collection_days.insert_one({
+                "_id": day1, "camp_id": ObjectId(), "day_date": "2026-09-15",
+                "venue": "District Hospital", "seat_limit": 5, "seats_taken": 0,
+            })
+            await mock_db.specs_collection_days.insert_one({
+                "_id": day2, "camp_id": ObjectId(), "day_date": "2026-09-20",
+                "venue": "Community Health Center", "seat_limit": 5, "seats_taken": 0,
+            })
 
             bad_body = FulfilmentBody(transcription_id=str(t_id), item_type="specs", status="deferred")
             with pytest.raises(HTTPException) as exc:
                 await record_fulfilment(bad_body, actor={"_id": ObjectId(), "role": "optometrist"})
             assert exc.value.status_code == 400
 
-            good_body = FulfilmentBody(
+            freeform = FulfilmentBody(
                 transcription_id=str(t_id),
                 item_type="specs",
                 status="deferred",
                 collection_date="2026-09-15",
-                collection_venue="District Hospital"
+                collection_venue="District Hospital",
+            )
+            with pytest.raises(HTTPException) as exc:
+                await record_fulfilment(freeform, actor={"_id": ObjectId(), "role": "optometrist"})
+            assert exc.value.status_code == 400
+
+            good_body = FulfilmentBody(
+                transcription_id=str(t_id),
+                item_type="specs",
+                status="deferred",
+                specs_collection_day_id=str(day1),
             )
             res1 = await record_fulfilment(good_body, actor={"_id": ObjectId(), "role": "optometrist"})
             assert res1["slip"]["version"] == 1
             assert res1["slip"]["active"] is True
+            assert res1["slip"]["collection_date"] == "2026-09-15"
+            assert res1["slip"]["collection_venue"] == "District Hospital"
             assert res1["fulfilment"]["status"] == "deferred"
+            d1 = await mock_db.specs_collection_days.find_one({"_id": day1})
+            assert d1["seats_taken"] == 1
 
             update_body = FulfilmentBody(
                 transcription_id=str(t_id),
                 item_type="specs",
                 status="deferred",
-                collection_date="2026-09-20",
-                collection_venue="Community Health Center"
+                specs_collection_day_id=str(day2),
             )
             res2 = await record_fulfilment(update_body, actor={"_id": ObjectId(), "role": "optometrist"})
             assert res2["slip"]["version"] == 2
-            
+            assert res2["slip"]["collection_date"] == "2026-09-20"
+
             active_slips = [s for s in mock_db.deferred_slips.docs if s["active"]]
             cancelled_slips = [s for s in mock_db.deferred_slips.docs if s["cancelled"]]
             assert len(active_slips) == 1
             assert len(cancelled_slips) == 1
             assert active_slips[0]["version"] == 2
+            d1_after = await mock_db.specs_collection_days.find_one({"_id": day1})
+            d2_after = await mock_db.specs_collection_days.find_one({"_id": day2})
+            assert d1_after["seats_taken"] == 0
+            assert d2_after["seats_taken"] == 1
+        asyncio.run(_run())
+
+    def test_specs_deferral_atomic_seat_limit_and_overbooking_prevention(self, monkeypatch):
+        async def _run():
+            mock_db = setup_mock_db(monkeypatch)
+            t_id = ObjectId()
+            p_id = ObjectId()
+            specs_day_id = ObjectId()
+
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False})
+            await mock_db.specs_collection_days.insert_one({
+                "_id": specs_day_id,
+                "camp_id": ObjectId(),
+                "day_date": "2026-09-10",
+                "venue": "Optical Desk",
+                "seat_limit": 1,
+                "seats_taken": 0,
+            })
+
+            body1 = FulfilmentBody(
+                transcription_id=str(t_id),
+                item_type="specs",
+                status="deferred",
+                specs_collection_day_id=str(specs_day_id),
+            )
+            res1 = await record_fulfilment(body1, actor={"_id": ObjectId(), "role": "optometrist"})
+            assert res1["fulfilment"]["status"] == "deferred"
+
+            specs_day = await mock_db.specs_collection_days.find_one({"_id": specs_day_id})
+            assert specs_day["seats_taken"] == 1
+
+            t_id2 = ObjectId()
+            await mock_db.transcriptions.insert_one({"_id": t_id2, "patient_id": ObjectId(), "locked": False})
+            body2 = FulfilmentBody(
+                transcription_id=str(t_id2),
+                item_type="specs",
+                status="deferred",
+                specs_collection_day_id=str(specs_day_id),
+            )
+            with pytest.raises(HTTPException) as exc:
+                await record_fulfilment(body2, actor={"_id": ObjectId(), "role": "optometrist"})
+            assert exc.value.status_code == 409
+        asyncio.run(_run())
+
+    def test_specs_rebooking_releases_prior_seat(self, monkeypatch):
+        async def _run():
+            mock_db = setup_mock_db(monkeypatch)
+            t_id = ObjectId()
+            p_id = ObjectId()
+            day1 = ObjectId()
+            day2 = ObjectId()
+
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False})
+            await mock_db.specs_collection_days.insert_one({
+                "_id": day1, "camp_id": ObjectId(), "day_date": "2026-09-10",
+                "venue": "Optical 1", "seat_limit": 5, "seats_taken": 0,
+            })
+            await mock_db.specs_collection_days.insert_one({
+                "_id": day2, "camp_id": ObjectId(), "day_date": "2026-09-11",
+                "venue": "Optical 2", "seat_limit": 5, "seats_taken": 0,
+            })
+
+            body1 = FulfilmentBody(
+                transcription_id=str(t_id), item_type="specs", status="deferred",
+                specs_collection_day_id=str(day1),
+            )
+            await record_fulfilment(body1, actor={"_id": ObjectId(), "role": "optometrist"})
+
+            d1 = await mock_db.specs_collection_days.find_one({"_id": day1})
+            assert d1["seats_taken"] == 1
+
+            body2 = FulfilmentBody(
+                transcription_id=str(t_id), item_type="specs", status="deferred",
+                specs_collection_day_id=str(day2),
+            )
+            await record_fulfilment(body2, actor={"_id": ObjectId(), "role": "optometrist"})
+
+            d1_after = await mock_db.specs_collection_days.find_one({"_id": day1})
+            d2_after = await mock_db.specs_collection_days.find_one({"_id": day2})
+            assert d1_after["seats_taken"] == 0
+            assert d2_after["seats_taken"] == 1
+        asyncio.run(_run())
+
+    def test_specs_fulfilled_cancels_token_and_releases_seat(self, monkeypatch):
+        async def _run():
+            mock_db = setup_mock_db(monkeypatch)
+            t_id = ObjectId()
+            day_id = ObjectId()
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": ObjectId(), "locked": False})
+            await mock_db.specs_collection_days.insert_one({
+                "_id": day_id, "camp_id": ObjectId(), "day_date": "2026-09-10",
+                "venue": "Optical", "seat_limit": 1, "seats_taken": 0,
+            })
+            await record_fulfilment(
+                FulfilmentBody(transcription_id=str(t_id), item_type="specs", status="deferred",
+                               specs_collection_day_id=str(day_id)),
+                actor={"_id": ObjectId(), "role": "optometrist"},
+            )
+            res = await record_fulfilment(
+                FulfilmentBody(transcription_id=str(t_id), item_type="specs", status="fulfilled"),
+                actor={"_id": ObjectId(), "role": "optometrist"},
+            )
+            assert res["slip"] is None
+            day = await mock_db.specs_collection_days.find_one({"_id": day_id})
+            assert day["seats_taken"] == 0
+            assert all(not s["active"] for s in mock_db.deferred_slips.docs)
+            assert all(s["cancelled"] for s in mock_db.deferred_slips.docs)
+        asyncio.run(_run())
+
+    def test_specs_same_day_rerecord_on_full_day(self, monkeypatch):
+        async def _run():
+            mock_db = setup_mock_db(monkeypatch)
+            t_id = ObjectId()
+            day_id = ObjectId()
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": ObjectId(), "locked": False})
+            await mock_db.specs_collection_days.insert_one({
+                "_id": day_id, "camp_id": ObjectId(), "day_date": "2026-09-10",
+                "venue": "Optical", "seat_limit": 1, "seats_taken": 0,
+            })
+            await record_fulfilment(
+                FulfilmentBody(transcription_id=str(t_id), item_type="specs", status="deferred",
+                               specs_collection_day_id=str(day_id)),
+                actor={"_id": ObjectId(), "role": "optometrist"},
+            )
+            res = await record_fulfilment(
+                FulfilmentBody(transcription_id=str(t_id), item_type="specs", status="deferred",
+                               specs_collection_day_id=str(day_id)),
+                actor={"_id": ObjectId(), "role": "optometrist"},
+            )
+            assert res["slip"]["version"] == 2
+            day = await mock_db.specs_collection_days.find_one({"_id": day_id})
+            assert day["seats_taken"] == 1
+        asyncio.run(_run())
+
+    def test_specs_fulfil_then_redefer_consumes_and_blocks_overbook(self, monkeypatch):
+        async def _run():
+            mock_db = setup_mock_db(monkeypatch)
+            t_a = ObjectId()
+            t_b = ObjectId()
+            day_id = ObjectId()
+            await mock_db.transcriptions.insert_one({"_id": t_a, "patient_id": ObjectId(), "locked": False})
+            await mock_db.transcriptions.insert_one({"_id": t_b, "patient_id": ObjectId(), "locked": False})
+            await mock_db.specs_collection_days.insert_one({
+                "_id": day_id, "camp_id": ObjectId(), "day_date": "2026-09-10",
+                "venue": "Optical", "seat_limit": 1, "seats_taken": 0,
+            })
+            actor = {"_id": ObjectId(), "role": "optometrist"}
+            await record_fulfilment(
+                FulfilmentBody(transcription_id=str(t_a), item_type="specs", status="deferred",
+                               specs_collection_day_id=str(day_id)),
+                actor=actor,
+            )
+            await record_fulfilment(
+                FulfilmentBody(transcription_id=str(t_a), item_type="specs", status="fulfilled",
+                               specs_collection_day_id=str(day_id)),
+                actor=actor,
+            )
+            day = await mock_db.specs_collection_days.find_one({"_id": day_id})
+            assert day["seats_taken"] == 0
+            res = await record_fulfilment(
+                FulfilmentBody(transcription_id=str(t_a), item_type="specs", status="deferred",
+                               specs_collection_day_id=str(day_id)),
+                actor=actor,
+            )
+            assert res["slip"]["active"] is True
+            day = await mock_db.specs_collection_days.find_one({"_id": day_id})
+            assert day["seats_taken"] == 1
+            with pytest.raises(HTTPException) as exc:
+                await record_fulfilment(
+                    FulfilmentBody(transcription_id=str(t_b), item_type="specs", status="deferred",
+                                   specs_collection_day_id=str(day_id)),
+                    actor=actor,
+                )
+            assert exc.value.status_code == 409
+            day = await mock_db.specs_collection_days.find_one({"_id": day_id})
+            assert day["seats_taken"] == 1
         asyncio.run(_run())
 
     def test_ot_deferral_atomic_seat_limit_and_overbooking_prevention(self, monkeypatch):
