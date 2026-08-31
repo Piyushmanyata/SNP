@@ -204,6 +204,17 @@ def setup_mock_db(monkeypatch):
     return mock_db
 
 
+async def insert_seen_patient(mock_db, p_id=None):
+    p_id = p_id or ObjectId()
+    await mock_db.patients.insert_one({
+        "_id": p_id,
+        "queue_status": "seen",
+        "printed_at": "2026-09-01T00:00:00Z",
+        "seen_at": "2026-09-01T00:00:01Z",
+    })
+    return p_id
+
+
 # =====================================================================
 # 1. ADVERSARIAL TESTS FOR parse_xml_qr & decode_aadhaar
 # =====================================================================
@@ -554,6 +565,27 @@ class TestFulfilmentDecomposedAndInvariants:
             assert "Transcription not found" in exc.value.detail
         asyncio.run(_run())
 
+    def test_fulfilment_rejects_when_patient_not_seen(self, monkeypatch):
+        async def _run():
+            mock_db = setup_mock_db(monkeypatch)
+            t_id = ObjectId()
+            p_id = ObjectId()
+            await mock_db.patients.insert_one({
+                "_id": p_id, "queue_status": "registered", "printed_at": None,
+            })
+            await mock_db.transcriptions.insert_one({
+                "_id": t_id, "patient_id": p_id, "locked": False,
+            })
+            body = FulfilmentBody(
+                transcription_id=str(t_id),
+                item_type="medicine",
+                status="fulfilled",
+            )
+            with pytest.raises(HTTPException) as exc:
+                await record_fulfilment(body, actor={"_id": ObjectId(), "role": "optometrist"})
+            assert exc.value.status_code == 409
+        asyncio.run(_run())
+
     def test_fulfilment_matrix_validation(self):
         _validate_fulfilment_matrix("medicine", "fulfilled")
         _validate_fulfilment_matrix("medicine", "not_available")
@@ -584,6 +616,7 @@ class TestFulfilmentDecomposedAndInvariants:
             p_id = ObjectId()
             day1 = ObjectId()
             day2 = ObjectId()
+            await insert_seen_patient(mock_db, p_id)
             await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False})
             await mock_db.specs_collection_days.insert_one({
                 "_id": day1, "camp_id": ObjectId(), "day_date": "2026-09-15",
@@ -653,6 +686,7 @@ class TestFulfilmentDecomposedAndInvariants:
             p_id = ObjectId()
             specs_day_id = ObjectId()
 
+            await insert_seen_patient(mock_db, p_id)
             await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False})
             await mock_db.specs_collection_days.insert_one({
                 "_id": specs_day_id,
@@ -676,7 +710,8 @@ class TestFulfilmentDecomposedAndInvariants:
             assert specs_day["seats_taken"] == 1
 
             t_id2 = ObjectId()
-            await mock_db.transcriptions.insert_one({"_id": t_id2, "patient_id": ObjectId(), "locked": False})
+            p_id2 = await insert_seen_patient(mock_db)
+            await mock_db.transcriptions.insert_one({"_id": t_id2, "patient_id": p_id2, "locked": False})
             body2 = FulfilmentBody(
                 transcription_id=str(t_id2),
                 item_type="specs",
@@ -696,6 +731,7 @@ class TestFulfilmentDecomposedAndInvariants:
             day1 = ObjectId()
             day2 = ObjectId()
 
+            await insert_seen_patient(mock_db, p_id)
             await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False})
             await mock_db.specs_collection_days.insert_one({
                 "_id": day1, "camp_id": ObjectId(), "day_date": "2026-09-10",
@@ -732,7 +768,8 @@ class TestFulfilmentDecomposedAndInvariants:
             mock_db = setup_mock_db(monkeypatch)
             t_id = ObjectId()
             day_id = ObjectId()
-            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": ObjectId(), "locked": False})
+            p_id = await insert_seen_patient(mock_db)
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False})
             await mock_db.specs_collection_days.insert_one({
                 "_id": day_id, "camp_id": ObjectId(), "day_date": "2026-09-10",
                 "venue": "Optical", "seat_limit": 1, "seats_taken": 0,
@@ -758,7 +795,8 @@ class TestFulfilmentDecomposedAndInvariants:
             mock_db = setup_mock_db(monkeypatch)
             t_id = ObjectId()
             day_id = ObjectId()
-            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": ObjectId(), "locked": False})
+            p_id = await insert_seen_patient(mock_db)
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False})
             await mock_db.specs_collection_days.insert_one({
                 "_id": day_id, "camp_id": ObjectId(), "day_date": "2026-09-10",
                 "venue": "Optical", "seat_limit": 1, "seats_taken": 0,
@@ -784,8 +822,10 @@ class TestFulfilmentDecomposedAndInvariants:
             t_a = ObjectId()
             t_b = ObjectId()
             day_id = ObjectId()
-            await mock_db.transcriptions.insert_one({"_id": t_a, "patient_id": ObjectId(), "locked": False})
-            await mock_db.transcriptions.insert_one({"_id": t_b, "patient_id": ObjectId(), "locked": False})
+            p_a = await insert_seen_patient(mock_db)
+            p_b = await insert_seen_patient(mock_db)
+            await mock_db.transcriptions.insert_one({"_id": t_a, "patient_id": p_a, "locked": False})
+            await mock_db.transcriptions.insert_one({"_id": t_b, "patient_id": p_b, "locked": False})
             await mock_db.specs_collection_days.insert_one({
                 "_id": day_id, "camp_id": ObjectId(), "day_date": "2026-09-10",
                 "venue": "Optical", "seat_limit": 1, "seats_taken": 0,
@@ -829,6 +869,7 @@ class TestFulfilmentDecomposedAndInvariants:
             p_id = ObjectId()
             ot_day_id = ObjectId()
             
+            await insert_seen_patient(mock_db, p_id)
             await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False})
             await mock_db.ot_schedule_days.insert_one({
                 "_id": ot_day_id,
@@ -852,7 +893,8 @@ class TestFulfilmentDecomposedAndInvariants:
             assert ot_day["seats_taken"] == 1
 
             t_id2 = ObjectId()
-            await mock_db.transcriptions.insert_one({"_id": t_id2, "patient_id": ObjectId(), "locked": False})
+            p_id2 = await insert_seen_patient(mock_db)
+            await mock_db.transcriptions.insert_one({"_id": t_id2, "patient_id": p_id2, "locked": False})
             body2 = FulfilmentBody(
                 transcription_id=str(t_id2),
                 item_type="ot",
@@ -873,6 +915,7 @@ class TestFulfilmentDecomposedAndInvariants:
             ot_day1 = ObjectId()
             ot_day2 = ObjectId()
             
+            await insert_seen_patient(mock_db, p_id)
             await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False})
             await mock_db.ot_schedule_days.insert_one({
                 "_id": ot_day1, "camp_id": ObjectId(), "day_date": "2026-09-10", "venue": "OT 1", "seat_limit": 5, "seats_taken": 0
@@ -912,7 +955,8 @@ class TestFulfilmentDecomposedAndInvariants:
             trans_ids = []
             for i in range(10):
                 tid = ObjectId()
-                await mock_db.transcriptions.insert_one({"_id": tid, "patient_id": ObjectId(), "locked": False})
+                pid = await insert_seen_patient(mock_db)
+                await mock_db.transcriptions.insert_one({"_id": tid, "patient_id": pid, "locked": False})
                 trans_ids.append(tid)
 
             async def attempt_booking(t_id):

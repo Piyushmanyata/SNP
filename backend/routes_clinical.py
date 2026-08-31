@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
+from pymongo.errors import DuplicateKeyError
 from bson import ObjectId
 from db import get_db
 from models import TranscriptionBody, FulfilmentBody, CorrectionBody, OtScheduleBody, SpecsScheduleBody
@@ -136,10 +137,11 @@ async def create_transcription(body: TranscriptionBody, actor: dict = Depends(re
     if p.get("queue_status") != "seen":
         raise HTTPException(status_code=409, detail="Registration is not eligible (not seen)")
     existing = await db.transcriptions.find_one({"patient_id": p["_id"]})
-    if existing:
-        if existing.get("locked"):
-            raise HTTPException(status_code=409, detail="Transcription is locked; use a correction")
-        await db.transcriptions.update_one({"_id": existing["_id"]}, {"$set": {
+    if not existing:
+        doc = {
+            "patient_id": p["_id"],
+            "person_id": p.get("person_id"),
+            "camp_id": p["camp_id"],
             "diagnosis_options": body.diagnosis_options,
             "diagnosis_other": body.diagnosis_other,
             "blood_sugar": body.blood_sugar,
@@ -149,13 +151,21 @@ async def create_transcription(body: TranscriptionBody, actor: dict = Depends(re
             "ot_eye": normalize_ot_eye(body.ot_eye),
             "ot_procedure": body.ot_procedure,
             "ot_notes": body.ot_notes,
-        }})
-        t = await db.transcriptions.find_one({"_id": existing["_id"]})
-        return {"transcription": ser_trans(t)}
-    doc = {
-        "patient_id": p["_id"],
-        "person_id": p.get("person_id"),
-        "camp_id": p["camp_id"],
+            "locked": False,
+            "created_by": str(actor["_id"]),
+            "created_at": now_utc(),
+        }
+        try:
+            res = await db.transcriptions.insert_one(doc)
+            doc["_id"] = res.inserted_id
+            return {"transcription": ser_trans(doc)}
+        except DuplicateKeyError:
+            existing = await db.transcriptions.find_one({"patient_id": p["_id"]})
+            if not existing:
+                raise
+    if existing.get("locked"):
+        raise HTTPException(status_code=409, detail="Transcription is locked; use a correction")
+    await db.transcriptions.update_one({"_id": existing["_id"]}, {"$set": {
         "diagnosis_options": body.diagnosis_options,
         "diagnosis_other": body.diagnosis_other,
         "blood_sugar": body.blood_sugar,
@@ -165,13 +175,9 @@ async def create_transcription(body: TranscriptionBody, actor: dict = Depends(re
         "ot_eye": normalize_ot_eye(body.ot_eye),
         "ot_procedure": body.ot_procedure,
         "ot_notes": body.ot_notes,
-        "locked": False,
-        "created_by": str(actor["_id"]),
-        "created_at": now_utc(),
-    }
-    res = await db.transcriptions.insert_one(doc)
-    doc["_id"] = res.inserted_id
-    return {"transcription": ser_trans(doc)}
+    }})
+    t = await db.transcriptions.find_one({"_id": existing["_id"]})
+    return {"transcription": ser_trans(t)}
 
 
 def _validate_fulfilment_matrix(item_type: str, status: str):
@@ -267,6 +273,12 @@ async def record_fulfilment(body: FulfilmentBody, actor: dict = Depends(require_
     t = await db.transcriptions.find_one({"_id": ObjectId(body.transcription_id)})
     if not t:
         raise HTTPException(status_code=404, detail="Transcription not found")
+    patient = await db.patients.find_one({"_id": t["patient_id"]}) if t.get("patient_id") else None
+    if not patient or patient.get("queue_status") != "seen":
+        raise HTTPException(status_code=409, detail={
+            "code": "not_seen",
+            "message": "This registration is not yet eligible (not marked seen).",
+        })
 
     _validate_fulfilment_matrix(body.item_type, body.status)
     prior = await db.fulfilments.find_one({"transcription_id": t["_id"], "item_type": body.item_type})

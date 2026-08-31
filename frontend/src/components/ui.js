@@ -6,7 +6,7 @@ export function Button({ variant = "primary", size = "md", className = "", child
   const base =
     "inline-flex items-center justify-center gap-2 font-semibold rounded-xl transition-colors focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed";
   const sizes = {
-    sm: "min-h-[36px] px-3 text-sm",
+    sm: "min-h-[44px] min-w-[44px] px-3 text-sm",
     md: "min-h-[44px] px-5 text-sm",
     lg: "min-h-[52px] px-6 text-base",
   };

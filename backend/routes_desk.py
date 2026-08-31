@@ -115,9 +115,22 @@ async def undo_seen(patient_id: str, actor: dict = Depends(require_staff)):
         raise HTTPException(status_code=409, detail="Undo window (10 min) has passed")
     if await db.transcriptions.find_one({"patient_id": p["_id"]}):
         raise HTTPException(status_code=409, detail="Cannot undo: clinical transcription exists")
-    await db.patients.update_one(
-        {"_id": p["_id"]},
+    updated = await db.patients.find_one_and_update(
+        {"_id": p["_id"], "seen_at": {"$ne": None}},
         {"$set": {"queue_status": "registered", "seen_at": None, "seen_by": None}},
+        return_document=True,
     )
-    p = await db.patients.find_one({"_id": p["_id"]})
-    return {"registration": ser_patient(p)}
+    if updated is None:
+        p = await db.patients.find_one({"_id": p["_id"]})
+        return {"registration": ser_patient(p)}
+    if await db.transcriptions.find_one({"patient_id": p["_id"]}):
+        await db.patients.find_one_and_update(
+            {"_id": p["_id"], "seen_at": None},
+            {"$set": {
+                "queue_status": "seen",
+                "seen_at": p["seen_at"],
+                "seen_by": p.get("seen_by"),
+            }},
+        )
+        raise HTTPException(status_code=409, detail="Cannot undo: clinical transcription exists")
+    return {"registration": ser_patient(updated)}

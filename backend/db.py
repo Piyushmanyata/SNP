@@ -25,31 +25,51 @@ async def next_seq(name: str) -> int:
     return int(doc["seq"])
 
 
+PERSON_CAMP_INDEX_NAME = "person_id_1_camp_id_1"
+PERSON_CAMP_INDEX = {
+    "keys": [("person_id", ASCENDING), ("camp_id", ASCENDING)],
+    "unique": True,
+    "partialFilterExpression": {"person_id": {"$type": "objectId"}},
+}
+TRANSCRIPTION_PATIENT_INDEX = {"keys": "patient_id", "unique": True}
+
+
+def should_drop_person_camp_index(index_info: dict) -> bool:
+    old = index_info.get(PERSON_CAMP_INDEX_NAME)
+    return bool(old) and not old.get("unique")
+
+
 async def init_indexes():
     db = get_db()
-    # staff / users
     await db.users.create_index("email", unique=True)
     await db.login_attempts.create_index("identifier")
     await db.login_attempts.create_index("locked_until", expireAfterSeconds=900)
-    # camps: exactly one active
     await db.camps.create_index(
         "is_active", unique=True, partialFilterExpression={"is_active": True}
     )
     await db.camp_days.create_index(
         [("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True
     )
-    # persons: one person per aadhaar key
     await db.persons.create_index("aadhaar_key", unique=True, sparse=True)
     await db.persons.create_index("person_no", unique=True)
-    # registrations
     await db.patients.create_index("reg_no", unique=True)
     await db.patients.create_index("patient_qr", unique=True)
     await db.patients.create_index(
         "registration_request_id", unique=True, sparse=True
     )
     await db.patients.create_index([("camp_id", ASCENDING), ("full_name_normalized", ASCENDING)])
-    await db.patients.create_index([("person_id", ASCENDING), ("camp_id", ASCENDING)])
-    # ot schedule
+    patient_indexes = await db.patients.index_information()
+    if should_drop_person_camp_index(patient_indexes):
+        await db.patients.drop_index(PERSON_CAMP_INDEX_NAME)
+    await db.patients.create_index(
+        PERSON_CAMP_INDEX["keys"],
+        unique=PERSON_CAMP_INDEX["unique"],
+        partialFilterExpression=PERSON_CAMP_INDEX["partialFilterExpression"],
+    )
+    await db.transcriptions.create_index(
+        TRANSCRIPTION_PATIENT_INDEX["keys"],
+        unique=TRANSCRIPTION_PATIENT_INDEX["unique"],
+    )
     await db.ot_schedule_days.create_index(
         [("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True
     )

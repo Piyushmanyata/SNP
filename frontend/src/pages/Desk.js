@@ -156,7 +156,7 @@ function PatientList({ patients, onMarkSeen, onUndo, navigate }) {
               <Printer className="w-4 h-4" /> Print
             </Button>
             {p.queue_status !== "seen" ? (
-              <Button size="sm" onClick={() => onMarkSeen(p.id)} data-testid={`mark-seen-button-${p.reg_no}`}>
+              <Button size="sm" onClick={() => onMarkSeen(p.id)} disabled={!p.printed_at} data-testid={`mark-seen-button-${p.reg_no}`}>
                 <CheckCircle2 className="w-4 h-4" /> Seen
               </Button>
             ) : (

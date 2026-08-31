@@ -9,6 +9,7 @@ The CRA bundle baked `REACT_APP_BACKEND_URL=http://localhost:8000`. Phones on th
 - If the page host is not loopback and the configured backend URL is missing or loopback, call `{window.location.protocol}//{window.location.hostname}:8000`.
 - Keep `REACT_APP_BACKEND_URL` for localhost and for production hosts that are not loopback.
 - Allow CORS for RFC1918 + loopback frontend origins via `allow_origin_regex`, in addition to `CORS_ORIGINS`.
+- `cors_origin_list` drops `*` so credentialed cookies never pair with a wildcard origin. Unset `CORS_ORIGINS` means LAN/loopback only.
 
 ## Consequences
 
