@@ -146,6 +146,53 @@ describe("Desk page component", () => {
     const undoSeenBtn = container.querySelector('[data-testid="undo-seen-button-102"]');
     expect(markSeenBtn).not.toBeNull();
     expect(undoSeenBtn).not.toBeNull();
+    expect(markSeenBtn.disabled).toBe(false);
+  });
+
+  test("disables mark seen until the prescription is printed", async () => {
+    api.get.mockImplementation((url) => {
+      if (url === "/kpis") {
+        return Promise.resolve({ data: { registered: 1, seen: 0, pending: 1 } });
+      }
+      if (url === "/patients") {
+        return Promise.resolve({
+          data: {
+            patients: [
+              {
+                id: "p-unprinted",
+                reg_no: "201",
+                full_name: "Unprinted Patient",
+                gender_label: "Male",
+                age: 40,
+                queue_status: "registered",
+                printed_at: null,
+              },
+            ],
+          },
+        });
+      }
+      if (url === "/camps/active") {
+        return Promise.resolve({
+          data: {
+            camp: { id: "camp-1", name: "Howrah Eye Camp", venue: "Community Hall" },
+            days: [{ id: "day-1", day_date: "2026-08-27", is_today: true }],
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <Desk />
+        </MemoryRouter>
+      );
+    });
+
+    const markSeenBtn = container.querySelector('[data-testid="mark-seen-button-201"]');
+    expect(markSeenBtn).not.toBeNull();
+    expect(markSeenBtn.disabled).toBe(true);
   });
 
   test("handles lookup by Reg number and scrolls to patient row", async () => {

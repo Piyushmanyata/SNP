@@ -32,10 +32,15 @@ LAN_ORIGIN_REGEX = (
     r")(:\d+)?$"
 )
 
-origins = os.environ.get("CORS_ORIGINS", "*")
+def cors_origin_list(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    return [o.strip() for o in raw.split(",") if o.strip() and o.strip() != "*"]
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if origins == "*" else [o.strip() for o in origins.split(",") if o.strip()],
+    allow_origins=cors_origin_list(os.environ.get("CORS_ORIGINS")),
     allow_origin_regex=LAN_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],

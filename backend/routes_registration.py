@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends, Request
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 from db import get_db, next_seq
 from models import AadhaarDecodeBody, RegisterBody, DuplicateCheckBody
 from helpers import (
@@ -194,7 +195,18 @@ async def _create_registration(body: RegisterBody, actor_id, is_self: bool, requ
         actor_id=actor_id,
         is_self=is_self,
     )
-    res = await db.patients.insert_one(doc)
+    try:
+        res = await db.patients.insert_one(doc)
+    except DuplicateKeyError:
+        if person:
+            existing = await db.patients.find_one({"person_id": person["_id"], "camp_id": camp["_id"]})
+            if existing:
+                return ser_patient(existing), False
+        if body.registration_request_id:
+            existing = await db.patients.find_one({"registration_request_id": body.registration_request_id})
+            if existing:
+                return ser_patient(existing), False
+        raise
     doc["_id"] = res.inserted_id
     return ser_patient(doc), True
 
