@@ -376,6 +376,30 @@ class TestClinical:
         assert d["seat_limit"] == 1 and d["seats_taken"] == 0 and d["seats_free"] == 1
         STATE["ot_day_id"] = d["id"]
 
+    def test_create_list_upsert_specs_collection_days(self, admin):
+        r = admin.post(f"{API}/clinical/specs-days", json={
+            "camp_id": STATE["camp_id"], "day_date": "2026-12-05",
+            "venue": "TEST Optical", "seat_limit": 1,
+        }, timeout=30)
+        assert r.status_code == 200, r.text
+        d = r.json()["specs_day"]
+        assert d["seat_limit"] == 1 and d["seats_taken"] == 0 and d["seats_free"] == 1
+        assert d["day_date"] == "2026-12-05"
+        STATE["specs_day_id"] = d["id"]
+
+        listed = admin.get(f"{API}/clinical/specs-days", timeout=30).json()["specs_days"]
+        assert any(x["id"] == d["id"] and x["seats_free"] == 1 for x in listed)
+
+        r = admin.post(f"{API}/clinical/specs-days", json={
+            "camp_id": STATE["camp_id"], "day_date": "2026-12-05",
+            "venue": "TEST Optical Hall", "seat_limit": 1,
+        }, timeout=30)
+        assert r.status_code == 200, r.text
+        up = r.json()["specs_day"]
+        assert up["id"] == d["id"]
+        assert up["venue"] == "TEST Optical Hall"
+        STATE["specs_day_venue"] = "TEST Optical Hall"
+
     def test_medicine_fulfilment_locks_transcription(self, admin):
         r = admin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": STATE["trans_id"], "item_type": "medicine", "status": "fulfilled",
@@ -399,23 +423,43 @@ class TestClinical:
         }, timeout=30)
         assert r.status_code == 400, r.text
 
-    def test_specs_deferral_requires_date_and_venue(self, admin):
+    def test_specs_deferral_requires_day_id(self, admin):
         r = admin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": STATE["trans_id"], "item_type": "specs", "status": "deferred",
         }, timeout=30)
         assert r.status_code == 400, r.text
 
-    def test_specs_deferral_slip(self, admin):
         r = admin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": STATE["trans_id"], "item_type": "specs", "status": "deferred",
             "collection_date": "2026-12-05", "collection_venue": "TEST Optical",
+        }, timeout=30)
+        assert r.status_code == 400, r.text
+
+    def test_specs_deferral_consumes_seat_and_prints_token(self, admin):
+        r = admin.post(f"{API}/clinical/fulfilment", json={
+            "transcription_id": STATE["trans_id"], "item_type": "specs", "status": "deferred",
+            "specs_collection_day_id": STATE["specs_day_id"],
         }, timeout=30)
         assert r.status_code == 200, r.text
         slip = r.json()["slip"]
         assert slip["item_type"] == "specs"
         assert slip["collection_date"] == "2026-12-05"
+        assert slip["collection_venue"] == STATE["specs_day_venue"]
         assert slip["active"] == True
         STATE["specs_slip_id"] = slip["id"]
+
+        days = admin.get(f"{API}/clinical/specs-days", timeout=30).json()["specs_days"]
+        day = next(d for d in days if d["id"] == STATE["specs_day_id"])
+        assert day["seats_taken"] == 1
+        assert day["seats_free"] == 0
+
+    def test_specs_seat_limit_below_assigned(self, admin):
+        r = admin.post(f"{API}/clinical/specs-days", json={
+            "camp_id": STATE["camp_id"], "day_date": "2026-12-05",
+            "venue": "TEST Optical Hall", "seat_limit": 0,
+        }, timeout=30)
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["code"] == "SEAT_LIMIT_BELOW_ASSIGNED"
 
     def test_ot_deferral_consumes_seat_and_prints_slip(self, admin):
         r = admin.post(f"{API}/clinical/fulfilment", json={
@@ -432,6 +476,10 @@ class TestClinical:
         day = next(d for d in days if d["id"] == STATE["ot_day_id"])
         assert day["seats_taken"] == 1
         assert day["seats_free"] == 0
+
+        looked = admin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
+        active = [s for s in looked.json()["slips"] if s.get("active")]
+        assert {s["item_type"] for s in active} == {"ot", "specs"}
 
     def test_seat_limit_below_assigned(self, admin):
         r = admin.post(f"{API}/clinical/ot-days", json={
@@ -454,6 +502,13 @@ class TestClinical:
         r = admin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": t2, "item_type": "ot", "status": "deferred",
             "ot_schedule_day_id": STATE["ot_day_id"],
+        }, timeout=30)
+        assert r.status_code == 409, f"expected full-day refusal, got {r.status_code}: {r.text[:200]}"
+
+    def test_specs_day_full_rejects_further_deferral(self, admin):
+        r = admin.post(f"{API}/clinical/fulfilment", json={
+            "transcription_id": STATE["trans2_id"], "item_type": "specs", "status": "deferred",
+            "specs_collection_day_id": STATE["specs_day_id"],
         }, timeout=30)
         assert r.status_code == 409, f"expected full-day refusal, got {r.status_code}: {r.text[:200]}"
 
@@ -712,6 +767,79 @@ class TestFixRegressions:
         assert r.status_code == 200, r.text
         assert seats(day_b) == 1, "new day should hold the seat"
         assert seats(day_a) == 0, "previous OT day seat leaked (not released)"
+
+    def test_specs_seat_released_on_rerecord_and_fulfilment(self, admin):
+        a = admin.post(f"{API}/clinical/specs-days", json={
+            "camp_id": STATE["camp_id"], "day_date": "2026-12-18",
+            "venue": "TEST Specs A", "seat_limit": 3}, timeout=30)
+        b = admin.post(f"{API}/clinical/specs-days", json={
+            "camp_id": STATE["camp_id"], "day_date": "2026-12-19",
+            "venue": "TEST Specs B", "seat_limit": 3}, timeout=30)
+        assert a.status_code == 200 and b.status_code == 200, (a.text, b.text)
+        day_a, day_b = a.json()["specs_day"]["id"], b.json()["specs_day"]["id"]
+
+        t2 = STATE["trans2_id"]
+        r = admin.post(f"{API}/clinical/fulfilment", json={
+            "transcription_id": t2, "item_type": "specs", "status": "deferred",
+            "specs_collection_day_id": day_a}, timeout=30)
+        assert r.status_code == 200, r.text
+
+        def seats(day_id):
+            days = admin.get(f"{API}/clinical/specs-days", timeout=30).json()["specs_days"]
+            return next(d for d in days if d["id"] == day_id)["seats_taken"]
+
+        assert seats(day_a) == 1
+        r = admin.post(f"{API}/clinical/fulfilment", json={
+            "transcription_id": t2, "item_type": "specs", "status": "deferred",
+            "specs_collection_day_id": day_b}, timeout=30)
+        assert r.status_code == 200, r.text
+        assert seats(day_b) == 1, "new day should hold the seat"
+        assert seats(day_a) == 0, "previous Specs collection day seat leaked (not released)"
+
+        r = admin.post(f"{API}/clinical/fulfilment", json={
+            "transcription_id": t2, "item_type": "specs", "status": "fulfilled"}, timeout=30)
+        assert r.status_code == 200, r.text
+        assert r.json()["slip"] is None
+        assert seats(day_b) == 0, "fulfilled must release the Specs collection day seat"
+        looked = admin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p2"]["reg_no"])}, timeout=30)
+        assert looked.status_code == 200, looked.text
+        active_specs = [s for s in looked.json()["slips"] if s.get("active") and s["item_type"] == "specs"]
+        assert active_specs == [], "fulfilled must cancel the Specs Token"
+
+    def test_specs_fulfil_then_redefer_consumes_and_full_day_409(self, admin):
+        c = admin.post(f"{API}/clinical/specs-days", json={
+            "camp_id": STATE["camp_id"], "day_date": "2026-12-22",
+            "venue": "TEST Specs C", "seat_limit": 1}, timeout=30)
+        assert c.status_code == 200, c.text
+        day_c = c.json()["specs_day"]["id"]
+        t2 = STATE["trans2_id"]
+
+        r = admin.post(f"{API}/clinical/fulfilment", json={
+            "transcription_id": t2, "item_type": "specs", "status": "deferred",
+            "specs_collection_day_id": day_c}, timeout=30)
+        assert r.status_code == 200, r.text
+
+        r = admin.post(f"{API}/clinical/fulfilment", json={
+            "transcription_id": t2, "item_type": "specs", "status": "fulfilled",
+            "specs_collection_day_id": day_c}, timeout=30)
+        assert r.status_code == 200, r.text
+
+        def seats():
+            days = admin.get(f"{API}/clinical/specs-days", timeout=30).json()["specs_days"]
+            return next(d for d in days if d["id"] == day_c)["seats_taken"]
+
+        assert seats() == 0
+        r = admin.post(f"{API}/clinical/fulfilment", json={
+            "transcription_id": t2, "item_type": "specs", "status": "deferred",
+            "specs_collection_day_id": day_c}, timeout=30)
+        assert r.status_code == 200, r.text
+        assert r.json()["slip"]["active"] is True
+        assert seats() == 1, "re-defer after fulfil must consume a seat"
+        r = admin.post(f"{API}/clinical/fulfilment", json={
+            "transcription_id": STATE["trans_id"], "item_type": "specs", "status": "deferred",
+            "specs_collection_day_id": day_c}, timeout=30)
+        assert r.status_code == 409, f"expected full-day refusal, got {r.status_code}: {r.text[:200]}"
+        assert seats() == 1
 
     # lockout is keyed on email and returns 429 (proxy-safe)
     def test_lockout_returns_429_and_is_email_keyed(self, anon):

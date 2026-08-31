@@ -17,6 +17,7 @@ import routes_desk
 import routes_clinical
 import routes_reports
 import routes_templates
+import routes_reminders
 
 app = FastAPI(title="SNP Camps API")
 
@@ -49,6 +50,7 @@ app.include_router(routes_desk.router)
 app.include_router(routes_clinical.router)
 app.include_router(routes_reports.router)
 app.include_router(routes_templates.router)
+app.include_router(routes_reminders.router)
 
 
 async def seed_admin():

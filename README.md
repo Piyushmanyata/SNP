@@ -39,10 +39,10 @@ SNP/
 
 | Role | Permissions & Responsibilities |
 |---|---|
-| **Admin** | Full system access: Camps, Camp Days, Staff accounts, OT Schedules, Clinical Templates, Audit Logs, and CSV Exports. |
+| **Admin** | Full system access: Camps, Camp Days, Staff accounts, OT Schedule Days, Specs collection days, Clinical Templates, Audit Logs, and CSV Exports. |
 | **Team Lead** | Camp desk supervision; create and manage Volunteer accounts on their assigned team. |
 | **Volunteer** | Desk operations: register patients (Aadhaar scan or manual), print prescription form, mark patient as seen. |
-| **Clinical Desk Operator** | Clinical workflow: eligibility verification, prescription transcription, medication/spectacle fulfilment, OT scheduling, deferral slips. |
+| **Clinical Desk Operator** | Clinical workflow: eligibility verification, prescription transcription, medication/spectacle fulfilment, OT and Specs collection assignment, A6 Token print. |
 | **Patient** | Public self-registration (`/self-register`) producing a patient QR code scanned by desk staff. |
 
 ---
@@ -72,6 +72,14 @@ ADMIN_PASSWORD=AdminCamp@2026
 CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
 COOKIE_SECURE=false
 COOKIE_SAMESITE=lax
+
+# D-1 reminders: POST /api/cron/reminders at 10:00 Asia/Kolkata (header X-Cron-Secret)
+CRON_SECRET=
+CRON_REMINDERS_AT=10:00 Asia/Kolkata
+MSG91_AUTH_KEY=
+MSG91_TEMPLATE_CAMP=
+MSG91_TEMPLATE_OT=
+MSG91_TEMPLATE_SPECS=
 
 # Frontend
 REACT_APP_BACKEND_URL=http://localhost:8000
@@ -156,3 +164,5 @@ pytest tests/
 ## Deployment
 
 The application is configured for deployment on the Emergent platform using `.emergent/` runtime manifests and cron jobs.
+
+D-1 Camp / OT / Specs reminders are a single HTTP job: `POST /api/cron/reminders` with `X-Cron-Secret`, intended to run at **10:00 IST**. `.emergent/cron/webhook-crons` is platform-managed (DO NOT EDIT); schedule the webhook in the Emergent dashboard.

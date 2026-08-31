@@ -39,6 +39,7 @@ export default function Clinical() {
   const [banner, setBanner] = useState("");
   const [diagOpts, setDiagOpts] = useState([]);
   const [otDays, setOtDays] = useState([]);
+  const [specsDays, setSpecsDays] = useState([]);
   const [rx, setRx] = useState(emptyRx);
   const [busy, setBusy] = useState(false);
   const [showCorrection, setShowCorrection] = useState(false);
@@ -59,6 +60,14 @@ export default function Clinical() {
       .catch((err) => {
         console.warn("Failed to fetch OT days:", err);
         setOtDays([]);
+      });
+
+    api
+      .get("/clinical/specs-days")
+      .then((r) => setSpecsDays(r.data?.specs_days || []))
+      .catch((err) => {
+        console.warn("Failed to fetch Specs collection days:", err);
+        setSpecsDays([]);
       });
   }, []);
 
@@ -186,6 +195,7 @@ export default function Clinical() {
             <FulfilmentSection
               data={data}
               otDays={otDays}
+              specsDays={specsDays}
               onDone={reload}
               navigate={navigate}
               setBanner={setBanner}

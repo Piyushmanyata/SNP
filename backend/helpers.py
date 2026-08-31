@@ -3,7 +3,7 @@ import re
 import hmac
 import hashlib
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -29,6 +29,10 @@ def iso(dt: datetime | None) -> str | None:
 
 def today_ist_str() -> str:
     return datetime.now(IST).strftime("%Y-%m-%d")
+
+
+def tomorrow_ist_str() -> str:
+    return (date.fromisoformat(today_ist_str()) + timedelta(days=1)).isoformat()
 
 
 # ---- normalization ----

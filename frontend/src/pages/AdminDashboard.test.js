@@ -102,6 +102,15 @@ beforeEach(() => {
         },
       });
     }
+    if (url === "/clinical/specs-days") {
+      return Promise.resolve({
+        data: {
+          specs_days: [
+            { id: "sp-1", day_date: "2026-09-12", venue: "Base Optical", seat_limit: 12, seats_taken: 3, seats_free: 9 },
+          ],
+        },
+      });
+    }
     if (url === "/leaderboard") {
       return Promise.resolve({
         data: {
@@ -316,5 +325,48 @@ describe("AdminDashboard component", () => {
     });
 
     expect(api.patch).toHaveBeenCalledWith("/staff/u-2/disable");
+  });
+
+  test("Specs collection days tab lists days and posts create", async () => {
+    api.post.mockResolvedValueOnce({ data: { specs_day: { id: "sp-2" } } });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <AdminDashboard />
+        </MemoryRouter>
+      );
+    });
+
+    await act(async () => {
+      container.querySelector('[data-testid="admin-tab-specs"]').click();
+    });
+
+    expect(container.textContent).toContain("Base Optical");
+    expect(container.textContent).toContain("3/12 seats");
+    expect(container.querySelector('[data-testid="specs-days-list"]')).not.toBeNull();
+
+    const dateInput = container.querySelector('[data-testid="specs-date-input"]');
+    const venueInput = container.querySelector('[data-testid="specs-venue-input"]');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    act(() => {
+      setter.call(dateInput, "2026-09-20");
+      dateInput.dispatchEvent(new Event("input", { bubbles: true }));
+      setter.call(venueInput, "New Optical");
+      venueInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+
+    await act(async () => {
+      container.querySelector('[data-testid="add-specs-day-button"]').click();
+    });
+
+    expect(api.post).toHaveBeenCalledWith(
+      "/clinical/specs-days",
+      expect.objectContaining({
+        camp_id: "c-1",
+        day_date: "2026-09-20",
+        venue: "New Optical",
+      })
+    );
   });
 });

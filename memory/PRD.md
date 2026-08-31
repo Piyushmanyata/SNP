@@ -33,20 +33,20 @@ on Emergent (React + FastAPI + MongoDB). Phase 1 = full Camp Management System.
 - Desk: QR/reg# lookup, print A4 (presence-once + PRINT_WINDOW_CLOSED gate), mark-seen (never_printed guard),
   undo-seen (10-min window, blocked once transcription exists).
 - Clinical: seen-only eligibility (not_seen refusal w/o PHI), transcription (locks on first fulfilment),
-  medicine/specs/OT fulfilment, deferred 58mm slips (versioned, cancel+replace), OT schedule days with
-  seat consumption (SEAT_LIMIT_BELOW_ASSIGNED guard, seat released on re-record), append-only corrections, history.
+  medicine/specs/OT fulfilment, A6 Tokens (versioned, cancel+replace), OT Schedule Days and Specs collection days with
+  seat consumption (SEAT_LIMIT_BELOW_ASSIGNED guard, seat released on re-record), D-1 MSG91 reminders, append-only corrections, history.
 - Staff mgmt, volunteer/team-lead leaderboards, KPIs, CSV exports (camp records + clinical audit).
 - Ops: /api/health, /api/health/ready (fail-closed).
-- Prints: A4 prescription (identity + QR + blank clinical area), 58mm thermal deferral slip.
+- Prints: A4 prescription (identity + QR + blank clinical area), A6 bilingual Token (105 × 148 mm) for OT and Spectacles to be made.
 
 ## Test Status
 - Backend: 74/74 pytest pass (/app/backend/tests/backend_test.py). Frontend: all regression flows pass.
 - Reports: /app/test_reports/iteration_1.json, iteration_2.json.
 
 ## Deferred (Phase 2+)
-- MSG91 DLT Devanagari SMS (registration/reminder/deferral) + nightly reminder scheduler + SMS ledger.
+- MSG91 DLT Devanagari SMS at registration or Token print (D-1 Camp/OT/Specs reminders ship in Phase 2).
 - Sponsor-asset object storage + versioned prescription template editor.
-- Real Aadhaar Secure QR cryptographic decode; real 58mm thermal Devanagari hardware print test.
+- Real Aadhaar Secure QR cryptographic decode.
 - Load testing to 10k+; Supabase→Mongo data migration; adversarial security audit.
 - Phase 4 modules: Members, Clinic, Matrimony, Events, Donations, CMS.
 

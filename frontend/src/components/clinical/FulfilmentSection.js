@@ -5,6 +5,7 @@ import { FulfilmentStation } from "./FulfilmentStation";
 export function FulfilmentSection({
   data,
   otDays,
+  specsDays,
   onDone,
   navigate,
   setBanner,
@@ -22,6 +23,7 @@ export function FulfilmentSection({
             type={type}
             data={data}
             otDays={otDays}
+            specsDays={specsDays}
             onDone={onDone}
             navigate={navigate}
             setBanner={setBanner}

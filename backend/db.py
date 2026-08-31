@@ -53,3 +53,15 @@ async def init_indexes():
     await db.ot_schedule_days.create_index(
         [("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True
     )
+    await db.specs_collection_days.create_index(
+        [("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True
+    )
+    await db.reminder_ledger.create_index(
+        [
+            ("number", ASCENDING),
+            ("reminder_type", ASCENDING),
+            ("event_date", ASCENDING),
+            ("send_date", ASCENDING),
+        ],
+        unique=True,
+    )

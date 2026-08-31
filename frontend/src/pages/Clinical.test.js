@@ -49,6 +49,16 @@ beforeEach(() => {
         },
       });
     }
+    if (url === "/clinical/specs-days") {
+      return Promise.resolve({
+        data: {
+          specs_days: [
+            { id: "sp-1", day_date: "2026-09-12", venue: "Base Optical", seats_free: 4 },
+            { id: "sp-full", day_date: "2026-09-13", venue: "Full Desk", seats_free: 0 },
+          ],
+        },
+      });
+    }
     return Promise.resolve({ data: {} });
   });
 });
@@ -208,6 +218,66 @@ describe("Clinical page component", () => {
       "Failed to fetch OT days:",
       expect.any(Error)
     );
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Failed to fetch Specs collection days:",
+      expect.any(Error)
+    );
     warnSpy.mockRestore();
+  });
+
+  test("Spectacles to be made deferral uses Specs collection day select", async () => {
+    const mockLookupData = {
+      registration: {
+        id: "reg-101",
+        reg_no: "1001",
+        full_name: "Subhash Bose",
+        gender_label: "Male",
+        age: 58,
+        queue_status: "seen",
+      },
+      person: { id: "p-101" },
+      transcription: { id: "tx-101", locked: false, diagnosis_options: ["Cataract"] },
+      fulfilments: [],
+      slips: [],
+    };
+    api.post.mockResolvedValueOnce({ data: mockLookupData });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <Clinical />
+        </MemoryRouter>
+      );
+    });
+
+    const lookupInput = container.querySelector('[data-testid="clinical-lookup-input"]');
+    act(() => {
+      const nativeSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value"
+      ).set;
+      nativeSetter.call(lookupInput, "1001");
+      lookupInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="clinical-lookup-button"]').click();
+    });
+
+    const statusSelect = container.querySelector('[data-testid="station-specs-status"]');
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set;
+      setter.call(statusSelect, "deferred");
+      statusSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    const daySelect = container.querySelector('[data-testid="specs-day-select-fulfil"]');
+    expect(daySelect).not.toBeNull();
+    expect(container.querySelector('[data-testid="specs-collection-date"]')).toBeNull();
+    expect(container.querySelector('[data-testid="specs-collection-venue"]')).toBeNull();
+    const fullOpt = Array.from(daySelect.options).find((o) => o.value === "sp-full");
+    expect(fullOpt).toBeTruthy();
+    expect(fullOpt.disabled).toBe(true);
+    const openOpt = Array.from(daySelect.options).find((o) => o.value === "sp-1");
+    expect(openOpt.disabled).toBe(false);
   });
 });
