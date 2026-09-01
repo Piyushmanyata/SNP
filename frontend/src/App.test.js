@@ -1,4 +1,3 @@
-import React from "react";
 import App from "./App";
 
 test("App module exports a valid React component", () => {

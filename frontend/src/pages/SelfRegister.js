@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import api, { formatApiError } from "../lib/api";
-import { Button, Card, Input, Field, Alert, Badge } from "../components/ui";
+import { Button, Card, Input, Field, Alert } from "../components/ui";
 import AadhaarScanner from "../components/AadhaarScanner";
 import { Stethoscope, CheckCircle2, Lock } from "lucide-react";
 import { v4 } from "../lib/uuid";
