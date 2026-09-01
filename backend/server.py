@@ -1,4 +1,5 @@
 import os
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -19,7 +20,28 @@ import routes_reports
 import routes_templates
 import routes_reminders
 
-app = FastAPI(title="SNP Camps API")
+
+async def seed_admin():
+    db = get_db()
+    email = os.environ["ADMIN_EMAIL"].lower().strip()
+    password = os.environ["ADMIN_PASSWORD"]
+    existing = await db.users.find_one({"email": email})
+    if existing is None:
+        await db.users.insert_one({
+            "email": email, "password_hash": hash_password(password),
+            "name": "Camp Administrator", "role": "admin", "phone": None,
+            "team_lead_id": None, "disabled_at": None, "created_at": now_utc(),
+        })
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_indexes()
+    await seed_admin()
+    yield
+
+
+app = FastAPI(title="SNP Camps API", lifespan=lifespan)
 
 LAN_ORIGIN_REGEX = (
     r"^https?://("
@@ -56,22 +78,3 @@ app.include_router(routes_clinical.router)
 app.include_router(routes_reports.router)
 app.include_router(routes_templates.router)
 app.include_router(routes_reminders.router)
-
-
-async def seed_admin():
-    db = get_db()
-    email = os.environ["ADMIN_EMAIL"].lower().strip()
-    password = os.environ["ADMIN_PASSWORD"]
-    existing = await db.users.find_one({"email": email})
-    if existing is None:
-        await db.users.insert_one({
-            "email": email, "password_hash": hash_password(password),
-            "name": "Camp Administrator", "role": "admin", "phone": None,
-            "team_lead_id": None, "disabled_at": None, "created_at": now_utc(),
-        })
-
-
-@app.on_event("startup")
-async def startup():
-    await init_indexes()
-    await seed_admin()

@@ -7,7 +7,7 @@ import {
 } from "../components/ui";
 import {
   Tent, Users, CalendarDays, Trophy, Download, Scissors, Glasses, Power, Trash2,
-  Plus, PrinterCheck, ClipboardList, Stethoscope, CheckCircle2, FileText,
+  Plus, PrinterCheck, ClipboardList, Stethoscope, FileText,
 } from "lucide-react";
 import TemplateEditor from "../components/TemplateEditor";
 
@@ -16,8 +16,7 @@ const TABS = [
   { id: "camps", label: "Camps & Days", icon: Tent },
   { id: "staff", label: "Staff", icon: Users },
   { id: "template", label: "Rx Template", icon: FileText },
-  { id: "ot", label: "OT Schedule", icon: Scissors },
-  { id: "specs", label: "Specs collection", icon: Glasses },
+  { id: "ot", label: "OT & Specs", icon: Scissors },
   { id: "board", label: "Leaderboards", icon: Trophy },
   { id: "exports", label: "Exports", icon: Download },
 ];
@@ -26,7 +25,7 @@ export default function AdminDashboard() {
   const [tab, setTab] = useState("overview");
   return (
     <Layout title="Admin">
-      <div className="flex gap-2 overflow-x-auto pb-2 mb-5 -mx-1 px-1" data-testid="admin-tabs">
+      <div className="flex flex-wrap gap-2 mb-5" data-testid="admin-tabs">
         {TABS.map((t) => {
           const Icon = t.icon;
           return (
@@ -42,8 +41,7 @@ export default function AdminDashboard() {
       {tab === "camps" && <Camps />}
       {tab === "staff" && <Staff />}
       {tab === "template" && <TemplateEditor />}
-      {tab === "ot" && <OtSchedule />}
-      {tab === "specs" && <SpecsCollectionDays />}
+      {tab === "ot" && <div className="space-y-5"><OtSchedule /><SpecsCollectionDays /></div>}
       {tab === "board" && <Leaderboards />}
       {tab === "exports" && <Exports />}
     </Layout>

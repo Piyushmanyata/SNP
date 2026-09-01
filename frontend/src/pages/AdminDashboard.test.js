@@ -151,7 +151,7 @@ describe("AdminDashboard component", () => {
     expect(gotoClinical).not.toBeNull();
   });
 
-  test("switches tabs smoothly (Camps, Staff, Template, OT, Leaderboard, Exports)", async () => {
+  test("switches tabs smoothly (Camps, Staff, Template, OT & Specs, Leaderboard, Exports)", async () => {
     await act(async () => {
       root.render(
         <MemoryRouter>
@@ -193,8 +193,12 @@ describe("AdminDashboard component", () => {
       otTab.click();
     });
 
+    expect(otTab.textContent).toContain("OT & Specs");
     expect(container.textContent).toContain("Base Eye Hospital");
     expect(container.textContent).toContain("5/20 seats");
+    expect(container.querySelector('[data-testid="specs-days-list"]')).not.toBeNull();
+    expect(container.textContent).toContain("Base Optical");
+    expect(container.textContent).toContain("Specs collection days");
 
     // Switch to Leaderboards tab
     const boardTab = container.querySelector('[data-testid="admin-tab-board"]');
@@ -327,7 +331,7 @@ describe("AdminDashboard component", () => {
     expect(api.patch).toHaveBeenCalledWith("/staff/u-2/disable");
   });
 
-  test("Specs collection days tab lists days and posts create", async () => {
+  test("OT & Specs tab lists Specs collection days and posts create", async () => {
     api.post.mockResolvedValueOnce({ data: { specs_day: { id: "sp-2" } } });
 
     await act(async () => {
@@ -339,7 +343,7 @@ describe("AdminDashboard component", () => {
     });
 
     await act(async () => {
-      container.querySelector('[data-testid="admin-tab-specs"]').click();
+      container.querySelector('[data-testid="admin-tab-ot"]').click();
     });
 
     expect(container.textContent).toContain("Base Optical");

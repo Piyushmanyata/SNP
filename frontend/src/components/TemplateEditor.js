@@ -4,7 +4,7 @@ import { Button, Card, Input, Field, Alert, Badge } from "./ui";
 import { PrescriptionSheet } from "../pages/PrintPrescription";
 import { v4 } from "../lib/uuid";
 import {
-  Save, UploadCloud, Eye, RotateCcw, ArrowUp, ArrowDown, Trash2, CheckCircle2, ImagePlus,
+  Save, Eye, RotateCcw, ArrowUp, ArrowDown, Trash2, CheckCircle2, ImagePlus,
 } from "lucide-react";
 
 const MAX_LOGO = 2 * 1024 * 1024;
