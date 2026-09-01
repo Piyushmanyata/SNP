@@ -26,7 +26,7 @@ jobs:
       - name: Install Backend Dependencies
         run: |
           pip install -r backend/requirements.txt
-          pip install pytest flake8 requests
+          pip install pytest flake8 requests httpx
 
       - name: Verify Backend Python Syntax & Imports
         run: |
