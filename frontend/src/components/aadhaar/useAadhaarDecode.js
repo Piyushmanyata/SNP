@@ -4,7 +4,7 @@ import * as grab from "./liveScan/grabFrame";
 import * as nativeDetector from "./liveScan/nativeDetector";
 import * as wasmDetector from "./liveScan/wasmDetector";
 
-export function useAadhaarDecode({ onScanned } = {}) {
+export function useAadhaarDecode({ onScanned, onFailure } = {}) {
   const [payload, setPayload] = useState("");
   const [error, setError] = useState("");
   const [outcome, setOutcome] = useState("");
@@ -38,6 +38,9 @@ export function useAadhaarDecode({ onScanned } = {}) {
             if (onScanned) onScanned(data.data);
           } else {
             setError(data.message || "Unable to read Aadhaar QR data.");
+            if ((data.outcome === "garbage" || data.outcome === "not-aadhaar") && onFailure) {
+              onFailure(data.outcome);
+            }
           }
         }
         return data;
@@ -52,7 +55,7 @@ export function useAadhaarDecode({ onScanned } = {}) {
         }
       }
     },
-    [onScanned]
+    [onScanned, onFailure]
   );
 
   const scanFile = useCallback(

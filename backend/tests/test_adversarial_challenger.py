@@ -497,10 +497,12 @@ class TestRegistrationDecomposedAndInvariants:
             assert patient1["reg_no"] == 1
             assert patient1["queue_status"] == "registered"
 
-            # Registering again with same Aadhaar in same camp
-            patient2, created2 = await _create_registration(body, actor_id=ObjectId(), is_self=False, request=None)
-            assert created2 is False
-            assert patient2["id"] == patient1["id"]
+            # Registering again with same Aadhaar in same camp is a hard Duplicate in camp
+            with pytest.raises(HTTPException) as exc:
+                await _create_registration(body, actor_id=ObjectId(), is_self=False, request=None)
+            assert exc.value.status_code == 409
+            assert exc.value.detail["code"] == "DUPLICATE_IN_CAMP"
+            assert exc.value.detail["registration"]["id"] == patient1["id"]
             assert len(mock_db.patients.docs) == 1
         asyncio.run(_run())
 
@@ -537,11 +539,12 @@ class TestRegistrationDecomposedAndInvariants:
             assert exc.value.status_code == 409
             assert exc.value.detail["code"] == "DUPLICATE_IN_CAMP"
 
-            # Override duplicate flag allows registration
             body.override_duplicate = True
-            patient, created = await _create_registration(body, actor_id=ObjectId(), is_self=False, request=None)
-            assert created is True
-            assert patient["reg_no"] == 2
+            with pytest.raises(HTTPException) as exc2:
+                await _create_registration(body, actor_id=ObjectId(), is_self=False, request=None)
+            assert exc2.value.status_code == 409
+            assert exc2.value.detail["code"] == "DUPLICATE_IN_CAMP"
+            assert len(mock_db.patients.docs) == 1
         asyncio.run(_run())
 
 

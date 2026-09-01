@@ -28,7 +28,7 @@ jest.mock("../components/Layout", () => {
 });
 
 jest.mock("../components/AadhaarScanner", () => {
-  return function MockAadhaarScanner({ onScanned }) {
+  return function MockAadhaarScanner({ onScanned, onFailure }) {
     return (
       <div data-testid="mock-aadhaar-scanner">
         <button
@@ -46,6 +46,13 @@ jest.mock("../components/AadhaarScanner", () => {
           }
         >
           Simulate Scan
+        </button>
+        <button
+          type="button"
+          data-testid="mock-failure-trigger"
+          onClick={() => onFailure && onFailure("garbage")}
+        >
+          Simulate Failure
         </button>
       </div>
     );
@@ -311,18 +318,20 @@ describe("Desk page component", () => {
       newRegBtn.click();
     });
 
-    // Verify modal inputs are present in portal (document.body)
+    expect(document.body.querySelector('[data-testid="mock-aadhaar-scanner"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="manual-exception-checkbox"]')).toBeNull();
+
+    const scanTrigger = document.body.querySelector('[data-testid="mock-scan-trigger"]');
+    act(() => {
+      scanTrigger.click();
+    });
+
     const nameInput = document.body.querySelector('[data-testid="reg-fullname-input"]');
     const ageInput = document.body.querySelector('[data-testid="reg-age-input"]');
     const phoneInput = document.body.querySelector('[data-testid="reg-phone-input"]');
     expect(nameInput).not.toBeNull();
     expect(ageInput).not.toBeNull();
-
-    // Trigger mock Aadhaar scan
-    const scanTrigger = document.body.querySelector('[data-testid="mock-scan-trigger"]');
-    act(() => {
-      scanTrigger.click();
-    });
 
     expect(nameInput.value).toBe("Aadhaar Scanned User");
     expect(nameInput.readOnly).toBe(true);
@@ -354,21 +363,12 @@ describe("Desk page component", () => {
     );
   });
 
-  test("handles duplicate detection warning and allows override registration", async () => {
+  test("two Failures reveal typed form and keep the scanner; no Register anyway", async () => {
     api.post.mockImplementation((url, body) => {
-      if (url === "/register/duplicate-check") {
-        return Promise.resolve({
-          data: {
-            likely_duplicates: [
-              { id: "dup-1", reg_no: "50", full_name: "Duplicate Person", age: 30 },
-            ],
-          },
-        });
-      }
       if (url === "/register") {
         return Promise.resolve({
           data: {
-            registration: { id: "reg-dup", reg_no: "104", full_name: body.full_name },
+            registration: { id: "reg-man", reg_no: "105", full_name: body.full_name },
           },
         });
       }
@@ -387,12 +387,35 @@ describe("Desk page component", () => {
       container.querySelector('[data-testid="new-registration-button"]').click();
     });
 
+    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="manual-exception-checkbox"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="dup-register-anyway"]')).toBeNull();
+
+    const fail = document.body.querySelector('[data-testid="mock-failure-trigger"]');
+    act(() => {
+      fail.click();
+    });
+    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
+
+    act(() => {
+      fail.click();
+    });
+
+    expect(document.body.querySelector('[data-testid="mock-aadhaar-scanner"]')).not.toBeNull();
     const nameInput = document.body.querySelector('[data-testid="reg-fullname-input"]');
-    const ageInput = document.body.querySelector('[data-testid="reg-age-input"]');
+    expect(nameInput).not.toBeNull();
+    expect(nameInput.readOnly).toBe(false);
+    expect(document.body.querySelector('[data-testid="manual-exception-reason"]')).toBeNull();
+    expect(document.body.textContent).toMatch(/Manual entry/i);
+
     act(() => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-      setter.call(nameInput, "Duplicate Person");
+      setter.call(nameInput, "Typed Patient");
       nameInput.dispatchEvent(new Event("input", { bubbles: true }));
+      const phoneInput = document.body.querySelector('[data-testid="reg-phone-input"]');
+      setter.call(phoneInput, "9830098300");
+      phoneInput.dispatchEvent(new Event("input", { bubbles: true }));
+      const ageInput = document.body.querySelector('[data-testid="reg-age-input"]');
       setter.call(ageInput, "30");
       ageInput.dispatchEvent(new Event("input", { bubbles: true }));
     });
@@ -402,26 +425,22 @@ describe("Desk page component", () => {
       submitBtn.click();
     });
 
-    // Check duplicate warning is rendered
-    const dupWarning = document.body.querySelector('[data-testid="duplicate-warning"]');
-    expect(dupWarning).not.toBeNull();
-    expect(document.body.textContent).toContain("Likely duplicate(s) — same name & age:");
-
-    const overrideBtn = document.body.querySelector('[data-testid="dup-register-anyway"]');
-    await act(async () => {
-      overrideBtn.click();
-    });
-
     expect(api.post).toHaveBeenCalledWith(
       "/register",
       expect.objectContaining({
-        full_name: "Duplicate Person",
-        override_duplicate: true,
+        full_name: "Typed Patient",
+        aadhaar_scanned: false,
+        manual_entry: true,
       })
     );
+    expect(api.post).not.toHaveBeenCalledWith(
+      "/register",
+      expect.objectContaining({ override_duplicate: true })
+    );
+    expect(document.body.querySelector('[data-testid="dup-register-anyway"]')).toBeNull();
   });
 
-  test("handles manual exception checkbox and audited reason input", async () => {
+  test("a Lock before two Failures never reveals a typed path", async () => {
     await act(async () => {
       root.render(
         <MemoryRouter>
@@ -434,22 +453,98 @@ describe("Desk page component", () => {
       container.querySelector('[data-testid="new-registration-button"]').click();
     });
 
-    const manualCheckbox = document.body.querySelector('[data-testid="manual-exception-checkbox"]');
-    expect(manualCheckbox).not.toBeNull();
+    act(() => {
+      document.body.querySelector('[data-testid="mock-failure-trigger"]').click();
+    });
+    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
 
     act(() => {
-      manualCheckbox.click();
+      document.body.querySelector('[data-testid="mock-scan-trigger"]').click();
     });
 
-    const reasonInput = document.body.querySelector('[data-testid="manual-exception-reason"]');
-    expect(reasonInput).not.toBeNull();
+    const nameInput = document.body.querySelector('[data-testid="reg-fullname-input"]');
+    expect(nameInput).not.toBeNull();
+    expect(nameInput.value).toBe("Aadhaar Scanned User");
+    expect(nameInput.readOnly).toBe(true);
+    expect(document.body.textContent).not.toMatch(/Manual entry/i);
+  });
 
+  test("closing New Registration resets the Failure count", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <Desk />
+        </MemoryRouter>
+      );
+    });
+
+    act(() => {
+      container.querySelector('[data-testid="new-registration-button"]').click();
+    });
+    const fail = document.body.querySelector('[data-testid="mock-failure-trigger"]');
+    act(() => {
+      fail.click();
+      fail.click();
+    });
+    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).not.toBeNull();
+
+    act(() => {
+      document.body.querySelector('[data-testid="modal-close-button"]').click();
+    });
+    expect(document.body.querySelector('[data-testid="mock-aadhaar-scanner"]')).toBeNull();
+
+    act(() => {
+      container.querySelector('[data-testid="new-registration-button"]').click();
+    });
+    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="mock-aadhaar-scanner"]')).not.toBeNull();
+  });
+
+  test("Duplicate in camp 409 shows existing reg_no and has no Register anyway", async () => {
+    api.post.mockImplementation((url) => {
+      if (url === "/register") {
+        const err = new Error("duplicate");
+        err.response = {
+          data: {
+            detail: {
+              code: "DUPLICATE_IN_CAMP",
+              message: "Already registered in this camp",
+              registration: { id: "dup-1", reg_no: 50, full_name: "Duplicate Person" },
+            },
+          },
+        };
+        return Promise.reject(err);
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <Desk />
+        </MemoryRouter>
+      );
+    });
+
+    act(() => {
+      container.querySelector('[data-testid="new-registration-button"]').click();
+    });
+    act(() => {
+      document.body.querySelector('[data-testid="mock-scan-trigger"]').click();
+    });
+    const phoneInput = document.body.querySelector('[data-testid="reg-phone-input"]');
     act(() => {
       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-      setter.call(reasonInput, "Aadhaar QR unreadable / worn out");
-      reasonInput.dispatchEvent(new Event("input", { bubbles: true }));
+      setter.call(phoneInput, "9830098300");
+      phoneInput.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
-    expect(reasonInput.value).toBe("Aadhaar QR unreadable / worn out");
+    await act(async () => {
+      document.body.querySelector('[data-testid="patient-register-submit"]').click();
+    });
+
+    expect(document.body.textContent).toContain("Already registered as #50");
+    expect(document.body.querySelector('[data-testid="dup-register-anyway"]')).toBeNull();
+    expect(document.body.textContent).not.toContain("Register anyway");
   });
 });

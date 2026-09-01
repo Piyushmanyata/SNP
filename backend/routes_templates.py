@@ -1,4 +1,5 @@
 import base64
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
 from db import get_db
@@ -21,14 +22,38 @@ MAX_LOGO_BYTES = 2 * 1024 * 1024
 ALLOWED_MIME = ("image/png", "image/jpeg", "image/webp")
 
 
+SNP_HEADER_TITLE = (
+    "Sikar Nagarik Parishad (Kolkata) / सीकर नागरिक परिषद (कोलकाता)\n"
+    "Sikar Zilla Welfare Trust / सीकर जिला वेलफेयर ट्रस्ट"
+)
+SNP_HEADER_SUBTITLE = (
+    "'Sikar Bhawan' 1A, Ashutosh Dey Lane (Near Girish Park Metro, Opp. Liberty Cinema), "
+    "KOLKATA-6. PHONE: 033 4006 4713, 2257 3521. E-mail: sikarkolkata@gmail.com. "
+    "Whatsapp: 86971 90268. FREE EYE SCREENING, FREE DISTRIBUTION OF SPECTACLES & MEDICINES "
+    "AND FREE ARRANGMENT OF CATARACT (IOL) OPERATION."
+)
+SNP_FOOTER = "Sponsorer: Rupa Foundation, Kolkata"
+_HEADER_JPG = Path(__file__).resolve().parent / "assets" / "eye-clinic-header.jpg"
+
+
+def _default_logos():
+    if not _HEADER_JPG.exists():
+        return []
+    data_url = "data:image/jpeg;base64," + base64.b64encode(_HEADER_JPG.read_bytes()).decode()
+    return [
+        {"id": "snp-parishad", "name": "sikar-nagarik-parishad.jpg", "data_url": data_url, "order": 0},
+        {"id": "szwt-trust", "name": "sikar-zilla-welfare-trust.jpg", "data_url": data_url, "order": 1},
+    ]
+
+
 def default_template(camp):
     return {
         "camp_id": str(camp["_id"]),
-        "header_title": camp["name"],
-        "header_subtitle": camp.get("venue", ""),
-        "footer_note": "Paper prescription is the source of truth.",
+        "header_title": SNP_HEADER_TITLE,
+        "header_subtitle": SNP_HEADER_SUBTITLE,
+        "footer_note": SNP_FOOTER,
         "blocks": [dict(b) for b in DEFAULT_BLOCKS],
-        "logos": [],
+        "logos": _default_logos(),
         "status": "defaults",
         "version": 0,
     }

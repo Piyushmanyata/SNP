@@ -166,8 +166,11 @@ class TestTemplates:
         assert j["draft"] is None and j["published"] is None
         d = j["defaults"]
         assert len(d["blocks"]) == 7
-        assert d["header_title"] == f"TEST_TPL Camp {TAG}"
-        assert d["header_subtitle"] == "TEST Hall"
+        assert "Sikar Nagarik Parishad" in d["header_title"]
+        assert "Sikar Zilla Welfare Trust" in d["header_title"]
+        assert "Sikar Bhawan" in d["header_subtitle"] or "SIKAR BHAWAN" in d["header_subtitle"].upper()
+        assert "Rupa" in d["footer_note"]
+        assert len(d["logos"]) >= 2
         assert [b["id"] for b in d["blocks"]][0] == "identity"
 
     def test_requires_admin(self, camp):
@@ -283,12 +286,13 @@ class TestTemplates:
         assert r.status_code == 200, r.text
         d = r.json()["draft"]
         assert len(d["blocks"]) == 7
-        assert d["header_title"] == f"TEST_TPL Camp {TAG}"
-        assert d["logos"] == []
+        assert "Sikar Nagarik Parishad" in d["header_title"]
+        assert "Rupa" in d["footer_note"]
+        assert len(d["logos"]) >= 2
         g = admin.get(f"{API}/templates?camp_id={camp}", timeout=30).json()
         assert len(g["draft"]["blocks"]) == 7
-        # published version untouched
         assert g["published"]["version"] == 2
+        assert g["published"]["header_title"] == "TEST Published Title"
 
     def test_no_mongo_id_leak(self, admin, camp):
         for url in [f"{API}/templates?camp_id={camp}", f"{API}/templates/active?camp_id={camp}"]:

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth, roleHome } from "../context/AuthContext";
 import { Button, Input, Field, Alert } from "../components/ui";
-import { formatApiError } from "../lib/api";
+import api, { formatApiError } from "../lib/api";
 import { Stethoscope, ScanLine } from "lucide-react";
 
 export default function Login() {
@@ -12,10 +12,23 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [occupancy, setOccupancy] = useState(null);
 
   useEffect(() => {
     if (user) navigate(roleHome(user.role), { replace: true });
   }, [user, navigate]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      api.get("/camps/active/public").then((r) => {
+        if (!cancelled) setOccupancy(r.data);
+      }).catch(() => {});
+    };
+    load();
+    const t = setInterval(load, 5000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -84,6 +97,19 @@ export default function Login() {
             <a href="/self-register" className="block text-center text-sm font-semibold text-emerald-600 hover:text-emerald-700 min-h-[44px] flex items-center justify-center" data-testid="goto-self-register-link">
               Patient self-registration →
             </a>
+            {occupancy?.camp && (
+              <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3 space-y-2" data-testid="public-occupancy">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{occupancy.camp.name}</p>
+                {(occupancy.days || []).map((d) => (
+                  <div key={d.id} className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-slate-700" data-testid={`occupancy-day-${d.id}`}>
+                    <span className="font-medium">{d.day_date}</span>
+                    <span>Registered {d.registered}</span>
+                    <span>Limit {d.seat_limit === 0 ? "unlimited" : d.seat_limit}</span>
+                    <span>Remaining {d.remaining}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

@@ -84,6 +84,30 @@ _Avoid_: specs slot, collection appointment, specs schedule
 The paper printed when OT or Spectacles to be made is deferred. Hindi and English labels; name and venue as stored. The patient brings it to the OT Schedule Day or Specs collection day. A new deferral of the same type cancels the previous Token.
 _Avoid_: slip, deferred slip, thermal slip, queue ticket, final token
 
+**Print window**:
+Admin-declared open/closed state on a camp day. Open: printing is enabled. Closed: printing is disabled. Not derived from the calendar.
+_Avoid_: IST print gate, today-only print
+
+**Manual entry**:
+A desk registration typed after two Failures. Marked on the registration. Not an admin approval and not an audited reason. Self-register has no typed path.
+_Avoid_: manual exception, manual window, manual audit
+
+**Aadhaar overwrite**:
+A Lock from New Registration that matches exactly one Manual entry updates that registration in place. Name, age, gender, DOB, last-4, and address come from the card. Household phone, camp day, and reg_no stay. The Manual entry mark clears. Not a second registration.
+_Avoid_: merge, bind Aadhaar, rescan button
+
+**Duplicate in camp**:
+A second registration in the same camp for the same person. Blocked when Person, last-4+name, last-4+DOB, or name+age+household phone already exists in that camp. There is no override.
+_Avoid_: register anyway, likely duplicate
+
+**Public occupancy**:
+Counts on the unauthenticated login page for the active camp: per camp day, registered, seat limit, remaining. No patient details.
+_Avoid_: live feed, registration ticker, public patient list
+
+**Camp-day capacity**:
+When a camp day's seat limit is greater than zero, that day refuses a new registration once the registered count reaches the limit. Limit zero is unlimited.
+_Avoid_: seats_taken (that counter is OT and Spectacles to be made only)
+
 **Camp reminder**:
 The Devanagari SMS sent the calendar day before a camp day, one per unique household number among patients registered for that day. Date and venue only; no patient names.
 _Avoid_: camp SMS, registration reminder
