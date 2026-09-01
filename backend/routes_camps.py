@@ -66,9 +66,22 @@ async def active_camp_public():
     if not c:
         return {"camp": None, "days": []}
     days = await db.camp_days.find({"camp_id": c["_id"]}).sort("day_date", 1).to_list(100)
+    out = []
+    for d in days:
+        n = await db.patients.count_documents({"camp_day_id": d["_id"]})
+        limit = d.get("seat_limit") or 0
+        remaining = "unlimited" if limit == 0 else max(0, limit - n)
+        out.append({
+            "id": str(d["_id"]),
+            "day_date": d["day_date"],
+            "is_today": d["day_date"] == today_ist_str(),
+            "registered": n,
+            "seat_limit": limit,
+            "remaining": remaining,
+        })
     return {
         "camp": {"id": str(c["_id"]), "name": c["name"], "venue": c["venue"]},
-        "days": [{"id": str(d["_id"]), "day_date": d["day_date"], "is_today": d["day_date"] == today_ist_str()} for d in days],
+        "days": out,
     }
 
 

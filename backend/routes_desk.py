@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
 from db import get_db
 from models import QrLookupBody
-from helpers import now_utc, today_ist_str, iso, as_utc
+from helpers import now_utc, iso, as_utc
 from serializers import ser_patient
 from security import require_staff
 from datetime import timedelta
@@ -48,11 +48,10 @@ async def print_prescription(patient_id: str, actor: dict = Depends(require_staf
     if not day:
         raise HTTPException(status_code=404, detail="Camp day not found")
 
-    # print window gate: today IST AND printing_open
-    if day["day_date"] != today_ist_str() or not day.get("printing_open", False):
+    if not day.get("printing_open", False):
         raise HTTPException(status_code=409, detail={
             "code": "PRINT_WINDOW_CLOSED",
-            "message": "The print window is closed for today.",
+            "message": "The print window is closed.",
         })
 
     # presence written once, idempotent

@@ -185,17 +185,15 @@ function RegisterModal({ open, onClose, days, onDone, setBanner }) {
   const [form, setForm] = useState(EMPTY_REG_FORM);
   const [scanned, setScanned] = useState(false);
   const [dayId, setDayId] = useState("");
-  const [manualEx, setManualEx] = useState(false);
-  const [manualReason, setManualReason] = useState("");
+  const [failures, setFailures] = useState(0);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [dups, setDups] = useState(null);
   const [reqId, setReqId] = useState(v4());
 
   useEffect(() => {
     if (open) {
-      setForm(EMPTY_REG_FORM); setScanned(false); setManualEx(false); setManualReason("");
-      setError(""); setDups(null); setReqId(v4());
+      setForm(EMPTY_REG_FORM); setScanned(false); setFailures(0);
+      setError(""); setReqId(v4());
       const today = days.find((d) => d.is_today);
       setDayId(today ? today.id : (days[0]?.id || ""));
     }
@@ -214,15 +212,17 @@ function RegisterModal({ open, onClose, days, onDone, setBanner }) {
     setScanned(true);
   }, []);
 
-  const submit = useCallback(async (override = false) => {
+  const onFailure = useCallback((outcome) => {
+    if (outcome === "garbage" || outcome === "not-aadhaar") {
+      setFailures((n) => n + 1);
+    }
+  }, []);
+
+  const showForm = scanned || failures >= 2;
+
+  const submit = useCallback(async () => {
     setBusy(true); setError("");
     try {
-      if (!override) {
-        const { data } = await api.post("/register/duplicate-check", {
-          full_name: form.full_name, age: form.age ? Number(form.age) : null,
-        });
-        if (data.likely_duplicates.length > 0) { setDups(data.likely_duplicates); setBusy(false); return; }
-      }
       const { data } = await api.post("/register", {
         full_name: form.full_name,
         age: form.age ? Number(form.age) : null,
@@ -234,10 +234,7 @@ function RegisterModal({ open, onClose, days, onDone, setBanner }) {
         aadhaar_scanned: scanned,
         camp_day_id: dayId,
         registration_request_id: reqId,
-        manual_exception: manualEx,
-        manual_reason: manualEx ? manualReason : null,
-        failed_scan_attempts: manualEx ? 2 : 0,
-        override_duplicate: override,
+        manual_entry: !scanned,
       });
       setBanner(`Registered #${data.registration.reg_no} — ${data.registration.full_name}`);
       onClose(); onDone();
@@ -245,74 +242,61 @@ function RegisterModal({ open, onClose, days, onDone, setBanner }) {
       const payload = errorPayload(err);
       if (payload && payload.code === "DUPLICATE_IN_CAMP") {
         setError(`Already registered as #${payload.registration.reg_no}. Print for them instead.`);
+      } else if (payload && payload.code === "AMBIGUOUS_MANUAL_ENTRY") {
+        const nos = (payload.registrations || []).map((r) => `#${r.reg_no}`).join(", ");
+        setError(`Multiple Manual entries match (${nos}). Print for them instead.`);
       } else {
         setError(formatApiError(err));
       }
     } finally { setBusy(false); }
-  }, [form, scanned, dayId, reqId, manualEx, manualReason, onClose, onDone, setBanner]);
+  }, [form, scanned, dayId, reqId, onClose, onDone, setBanner]);
 
   return (
     <Modal open={open} onClose={onClose} title="New Registration" size="lg">
       <div className="space-y-4">
-        <AadhaarScanner onScanned={onScan} />
+        <AadhaarScanner onScanned={onScan} onFailure={onFailure} />
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Field label="Full name" required>
-            <Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} readOnly={scanned && Boolean(form.full_name)} className={scanned && form.full_name ? "bg-slate-100" : ""} data-testid="reg-fullname-input" />
-          </Field>
-          <Field label="Age" required>
-            <Input type="number" value={form.age} onChange={(e) => setForm({ ...form, age: e.target.value })} readOnly={scanned && form.age !== "" && form.age !== null && form.age !== undefined} className={scanned && form.age !== "" && form.age !== null && form.age !== undefined ? "bg-slate-100" : ""} data-testid="reg-age-input" />
-          </Field>
-          <Field label="Gender">
-            <select className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300 disabled:bg-slate-100" value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })} disabled={scanned && Boolean(form.gender)} data-testid="reg-gender-select">
-              <option value="">—</option><option value="M">Male</option><option value="F">Female</option><option value="O">Other</option>
-            </select>
-          </Field>
-          <Field label="Phone (household)" required hint="10-digit mobile">
-            <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} inputMode="numeric" data-testid="reg-phone-input" />
-          </Field>
-          <Field label="Aadhaar last-4">
-            <Input value={form.aadhaar_last4} onChange={(e) => setForm({ ...form, aadhaar_last4: e.target.value })} readOnly={scanned && Boolean(form.aadhaar_last4)} className={scanned && form.aadhaar_last4 ? "bg-slate-100" : ""} maxLength={4} data-testid="reg-last4-input" />
-          </Field>
-          <Field label="Camp day">
-            <select className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300" value={dayId} onChange={(e) => setDayId(e.target.value)} data-testid="reg-day-select">
-              {days.map((d) => <option key={d.id} value={d.id}>{d.day_date}{d.is_today ? " (today)" : ""}</option>)}
-            </select>
-          </Field>
-        </div>
-        <Field label="Address">
-          <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} readOnly={scanned && Boolean(form.address)} className={scanned && form.address ? "bg-slate-100" : ""} data-testid="reg-address-input" />
-        </Field>
-
-        {!scanned && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-            <label className="flex items-center gap-2 text-sm font-semibold text-amber-800">
-              <input type="checkbox" checked={manualEx} onChange={(e) => setManualEx(e.target.checked)} className="w-5 h-5" data-testid="manual-exception-checkbox" />
-              Manual exception (after 2 failed scans)
-            </label>
-            {manualEx && (
-              <Input className="mt-2" placeholder="Reason (audited)" value={manualReason} onChange={(e) => setManualReason(e.target.value)} data-testid="manual-exception-reason" />
+        {showForm && (
+          <>
+            {!scanned && (
+              <p className="text-sm font-semibold text-amber-800" data-testid="manual-entry-note">Manual entry</p>
             )}
-          </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <Field label="Full name" required>
+                <Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} readOnly={scanned && Boolean(form.full_name)} className={scanned && form.full_name ? "bg-slate-100" : ""} data-testid="reg-fullname-input" />
+              </Field>
+              <Field label="Age" required>
+                <Input type="number" value={form.age} onChange={(e) => setForm({ ...form, age: e.target.value })} readOnly={scanned && form.age !== "" && form.age !== null && form.age !== undefined} className={scanned && form.age !== "" && form.age !== null && form.age !== undefined ? "bg-slate-100" : ""} data-testid="reg-age-input" />
+              </Field>
+              <Field label="Gender">
+                <select className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300 disabled:bg-slate-100" value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })} disabled={scanned && Boolean(form.gender)} data-testid="reg-gender-select">
+                  <option value="">—</option><option value="M">Male</option><option value="F">Female</option><option value="O">Other</option>
+                </select>
+              </Field>
+              <Field label="Phone (household)" required hint="10-digit mobile">
+                <Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} inputMode="numeric" data-testid="reg-phone-input" />
+              </Field>
+              <Field label="Aadhaar last-4">
+                <Input value={form.aadhaar_last4} onChange={(e) => setForm({ ...form, aadhaar_last4: e.target.value })} readOnly={scanned && Boolean(form.aadhaar_last4)} className={scanned && form.aadhaar_last4 ? "bg-slate-100" : ""} maxLength={4} data-testid="reg-last4-input" />
+              </Field>
+              <Field label="Camp day">
+                <select className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300" value={dayId} onChange={(e) => setDayId(e.target.value)} data-testid="reg-day-select">
+                  {days.map((d) => <option key={d.id} value={d.id}>{d.day_date}{d.is_today ? " (today)" : ""}</option>)}
+                </select>
+              </Field>
+            </div>
+            <Field label="Address">
+              <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} readOnly={scanned && Boolean(form.address)} className={scanned && form.address ? "bg-slate-100" : ""} data-testid="reg-address-input" />
+            </Field>
+          </>
         )}
 
         <Alert>{error}</Alert>
 
-        {dups ? (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 space-y-2" data-testid="duplicate-warning">
-            <p className="text-sm font-semibold text-amber-800">Likely duplicate(s) — same name & age:</p>
-            {dups.map((d) => (
-              <p key={d.id} className="text-sm text-slate-700">#{d.reg_no} — {d.full_name} ({d.age})</p>
-            ))}
-            <div className="flex gap-2 pt-1">
-              <Button variant="outline" size="sm" onClick={() => { setDups(null); onClose(); }} data-testid="dup-print-instead">Cancel / Print for them</Button>
-              <Button size="sm" onClick={() => submit(true)} disabled={busy} data-testid="dup-register-anyway">Register anyway</Button>
-            </div>
-          </div>
-        ) : (
+        {showForm && (
           <div className="flex gap-2 justify-end pt-1">
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button onClick={() => submit(false)} disabled={busy || !form.full_name || !dayId} data-testid="patient-register-submit">
+            <Button onClick={submit} disabled={busy || !form.full_name || !dayId} data-testid="patient-register-submit">
               {busy ? "Registering…" : "Register"}
             </Button>
           </div>

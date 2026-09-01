@@ -77,26 +77,98 @@ async def _validate_camp_and_day(db, camp_day_id: str) -> tuple[dict, dict]:
     return camp, day
 
 
-async def _check_registration_duplicates(db, camp_id, body: RegisterBody, person: dict | None = None):
-    if person:
-        existing_reg = await db.patients.find_one({"person_id": person["_id"], "camp_id": camp_id})
-        if existing_reg:
-            return existing_reg
+def _is_manual(p: dict) -> bool:
+    return bool(p.get("manual_entry") or p.get("manual_exception"))
 
+
+def _is_scanned_row(p: dict) -> bool:
+    return bool(p.get("aadhaar_scanned") or p.get("person_id"))
+
+
+def _dup_409(row: dict) -> HTTPException:
+    return HTTPException(status_code=409, detail={
+        "code": "DUPLICATE_IN_CAMP",
+        "message": "Already registered in this camp",
+        "registration": ser_patient(row),
+    })
+
+
+async def _duplicate_hits(db, camp_id, body: RegisterBody, person: dict | None = None):
+    hits = []
+    seen = set()
+
+    async def collect(query):
+        docs = await db.patients.find({"camp_id": camp_id, **query}).to_list(20)
+        for d in docs:
+            if d["_id"] not in seen:
+                seen.add(d["_id"])
+                hits.append(d)
+
+    if person:
+        await collect({"person_id": person["_id"]})
     norm = normalize_name(body.full_name)
-    if body.aadhaar_last4 and not body.override_duplicate:
-        clash = await db.patients.find_one({
-            "camp_id": camp_id,
-            "aadhaar_last4": body.aadhaar_last4,
+    if body.aadhaar_last4 and norm:
+        await collect({"aadhaar_last4": body.aadhaar_last4, "full_name_normalized": norm})
+    if body.aadhaar_last4 and body.dob:
+        await collect({"aadhaar_last4": body.aadhaar_last4, "dob": body.dob})
+    phone = normalize_phone(body.phone)
+    age = body.age
+    if age is None and body.dob:
+        age = age_from_dob(body.dob)
+    if norm and age is not None and phone:
+        await collect({
             "full_name_normalized": norm,
+            "age": age,
+            "phone_normalized": phone,
         })
-        if clash:
-            raise HTTPException(status_code=409, detail={
-                "code": "DUPLICATE_IN_CAMP",
-                "message": "Already registered in this camp",
-                "registration": ser_patient(clash),
-            })
-    return None
+    return hits
+
+
+async def _check_registration_duplicates(db, camp_id, body: RegisterBody, person: dict | None = None):
+    hits = await _duplicate_hits(db, camp_id, body, person)
+    return hits[0] if hits else None
+
+
+async def _assert_capacity(db, day):
+    limit = day.get("seat_limit") or 0
+    if limit <= 0:
+        return
+    n = await db.patients.count_documents({"camp_day_id": day["_id"]})
+    if n >= limit:
+        raise HTTPException(status_code=409, detail={
+            "code": "CAMP_DAY_FULL",
+            "message": "This camp day is full.",
+        })
+
+
+async def _overwrite_manual(db, target, body: RegisterBody, person, age):
+    norm = normalize_name(body.full_name)
+    if age is None and body.dob:
+        age = age_from_dob(body.dob)
+    updates = {
+        "full_name": body.full_name,
+        "full_name_normalized": norm,
+        "latin_display_name": body.latin_display_name,
+        "gender": body.gender,
+        "age": age,
+        "address": body.address,
+        "aadhaar_last4": body.aadhaar_last4,
+        "dob": body.dob,
+        "aadhaar_scanned": True,
+        "person_id": person["_id"] if person else None,
+        "manual_entry": False,
+        "manual_exception": None,
+    }
+    try:
+        await db.patients.update_one({"_id": target["_id"]}, {"$set": updates})
+    except DuplicateKeyError:
+        if person:
+            existing = await db.patients.find_one({"person_id": person["_id"], "camp_id": target["camp_id"]})
+            if existing:
+                raise _dup_409(existing)
+        raise
+    p = await db.patients.find_one({"_id": target["_id"]})
+    return ser_patient(p), False
 
 
 def _build_patient_document(
@@ -111,14 +183,7 @@ def _build_patient_document(
     is_self: bool,
 ) -> dict:
     norm = normalize_name(body.full_name)
-    manual = None
-    if body.manual_exception:
-        manual = {
-            "actor": str(actor_id) if actor_id else "self",
-            "reason": body.manual_reason,
-            "failed_scan_attempts": body.failed_scan_attempts,
-            "at": now_utc(),
-        }
+    is_manual = (body.manual_entry or body.manual_exception) and not body.aadhaar_scanned
 
     return {
         "person_id": person_id,
@@ -134,6 +199,7 @@ def _build_patient_document(
         "phone": phone,
         "phone_normalized": phone,
         "aadhaar_last4": body.aadhaar_last4,
+        "dob": body.dob,
         "aadhaar_scanned": body.aadhaar_scanned,
         "queue_status": "registered",
         "patient_qr": new_uuid(),
@@ -143,7 +209,8 @@ def _build_patient_document(
         "checked_in_by": None,
         "created_by": str(actor_id) if actor_id else None,
         "is_self_registered": is_self,
-        "manual_exception": manual,
+        "manual_entry": is_manual,
+        "manual_exception": True if is_manual else None,
         "registration_request_id": body.registration_request_id,
         "reminder_sms_sent_at": None,
         "created_at": now_utc(),
@@ -175,9 +242,29 @@ async def _create_registration(body: RegisterBody, actor_id, is_self: bool, requ
             "latin_display_name": body.latin_display_name,
         })
 
-    existing_dup = await _check_registration_duplicates(db, camp["_id"], body, person)
-    if existing_dup:
-        return ser_patient(existing_dup), False
+    hits = await _duplicate_hits(db, camp["_id"], body, person)
+    if body.aadhaar_scanned:
+        scanned_hits = [h for h in hits if _is_scanned_row(h)]
+        manual_hits = [h for h in hits if _is_manual(h) and not _is_scanned_row(h)]
+        if scanned_hits:
+            raise _dup_409(scanned_hits[0])
+        if len(manual_hits) > 1:
+            raise HTTPException(status_code=409, detail={
+                "code": "AMBIGUOUS_MANUAL_ENTRY",
+                "message": "Multiple Manual entries match this card",
+                "registrations": [ser_patient(h) for h in manual_hits],
+            })
+        if len(manual_hits) == 1:
+            if is_self:
+                raise _dup_409(manual_hits[0])
+            age = body.age
+            if age is None and body.dob:
+                age = age_from_dob(body.dob)
+            return await _overwrite_manual(db, manual_hits[0], body, person, age)
+    elif hits:
+        raise _dup_409(hits[0])
+
+    await _assert_capacity(db, day)
 
     reg_no = await next_seq("reg_no")
     age = body.age
@@ -198,14 +285,14 @@ async def _create_registration(body: RegisterBody, actor_id, is_self: bool, requ
     try:
         res = await db.patients.insert_one(doc)
     except DuplicateKeyError:
-        if person:
-            existing = await db.patients.find_one({"person_id": person["_id"], "camp_id": camp["_id"]})
-            if existing:
-                return ser_patient(existing), False
         if body.registration_request_id:
             existing = await db.patients.find_one({"registration_request_id": body.registration_request_id})
             if existing:
                 return ser_patient(existing), False
+        if person:
+            existing = await db.patients.find_one({"person_id": person["_id"], "camp_id": camp["_id"]})
+            if existing:
+                raise _dup_409(existing)
         raise
     doc["_id"] = res.inserted_id
     return ser_patient(doc), True
@@ -220,8 +307,6 @@ async def desk_register(body: RegisterBody, request: Request, actor: dict = Depe
     phone_norm = normalize_phone(body.phone)
     if not phone_norm or is_dummy_phone(phone_norm):
         raise HTTPException(status_code=400, detail="A valid 10-digit household mobile number is required")
-    if body.manual_exception and actor["role"] == "clinical_desk_operator":
-        raise HTTPException(status_code=403, detail="Not permitted")
     patient, created = await _create_registration(body, actor["_id"], False, request)
     return {"registration": patient, "created": created}
 

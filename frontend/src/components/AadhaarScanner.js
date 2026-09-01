@@ -10,7 +10,7 @@ import {
   AadhaarScannerStatus,
 } from "./aadhaar";
 
-export default function AadhaarScanner({ onScanned, disabled }) {
+export default function AadhaarScanner({ onScanned, onFailure, disabled }) {
   const [mode, setMode] = useState("idle");
   const fileRef = useRef(null);
 
@@ -25,7 +25,7 @@ export default function AadhaarScanner({ onScanned, disabled }) {
     busy,
     decode,
     scanFile,
-  } = useAadhaarDecode({ onScanned });
+  } = useAadhaarDecode({ onScanned, onFailure });
 
   const handleLock = useCallback(() => {
     setMode("idle");

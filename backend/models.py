@@ -54,6 +54,7 @@ class RegisterBody(BaseModel):
     registration_request_id: Optional[str] = None
     override_duplicate: bool = False
     is_self_registered: bool = False
+    manual_entry: bool = False
     manual_exception: bool = False
     manual_reason: Optional[str] = None
     failed_scan_attempts: int = 0
