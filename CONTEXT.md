@@ -105,7 +105,7 @@ Twenty seconds of live scan with no Detect at all. Counts the same as two Failur
 _Avoid_: scan timeout, camera failure, give up
 
 **Arrival**:
-The patient is physically at the camp on a camp day. Stamped by a desk Lock that matches their registration in this camp. Registration is a booking; Arrival is presence. A registration reaches Seen only through Arrival. Print Prescription is gated on Arrival, not on Registration.
+The patient is physically at the camp on a camp day. Stamped by a desk Lock that matches their registration in this camp, or by the registration that creates a walk-in. Registration is a booking; Arrival is presence. Stamped once: a second Lock does not re-stamp it or move the patient again. A registration reaches Seen only through Arrival. Print Prescription is gated on Arrival, not on Registration. The desk offers no way to check a patient in from a name or number lookup.
 _Avoid_: check-in, presence, attendance, walk-in (a walk-in registers and arrives in one action)
 
 **Aadhaar overwrite**:
@@ -125,8 +125,12 @@ The headline on the unauthenticated login page for the active camp: total seats 
 _Avoid_: live feed, registration ticker, public patient list
 
 **Camp-day capacity**:
-Every camp day has a seat limit greater than zero; there is no unlimited day. The limit refuses a new registration on that day once registrations reach it. It does not refuse an Arrival: a patient booked for one camp day who arrives on another is checked in on the day they came, and that day's arrivals may exceed its limit. Camp-day capacity is a planning number for footfall. OT Schedule Day and Specs collection day seats are surgical and workshop capacity, and those stay a hard block.
+Every camp day has a seat limit greater than zero; there is no unlimited day. The limit counts bookings, which Arrival never moves: a patient booked for one camp day who arrives on another is checked in on the day they came without consuming a seat there or releasing one on the day they left. Camp-day capacity is a planning number for footfall. OT Schedule Day and Specs collection day seats are surgical and workshop capacity, and those stay a hard block.
 _Avoid_: seats_taken (that counter is OT and Spectacles to be made only), unlimited day
+
+**Camp records export**:
+The single admin-only CSV for a camp, one row per patient including no-shows. Carries identity (name, age, gender, household phone, address, Aadhaar last-4, reg_no), the Manual entry mark, the registration / arrival / seen timestamps, diagnosis, BP and blood sugar, each eye's power, the status of all four Fulfilment lines, and the assigned clinical day and venue for each deferral. It is a wide file of patient data and is not downloadable by a volunteer.
+_Avoid_: camp records, clinical audit, the reports (there is exactly one export)
 
 Every SMS below is Devanagari, per patient, and carries that patient's reg_no. A household number covering three patients receives three messages. Each is its own DLT template.
 

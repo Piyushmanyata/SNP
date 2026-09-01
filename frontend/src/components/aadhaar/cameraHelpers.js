@@ -49,7 +49,7 @@ export function createStillCapture(stream) {
   if (!track || typeof window === "undefined" || !window.ImageCapture) return null;
   try {
     const capture = new window.ImageCapture(track);
-    if (typeof capture.grabFrame !== "function") return null;
+    if (typeof capture.takePhoto !== "function") return null;
     return capture;
   } catch (e) {
     logger.warn("Still capture unavailable on this track:", e);

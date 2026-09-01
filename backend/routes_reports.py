@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 from bson import ObjectId
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from db import get_db
 from helpers import iso
 from security import require_admin, require_staff, require_any
@@ -77,12 +78,16 @@ EXPORT_COLUMNS = [
 ]
 
 
+SPECS_FIXED_COLUMN = {"fulfilled": "issued", "not_required": "not_required"}
+SPECS_MADE_COLUMN = {"deferred": "deferred", "not_required": "not_required"}
+
+
 def _line_statuses(fulfilments: dict) -> List[str]:
     specs = fulfilments.get("specs", {}).get("status")
     return [
         fulfilments.get("medicine", {}).get("status", ""),
-        "issued" if specs == "fulfilled" else "",
-        "deferred" if specs == "deferred" else "",
+        SPECS_FIXED_COLUMN.get(specs, ""),
+        SPECS_MADE_COLUMN.get(specs, ""),
         fulfilments.get("ot", {}).get("status", ""),
     ]
 
@@ -94,7 +99,7 @@ def _diagnosis(t: dict) -> str:
     return ";".join(parts)
 
 
-async def _export_row(db: Any, p: dict, day_dates: dict) -> List[Any]:
+async def _export_row(db: AsyncIOMotorDatabase, p: dict, day_dates: dict) -> List[Any]:
     t = await db.transcriptions.find_one({"patient_id": p["_id"]}) or {}
     fulfilments = {}
     if t:

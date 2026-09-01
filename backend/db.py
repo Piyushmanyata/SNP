@@ -84,8 +84,6 @@ async def init_indexes() -> None:
     await db.specs_collection_days.create_index(
         [("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True
     )
-    # Rows written before the per-patient grain have no patient_id; excluding them
-    # keeps the unique index buildable on an existing database.
     if should_drop_ledger_index(await db.reminder_ledger.index_information()):
         await db.reminder_ledger.drop_index(LEDGER_INDEX_NAME)
     await db.reminder_ledger.create_index(

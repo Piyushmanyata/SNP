@@ -93,7 +93,14 @@ async def _active_camp(db: AsyncIOMotorDatabase) -> dict:
 
 async def _stamp_arrival(db: AsyncIOMotorDatabase, patient: dict, actor_id: str) -> Dict[str, Any]:
     """Arrival is a presence. It never consults camp-day capacity."""
-    updates: Dict[str, Any] = {}
+    if patient.get("arrived_at"):
+        return patient
+    updates: Dict[str, Any] = {
+        "arrived_at": now_utc(),
+        "arrived_by": actor_id,
+        "queue_status": "arrived" if patient.get("queue_status") == "registered"
+                        else patient.get("queue_status"),
+    }
     today_day = await db.camp_days.find_one(
         {"camp_id": patient["camp_id"], "day_date": today_ist_str()}
     )
@@ -101,13 +108,7 @@ async def _stamp_arrival(db: AsyncIOMotorDatabase, patient: dict, actor_id: str)
         booked = await db.camp_days.find_one({"_id": patient["camp_day_id"]})
         updates["camp_day_id"] = today_day["_id"]
         updates["camp_day_changed_from"] = booked["day_date"] if booked else None
-    if not patient.get("arrived_at"):
-        updates["arrived_at"] = now_utc()
-        updates["arrived_by"] = actor_id
-        if patient.get("queue_status") == "registered":
-            updates["queue_status"] = "arrived"
-    if updates:
-        await db.patients.update_one({"_id": patient["_id"]}, {"$set": updates})
+    await db.patients.update_one({"_id": patient["_id"]}, {"$set": updates})
     return await db.patients.find_one({"_id": patient["_id"]})
 
 

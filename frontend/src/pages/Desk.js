@@ -120,7 +120,6 @@ export default function Desk() {
 
   const markSeen = useCallback((reg) => act("/desk/mark-seen", reg), [act]);
   const undoSeen = useCallback((reg) => act("/desk/undo-seen", reg), [act]);
-  const arrive = useCallback((reg) => act("/desk/arrive", reg), [act]);
   const print = useCallback((reg) => navigate(`/print/prescription/${reg.id}`), [navigate]);
 
   const openWalkIn = useCallback(() => { setWalkIn(true); setShowReg(true); }, []);
@@ -175,7 +174,7 @@ export default function Desk() {
 
         {found && (
           <div className="mt-4" data-testid="desk-found-patient">
-            <PatientRow p={found} onPrint={print} onMarkSeen={markSeen} onUndo={undoSeen} onArrive={arrive} />
+            <PatientRow p={found} onPrint={print} onMarkSeen={markSeen} onUndo={undoSeen} />
           </div>
         )}
 
@@ -187,7 +186,7 @@ export default function Desk() {
             </div>
             <div className="space-y-2" data-testid="desk-search-results">
               {searchResults.map((p) => (
-                <PatientRow key={p.id} p={p} onPrint={print} onMarkSeen={markSeen} onUndo={undoSeen} onArrive={arrive} />
+                <PatientRow key={p.id} p={p} onPrint={print} onMarkSeen={markSeen} onUndo={undoSeen} />
               ))}
             </div>
           </div>
@@ -217,7 +216,7 @@ export default function Desk() {
   );
 }
 
-export function PatientRow({ p, onPrint, onMarkSeen, onUndo, onArrive }) {
+export function PatientRow({ p, onPrint, onMarkSeen, onUndo }) {
   return (
     <div
       id={`row-${p.id}`}
@@ -233,12 +232,13 @@ export function PatientRow({ p, onPrint, onMarkSeen, onUndo, onArrive }) {
       </div>
       <StatusBadge status={p.queue_status} />
       {p.printed_at && <Badge tone="indigo">Printed</Badge>}
+      {!p.arrived_at && (
+        <span className="text-xs text-slate-500" data-testid={`awaiting-scan-${p.reg_no}`}>
+          Scan their card at the door to check in
+        </span>
+      )}
       <div className="flex gap-1.5 ml-auto">
-        {!p.arrived_at ? (
-          <Button size="sm" onClick={() => onArrive(p)} data-testid={`arrive-button-${p.reg_no}`}>
-            <CheckCircle2 className="w-4 h-4" /> Check in
-          </Button>
-        ) : (
+        {p.arrived_at && (
           <>
             <Button size="sm" variant="outline" onClick={() => onPrint(p)} data-testid={`print-button-${p.reg_no}`}>
               <Printer className="w-4 h-4" /> Print
@@ -314,7 +314,6 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
     }
   }, []);
 
-  // A Scan stall counts the same as two Failures.
   const onScanStall = useCallback(() => setFailures(2), []);
 
   const showForm = scanned || failures >= 2;

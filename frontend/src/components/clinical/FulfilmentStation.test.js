@@ -80,18 +80,42 @@ describe("Fulfilment lines", () => {
     expect(container.textContent).toContain("Spectacles to be made");
   });
 
-  test("a specs line cannot be recorded until both eyes have a power", async () => {
+  test("issuing specs is blocked until both eyes have a power", async () => {
     await renderSection({
       transcription: { id: "tx-1", specs_measurements: { r_sph: "-1.00" } },
       registration: { id: "reg-1" },
       fulfilments: [],
     });
 
+    const status = container.querySelector('[data-testid="station-specs_fixed-status"]');
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set;
+      setter.call(status, "fulfilled");
+      status.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
     expect(container.querySelector('[data-testid="station-specs_fixed-needs-power"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="station-specs_fixed-save"]').disabled).toBe(true);
     expect(container.querySelector('[data-testid="station-specs_made-save"]').disabled).toBe(true);
-    expect(container.querySelector('[data-testid="station-medicine-save"]').disabled).toBe(true);
     expect(container.querySelector('[data-testid="station-medicine-needs-power"]')).toBeNull();
+  });
+
+  test("a patient who needs no glasses is recordable without a power", async () => {
+    await renderSection({
+      transcription: { id: "tx-1" },
+      registration: { id: "reg-1" },
+      fulfilments: [],
+    });
+
+    const status = container.querySelector('[data-testid="station-specs_fixed-status"]');
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set;
+      setter.call(status, "not_required");
+      status.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+
+    expect(container.querySelector('[data-testid="station-specs_fixed-needs-power"]')).toBeNull();
+    expect(container.querySelector('[data-testid="station-specs_fixed-save"]').disabled).toBe(false);
   });
 
   test("recording Fixed-power specs posts a fulfilled specs line", async () => {

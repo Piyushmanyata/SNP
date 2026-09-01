@@ -148,7 +148,7 @@ async def _assert_capacity(db: AsyncIOMotorDatabase, day: dict) -> None:
     limit = day.get("seat_limit") or 0
     if limit <= 0:
         return
-    n = await db.patients.count_documents({"camp_day_id": day["_id"]})
+    n = await db.patients.count_documents({"booked_camp_day_id": day["_id"]})
     if n >= limit:
         raise HTTPException(status_code=409, detail={
             "code": "CAMP_DAY_FULL",
@@ -210,6 +210,7 @@ def _build_patient_document(
         "person_id": person_id,
         "camp_id": camp_id,
         "camp_day_id": camp_day_id,
+        "booked_camp_day_id": camp_day_id,
         "reg_no": reg_no,
         "full_name": body.full_name,
         "full_name_normalized": norm,
@@ -408,6 +409,13 @@ async def name_search(q: str, actor: dict = Depends(require_any)) -> Dict[str, A
     camp = await db.camps.find_one({"is_active": True})
     if not camp:
         return {"results": []}
+    phone = normalize_phone(q)
+    if phone and len(phone) == 10 and q.strip().replace(" ", "").isdigit():
+        results = await db.patients.find({
+            "camp_id": camp["_id"],
+            "phone_normalized": phone,
+        }).limit(25).to_list(25)
+        return {"results": [ser_patient(r) for r in results]}
     norm = normalize_name(q)
     if not norm:
         return {"results": []}

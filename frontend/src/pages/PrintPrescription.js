@@ -86,7 +86,6 @@ export function PrescriptionSheet({ rx, logos = [], navigate, preview }) {
       )}
 
       <div className="print-a4 bg-white mx-auto shadow-lg" style={{ width: "210mm", minHeight: preview ? "auto" : "297mm", padding: "16mm" }} data-testid="a4-prescription-sheet">
-        {/* Letterhead */}
         <div className="flex items-start justify-between border-b-2 border-slate-900 pb-4 gap-4">
           <div className="flex items-center gap-3">
             {logos.map((lg, i) => (
@@ -106,7 +105,6 @@ export function PrescriptionSheet({ rx, logos = [], navigate, preview }) {
           </div>
         </div>
 
-        {/* Dynamic blocks */}
         <div className="mt-5 space-y-5">
           {RX_BLOCKS.map((b) => {
             if (b.type === "identity") {

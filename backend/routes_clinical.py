@@ -2,7 +2,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from pymongo.errors import DuplicateKeyError
 from bson import ObjectId
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
 from db import get_db
 from models import TranscriptionBody, FulfilmentBody, CorrectionBody, OtScheduleBody, SpecsScheduleBody
 from helpers import now_utc, iso, DIAGNOSIS_OPTIONS
@@ -200,7 +200,7 @@ def _validate_fulfilment_matrix(item_type: str, status: str) -> None:
         raise HTTPException(status_code=400, detail="Invalid fulfilment item/status")
 
 
-async def _consume_seat(collection: Any, day_id: str) -> Optional[dict]:
+async def _consume_seat(collection: AsyncIOMotorCollection, day_id: str) -> Optional[dict]:
     return await collection.find_one_and_update(
         {"_id": ObjectId(day_id),
          "$expr": {"$lt": ["$seats_taken", "$seat_limit"]}},
@@ -233,7 +233,7 @@ DEFERRAL_CONFIG = {
 }
 
 
-async def _refuse_full(collection: Any, day: dict, cfg: dict) -> None:
+async def _refuse_full(collection: AsyncIOMotorCollection, day: dict, cfg: dict) -> None:
     """A single full day is a retry; every day of the type full is an admin problem."""
     free = await collection.count_documents({
         "camp_id": day.get("camp_id"),
@@ -247,8 +247,8 @@ async def _refuse_full(collection: Any, day: dict, cfg: dict) -> None:
     raise HTTPException(status_code=409, detail=cfg["full_err"])
 
 
-def _assert_specs_measurements(item_type: str, transcription: dict) -> None:
-    if item_type != "specs":
+def _assert_specs_measurements(item_type: str, status: str, transcription: dict) -> None:
+    if item_type != "specs" or status not in ("fulfilled", "deferred"):
         return
     m = transcription.get("specs_measurements") or {}
     if not (str(m.get("r_sph") or "").strip() and str(m.get("l_sph") or "").strip()):
@@ -347,7 +347,7 @@ async def record_fulfilment(body: FulfilmentBody, actor: dict = Depends(require_
         })
 
     _validate_fulfilment_matrix(body.item_type, body.status)
-    _assert_specs_measurements(body.item_type, t)
+    _assert_specs_measurements(body.item_type, body.status, t)
     prior = await db.fulfilments.find_one({"transcription_id": t["_id"], "item_type": body.item_type})
     if body.status != "deferred":
         await db.deferred_slips.update_many(

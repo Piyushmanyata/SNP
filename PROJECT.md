@@ -32,9 +32,9 @@ The application stack consists of:
 | 2 | Registration confirmation and Token SMS | Best-effort sends on the registration create path and on OT/Specs deferral | M1 | DONE |
 | 3 | Arrival as a distinct state | `arrived_at` on the registration; `registered -> arrived -> seen`; Print and Seen gated on Arrival | M2 | DONE |
 | 4 | Camp-day scan resolution | `POST /api/desk/scan` returns arrived / mismatch_review / ambiguous / no_match; `POST /api/desk/scan/confirm` applies the overwrite and checks in | M2 | DONE |
-| 5 | Wrong-day check-in | Arrival moves the registration to the day they came and records the change; capacity never blocks Arrival | M2 | DONE |
+| 5 | Wrong-day check-in | Arrival moves the registration to the day they came and records the change, without consuming or releasing a camp-day seat | M2 | DONE |
 | 6 | Camp-day capacity and public occupancy | Seat limit must be > 0; public endpoint returns camp totals; login screen leads with registrations / seats | M3 | DONE |
-| 7 | Four Fulfilment lines | Medicine, Fixed-power specs, Spectacles to be made, OT; measurements required on both specs lines; day picker pre-selects the earliest free day | M3 | DONE |
+| 7 | Four Fulfilment lines | Medicine, Fixed-power specs, Spectacles to be made, OT; a power for both eyes is required to issue or defer specs; day picker pre-selects the earliest free day | M3 | DONE |
 | 8 | Desk patient list removed | `GET /api/patients` removed; Seen is reached through QR, `reg_no` or name lookup | M3 | DONE |
 | 9 | Single wide export | One admin-only CSV, one row per patient, no-shows included | M4 | DONE |
 | 10 | Prescription lockdown | Layout constants in the print component; only sponsor logos editable; draft/publish/restore removed | M4 | DONE |
@@ -60,7 +60,9 @@ The application stack consists of:
 - `POST /api/desk/scan/confirm {patient_id, payload}` → applies the Aadhaar overwrite (name, age, gender,
   DOB, last-4, address) and stamps Arrival in one operation, preserving phone, camp day, `reg_no` and
   lifecycle timestamps.
-- `POST /api/desk/arrive/{patient_id}` → stamps Arrival for a walk-in or a lookup match.
+- `POST /api/desk/arrive/{patient_id}` → stamps Arrival for a walk-in, immediately after the registration
+  that the door scan led to. The desk offers no other route: Arrival is never reachable from a lookup.
+  Arrival is stamped once; a later scan of the same card neither re-stamps it nor moves the patient again.
 
 ### SMS
 - `sms.send_patient_sms(db, patient, message_type, event_date, venue) -> bool` — never raises; records one
@@ -69,8 +71,9 @@ The application stack consists of:
   template taking `reg_no`, `date` and `venue`.
 
 ### Fulfilment
-- `POST /api/clinical/fulfilment` refuses a `specs` line with 400 `SPECS_MEASUREMENTS_REQUIRED` unless the
-  transcription carries a power for both eyes.
+- `POST /api/clinical/fulfilment` refuses a `specs` line recorded as `fulfilled` or `deferred` with 400
+  `SPECS_MEASUREMENTS_REQUIRED` unless the transcription carries a power for both eyes. `not_required`
+  needs no power.
 - A deferral to a full day is 409 `full or not found`; when no day of that type has a free seat it is
   409 `NO_CLINICAL_DAY_AVAILABLE` naming the admin action.
 
@@ -82,6 +85,10 @@ The application stack consists of:
 - `GET /api/exports/camp-records?camp_id=` (admin) → one CSV row per patient of the camp, including
   no-shows, with the header fixed by `EXPORT_COLUMNS` in `backend/routes_reports.py`.
 
+### Search
+- `GET /api/patients/search?q=` matches a 10-digit household phone exactly, otherwise a name prefix,
+  scoped to the active camp.
+
 ## Code Layout
 - `backend/*.py`
 - `frontend/src/**/*.js`
@@ -92,3 +99,6 @@ The application stack consists of:
   ids are set, so the app runs without them.
 - A domain and certificate for `APP_DOMAIN`. Live scan cannot be tested on a phone until HTTPS is in place.
 - Camp days created before this change with a zero seat limit need a one-time backfill to a real number.
+- Registrations created before this change have no `booked_camp_day_id`. Camp-day capacity counts that
+  field, so those rows do not count toward a day's limit until backfilled:
+  `db.patients.updateMany({booked_camp_day_id: {$exists: false}}, [{$set: {booked_camp_day_id: "$camp_day_id"}}])`.

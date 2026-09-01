@@ -95,8 +95,6 @@ export function FulfilmentStation({
     return found && line.statuses.includes(found.status) ? found : null;
   }, [data, line]);
   const slip = data?.slips?.find((s) => s.item_type === line.itemType && s.active);
-  const measurementsMissing = line.needsMeasurements && !hasMeasurements(data?.transcription);
-
   const [status, setStatus] = useState(existing?.status || "");
   const [dayId, setDayId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -111,6 +109,8 @@ export function FulfilmentStation({
   }, [days, existing, line.dayField]);
 
   const needsDay = Boolean(line.dayField) && status === "deferred";
+  const recordsPower = line.needsMeasurements && (status === "fulfilled" || status === "deferred");
+  const measurementsMissing = recordsPower && !hasMeasurements(data?.transcription);
 
   const save = useCallback(async () => {
     if (!data?.transcription?.id) return;

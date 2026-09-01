@@ -542,7 +542,6 @@ class TestRegistrationDecomposedAndInvariants:
             assert exc.value.status_code == 409
             assert exc.value.detail["code"] == "DUPLICATE_IN_CAMP"
 
-            body.override_duplicate = True
             with pytest.raises(HTTPException) as exc2:
                 await _create_registration(body, actor_id=ObjectId(), is_self=False, request=None)
             assert exc2.value.status_code == 409

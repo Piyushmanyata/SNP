@@ -377,7 +377,7 @@ describe("Desk page", () => {
     expect(api.post).toHaveBeenCalledWith("/desk/mark-seen/p-1");
   });
 
-  test("a booking that has not arrived offers Check in, not Print", async () => {
+  test("a booking that has not arrived cannot be checked in from a lookup", async () => {
     api.post.mockResolvedValue({
       data: { registration: { ...ARRIVED, queue_status: "registered", arrived_at: null } },
     });
@@ -389,9 +389,11 @@ describe("Desk page", () => {
       container.querySelector('[data-testid="desk-lookup-button"]').click();
     });
 
-    expect(container.querySelector('[data-testid="arrive-button-101"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="awaiting-scan-101"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="arrive-button-101"]')).toBeNull();
     expect(container.querySelector('[data-testid="print-button-101"]')).toBeNull();
     expect(container.querySelector('[data-testid="mark-seen-button-101"]')).toBeNull();
+    expect(api.post).not.toHaveBeenCalledWith("/desk/arrive/p-1");
   });
 
   test("two Failures reveal the typed form and there is no Register anyway", async () => {

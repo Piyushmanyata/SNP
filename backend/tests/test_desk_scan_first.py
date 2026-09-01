@@ -161,7 +161,7 @@ class TestDuplicateInCamp:
         assert b.json()["detail"]["code"] == "DUPLICATE_IN_CAMP"
         assert b.json()["detail"]["registration"]["reg_no"] == reg_no
 
-    def test_override_duplicate_does_not_create_second_reg_no(self, admin):
+    def test_a_duplicate_cannot_be_overridden(self, admin):
         camp_id = _camp(admin, "dupoverride")
         day = _day(admin, camp_id, TODAY_IST)
         a = _reg(admin, day["id"], full_name=f"TEST Override {TAG}", age=29,

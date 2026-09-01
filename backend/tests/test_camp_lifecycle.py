@@ -27,7 +27,7 @@ import sms
 from models import FulfilmentBody, RegisterBody, ScanBody, ScanConfirmBody
 from routes_clinical import record_fulfilment
 from routes_desk import arrive, mark_seen, print_prescription, scan, scan_confirm
-from routes_registration import desk_register
+from routes_registration import desk_register, name_search
 from test_adversarial_challenger import MockDB, setup_mock_db
 
 TODAY = "2026-09-01"
@@ -304,6 +304,47 @@ class TestScanResolution:
             assert out["registration"]["reg_no"] == reg["reg_no"]
         asyncio.run(run())
 
+    def test_a_wrong_day_arrival_moves_no_camp_day_seat(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            _camp_id, (today_id, other_id) = await _seed_camp(mock_db, days=(TODAY, OTHER_DAY))
+            await mock_db.camp_days.update_one({"_id": today_id}, {"$set": {"seat_limit": 1}})
+            await _register(today_id, full_name="Booked Today", phone="9876500007",
+                            manual_entry=True)
+            await _register(
+                other_id, full_name="Sunita Devi", gender="F", dob="1975-06-14",
+                aadhaar_last4="1234", aadhaar_scanned=True,
+            )
+
+            out = await scan(ScanBody(payload=CARD), actor=ACTOR)
+            assert out["outcome"] == "arrived"
+            assert out["registration"]["camp_day_id"] == str(today_id)
+
+            # The booking that was already on today still owns the only seat.
+            with pytest.raises(HTTPException) as exc:
+                await _register(today_id, full_name="Third Person", phone="9876500008",
+                                manual_entry=True)
+            assert exc.value.detail["code"] == "CAMP_DAY_FULL"
+            # And the day they left has not gained a seat back.
+            assert await mock_db.patients.count_documents({"booked_camp_day_id": other_id}) == 1
+        asyncio.run(run())
+
+    def test_scanning_an_arrived_patient_again_does_not_move_them(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            _camp_id, (today_id, other_id) = await _seed_camp(mock_db, days=(TODAY, OTHER_DAY))
+            await _register(
+                other_id, full_name="Sunita Devi", gender="F", dob="1975-06-14",
+                aadhaar_last4="1234", aadhaar_scanned=True,
+            )
+            first = await scan(ScanBody(payload=CARD), actor=ACTOR)
+            second = await scan(ScanBody(payload=CARD), actor=ACTOR)
+
+            assert second["registration"]["arrived_at"] == first["registration"]["arrived_at"]
+            assert second["registration"]["camp_day_changed_from"] == OTHER_DAY
+            assert second["registration"]["camp_day_id"] == str(today_id)
+        asyncio.run(run())
+
     def test_camp_day_capacity_refuses_registration_but_not_arrival(self, monkeypatch):
         async def run():
             mock_db = _mock(monkeypatch)
@@ -430,6 +471,16 @@ class TestFulfilmentLines:
             assert sent == []
         asyncio.run(run())
 
+    def test_a_patient_who_needs_no_glasses_needs_no_power(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            _camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db)
+            body = FulfilmentBody(transcription_id=str(trans_id), item_type="specs",
+                                  status="not_required")
+            out = await record_fulfilment(body, actor=ACTOR)
+            assert out["fulfilment"]["status"] == "not_required"
+        asyncio.run(run())
+
     def test_medicine_is_unaffected_by_the_measurement_rule(self, monkeypatch):
         async def run():
             mock_db = _mock(monkeypatch)
@@ -515,3 +566,15 @@ class TestFulfilmentLines:
 
 def test_mock_db_is_isolated_per_test():
     assert isinstance(MockDB(), MockDB)
+
+
+class TestFindingAnExistingBooking:
+    def test_a_no_match_scan_can_be_followed_by_a_phone_search(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            _camp_id, (day_id,) = await _seed_camp(mock_db)
+            reg = await _register(day_id, full_name="Sunita Devi", phone="9876500001",
+                                  manual_entry=True)
+            out = await name_search("9876500001", actor=ACTOR)
+            assert [r["reg_no"] for r in out["results"]] == [reg["reg_no"]]
+        asyncio.run(run())

@@ -118,7 +118,7 @@ function Occupancy({ occupancy, compact }) {
       <p className={`mt-2 text-sm ${compact ? "text-slate-600" : "text-slate-400"}`}>
         registered against {seats} seats · {remaining} left
       </p>
-      <p className={`mt-1 text-xs ${compact ? "text-slate-500" : "text-slate-500"}`}>
+      <p className="mt-1 text-xs text-slate-500">
         {occupancy.camp.venue}
       </p>
     </div>

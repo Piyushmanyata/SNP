@@ -89,8 +89,10 @@ export function useAadhaarCamera({
     const video = videoRef.current;
     if (region === "full" && stillCaptureRef.current) {
       try {
-        const bitmap = await stillCaptureRef.current.grabFrame();
+        const blob = await stillCaptureRef.current.takePhoto();
+        const bitmap = await createImageBitmap(blob);
         const imageData = grab.bitmapToImageData(bitmap);
+        if (bitmap.close) bitmap.close();
         if (imageData) return imageData;
       } catch (e) {
         logger.warn("Still capture failed, falling back to preview frame:", e);

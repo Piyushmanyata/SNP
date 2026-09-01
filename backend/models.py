@@ -52,7 +52,6 @@ class RegisterBody(BaseModel):
     latin_display_name: Optional[str] = None
     camp_day_id: str
     registration_request_id: Optional[str] = None
-    override_duplicate: bool = False
     is_self_registered: bool = False
     manual_entry: bool = False
     manual_exception: bool = False
