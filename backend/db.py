@@ -35,6 +35,7 @@ TRANSCRIPTION_PATIENT_INDEX = {"keys": "patient_id", "unique": True}
 
 LEDGER_INDEX_NAME = "patient_id_1_message_type_1_event_date_1"
 LEDGER_PARTIAL_FILTER = {"patient_id": {"$exists": True}}
+HOUSEHOLD_LEDGER_INDEX_NAME = "number_1_reminder_type_1_event_date_1_send_date_1"
 
 
 def should_drop_person_camp_index(index_info: dict) -> bool:
@@ -45,6 +46,10 @@ def should_drop_person_camp_index(index_info: dict) -> bool:
 def should_drop_ledger_index(index_info: dict) -> bool:
     old = index_info.get(LEDGER_INDEX_NAME)
     return bool(old) and old.get("partialFilterExpression") != LEDGER_PARTIAL_FILTER
+
+
+def should_drop_household_ledger_index(index_info: dict) -> bool:
+    return HOUSEHOLD_LEDGER_INDEX_NAME in index_info
 
 
 async def init_indexes() -> None:
@@ -84,7 +89,10 @@ async def init_indexes() -> None:
     await db.specs_collection_days.create_index(
         [("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True
     )
-    if should_drop_ledger_index(await db.reminder_ledger.index_information()):
+    ledger_indexes = await db.reminder_ledger.index_information()
+    if should_drop_household_ledger_index(ledger_indexes):
+        await db.reminder_ledger.drop_index(HOUSEHOLD_LEDGER_INDEX_NAME)
+    if should_drop_ledger_index(ledger_indexes):
         await db.reminder_ledger.drop_index(LEDGER_INDEX_NAME)
     await db.reminder_ledger.create_index(
         [
