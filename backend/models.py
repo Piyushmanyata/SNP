@@ -27,7 +27,7 @@ class CampBody(BaseModel):
 class CampDayBody(BaseModel):
     camp_id: str
     day_date: str
-    seat_limit: int = 0
+    seat_limit: int = Field(gt=0)
 
 
 class PrintWindowBody(BaseModel):
@@ -52,7 +52,6 @@ class RegisterBody(BaseModel):
     latin_display_name: Optional[str] = None
     camp_day_id: str
     registration_request_id: Optional[str] = None
-    override_duplicate: bool = False
     is_self_registered: bool = False
     manual_entry: bool = False
     manual_exception: bool = False
@@ -68,6 +67,15 @@ class DuplicateCheckBody(BaseModel):
 # ---- desk ----
 class QrLookupBody(BaseModel):
     value: str  # patient qr uuid, snp:{uuid}, /p/{uuid}, or reg_no
+
+
+class ScanBody(BaseModel):
+    payload: str  # Aadhaar Secure QR payload
+
+
+class ScanConfirmBody(BaseModel):
+    patient_id: str
+    payload: str
 
 
 # ---- clinical ----

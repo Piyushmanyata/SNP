@@ -8,9 +8,12 @@ if str(backend_dir) not in sys.path:
 from pymongo import ASCENDING
 
 from db import (
+    LEDGER_INDEX_NAME,
+    LEDGER_PARTIAL_FILTER,
     PERSON_CAMP_INDEX,
     PERSON_CAMP_INDEX_NAME,
     TRANSCRIPTION_PATIENT_INDEX,
+    should_drop_ledger_index,
     should_drop_person_camp_index,
 )
 
@@ -35,3 +38,13 @@ def test_non_unique_person_camp_index_is_dropped():
         PERSON_CAMP_INDEX_NAME: {"unique": True, "key": [("person_id", 1), ("camp_id", 1)]},
     })
     assert not should_drop_person_camp_index({})
+
+
+def test_ledger_index_from_the_household_grain_is_dropped_and_rebuilt():
+    assert LEDGER_PARTIAL_FILTER == {"patient_id": {"$exists": True}}
+    # An index built before the partial filter existed conflicts on name, so it must go.
+    assert should_drop_ledger_index({LEDGER_INDEX_NAME: {"unique": True}})
+    assert not should_drop_ledger_index({
+        LEDGER_INDEX_NAME: {"unique": True, "partialFilterExpression": LEDGER_PARTIAL_FILTER},
+    })
+    assert not should_drop_ledger_index({})

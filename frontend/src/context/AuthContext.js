@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from "react";
 import api from "../lib/api";
+import logger from "../lib/logger";
 
 const AuthContext = createContext(null);
 
@@ -25,7 +26,7 @@ export function AuthProvider({ children }) {
     try {
       await api.post("/auth/logout");
     } catch (e) {
-      console.warn("Logout request failed:", e);
+      logger.warn("Logout request failed:", e);
     }
     setUser(false);
   }, []);

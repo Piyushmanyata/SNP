@@ -85,6 +85,7 @@ export function Badge({ tone = "slate", children, className = "" }) {
 
 export function StatusBadge({ status }) {
   if (status === "seen") return <Badge tone="emerald">Seen</Badge>;
+  if (status === "arrived") return <Badge tone="indigo">Arrived</Badge>;
   return <Badge tone="amber">Registered</Badge>;
 }
 

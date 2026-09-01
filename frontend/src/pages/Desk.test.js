@@ -27,22 +27,27 @@ jest.mock("../components/Layout", () => {
   };
 });
 
+const CARD_PAYLOAD = "AADHAAR|Aadhaar Scanned User|M|1984-05-12|8888|10 Downing St, Kolkata";
+
 jest.mock("../components/AadhaarScanner", () => {
-  return function MockAadhaarScanner({ onScanned, onFailure }) {
+  return function MockAadhaarScanner({ onScanned, onFailure, onScanStall }) {
     return (
       <div data-testid="mock-aadhaar-scanner">
         <button
           type="button"
           data-testid="mock-scan-trigger"
           onClick={() =>
-            onScanned({
-              full_name: "Aadhaar Scanned User",
-              age: 42,
-              gender: "M",
-              address: "10 Downing St, Kolkata",
-              aadhaar_last4: "8888",
-              dob: "1984-05-12",
-            })
+            onScanned(
+              {
+                full_name: "Aadhaar Scanned User",
+                age: 42,
+                gender: "M",
+                address: "10 Downing St, Kolkata",
+                aadhaar_last4: "8888",
+                dob: "1984-05-12",
+              },
+              "AADHAAR|Aadhaar Scanned User|M|1984-05-12|8888|10 Downing St, Kolkata"
+            )
           }
         >
           Simulate Scan
@@ -54,13 +59,47 @@ jest.mock("../components/AadhaarScanner", () => {
         >
           Simulate Failure
         </button>
+        <button
+          type="button"
+          data-testid="mock-stall-trigger"
+          onClick={() => onScanStall && onScanStall()}
+        >
+          Simulate Scan stall
+        </button>
       </div>
     );
   };
 });
 
+const ARRIVED = {
+  id: "p-1",
+  reg_no: "101",
+  full_name: "Aadhaar Scanned User",
+  gender_label: "Male",
+  age: 42,
+  phone: "9876543210",
+  queue_status: "arrived",
+  arrived_at: "2026-09-01T04:00:00Z",
+  printed_at: null,
+  camp_day_changed_from: null,
+};
+
 let container = null;
 let root = null;
+
+function deskScanner() {
+  return container.querySelectorAll('[data-testid="mock-scan-trigger"]')[0];
+}
+
+function modalScanner(testid) {
+  return [...document.body.querySelectorAll(`[data-testid="${testid}"]`)].pop();
+}
+
+function setInput(el, value) {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+  setter.call(el, value);
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+}
 
 beforeEach(() => {
   window.HTMLElement.prototype.scrollIntoView = jest.fn();
@@ -71,36 +110,7 @@ beforeEach(() => {
 
   api.get.mockImplementation((url) => {
     if (url === "/kpis") {
-      return Promise.resolve({
-        data: { registered: 45, seen: 30, pending: 15 },
-      });
-    }
-    if (url === "/patients") {
-      return Promise.resolve({
-        data: {
-          patients: [
-            {
-              id: "p-1",
-              reg_no: "101",
-              full_name: "Anil Kapoor",
-              gender_label: "Male",
-              age: 50,
-              phone: "9876543210",
-              queue_status: "registered",
-              printed_at: "2026-08-27T10:00:00Z",
-              aadhaar_scanned: true,
-            },
-            {
-              id: "p-2",
-              reg_no: "102",
-              full_name: "Sunita Roy",
-              gender_label: "Female",
-              age: 35,
-              queue_status: "seen",
-            },
-          ],
-        },
-      });
+      return Promise.resolve({ data: { registered: 45, seen: 30, pending: 15 } });
     }
     if (url === "/camps/active") {
       return Promise.resolve({
@@ -125,391 +135,346 @@ afterEach(() => {
   container = null;
 });
 
-describe("Desk page component", () => {
-  test("renders KPI statistics and patient list with actions", async () => {
-    await act(async () => {
-      root.render(
-        <MemoryRouter>
-          <Desk />
-        </MemoryRouter>
-      );
-    });
-
-    const regStat = container.querySelector('[data-testid="kpi-registered-count"]');
-    const seenStat = container.querySelector('[data-testid="kpi-seen-count"]');
-    const pendingStat = container.querySelector('[data-testid="kpi-pending-count"]');
-
-    expect(regStat.textContent).toContain("45");
-    expect(seenStat.textContent).toContain("30");
-    expect(pendingStat.textContent).toContain("15");
-
-    const patientRow1 = container.querySelector('[data-testid="patient-row-101"]');
-    const patientRow2 = container.querySelector('[data-testid="patient-row-102"]');
-    expect(patientRow1).not.toBeNull();
-    expect(patientRow2).not.toBeNull();
-    expect(patientRow1.textContent).toContain("Anil Kapoor");
-
-    const markSeenBtn = container.querySelector('[data-testid="mark-seen-button-101"]');
-    const undoSeenBtn = container.querySelector('[data-testid="undo-seen-button-102"]');
-    expect(markSeenBtn).not.toBeNull();
-    expect(undoSeenBtn).not.toBeNull();
-    expect(markSeenBtn.disabled).toBe(false);
-  });
-
-  test("disables mark seen until the prescription is printed", async () => {
-    api.get.mockImplementation((url) => {
-      if (url === "/kpis") {
-        return Promise.resolve({ data: { registered: 1, seen: 0, pending: 1 } });
-      }
-      if (url === "/patients") {
-        return Promise.resolve({
-          data: {
-            patients: [
-              {
-                id: "p-unprinted",
-                reg_no: "201",
-                full_name: "Unprinted Patient",
-                gender_label: "Male",
-                age: 40,
-                queue_status: "registered",
-                printed_at: null,
-              },
-            ],
-          },
-        });
-      }
-      if (url === "/camps/active") {
-        return Promise.resolve({
-          data: {
-            camp: { id: "camp-1", name: "Howrah Eye Camp", venue: "Community Hall" },
-            days: [{ id: "day-1", day_date: "2026-08-27", is_today: true }],
-          },
-        });
-      }
-      return Promise.resolve({ data: {} });
-    });
-
-    await act(async () => {
-      root.render(
-        <MemoryRouter>
-          <Desk />
-        </MemoryRouter>
-      );
-    });
-
-    const markSeenBtn = container.querySelector('[data-testid="mark-seen-button-201"]');
-    expect(markSeenBtn).not.toBeNull();
-    expect(markSeenBtn.disabled).toBe(true);
-  });
-
-  test("handles lookup by Reg number and scrolls to patient row", async () => {
-    api.post.mockImplementation((url) => {
-      if (url === "/desk/lookup") {
-        return Promise.resolve({
-          data: {
-            registration: { id: "p-1", reg_no: "101", full_name: "Anil Kapoor" },
-          },
-        });
-      }
-      return Promise.resolve({ data: {} });
-    });
-
-    await act(async () => {
-      root.render(
-        <MemoryRouter>
-          <Desk />
-        </MemoryRouter>
-      );
-    });
-
-    const lookupInput = container.querySelector('[data-testid="desk-lookup-input"]');
-    act(() => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-      setter.call(lookupInput, "101");
-      lookupInput.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-
-    const lookupBtn = container.querySelector('[data-testid="desk-lookup-button"]');
-    await act(async () => {
-      lookupBtn.click();
-    });
-
-    expect(api.post).toHaveBeenCalledWith("/desk/lookup", { value: "101" });
-    expect(container.textContent).toContain("Found reg #101 — Anil Kapoor");
-  });
-
-  test("handles name search and clears results", async () => {
-    api.get.mockImplementation((url) => {
-      if (url.startsWith("/patients/search")) {
-        return Promise.resolve({
-          data: {
-            results: [
-              {
-                id: "p-10",
-                reg_no: "110",
-                full_name: "Search Result Patient",
-                gender_label: "Female",
-                age: 60,
-                queue_status: "registered",
-              },
-            ],
-          },
-        });
-      }
-      if (url === "/kpis") return Promise.resolve({ data: { registered: 0, seen: 0, pending: 0 } });
-      if (url === "/patients") return Promise.resolve({ data: { patients: [] } });
-      if (url === "/camps/active") return Promise.resolve({ data: { camp: { name: "Camp" }, days: [] } });
-      return Promise.resolve({ data: {} });
-    });
-
-    await act(async () => {
-      root.render(
-        <MemoryRouter>
-          <Desk />
-        </MemoryRouter>
-      );
-    });
-
-    const searchInput = container.querySelector('[data-testid="desk-name-search-input"]');
-    act(() => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-      setter.call(searchInput, "Search");
-      searchInput.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-
-    const searchBtn = container.querySelector('[data-testid="desk-name-search-button"]');
-    await act(async () => {
-      searchBtn.click();
-    });
-
-    expect(container.textContent).toContain("Search Result Patient");
-    expect(container.textContent).toContain("Search results (1)");
-  });
-
-  test("opens Registration modal, populates scanned Aadhaar, locks fields and registers patient", async () => {
-    api.post.mockImplementation((url, body) => {
-      if (url === "/register/duplicate-check") {
-        return Promise.resolve({ data: { likely_duplicates: [] } });
-      }
-      if (url === "/register") {
-        return Promise.resolve({
-          data: {
-            registration: {
-              id: "reg-new",
-              reg_no: "103",
-              full_name: body.full_name,
-            },
-          },
-        });
-      }
-      return Promise.resolve({ data: {} });
-    });
-
-    await act(async () => {
-      root.render(
-        <MemoryRouter>
-          <Desk />
-        </MemoryRouter>
-      );
-    });
-
-    const newRegBtn = container.querySelector('[data-testid="new-registration-button"]');
-    act(() => {
-      newRegBtn.click();
-    });
-
-    expect(document.body.querySelector('[data-testid="mock-aadhaar-scanner"]')).not.toBeNull();
-    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
-    expect(document.body.querySelector('[data-testid="manual-exception-checkbox"]')).toBeNull();
-
-    const scanTrigger = document.body.querySelector('[data-testid="mock-scan-trigger"]');
-    act(() => {
-      scanTrigger.click();
-    });
-
-    const nameInput = document.body.querySelector('[data-testid="reg-fullname-input"]');
-    const ageInput = document.body.querySelector('[data-testid="reg-age-input"]');
-    const phoneInput = document.body.querySelector('[data-testid="reg-phone-input"]');
-    expect(nameInput).not.toBeNull();
-    expect(ageInput).not.toBeNull();
-
-    expect(nameInput.value).toBe("Aadhaar Scanned User");
-    expect(nameInput.readOnly).toBe(true);
-    expect(ageInput.value).toBe("42");
-    expect(ageInput.readOnly).toBe(true);
-
-    // Provide phone
-    act(() => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-      setter.call(phoneInput, "9830098300");
-      phoneInput.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-
-    const submitBtn = document.body.querySelector('[data-testid="patient-register-submit"]');
-    await act(async () => {
-      submitBtn.click();
-    });
-
-    expect(api.post).toHaveBeenCalledWith(
-      "/register",
-      expect.objectContaining({
-        full_name: "Aadhaar Scanned User",
-        age: 42,
-        gender: "M",
-        phone: "9830098300",
-        aadhaar_last4: "8888",
-        aadhaar_scanned: true,
-      })
+async function renderDesk() {
+  await act(async () => {
+    root.render(
+      <MemoryRouter>
+        <Desk />
+      </MemoryRouter>
     );
   });
+}
 
-  test("two Failures reveal typed form and keep the scanner; no Register anyway", async () => {
+async function scanAtDoor() {
+  await act(async () => {
+    deskScanner().click();
+  });
+}
+
+describe("Desk page", () => {
+  test("shows KPIs and never lists patients", async () => {
+    await renderDesk();
+
+    expect(container.querySelector('[data-testid="kpi-registered-count"]').textContent).toContain("45");
+    expect(container.querySelector('[data-testid="kpi-seen-count"]').textContent).toContain("30");
+    expect(container.querySelector('[data-testid="patient-list"]')).toBeNull();
+    expect(api.get).not.toHaveBeenCalledWith("/patients");
+    expect(container.textContent).not.toContain("Today's patients");
+  });
+
+  test("one scan box, no mode to choose first", async () => {
+    await renderDesk();
+    expect(container.querySelectorAll('[data-testid="mock-aadhaar-scanner"]').length).toBe(1);
+    expect(container.textContent).toContain("Scan at the door");
+  });
+
+  test("a card already on file checks the patient in", async () => {
+    api.post.mockResolvedValueOnce({ data: { outcome: "arrived", registration: ARRIVED } });
+    await renderDesk();
+    await scanAtDoor();
+
+    expect(api.post).toHaveBeenCalledWith("/desk/scan", { payload: CARD_PAYLOAD });
+    expect(container.querySelector('[data-testid="scan-arrived"]')).not.toBeNull();
+    expect(container.textContent).toContain("Checked in #101");
+    expect(container.querySelector('[data-testid="scan-print-button"]')).not.toBeNull();
+  });
+
+  test("a wrong-day arrival is shown as moved to the day they came", async () => {
+    api.post.mockResolvedValueOnce({
+      data: {
+        outcome: "arrived",
+        registration: { ...ARRIVED, camp_day_changed_from: "2026-08-28" },
+      },
+    });
+    await renderDesk();
+    await scanAtDoor();
+
+    expect(container.querySelector('[data-testid="scan-day-changed"]').textContent)
+      .toContain("2026-08-28");
+  });
+
+  test("a Manual entry match shows both value sets with no edit affordance", async () => {
+    api.post.mockResolvedValueOnce({
+      data: {
+        outcome: "mismatch_review",
+        registration: { ...ARRIVED, queue_status: "registered", arrived_at: null },
+        card: { full_name: "Aadhaar Scanned User", age: 42 },
+        diff: [
+          { field: "full_name", stored: "A Scanned User", card: "Aadhaar Scanned User" },
+          { field: "age", stored: 39, card: 42 },
+        ],
+      },
+    });
+    await renderDesk();
+    await scanAtDoor();
+
+    const review = container.querySelector('[data-testid="mismatch-review"]');
+    expect(review).not.toBeNull();
+    expect(review.textContent).toContain("A Scanned User");
+    expect(review.textContent).toContain("Aadhaar Scanned User");
+    expect(review.textContent).toContain("39");
+    expect(review.textContent).toContain("42");
+    expect(review.querySelectorAll("input").length).toBe(0);
+    expect(review.querySelectorAll("select").length).toBe(0);
+    expect(review.textContent).not.toContain("Keep stored");
+  });
+
+  test("confirming Mismatch review applies the card and checks in", async () => {
+    api.post
+      .mockResolvedValueOnce({
+        data: {
+          outcome: "mismatch_review",
+          registration: { ...ARRIVED, arrived_at: null },
+          card: { full_name: "Aadhaar Scanned User" },
+          diff: [{ field: "age", stored: 39, card: 42 }],
+        },
+      })
+      .mockResolvedValueOnce({ data: { outcome: "arrived", registration: ARRIVED } });
+
+    await renderDesk();
+    await scanAtDoor();
+    await act(async () => {
+      container.querySelector('[data-testid="mismatch-confirm-button"]').click();
+    });
+
+    expect(api.post).toHaveBeenCalledWith("/desk/scan/confirm", {
+      patient_id: "p-1",
+      payload: CARD_PAYLOAD,
+    });
+    expect(container.querySelector('[data-testid="scan-arrived"]')).not.toBeNull();
+  });
+
+  test("a scan matching nothing registers nobody and offers search first", async () => {
+    api.post.mockResolvedValueOnce({
+      data: { outcome: "no_match", card: { full_name: "Aadhaar Scanned User", age: 42 } },
+    });
+    await renderDesk();
+    await scanAtDoor();
+
+    expect(container.querySelector('[data-testid="scan-no-match"]')).not.toBeNull();
+    expect(container.textContent).toContain("Use the search below before registering anyone");
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(api.post).not.toHaveBeenCalledWith("/register", expect.anything());
+    expect(container.querySelector('[data-testid="register-walk-in-button"]')).not.toBeNull();
+  });
+
+  test("registering a walk-in is a deliberate second action that also checks them in", async () => {
     api.post.mockImplementation((url, body) => {
+      if (url === "/desk/scan") {
+        return Promise.resolve({ data: { outcome: "no_match", card: { full_name: "X" } } });
+      }
       if (url === "/register") {
-        return Promise.resolve({
-          data: {
-            registration: { id: "reg-man", reg_no: "105", full_name: body.full_name },
-          },
-        });
+        return Promise.resolve({ data: { registration: { id: "p-9", reg_no: "109", full_name: body.full_name } } });
+      }
+      if (url === "/desk/arrive/p-9") {
+        return Promise.resolve({ data: { registration: { ...ARRIVED, id: "p-9", reg_no: "109" } } });
       }
       return Promise.resolve({ data: {} });
     });
 
+    await renderDesk();
+    await scanAtDoor();
+    act(() => {
+      container.querySelector('[data-testid="register-walk-in-button"]').click();
+    });
+    expect(document.body.querySelector('[data-testid="walk-in-note"]')).not.toBeNull();
+
+    act(() => {
+      modalScanner("mock-scan-trigger").click();
+    });
+    act(() => {
+      setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "9876500001");
+    });
     await act(async () => {
-      root.render(
-        <MemoryRouter>
-          <Desk />
-        </MemoryRouter>
-      );
+      document.body.querySelector('[data-testid="patient-register-submit"]').click();
     });
 
+    expect(api.post).toHaveBeenCalledWith("/desk/arrive/p-9");
+    expect(container.textContent).toContain("Registered and checked in #109");
+  });
+
+  test("a pre-registration prints nothing and says the SMS went out", async () => {
+    api.post.mockImplementation((url, body) => {
+      if (url === "/register") {
+        return Promise.resolve({ data: { registration: { id: "p-7", reg_no: "107", full_name: body.full_name } } });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    await renderDesk();
     act(() => {
       container.querySelector('[data-testid="new-registration-button"]').click();
     });
-
-    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
-    expect(document.body.querySelector('[data-testid="manual-exception-checkbox"]')).toBeNull();
-    expect(document.body.querySelector('[data-testid="dup-register-anyway"]')).toBeNull();
-
-    const fail = document.body.querySelector('[data-testid="mock-failure-trigger"]');
-    act(() => {
-      fail.click();
-    });
-    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="walk-in-note"]')).toBeNull();
 
     act(() => {
-      fail.click();
+      modalScanner("mock-scan-trigger").click();
     });
-
-    expect(document.body.querySelector('[data-testid="mock-aadhaar-scanner"]')).not.toBeNull();
-    const nameInput = document.body.querySelector('[data-testid="reg-fullname-input"]');
-    expect(nameInput).not.toBeNull();
-    expect(nameInput.readOnly).toBe(false);
-    expect(document.body.querySelector('[data-testid="manual-exception-reason"]')).toBeNull();
-    expect(document.body.textContent).toMatch(/Manual entry/i);
-
     act(() => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-      setter.call(nameInput, "Typed Patient");
-      nameInput.dispatchEvent(new Event("input", { bubbles: true }));
-      const phoneInput = document.body.querySelector('[data-testid="reg-phone-input"]');
-      setter.call(phoneInput, "9830098300");
-      phoneInput.dispatchEvent(new Event("input", { bubbles: true }));
-      const ageInput = document.body.querySelector('[data-testid="reg-age-input"]');
-      setter.call(ageInput, "30");
-      ageInput.dispatchEvent(new Event("input", { bubbles: true }));
+      setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "9876500001");
     });
-
-    const submitBtn = document.body.querySelector('[data-testid="patient-register-submit"]');
     await act(async () => {
-      submitBtn.click();
+      document.body.querySelector('[data-testid="patient-register-submit"]').click();
     });
 
-    expect(api.post).toHaveBeenCalledWith(
-      "/register",
-      expect.objectContaining({
-        full_name: "Typed Patient",
-        aadhaar_scanned: false,
-        manual_entry: true,
-      })
-    );
-    expect(api.post).not.toHaveBeenCalledWith(
-      "/register",
-      expect.objectContaining({ override_duplicate: true })
-    );
-    expect(document.body.querySelector('[data-testid="dup-register-anyway"]')).toBeNull();
+    expect(api.post).not.toHaveBeenCalledWith("/desk/arrive/p-7");
+    expect(container.textContent).toContain("SMS sent");
+  });
+
+  test("marking Seen by typing a reg_no", async () => {
+    api.post.mockImplementation((url) => {
+      if (url === "/desk/lookup") {
+        return Promise.resolve({ data: { registration: { ...ARRIVED, printed_at: "2026-09-01T05:00:00Z" } } });
+      }
+      if (url === "/desk/mark-seen/p-1") {
+        return Promise.resolve({ data: { registration: { ...ARRIVED, queue_status: "seen", printed_at: "x" } } });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    await renderDesk();
+    act(() => {
+      setInput(container.querySelector('[data-testid="desk-lookup-input"]'), "101");
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="desk-lookup-button"]').click();
+    });
+    expect(container.querySelector('[data-testid="desk-found-patient"]')).not.toBeNull();
+
+    await act(async () => {
+      container.querySelector('[data-testid="mark-seen-button-101"]').click();
+    });
+    expect(api.post).toHaveBeenCalledWith("/desk/mark-seen/p-1");
+  });
+
+  test("marking Seen by searching a name", async () => {
+    api.get.mockImplementation((url) => {
+      if (url === "/kpis") return Promise.resolve({ data: { registered: 1, seen: 0, pending: 1 } });
+      if (url === "/camps/active") {
+        return Promise.resolve({ data: { camp: { id: "camp-1", name: "C" }, days: [] } });
+      }
+      if (url.startsWith("/patients/search")) {
+        return Promise.resolve({
+          data: { results: [{ ...ARRIVED, printed_at: "2026-09-01T05:00:00Z" }] },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+    api.post.mockResolvedValue({ data: { registration: { ...ARRIVED, queue_status: "seen" } } });
+
+    await renderDesk();
+    act(() => {
+      setInput(container.querySelector('[data-testid="desk-name-search-input"]'), "Aadhaar");
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="desk-name-search-button"]').click();
+    });
+
+    expect(container.querySelector('[data-testid="desk-search-results"]')).not.toBeNull();
+    await act(async () => {
+      container.querySelector('[data-testid="mark-seen-button-101"]').click();
+    });
+    expect(api.post).toHaveBeenCalledWith("/desk/mark-seen/p-1");
+  });
+
+  test("a booking that has not arrived cannot be checked in from a lookup", async () => {
+    api.post.mockResolvedValue({
+      data: { registration: { ...ARRIVED, queue_status: "registered", arrived_at: null } },
+    });
+    await renderDesk();
+    act(() => {
+      setInput(container.querySelector('[data-testid="desk-lookup-input"]'), "101");
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="desk-lookup-button"]').click();
+    });
+
+    expect(container.querySelector('[data-testid="awaiting-scan-101"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="arrive-button-101"]')).toBeNull();
+    expect(container.querySelector('[data-testid="print-button-101"]')).toBeNull();
+    expect(container.querySelector('[data-testid="mark-seen-button-101"]')).toBeNull();
+    expect(api.post).not.toHaveBeenCalledWith("/desk/arrive/p-1");
+  });
+
+  test("two Failures reveal the typed form and there is no Register anyway", async () => {
+    await renderDesk();
+    act(() => {
+      container.querySelector('[data-testid="new-registration-button"]').click();
+    });
+    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
+
+    act(() => {
+      modalScanner("mock-failure-trigger").click();
+    });
+    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
+
+    act(() => {
+      modalScanner("mock-failure-trigger").click();
+    });
+    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="manual-entry-note"]')).not.toBeNull();
+    expect(document.body.textContent).not.toContain("Register anyway");
+  });
+
+  test("a Scan stall counts the same as two Failures", async () => {
+    await renderDesk();
+    act(() => {
+      container.querySelector('[data-testid="new-registration-button"]').click();
+    });
+    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
+
+    act(() => {
+      modalScanner("mock-stall-trigger").click();
+    });
+    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="manual-entry-note"]')).not.toBeNull();
   });
 
   test("a Lock before two Failures never reveals a typed path", async () => {
-    await act(async () => {
-      root.render(
-        <MemoryRouter>
-          <Desk />
-        </MemoryRouter>
-      );
-    });
-
+    await renderDesk();
     act(() => {
       container.querySelector('[data-testid="new-registration-button"]').click();
     });
-
     act(() => {
-      document.body.querySelector('[data-testid="mock-failure-trigger"]').click();
-    });
-    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
-
-    act(() => {
-      document.body.querySelector('[data-testid="mock-scan-trigger"]').click();
+      modalScanner("mock-scan-trigger").click();
     });
 
-    const nameInput = document.body.querySelector('[data-testid="reg-fullname-input"]');
-    expect(nameInput).not.toBeNull();
-    expect(nameInput.value).toBe("Aadhaar Scanned User");
-    expect(nameInput.readOnly).toBe(true);
-    expect(document.body.textContent).not.toMatch(/Manual entry/i);
+    expect(document.body.querySelector('[data-testid="manual-entry-note"]')).toBeNull();
+    const name = document.body.querySelector('[data-testid="reg-fullname-input"]');
+    expect(name.readOnly).toBe(true);
+    expect(name.value).toBe("Aadhaar Scanned User");
   });
 
   test("closing New Registration resets the Failure count", async () => {
-    await act(async () => {
-      root.render(
-        <MemoryRouter>
-          <Desk />
-        </MemoryRouter>
-      );
-    });
-
+    await renderDesk();
     act(() => {
       container.querySelector('[data-testid="new-registration-button"]').click();
     });
-    const fail = document.body.querySelector('[data-testid="mock-failure-trigger"]');
     act(() => {
-      fail.click();
-      fail.click();
+      modalScanner("mock-failure-trigger").click();
+      modalScanner("mock-failure-trigger").click();
     });
     expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).not.toBeNull();
 
     act(() => {
       document.body.querySelector('[data-testid="modal-close-button"]').click();
     });
-    expect(document.body.querySelector('[data-testid="mock-aadhaar-scanner"]')).toBeNull();
-
     act(() => {
       container.querySelector('[data-testid="new-registration-button"]').click();
     });
     expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
-    expect(document.body.querySelector('[data-testid="mock-aadhaar-scanner"]')).not.toBeNull();
   });
 
-  test("Duplicate in camp 409 shows existing reg_no and has no Register anyway", async () => {
+  test("Duplicate in camp 409 shows the existing reg_no and has no override", async () => {
     api.post.mockImplementation((url) => {
       if (url === "/register") {
-        const err = new Error("duplicate");
+        const err = new Error("Duplicate");
         err.response = {
           data: {
             detail: {
               code: "DUPLICATE_IN_CAMP",
               message: "Already registered in this camp",
-              registration: { id: "dup-1", reg_no: 50, full_name: "Duplicate Person" },
+              registration: { reg_no: "999" },
             },
           },
         };
@@ -518,33 +483,40 @@ describe("Desk page component", () => {
       return Promise.resolve({ data: {} });
     });
 
-    await act(async () => {
-      root.render(
-        <MemoryRouter>
-          <Desk />
-        </MemoryRouter>
-      );
-    });
-
+    await renderDesk();
     act(() => {
       container.querySelector('[data-testid="new-registration-button"]').click();
     });
     act(() => {
-      document.body.querySelector('[data-testid="mock-scan-trigger"]').click();
+      modalScanner("mock-scan-trigger").click();
     });
-    const phoneInput = document.body.querySelector('[data-testid="reg-phone-input"]');
     act(() => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-      setter.call(phoneInput, "9830098300");
-      phoneInput.dispatchEvent(new Event("input", { bubbles: true }));
+      setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "9876500001");
     });
-
     await act(async () => {
       document.body.querySelector('[data-testid="patient-register-submit"]').click();
     });
 
-    expect(document.body.textContent).toContain("Already registered as #50");
-    expect(document.body.querySelector('[data-testid="dup-register-anyway"]')).toBeNull();
+    expect(document.body.textContent).toContain("Already registered as #999");
     expect(document.body.textContent).not.toContain("Register anyway");
+  });
+
+  test("an ambiguous scan lists the candidates and checks nobody in", async () => {
+    api.post.mockResolvedValueOnce({
+      data: {
+        outcome: "ambiguous",
+        registrations: [
+          { id: "a", reg_no: "201", full_name: "Same Name", age: 40 },
+          { id: "b", reg_no: "202", full_name: "Same Name", age: 41 },
+        ],
+      },
+    });
+    await renderDesk();
+    await scanAtDoor();
+
+    expect(container.querySelector('[data-testid="scan-ambiguous"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="ambiguous-201"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="ambiguous-202"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="scan-arrived"]')).toBeNull();
   });
 });

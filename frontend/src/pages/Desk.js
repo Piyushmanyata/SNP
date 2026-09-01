@@ -1,37 +1,40 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import api, { formatApiError, errorPayload } from "../lib/api";
 import Layout from "../components/Layout";
 import AadhaarScanner from "../components/AadhaarScanner";
+import { ScanOutcome } from "../components/desk/ScanOutcome";
 import { v4 } from "../lib/uuid";
 import {
   Button, Card, Input, Field, Alert, Modal, Stat, StatusBadge, Badge, ErrorCard,
 } from "../components/ui";
 import {
-  UserPlus, Search, Printer, CheckCircle2, Undo2, ScanLine, Lock, Users,
+  UserPlus, Search, Printer, CheckCircle2, Undo2, ScanLine,
 } from "lucide-react";
 
 export default function Desk() {
   const navigate = useNavigate();
   const [kpi, setKpi] = useState(null);
-  const [patients, setPatients] = useState([]);
   const [loadErr, setLoadErr] = useState("");
   const [days, setDays] = useState([]);
   const [camp, setCamp] = useState(null);
   const [showReg, setShowReg] = useState(false);
+  const [walkIn, setWalkIn] = useState(false);
+  const [scanResult, setScanResult] = useState(null);
+  const [scanPayload, setScanPayload] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [found, setFound] = useState(null);
   const [lookupVal, setLookupVal] = useState("");
   const [searchVal, setSearchVal] = useState("");
   const [searchResults, setSearchResults] = useState(null);
   const [banner, setBanner] = useState("");
+  const [error, setError] = useState("");
 
   const load = useCallback(async () => {
     setLoadErr("");
     try {
-      const [k, p, a] = await Promise.all([
-        api.get("/kpis"), api.get("/patients"), api.get("/camps/active"),
-      ]);
+      const [k, a] = await Promise.all([api.get("/kpis"), api.get("/camps/active")]);
       setKpi(k.data);
-      setPatients(p.data.patients);
       setCamp(a.data.camp);
       setDays(a.data.days || []);
     } catch (e) {
@@ -41,42 +44,86 @@ export default function Desk() {
 
   useEffect(() => { load(); }, [load]);
 
+  const onScanned = useCallback(async (_card, payload) => {
+    setBanner(""); setError(""); setSearchResults(null); setFound(null);
+    setScanPayload(payload);
+    try {
+      const { data } = await api.post("/desk/scan", { payload });
+      setScanResult(data);
+      if (data.outcome === "arrived") {
+        setBanner(`Checked in #${data.registration.reg_no} — ${data.registration.full_name}`);
+        await load();
+      }
+    } catch (err) {
+      setScanResult(null);
+      setError(formatApiError(err));
+    }
+  }, [load]);
+
+  const confirmMismatch = useCallback(async () => {
+    if (!scanResult?.registration) return;
+    setBusy(true); setError("");
+    try {
+      const { data } = await api.post("/desk/scan/confirm", {
+        patient_id: scanResult.registration.id,
+        payload: scanPayload,
+      });
+      setScanResult(data);
+      setBanner(`Checked in #${data.registration.reg_no} — ${data.registration.full_name}`);
+      await load();
+    } catch (err) {
+      setError(formatApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [scanResult, scanPayload, load]);
+
   const doLookup = useCallback(async (e) => {
     e?.preventDefault();
     if (!lookupVal.trim()) return;
-    setBanner("");
+    setBanner(""); setError(""); setSearchResults(null);
     try {
       const { data } = await api.post("/desk/lookup", { value: lookupVal.trim() });
-      const el = document.getElementById(`row-${data.registration.id}`);
+      setFound(data.registration);
       setLookupVal("");
-      await load();
-      setTimeout(() => el?.scrollIntoView({ behavior: "smooth", block: "center" }), 100);
-      setBanner(`Found reg #${data.registration.reg_no} — ${data.registration.full_name}`);
     } catch (err) {
-      setBanner(formatApiError(err));
+      setFound(null);
+      setError(formatApiError(err));
     }
-  }, [lookupVal, load]);
+  }, [lookupVal]);
 
   const doSearch = useCallback(async (e) => {
     e?.preventDefault();
     if (!searchVal.trim()) { setSearchResults(null); return; }
+    setError("");
     try {
       const { data } = await api.get(`/patients/search?q=${encodeURIComponent(searchVal.trim())}`);
       setSearchResults(data.results);
-    } catch (err) { setBanner(formatApiError(err)); }
+    } catch (err) { setError(formatApiError(err)); }
   }, [searchVal]);
 
-  const markSeen = useCallback(async (id) => {
-    setBanner("");
-    try { await api.post(`/desk/mark-seen/${id}`); await load(); }
-    catch (err) { setBanner(formatApiError(err)); }
-  }, [load]);
+  const act = useCallback(async (path, reg) => {
+    setBanner(""); setError("");
+    try {
+      const { data } = await api.post(`${path}/${reg.id}`);
+      setFound(data.registration);
+      if (scanResult?.registration?.id === reg.id) {
+        setScanResult({ ...scanResult, registration: data.registration });
+      }
+      await load();
+      return data.registration;
+    } catch (err) {
+      setError(formatApiError(err));
+      return null;
+    }
+  }, [load, scanResult]);
 
-  const undoSeen = useCallback(async (id) => {
-    setBanner("");
-    try { await api.post(`/desk/undo-seen/${id}`); await load(); }
-    catch (err) { setBanner(formatApiError(err)); }
-  }, [load]);
+  const markSeen = useCallback((reg) => act("/desk/mark-seen", reg), [act]);
+  const undoSeen = useCallback((reg) => act("/desk/undo-seen", reg), [act]);
+  const print = useCallback((reg) => navigate(`/print/prescription/${reg.id}`), [navigate]);
+
+  const openWalkIn = useCallback(() => { setWalkIn(true); setShowReg(true); }, []);
+  const openPreReg = useCallback(() => { setWalkIn(false); setShowReg(true); }, []);
 
   if (loadErr) return <Layout title="Desk"><ErrorCard message={loadErr} onRetry={load} /></Layout>;
 
@@ -93,80 +140,121 @@ export default function Desk() {
       </div>
 
       <Card className="mb-5">
-        <div className="flex flex-col sm:flex-row gap-3">
-          <Button size="lg" className="sm:w-auto" onClick={() => setShowReg(true)} disabled={noCamp} data-testid="new-registration-button">
-            <UserPlus className="w-5 h-5" /> New Registration
-          </Button>
-          <form onSubmit={doLookup} className="flex-1 flex gap-2">
-            <Input value={lookupVal} onChange={(e) => setLookupVal(e.target.value)} placeholder="Scan patient QR or type Reg #" data-testid="desk-lookup-input" />
-            <Button type="submit" variant="secondary" data-testid="desk-lookup-button"><ScanLine className="w-5 h-5" /></Button>
-          </form>
+        <div className="flex items-center gap-2 mb-3">
+          <ScanLine className="w-5 h-5 text-emerald-600" />
+          <h3 className="font-display font-bold text-slate-900">Scan at the door</h3>
         </div>
-        <form onSubmit={doSearch} className="flex gap-2 mt-3">
-          <Input value={searchVal} onChange={(e) => setSearchVal(e.target.value)} placeholder="Name search (lost paper/number)" data-testid="desk-name-search-input" />
-          <Button type="submit" variant="outline" data-testid="desk-name-search-button"><Search className="w-5 h-5" /></Button>
-        </form>
+        <AadhaarScanner onScanned={onScanned} disabled={noCamp} />
+        {error && <Alert className="mt-3">{error}</Alert>}
         {banner && <Alert tone="emerald" className="mt-3">{banner}</Alert>}
+        <div className="mt-3">
+          <ScanOutcome
+            result={scanResult}
+            busy={busy}
+            onPrint={print}
+            onMarkSeen={markSeen}
+            onConfirm={confirmMismatch}
+            onRegisterNew={openWalkIn}
+          />
+        </div>
       </Card>
 
-      {searchResults && (
-        <Card className="mb-5">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-display font-bold text-slate-900">Search results ({searchResults.length})</h3>
-            <Button variant="ghost" size="sm" onClick={() => { setSearchResults(null); setSearchVal(""); }}>Clear</Button>
-          </div>
-          <PatientList patients={searchResults} days={days} onMarkSeen={markSeen} onUndo={undoSeen} navigate={navigate} />
-        </Card>
-      )}
+      <Card className="mb-5">
+        <h3 className="font-display font-bold text-slate-900 mb-3">Find one patient</h3>
+        <form onSubmit={doLookup} className="flex gap-2">
+          <Input value={lookupVal} onChange={(e) => setLookupVal(e.target.value)}
+            placeholder="Scan prescription QR or type Reg #" data-testid="desk-lookup-input" />
+          <Button type="submit" variant="secondary" data-testid="desk-lookup-button"><ScanLine className="w-5 h-5" /></Button>
+        </form>
+        <form onSubmit={doSearch} className="flex gap-2 mt-3">
+          <Input value={searchVal} onChange={(e) => setSearchVal(e.target.value)}
+            placeholder="Name search (lost paper/number)" data-testid="desk-name-search-input" />
+          <Button type="submit" variant="outline" data-testid="desk-name-search-button"><Search className="w-5 h-5" /></Button>
+        </form>
 
-      <Card>
-        <div className="flex items-center gap-2 mb-4">
-          <Users className="w-5 h-5 text-slate-400" />
-          <h3 className="font-display font-bold text-slate-900">Today's patients</h3>
-          <Badge className="ml-auto">{patients.length}</Badge>
-        </div>
-        {patients.length === 0 ? (
-          <p className="text-slate-400 text-sm text-center py-8">No registrations yet.</p>
-        ) : (
-          <PatientList patients={patients} days={days} onMarkSeen={markSeen} onUndo={undoSeen} navigate={navigate} />
+        {found && (
+          <div className="mt-4" data-testid="desk-found-patient">
+            <PatientRow p={found} onPrint={print} onMarkSeen={markSeen} onUndo={undoSeen} />
+          </div>
+        )}
+
+        {searchResults && (
+          <div className="mt-4">
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-sm font-semibold text-slate-700">Search results ({searchResults.length})</p>
+              <Button variant="ghost" size="sm" onClick={() => { setSearchResults(null); setSearchVal(""); }}>Clear</Button>
+            </div>
+            <div className="space-y-2" data-testid="desk-search-results">
+              {searchResults.map((p) => (
+                <PatientRow key={p.id} p={p} onPrint={print} onMarkSeen={markSeen} onUndo={undoSeen} />
+              ))}
+            </div>
+          </div>
         )}
       </Card>
 
-      <RegisterModal open={showReg} onClose={() => setShowReg(false)} days={days} onDone={load} setBanner={setBanner} />
+      <Card>
+        <h3 className="font-display font-bold text-slate-900 mb-1">Pre-registration</h3>
+        <p className="text-sm text-slate-500 mb-3">
+          Books a seat and sends the patient their registration number. Nothing prints.
+        </p>
+        <Button size="lg" onClick={openPreReg} disabled={noCamp} data-testid="new-registration-button">
+          <UserPlus className="w-5 h-5" /> New Registration
+        </Button>
+      </Card>
+
+      <RegisterModal
+        open={showReg}
+        walkIn={walkIn}
+        onClose={() => setShowReg(false)}
+        days={days}
+        onDone={load}
+        setBanner={setBanner}
+        onRegistered={setFound}
+      />
     </Layout>
   );
 }
 
-function PatientList({ patients, onMarkSeen, onUndo, navigate }) {
+export function PatientRow({ p, onPrint, onMarkSeen, onUndo }) {
   return (
-    <div className="space-y-2" data-testid="patient-list">
-      {patients.map((p) => (
-        <div key={p.id} id={`row-${p.id}`} className="flex flex-wrap items-center gap-3 p-3 rounded-xl border border-slate-200 hover:border-emerald-300 transition-colors" data-testid={`patient-row-${p.reg_no}`}>
-          <div className="w-14 shrink-0">
-            <span className="font-mono font-bold text-emerald-600">#{p.reg_no}</span>
-          </div>
-          <div className="flex-1 min-w-[140px]">
-            <p className="font-semibold text-slate-900">{p.full_name} {p.aadhaar_scanned && <Lock className="w-3 h-3 inline text-slate-400" />}</p>
-            <p className="text-xs text-slate-400">{p.gender_label} · {p.age ?? "-"} yrs {p.phone ? `· ${p.phone}` : ""} {p.is_self_registered && "· self"}</p>
-          </div>
-          <StatusBadge status={p.queue_status} />
-          {p.printed_at && <Badge tone="indigo">Printed</Badge>}
-          <div className="flex gap-1.5 ml-auto">
-            <Button size="sm" variant="outline" onClick={() => navigate(`/print/prescription/${p.id}`)} data-testid={`print-button-${p.reg_no}`}>
+    <div
+      id={`row-${p.id}`}
+      className="flex flex-wrap items-center gap-3 p-3 rounded-xl border border-slate-200"
+      data-testid={`patient-row-${p.reg_no}`}
+    >
+      <span className="font-mono font-bold text-emerald-600 w-14 shrink-0">#{p.reg_no}</span>
+      <div className="flex-1 min-w-[140px]">
+        <p className="font-semibold text-slate-900">{p.full_name}</p>
+        <p className="text-xs text-slate-400">
+          {p.gender_label} · {p.age ?? "-"} yrs {p.phone ? `· ${p.phone}` : ""}
+        </p>
+      </div>
+      <StatusBadge status={p.queue_status} />
+      {p.printed_at && <Badge tone="indigo">Printed</Badge>}
+      {!p.arrived_at && (
+        <span className="text-xs text-slate-500" data-testid={`awaiting-scan-${p.reg_no}`}>
+          Scan their card at the door to check in
+        </span>
+      )}
+      <div className="flex gap-1.5 ml-auto">
+        {p.arrived_at && (
+          <>
+            <Button size="sm" variant="outline" onClick={() => onPrint(p)} data-testid={`print-button-${p.reg_no}`}>
               <Printer className="w-4 h-4" /> Print
             </Button>
             {p.queue_status !== "seen" ? (
-              <Button size="sm" onClick={() => onMarkSeen(p.id)} disabled={!p.printed_at} data-testid={`mark-seen-button-${p.reg_no}`}>
+              <Button size="sm" onClick={() => onMarkSeen(p)} disabled={!p.printed_at} data-testid={`mark-seen-button-${p.reg_no}`}>
                 <CheckCircle2 className="w-4 h-4" /> Seen
               </Button>
             ) : (
-              <Button size="sm" variant="ghost" onClick={() => onUndo(p.id)} data-testid={`undo-seen-button-${p.reg_no}`}>
+              <Button size="sm" variant="ghost" onClick={() => onUndo(p)} data-testid={`undo-seen-button-${p.reg_no}`}>
                 <Undo2 className="w-4 h-4" /> Undo
               </Button>
             )}
-          </div>
-        </div>
-      ))}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -181,7 +269,7 @@ const EMPTY_REG_FORM = Object.freeze({
   dob: "",
 });
 
-function RegisterModal({ open, onClose, days, onDone, setBanner }) {
+export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, onRegistered }) {
   const [form, setForm] = useState(EMPTY_REG_FORM);
   const [scanned, setScanned] = useState(false);
   const [dayId, setDayId] = useState("");
@@ -189,15 +277,23 @@ function RegisterModal({ open, onClose, days, onDone, setBanner }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [reqId, setReqId] = useState(v4());
+  const prevOpenRef = useRef(false);
 
   useEffect(() => {
-    if (open) {
-      setForm(EMPTY_REG_FORM); setScanned(false); setFailures(0);
-      setError(""); setReqId(v4());
+    if (open && !prevOpenRef.current) {
+      setForm(EMPTY_REG_FORM);
+      setScanned(false);
+      setFailures(0);
+      setError("");
+      setReqId(v4());
+      const today = days.find((d) => d.is_today);
+      setDayId(today ? today.id : (days[0]?.id || ""));
+    } else if (open && !dayId && days.length > 0) {
       const today = days.find((d) => d.is_today);
       setDayId(today ? today.id : (days[0]?.id || ""));
     }
-  }, [open, days]);
+    prevOpenRef.current = open;
+  }, [open, days, dayId]);
 
   const onScan = useCallback((data) => {
     setForm((prev) => ({
@@ -218,6 +314,8 @@ function RegisterModal({ open, onClose, days, onDone, setBanner }) {
     }
   }, []);
 
+  const onScanStall = useCallback(() => setFailures(2), []);
+
   const showForm = scanned || failures >= 2;
 
   const submit = useCallback(async () => {
@@ -236,25 +334,40 @@ function RegisterModal({ open, onClose, days, onDone, setBanner }) {
         registration_request_id: reqId,
         manual_entry: !scanned,
       });
-      setBanner(`Registered #${data.registration.reg_no} — ${data.registration.full_name}`);
+      let reg = data.registration;
+      if (walkIn) {
+        const arrived = await api.post(`/desk/arrive/${reg.id}`);
+        reg = arrived.data.registration;
+      }
+      setBanner(
+        walkIn
+          ? `Registered and checked in #${reg.reg_no} — ${reg.full_name}`
+          : `Registered #${reg.reg_no} — ${reg.full_name}. SMS sent.`
+      );
+      if (onRegistered) onRegistered(reg);
       onClose(); onDone();
     } catch (err) {
       const payload = errorPayload(err);
       if (payload && payload.code === "DUPLICATE_IN_CAMP") {
-        setError(`Already registered as #${payload.registration.reg_no}. Print for them instead.`);
+        setError(`Already registered as #${payload.registration.reg_no}. Check them in instead.`);
       } else if (payload && payload.code === "AMBIGUOUS_MANUAL_ENTRY") {
         const nos = (payload.registrations || []).map((r) => `#${r.reg_no}`).join(", ");
-        setError(`Multiple Manual entries match (${nos}). Print for them instead.`);
+        setError(`Multiple Manual entries match (${nos}). Check one of them in instead.`);
       } else {
         setError(formatApiError(err));
       }
     } finally { setBusy(false); }
-  }, [form, scanned, dayId, reqId, onClose, onDone, setBanner]);
+  }, [form, scanned, dayId, reqId, walkIn, onClose, onDone, onRegistered, setBanner]);
 
   return (
-    <Modal open={open} onClose={onClose} title="New Registration" size="lg">
+    <Modal open={open} onClose={onClose} title={walkIn ? "Register walk-in" : "New Registration"} size="lg">
       <div className="space-y-4">
-        <AadhaarScanner onScanned={onScan} onFailure={onFailure} />
+        {walkIn && (
+          <p className="text-sm text-slate-600" data-testid="walk-in-note">
+            This registers the patient and checks them in, in one action.
+          </p>
+        )}
+        <AadhaarScanner onScanned={onScan} onFailure={onFailure} onScanStall={onScanStall} />
 
         {showForm && (
           <>
@@ -297,7 +410,7 @@ function RegisterModal({ open, onClose, days, onDone, setBanner }) {
           <div className="flex gap-2 justify-end pt-1">
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
             <Button onClick={submit} disabled={busy || !form.full_name || !dayId} data-testid="patient-register-submit">
-              {busy ? "Registering…" : "Register"}
+              {busy ? "Registering…" : walkIn ? "Register and check in" : "Register"}
             </Button>
           </div>
         )}

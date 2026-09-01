@@ -225,7 +225,7 @@ describe("Clinical page component", () => {
     warnSpy.mockRestore();
   });
 
-  test("Spectacles to be made deferral uses Specs collection day select", async () => {
+  test("Spectacles to be made assigns a Specs collection day with full days unselectable", async () => {
     const mockLookupData = {
       registration: {
         id: "reg-101",
@@ -236,7 +236,10 @@ describe("Clinical page component", () => {
         queue_status: "seen",
       },
       person: { id: "p-101" },
-      transcription: { id: "tx-101", locked: false, diagnosis_options: ["Cataract"] },
+      transcription: {
+        id: "tx-101", locked: false, diagnosis_options: ["Cataract"],
+        specs_measurements: { r_sph: "-1.00", l_sph: "-1.25" },
+      },
       fulfilments: [],
       slips: [],
     };
@@ -263,14 +266,7 @@ describe("Clinical page component", () => {
       container.querySelector('[data-testid="clinical-lookup-button"]').click();
     });
 
-    const statusSelect = container.querySelector('[data-testid="station-specs-status"]');
-    act(() => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set;
-      setter.call(statusSelect, "deferred");
-      statusSelect.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-
-    const daySelect = container.querySelector('[data-testid="specs-day-select-fulfil"]');
+    const daySelect = container.querySelector('[data-testid="specs_collection_day_id-select"]');
     expect(daySelect).not.toBeNull();
     expect(container.querySelector('[data-testid="specs-collection-date"]')).toBeNull();
     expect(container.querySelector('[data-testid="specs-collection-venue"]')).toBeNull();

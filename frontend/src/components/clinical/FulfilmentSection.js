@@ -1,6 +1,6 @@
 import React from "react";
 import { Card } from "../ui";
-import { FulfilmentStation } from "./FulfilmentStation";
+import { FulfilmentStation, LINE_ORDER } from "./FulfilmentStation";
 
 export function FulfilmentSection({
   data,
@@ -13,14 +13,12 @@ export function FulfilmentSection({
 }) {
   return (
     <Card>
-      <h3 className="font-display font-bold text-slate-900 mb-4">
-        Clinical Line Stations
-      </h3>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        {["medicine", "specs", "ot"].map((type) => (
+      <h3 className="font-display font-bold text-slate-900 mb-4">Fulfilment lines</h3>
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        {LINE_ORDER.map((line) => (
           <FulfilmentStation
-            key={type}
-            type={type}
+            key={`${data?.registration?.id || data?.transcription?.id || "none"}-${line}`}
+            line={line}
             data={data}
             otDays={otDays}
             specsDays={specsDays}

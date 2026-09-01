@@ -2,6 +2,7 @@ export const NATIVE_MISS_LIMIT = 8;
 export const PROMOTE_AFTER_MS = 1250;
 export const PAYLOAD_IGNORE_MS = 1500;
 export const FALLBACK_HINT_MS = 2500;
+export const SCAN_STALL_MS = 20000;
 export const MAX_DETECT_INTERVAL_MS = 125;
 
 export const ZXING_READER_OPTIONS = {
@@ -23,6 +24,7 @@ export function createLiveScanEngine({
   onLock,
   onFailure,
   onHintFallbacks,
+  onScanStall,
 } = {}) {
   let started = false;
   let decoder = "native";
@@ -35,6 +37,8 @@ export function createLiveScanEngine({
   let frozen = false;
   let softHold = false;
   let fallbackHinted = false;
+  let detects = 0;
+  let stalled = false;
   const ignoredUntil = new Map();
 
   function getState() {
@@ -47,6 +51,8 @@ export function createLiveScanEngine({
       nativeMisses,
       nextRegion,
       started,
+      detects,
+      stalled,
     };
   }
 
@@ -81,6 +87,14 @@ export function createLiveScanEngine({
     }
   }
 
+  function checkStall() {
+    if (stalled || frozen || !started) return;
+    if (detects > 0) return;
+    if (now() - sessionStart < SCAN_STALL_MS) return;
+    stalled = true;
+    if (onScanStall) onScanStall();
+  }
+
   function isIgnored(payload) {
     const until = ignoredUntil.get(payload);
     if (until == null) return false;
@@ -107,8 +121,10 @@ export function createLiveScanEngine({
         if (decoder === "native") nativeMisses += 1;
         if (shouldPromote()) await promote();
         hintFallback();
+        checkStall();
         return { miss: true };
       }
+      detects += 1;
       if (isIgnored(payload)) return { ignored: true };
       softHold = true;
       const result = await decode(payload);
@@ -137,6 +153,8 @@ export function createLiveScanEngine({
     nextRegion = "roi";
     sessionStart = now();
     fallbackHinted = false;
+    detects = 0;
+    stalled = false;
     ignoredUntil.clear();
     decoder = hasNativeDetector ? "native" : "wasm";
     if (decoder === "wasm") ensureWasm();

@@ -40,7 +40,7 @@ afterEach(() => {
 });
 
 describe("PrintPrescription component", () => {
-  test("renders prescription sheet with default render fallback when template API fails with warning", async () => {
+  test("prints the fixed trust letterhead even when the sponsor logos cannot be fetched", async () => {
     const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
 
     api.post.mockResolvedValueOnce({
@@ -73,17 +73,50 @@ describe("PrintPrescription component", () => {
     });
 
     expect(warnSpy).toHaveBeenCalledWith(
-      "Failed to fetch active template for camp, falling back to default render:",
+      "Failed to fetch sponsor logos, printing without them:",
       expect.any(Error)
     );
 
     const sheet = container.querySelector('[data-testid="a4-prescription-sheet"]');
     expect(sheet).not.toBeNull();
+    expect(container.textContent).toContain("Sikar Nagarik Parishad");
+    expect(container.textContent).toContain("Sikar Zilla Welfare Trust");
+    expect(container.textContent).toContain("sikarkolkata@gmail.com");
+    expect(container.textContent).toContain("Rupa Foundation");
     expect(container.textContent).toContain("SNP Camp Nadia");
     expect(container.textContent).toContain("Aparna Sen");
     expect(container.textContent).toContain("#1001");
 
     warnSpy.mockRestore();
+  });
+
+  test("renders every fixed block and asks the server only for logos", async () => {
+    api.post.mockResolvedValueOnce({
+      data: {
+        prescription: {
+          id: "rx-1", camp_id: "camp-001", camp_name: "SNP Camp Nadia",
+          venue: "Community Center", reg_no: "1001", patient_qr: "qr-1001",
+          full_name: "Aparna Sen", age: 45, gender: "Female", date: "2026-08-27",
+        },
+      },
+    });
+    api.get.mockResolvedValueOnce({ data: { logos: [] } });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/print/rx/rx-1"]}>
+          <Routes>
+            <Route path="/print/rx/:id" element={<PrintPrescription />} />
+          </Routes>
+        </MemoryRouter>
+      );
+    });
+
+    expect(api.get).toHaveBeenCalledWith("/templates/logos?camp_id=camp-001");
+    for (const block of ["diagnosis", "vision", "prescription", "vitals", "advice"]) {
+      expect(container.querySelector(`[data-testid="rx-block-${block}"]`)).not.toBeNull();
+    }
+    expect(container.querySelector('[data-testid="rx-block-identity"]')).not.toBeNull();
   });
 
   test("handles prescription loading error", async () => {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import api, { formatApiError } from "../lib/api";
 import { Button, Card, Input, Field, Alert } from "../components/ui";
@@ -29,7 +29,8 @@ export default function SelfRegister() {
       .catch((e) => setLoadErr(formatApiError(e)));
   }, []);
 
-  const submit = async () => {
+  const submit = useCallback(async () => {
+    if (!scanned || !dayId) return;
     setBusy(true); setError("");
     try {
       const { data } = await api.post("/self-register", {
@@ -51,7 +52,7 @@ export default function SelfRegister() {
     } finally {
       setBusy(false);
     }
-  };
+  }, [scanned, phone, dayId]);
 
   return (
     <div className="min-h-screen bg-slate-50">

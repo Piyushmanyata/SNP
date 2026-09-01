@@ -3,6 +3,7 @@ import api, { formatApiError } from "../../lib/api";
 import * as grab from "./liveScan/grabFrame";
 import * as nativeDetector from "./liveScan/nativeDetector";
 import * as wasmDetector from "./liveScan/wasmDetector";
+import logger from "../../lib/logger";
 
 export function useAadhaarDecode({ onScanned, onFailure } = {}) {
   const [payload, setPayload] = useState("");
@@ -35,7 +36,7 @@ export function useAadhaarDecode({ onScanned, onFailure } = {}) {
           setOutcome(data.outcome);
           setSource(data.source || "");
           if (data.outcome === "card") {
-            if (onScanned) onScanned(data.data);
+            if (onScanned) onScanned(data.data, text);
           } else {
             setError(data.message || "Unable to read Aadhaar QR data.");
             if ((data.outcome === "garbage" || data.outcome === "not-aadhaar") && onFailure) {
@@ -86,7 +87,7 @@ export function useAadhaarDecode({ onScanned, onFailure } = {}) {
         }
         await decode(text);
       } catch (e) {
-        console.warn("QR code scanning from file failed:", e);
+        logger.warn("QR code scanning from file failed:", e);
         if (mountedRef.current) {
           setError("No Aadhaar QR found in the image. Try a clearer photo.");
         }

@@ -24,26 +24,33 @@ FIELDS = [
 ]
 
 
-def _to_iso_dob(raw: str):
-    raw = (raw or "").strip(" '\"`\t\r\n")
-    if "T" in raw:
-        raw = raw.split("T")[0]
-    elif " " in raw and len(raw.split(" ")[0]) >= 4:
-        first_part = raw.split(" ")[0]
-        if any(c in first_part for c in "-/.") or (len(first_part) == 4 and first_part.isdigit()):
-            raw = first_part
-    for fmt in (
-        "%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%y", "%d/%m/%y",
-        "%d.%m.%Y", "%Y.%m.%d", "%Y/%m/%d", "%d-%b-%Y", "%d %b %Y",
-        "%d-%B-%Y", "%d %B %Y",
-    ):
+DATE_FORMATS = (
+    "%d-%m-%Y", "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%y", "%d/%m/%y",
+    "%d.%m.%Y", "%Y.%m.%d", "%Y/%m/%d", "%d-%b-%Y", "%d %b %Y",
+    "%d-%B-%Y", "%d %B %Y",
+)
+
+
+def _clean_date_string(raw: str) -> str:
+    cleaned = (raw or "").strip(" '\"`\t\r\n")
+    if "T" in cleaned:
+        return cleaned.split("T")[0]
+    if " " in cleaned:
+        first = cleaned.split(" ")[0]
+        if any(c in first for c in "-/.") or (len(first) == 4 and first.isdigit()):
+            return first
+    return cleaned
+
+
+def _to_iso_dob(raw: str) -> str | None:
+    cleaned = _clean_date_string(raw)
+    for fmt in DATE_FORMATS:
         try:
-            return datetime.strptime(raw, fmt).strftime("%Y-%m-%d")
+            return datetime.strptime(cleaned, fmt).strftime("%Y-%m-%d")
         except ValueError:
             continue
-    # year-only fallback
-    if len(raw) == 4 and raw.isdigit():
-        return f"{raw}-01-01"
+    if len(cleaned) == 4 and cleaned.isdigit():
+        return f"{cleaned}-01-01"
     return None
 
 
@@ -68,48 +75,54 @@ def _decompress(qr: str) -> bytes:
     byte_array = big.to_bytes((big.bit_length() + 7) // 8, "big")
     for b_arr in (byte_array, b"\x00" + byte_array, b"\x00\x00" + byte_array):
         try:
-            return zlib.decompress(b_arr, 16 + zlib.MAX_WBITS)  # gzip header
+            return zlib.decompress(b_arr, 16 + zlib.MAX_WBITS)
         except zlib.error:
             pass
         try:
-            return zlib.decompress(b_arr)  # raw zlib fallback
+            return zlib.decompress(b_arr)
         except zlib.error:
             pass
         try:
-            return zlib.decompress(b_arr, -zlib.MAX_WBITS)  # raw deflate fallback
+            return zlib.decompress(b_arr, -zlib.MAX_WBITS)
         except zlib.error:
             pass
     raise ValueError("Could not decompress Secure QR payload")
 
 
-def parse_secure_qr(qr: str) -> dict:
-    """Parse a Secure QR v2 big-integer payload. Raises on malformed input."""
-    data = _decompress(qr)
-    delim = [-1]
+def _extract_delimited_segments(data: bytes, field_names: list[str]) -> dict[str, str]:
+    delims = [-1]
     for i, b in enumerate(data):
         if b == 255:
-            delim.append(i)
-            if len(delim) >= len(FIELDS) + 1:  # enough to bound every text field
+            delims.append(i)
+            if len(delims) >= len(field_names) + 1:
                 break
     fields = {}
-    for i in range(len(FIELDS)):
-        if i + 1 >= len(delim):
+    for i, name in enumerate(field_names):
+        if i + 1 >= len(delims):
             break
-        seg = data[delim[i] + 1: delim[i + 1]]
+        seg = data[delims[i] + 1: delims[i + 1]]
         try:
-            fields[FIELDS[i]] = seg.decode("utf-8")
+            fields[name] = seg.decode("utf-8")
         except UnicodeDecodeError:
-            fields[FIELDS[i]] = seg.decode("ISO-8859-1", errors="replace")
+            fields[name] = seg.decode("ISO-8859-1", errors="replace")
+    return fields
+
+
+def parse_secure_qr(qr: str) -> dict:
+    data = _decompress(qr)
+    fields = _extract_delimited_segments(data, FIELDS)
 
     name = fields.get("name", "").strip()
     if not name:
         raise ValueError("No name field decoded")
+
     ref = (fields.get("referenceid", "") or "").strip()
     last4 = ref[:4] if len(ref) >= 4 else ref
     gender = _normalize_gender(fields.get("gender", ""))
     dob_iso = _to_iso_dob(fields.get("dob", ""))
     addr_keys = ["house", "street", "landmark", "location", "postoffice", "vtc", "subdistrict", "district", "state", "pincode"]
     address = ", ".join(fields.get(k, "").strip() for k in addr_keys if fields.get(k, "").strip())
+
     return {
         "full_name": name,
         "gender": gender,
@@ -126,13 +139,11 @@ def _parse_xml_attributes(raw_xml: str) -> dict:
         root = ET.fromstring(cleaned)
         return {k.lower(): v for k, v in root.attrib.items()}
     except Exception:
-        # Sanitize unescaped ampersands or malformed XML entities
         sanitized = re.sub(r"&(?!amp;|lt;|gt;|quot;|apos;)", "&amp;", cleaned)
         try:
             root = ET.fromstring(sanitized)
             return {k.lower(): v for k, v in root.attrib.items()}
         except Exception:
-            # Fallback regex extraction of XML attributes
             matches = re.findall(r'([a-zA-Z_:][a-zA-Z0-9._:-]*)\s*=\s*["\']([^"\']*)["\']', cleaned)
             return {k.lower(): v for k, v in matches}
 
@@ -154,7 +165,6 @@ def _extract_xml_address(attrs: dict) -> str:
 
 
 def parse_xml_qr(qr: str) -> dict:
-    """Parse the older (pre-2018) XML PrintLetterBarcodeData QR."""
     attrs = _parse_xml_attributes(qr)
     name = (attrs.get("name") or "").strip()
     if not name:
@@ -190,31 +200,41 @@ def _decode_demo_payload(raw: str) -> dict:
     }}
 
 
-def decode_aadhaar(raw: str) -> dict:
-    """Return {outcome, data|message}. outcome in card|garbage|not-aadhaar."""
-    raw = (raw or "").strip().lstrip("\ufeff")
-    if not raw:
-        return {"outcome": "not-aadhaar", "message": "No data captured."}
-    if raw.startswith("snp:") or "/p/" in raw:
-        return {"outcome": "not-aadhaar", "message": "This is a patient QR, not an Aadhaar card."}
-
-    # Demo/simulated card (kept for testing without a real card)
-    if raw.upper().startswith("AADHAAR|"):
-        return _decode_demo_payload(raw)
-
-    # Old XML QR
+def _try_decode_xml(raw: str) -> dict | None:
     if raw.startswith("<") or "<PrintLetterBarcodeData" in raw:
         try:
             return {"outcome": "card", "source": "secure_qr_xml", "data": parse_xml_qr(raw)}
         except Exception:
             return {"outcome": "garbage", "message": "Could not read the Aadhaar QR (XML)."}
+    return None
 
-    # Secure QR v2 big-integer payload
+
+def _try_decode_secure_qr(raw: str) -> dict | None:
     digits = re.sub(r"\s+", "", raw)
     if digits.isdigit() and len(digits) > 40:
         try:
             return {"outcome": "card", "source": "secure_qr", "data": parse_secure_qr(digits)}
         except Exception:
             return {"outcome": "garbage", "message": "Could not decode the Aadhaar Secure QR."}
+    return None
+
+
+def decode_aadhaar(raw: str) -> dict:
+    raw = (raw or "").strip().lstrip("\ufeff")
+    if not raw:
+        return {"outcome": "not-aadhaar", "message": "No data captured."}
+    if raw.startswith("snp:") or "/p/" in raw:
+        return {"outcome": "not-aadhaar", "message": "This is a patient QR, not an Aadhaar card."}
+    if raw.upper().startswith("AADHAAR|"):
+        return _decode_demo_payload(raw)
+
+    xml_result = _try_decode_xml(raw)
+    if xml_result:
+        return xml_result
+
+    secure_result = _try_decode_secure_qr(raw)
+    if secure_result:
+        return secure_result
 
     return {"outcome": "garbage", "message": "Could not read an Aadhaar Secure QR."}
+

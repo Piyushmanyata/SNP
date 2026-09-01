@@ -1,3 +1,5 @@
+import logger from "../../../lib/logger";
+
 export function hasNativeBarcodeDetector() {
   return typeof window !== "undefined" && typeof window.BarcodeDetector === "function";
 }
@@ -10,7 +12,8 @@ export async function detectNativeImageData(imageData) {
     const hit = codes && codes[0];
     return hit && hit.rawValue ? hit.rawValue : null;
   } catch (e) {
-    console.warn("BarcodeDetector failed:", e);
+    logger.warn("BarcodeDetector failed:", e);
     return null;
   }
 }
+

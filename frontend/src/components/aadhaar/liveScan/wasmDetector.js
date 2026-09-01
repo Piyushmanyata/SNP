@@ -1,3 +1,5 @@
+import logger from "../../../lib/logger";
+
 let worker = null;
 let seq = 0;
 const pending = new Map();
@@ -21,7 +23,7 @@ export function loadZxingWorker() {
     job.resolve(text || null);
   };
   worker.onerror = (err) => {
-    console.warn("zxing worker error:", err);
+    logger.warn("zxing worker error:", err);
   };
   return Promise.resolve();
 }

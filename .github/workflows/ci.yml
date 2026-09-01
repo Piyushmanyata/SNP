@@ -26,13 +26,16 @@ jobs:
       - name: Install Backend Dependencies
         run: |
           pip install -r backend/requirements.txt
-          pip install pytest flake8 requests
+          pip install pytest flake8 requests httpx
 
       - name: Verify Backend Python Syntax & Imports
         run: |
           python -m py_compile backend/*.py
-          python -c "import sys; sys.path.insert(0, 'backend'); import server, db, models, security, helpers, serializers, aadhaar, routes_auth, routes_staff, routes_camps, routes_registration, routes_desk, routes_clinical, routes_reports, routes_templates; print('Backend modules verified')"
-          pytest backend/tests/test_aadhaar_unit.py backend/tests/test_seed_admin.py backend/tests/test_cors.py backend/tests/test_indexes.py backend/tests/test_adversarial_challenger.py
+          python -c "import sys; sys.path.insert(0, 'backend'); import server, db, models, security, helpers, serializers, aadhaar, msg91, sms, routes_auth, routes_staff, routes_camps, routes_registration, routes_desk, routes_clinical, routes_reports, routes_templates, routes_reminders; print('Backend modules verified')"
+          pytest backend/tests/test_aadhaar_unit.py backend/tests/test_seed_admin.py backend/tests/test_cors.py backend/tests/test_indexes.py backend/tests/test_adversarial_challenger.py backend/tests/test_adversarial_stress_suite.py backend/tests/test_camp_lifecycle.py backend/tests/test_reminders.py
+
+      - name: Lint Backend
+        run: flake8 --select=F,E9 backend/*.py
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -44,6 +47,10 @@ jobs:
       - name: Install Frontend Dependencies
         working-directory: ./frontend
         run: npm ci || npm install
+
+      - name: Lint Frontend
+        working-directory: ./frontend
+        run: npm run lint
 
       - name: Run Frontend Tests
         working-directory: ./frontend

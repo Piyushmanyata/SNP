@@ -1,3 +1,4 @@
+from typing import Any, Dict
 from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
 from db import get_db
@@ -8,7 +9,7 @@ from security import require_admin, require_any
 router = APIRouter(prefix="/api/camps", tags=["camps"])
 
 
-def ser_camp(c: dict) -> dict:
+def ser_camp(c: dict) -> Dict[str, Any]:
     return {
         "id": str(c["_id"]),
         "name": c["name"],
@@ -19,7 +20,7 @@ def ser_camp(c: dict) -> dict:
     }
 
 
-def ser_day(d: dict) -> dict:
+def ser_day(d: dict) -> Dict[str, Any]:
     return {
         "id": str(d["_id"]),
         "camp_id": str(d["camp_id"]),
@@ -31,7 +32,7 @@ def ser_day(d: dict) -> dict:
 
 
 @router.post("")
-async def create_camp(body: CampBody, actor: dict = Depends(require_admin)):
+async def create_camp(body: CampBody, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     res = await db.camps.insert_one({
         "name": body.name, "venue": body.venue, "camp_date": body.camp_date,
@@ -42,14 +43,14 @@ async def create_camp(body: CampBody, actor: dict = Depends(require_admin)):
 
 
 @router.get("")
-async def list_camps(actor: dict = Depends(require_any)):
+async def list_camps(actor: dict = Depends(require_any)) -> Dict[str, Any]:
     db = get_db()
     camps = await db.camps.find().sort("created_at", -1).to_list(500)
     return {"camps": [ser_camp(c) for c in camps]}
 
 
 @router.get("/active")
-async def active_camp(actor: dict = Depends(require_any)):
+async def active_camp(actor: dict = Depends(require_any)) -> Dict[str, Any]:
     db = get_db()
     c = await db.camps.find_one({"is_active": True})
     if not c:
@@ -59,7 +60,7 @@ async def active_camp(actor: dict = Depends(require_any)):
 
 
 @router.get("/active/public")
-async def active_camp_public():
+async def active_camp_public() -> Dict[str, Any]:
     """Public (no auth) projection for patient self-registration. No PHI."""
     db = get_db()
     c = await db.camps.find_one({"is_active": True})
@@ -67,26 +68,29 @@ async def active_camp_public():
         return {"camp": None, "days": []}
     days = await db.camp_days.find({"camp_id": c["_id"]}).sort("day_date", 1).to_list(100)
     out = []
+    total_seats = 0
     for d in days:
         n = await db.patients.count_documents({"camp_day_id": d["_id"]})
         limit = d.get("seat_limit") or 0
-        remaining = "unlimited" if limit == 0 else max(0, limit - n)
+        total_seats += limit
         out.append({
             "id": str(d["_id"]),
             "day_date": d["day_date"],
             "is_today": d["day_date"] == today_ist_str(),
             "registered": n,
             "seat_limit": limit,
-            "remaining": remaining,
+            "remaining": max(0, limit - n),
         })
     return {
         "camp": {"id": str(c["_id"]), "name": c["name"], "venue": c["venue"]},
+        "total_seats": total_seats,
+        "total_registered": await db.patients.count_documents({"camp_id": c["_id"]}),
         "days": out,
     }
 
 
 @router.patch("/{camp_id}")
-async def update_camp(camp_id: str, body: CampBody, actor: dict = Depends(require_admin)):
+async def update_camp(camp_id: str, body: CampBody, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     await db.camps.update_one({"_id": ObjectId(camp_id)}, {"$set": {
         "name": body.name, "venue": body.venue, "camp_date": body.camp_date}})
@@ -97,7 +101,7 @@ async def update_camp(camp_id: str, body: CampBody, actor: dict = Depends(requir
 
 
 @router.post("/{camp_id}/activate")
-async def activate_camp(camp_id: str, actor: dict = Depends(require_admin)):
+async def activate_camp(camp_id: str, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     oid = ObjectId(camp_id)
     if not await db.camps.find_one({"_id": oid}):
@@ -109,14 +113,14 @@ async def activate_camp(camp_id: str, actor: dict = Depends(require_admin)):
 
 
 @router.post("/{camp_id}/deactivate")
-async def deactivate_camp(camp_id: str, actor: dict = Depends(require_admin)):
+async def deactivate_camp(camp_id: str, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     await db.camps.update_one({"_id": ObjectId(camp_id)}, {"$set": {"is_active": False}})
     return {"ok": True}
 
 
 @router.delete("/{camp_id}")
-async def delete_camp(camp_id: str, actor: dict = Depends(require_admin)):
+async def delete_camp(camp_id: str, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     oid = ObjectId(camp_id)
     if await db.patients.find_one({"camp_id": oid}):
@@ -127,7 +131,7 @@ async def delete_camp(camp_id: str, actor: dict = Depends(require_admin)):
 
 
 @router.post("/days")
-async def upsert_camp_day(body: CampDayBody, actor: dict = Depends(require_admin)):
+async def upsert_camp_day(body: CampDayBody, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     camp_oid = ObjectId(body.camp_id)
     if not await db.camps.find_one({"_id": camp_oid}):
@@ -148,14 +152,14 @@ async def upsert_camp_day(body: CampDayBody, actor: dict = Depends(require_admin
 
 
 @router.get("/{camp_id}/days")
-async def list_days(camp_id: str, actor: dict = Depends(require_any)):
+async def list_days(camp_id: str, actor: dict = Depends(require_any)) -> Dict[str, Any]:
     db = get_db()
     days = await db.camp_days.find({"camp_id": ObjectId(camp_id)}).sort("day_date", 1).to_list(100)
     return {"days": [ser_day(d) for d in days]}
 
 
 @router.patch("/days/{day_id}/print-window")
-async def toggle_print_window(day_id: str, body: PrintWindowBody, actor: dict = Depends(require_admin)):
+async def toggle_print_window(day_id: str, body: PrintWindowBody, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     res = await db.camp_days.update_one(
         {"_id": ObjectId(day_id)}, {"$set": {"printing_open": body.printing_open}})
@@ -166,7 +170,7 @@ async def toggle_print_window(day_id: str, body: PrintWindowBody, actor: dict = 
 
 
 @router.delete("/days/{day_id}")
-async def delete_day(day_id: str, actor: dict = Depends(require_admin)):
+async def delete_day(day_id: str, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     oid = ObjectId(day_id)
     if await db.patients.find_one({"camp_day_id": oid}):

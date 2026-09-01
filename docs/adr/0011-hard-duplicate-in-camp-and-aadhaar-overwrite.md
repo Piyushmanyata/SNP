@@ -20,3 +20,12 @@ Volunteers cannot type a patient before trying the card. A later Lock repairs a 
 - Volunteer checkbox for “two failed scans” — people ticked it without scanning.
 - “Register anyway” — made Duplicate in camp optional.
 - A separate “Scan Aadhaar” / bind screen — a second resource and desk flow for what is the same register request.
+
+## Amendment (ADR 0012 era)
+
+Two rules above did not survive contact with camp day and pre-registration.
+
+**"Empty Detect misses are not Failures" trapped the volunteer it was meant to protect.** On a phone whose camera never detects anything, Decode is never called, the Failure count stays at zero, and the typed form never appears. The volunteer cannot proceed and cannot fall back. Twenty seconds of Live scan with no Detect at all is now a Scan stall, and counts the same as two Failures. It reveals torch, photo upload, and manual entry together. Capture-first is preserved: a volunteer still cannot skip scanning, they just cannot be trapped by it.
+
+**"Already-scanned match 409s" is wrong once Arrival exists.** A Lock on a patient who already has Aadhaar on file is the camp-day check-in, not a duplicate. The desk has one scan box and infers intent from the match: a match with Aadhaar on file stamps Arrival; a match on a Manual entry goes through Mismatch review, and confirming applies the Aadhaar overwrite and stamps Arrival; no match does not register anyone, it offers a name or phone search and requires an explicit "Register as new". Duplicate in camp is unchanged and still has no override.
+

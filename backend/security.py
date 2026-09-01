@@ -2,6 +2,7 @@ import os
 import jwt
 import bcrypt
 from datetime import timedelta
+from typing import Callable, Any
 from bson import ObjectId
 from fastapi import Request, HTTPException, Depends
 from db import get_db
@@ -91,7 +92,7 @@ async def get_current_user(request: Request) -> dict:
     return user
 
 
-def require_roles(*roles):
+def require_roles(*roles: str) -> Callable[..., Any]:
     async def dep(user: dict = Depends(get_current_user)) -> dict:
         if user["role"] not in roles:
             raise HTTPException(status_code=403, detail="Insufficient permissions")
