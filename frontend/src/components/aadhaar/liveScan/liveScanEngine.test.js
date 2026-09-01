@@ -3,6 +3,7 @@ import {
   NATIVE_MISS_LIMIT,
   PAYLOAD_IGNORE_MS,
   PROMOTE_AFTER_MS,
+  SCAN_STALL_MS,
   ZXING_READER_OPTIONS,
   createLiveScanEngine,
 } from "./liveScanEngine";
@@ -24,6 +25,7 @@ function makeEngine(overrides = {}) {
   const onLock = jest.fn();
   const onFailure = jest.fn();
   const onHintFallbacks = jest.fn();
+  const onScanStall = jest.fn();
   const engine = createLiveScanEngine({
     hasNativeDetector: true,
     now: () => t,
@@ -34,6 +36,7 @@ function makeEngine(overrides = {}) {
     onLock,
     onFailure,
     onHintFallbacks,
+    onScanStall,
     ...overrides,
   });
   return {
@@ -48,6 +51,7 @@ function makeEngine(overrides = {}) {
     onLock,
     onFailure,
     onHintFallbacks,
+    onScanStall,
   };
 }
 
@@ -264,6 +268,71 @@ describe("createLiveScanEngine", () => {
       await engine.tick(frame);
       expect(detectNative).toHaveBeenCalled();
       expect(loadWasm).not.toHaveBeenCalled();
+    }
+  );
+});
+
+describe("Scan stall", () => {
+  test("twenty seconds with no Detect at all reveals the fallbacks",
+    async () => {
+      const { engine, onScanStall, advance } = makeEngine();
+      engine.start();
+      await engine.tick(frame);
+      expect(onScanStall).not.toHaveBeenCalled();
+
+      advance(SCAN_STALL_MS - 1);
+      await engine.tick(frame);
+      expect(onScanStall).not.toHaveBeenCalled();
+      expect(engine.getState().stalled).toBe(false);
+
+      advance(1);
+      await engine.tick(frame);
+      expect(onScanStall).toHaveBeenCalledTimes(1);
+      expect(engine.getState().stalled).toBe(true);
+    }
+  );
+
+  test("a stall fires once, not on every later tick",
+    async () => {
+      const { engine, onScanStall, advance } = makeEngine();
+      engine.start();
+      advance(SCAN_STALL_MS);
+      await engine.tick(frame);
+      await engine.tick(frame);
+      await engine.tick(frame);
+      expect(onScanStall).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  test("a camera that detects something never stalls, even if decode fails",
+    async () => {
+      const detectNative = jest.fn().mockResolvedValue("some-payload");
+      const decode = jest.fn().mockResolvedValue({ outcome: "garbage" });
+      const { engine, onScanStall, onFailure, advance } = makeEngine({ detectNative, decode });
+      engine.start();
+      await engine.tick(frame);
+      expect(onFailure).toHaveBeenCalled();
+
+      advance(SCAN_STALL_MS * 2);
+      await engine.tick(frame);
+      expect(onScanStall).not.toHaveBeenCalled();
+      expect(engine.getState().detects).toBeGreaterThan(0);
+    }
+  );
+
+  test("restarting the scan clears the stall",
+    async () => {
+      const { engine, onScanStall, advance } = makeEngine();
+      engine.start();
+      advance(SCAN_STALL_MS);
+      await engine.tick(frame);
+      expect(onScanStall).toHaveBeenCalledTimes(1);
+
+      engine.start();
+      expect(engine.getState().stalled).toBe(false);
+      expect(engine.getState().detects).toBe(0);
+      await engine.tick(frame);
+      expect(onScanStall).toHaveBeenCalledTimes(1);
     }
   );
 });

@@ -1,16 +1,19 @@
+from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from pymongo.errors import DuplicateKeyError
 from bson import ObjectId
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from db import get_db
 from models import TranscriptionBody, FulfilmentBody, CorrectionBody, OtScheduleBody, SpecsScheduleBody
 from helpers import now_utc, iso, DIAGNOSIS_OPTIONS
 from serializers import ser_patient, ser_person
 from security import require_clinical, require_admin, require_any
+import sms
 
 router = APIRouter(prefix="/api/clinical", tags=["clinical"])
 
 
-def ser_trans(t: dict) -> dict:
+def ser_trans(t: dict) -> Dict[str, Any]:
     return {
         "id": str(t["_id"]),
         "patient_id": str(t["patient_id"]),
@@ -30,7 +33,7 @@ def ser_trans(t: dict) -> dict:
     }
 
 
-def ser_fulfil(f: dict) -> dict:
+def ser_fulfil(f: dict) -> Dict[str, Any]:
     return {
         "id": str(f["_id"]),
         "transcription_id": str(f["transcription_id"]),
@@ -44,7 +47,7 @@ def ser_fulfil(f: dict) -> dict:
     }
 
 
-def ser_slip(s: dict) -> dict:
+def ser_slip(s: dict) -> Dict[str, Any]:
     return {
         "id": str(s["_id"]),
         "transcription_id": str(s["transcription_id"]),
@@ -59,7 +62,7 @@ def ser_slip(s: dict) -> dict:
     }
 
 
-def ser_ot_day(d: dict) -> dict:
+def ser_ot_day(d: dict) -> Dict[str, Any]:
     return {
         "id": str(d["_id"]),
         "camp_id": str(d["camp_id"]),
@@ -71,7 +74,7 @@ def ser_ot_day(d: dict) -> dict:
     }
 
 
-def ser_specs_day(d: dict) -> dict:
+def ser_specs_day(d: dict) -> Dict[str, Any]:
     return {
         "id": str(d["_id"]),
         "camp_id": str(d["camp_id"]),
@@ -83,7 +86,7 @@ def ser_specs_day(d: dict) -> dict:
     }
 
 
-def normalize_ot_eye(v):
+def normalize_ot_eye(v: Optional[str]) -> Optional[str]:
     if not v:
         return None
     m = {"r": "R", "right": "R", "l": "L", "left": "L", "b": "B", "both": "B"}
@@ -91,36 +94,17 @@ def normalize_ot_eye(v):
 
 
 @router.get("/diagnosis-options")
-async def diagnosis_options(actor: dict = Depends(require_any)):
+async def diagnosis_options(actor: dict = Depends(require_any)) -> Dict[str, Any]:
     return {"options": DIAGNOSIS_OPTIONS}
 
 
-@router.post("/lookup")
-async def clinical_lookup(body: dict, actor: dict = Depends(require_clinical)):
-    """Lookup an eligible (seen) registration by reg_no or patient QR."""
-    db = get_db()
-    value = str(body.get("value", "")).strip()
-    if value.startswith("snp:"):
-        value = value[4:]
-    if "/p/" in value:
-        value = value.split("/p/")[-1]
-    p = await db.patients.find_one({"patient_qr": value})
-    if not p and value.isdigit():
-        p = await db.patients.find_one({"reg_no": int(value)})
-    if not p:
-        raise HTTPException(status_code=404, detail="No matching registration found")
-    if p.get("queue_status") != "seen":
-        # refusal without exposing PHI
-        raise HTTPException(status_code=409, detail={
-            "code": "not_seen",
-            "message": "This registration is not yet eligible (not marked seen).",
-        })
-    person = await db.persons.find_one({"_id": p["person_id"]}) if p.get("person_id") else None
-    trans = await db.transcriptions.find_one({"patient_id": p["_id"]})
+async def _fetch_clinical_bundle(db: AsyncIOMotorDatabase, patient: dict) -> Dict[str, Any]:
+    person = await db.persons.find_one({"_id": patient["person_id"]}) if patient.get("person_id") else None
+    trans = await db.transcriptions.find_one({"patient_id": patient["_id"]})
     fulfilments = await db.fulfilments.find({"transcription_id": trans["_id"]}).to_list(20) if trans else []
     slips = await db.deferred_slips.find({"transcription_id": trans["_id"], "active": True}).to_list(20) if trans else []
     return {
-        "registration": ser_patient(p),
+        "registration": ser_patient(patient),
         "person": ser_person(person) if person else None,
         "transcription": ser_trans(trans) if trans else None,
         "fulfilments": [ser_fulfil(f) for f in fulfilments],
@@ -128,8 +112,34 @@ async def clinical_lookup(body: dict, actor: dict = Depends(require_clinical)):
     }
 
 
+def _parse_lookup_identifier(raw_value: str) -> str:
+    val = str(raw_value).strip()
+    if val.startswith("snp:"):
+        val = val[4:]
+    if "/p/" in val:
+        val = val.split("/p/")[-1]
+    return val
+
+
+@router.post("/lookup")
+async def clinical_lookup(body: dict, actor: dict = Depends(require_clinical)) -> Dict[str, Any]:
+    db = get_db()
+    value = _parse_lookup_identifier(body.get("value", ""))
+    p = await db.patients.find_one({"patient_qr": value})
+    if not p and value.isdigit():
+        p = await db.patients.find_one({"reg_no": int(value)})
+    if not p:
+        raise HTTPException(status_code=404, detail="No matching registration found")
+    if p.get("queue_status") != "seen":
+        raise HTTPException(status_code=409, detail={
+            "code": "not_seen",
+            "message": "This registration is not yet eligible (not marked seen).",
+        })
+    return await _fetch_clinical_bundle(db, p)
+
+
 @router.post("/transcription")
-async def create_transcription(body: TranscriptionBody, actor: dict = Depends(require_clinical)):
+async def create_transcription(body: TranscriptionBody, actor: dict = Depends(require_clinical)) -> Dict[str, Any]:
     db = get_db()
     p = await db.patients.find_one({"_id": ObjectId(body.patient_id)})
     if not p:
@@ -180,7 +190,7 @@ async def create_transcription(body: TranscriptionBody, actor: dict = Depends(re
     return {"transcription": ser_trans(t)}
 
 
-def _validate_fulfilment_matrix(item_type: str, status: str):
+def _validate_fulfilment_matrix(item_type: str, status: str) -> None:
     valid = {
         "medicine": {"fulfilled", "not_available", "not_required"},
         "specs": {"fulfilled", "deferred", "not_required"},
@@ -190,64 +200,101 @@ def _validate_fulfilment_matrix(item_type: str, status: str):
         raise HTTPException(status_code=400, detail="Invalid fulfilment item/status")
 
 
-async def _consume_day_seat(db, collection, day_id: str, full_detail: str):
-    day = await collection.find_one_and_update(
+async def _consume_seat(collection: Any, day_id: str) -> Optional[dict]:
+    return await collection.find_one_and_update(
         {"_id": ObjectId(day_id),
          "$expr": {"$lt": ["$seats_taken", "$seat_limit"]}},
         {"$inc": {"seats_taken": 1}},
         return_document=True,
     )
-    if not day:
-        raise HTTPException(status_code=409, detail=full_detail)
-    return day
 
 
-async def _day_or_consume(db, collection, day_id: str, already_held: bool, full_detail: str):
-    if already_held:
-        day = await collection.find_one({"_id": ObjectId(day_id)})
+DEFERRAL_CONFIG = {
+    "specs": {
+        "id_field": "specs_collection_day_id",
+        "collection_attr": "specs_collection_days",
+        "missing_err": "Spectacles to be made deferral needs a Specs collection day",
+        "full_err": "Specs collection day is full or not found",
+        "none_free_err": "Every Specs collection day is full. Call the admin to add a Specs collection day.",
+        "instructions": "Collect spectacles on the scheduled date.",
+        "slip_kwarg": "specs_collection_day_id",
+        "message_type": "specs_token",
+    },
+    "ot": {
+        "id_field": "ot_schedule_day_id",
+        "collection_attr": "ot_schedule_days",
+        "missing_err": "OT deferral needs a scheduled day",
+        "full_err": "OT day is full or not found",
+        "none_free_err": "Every OT Schedule Day is full. Call the admin to add an OT Schedule Day.",
+        "instructions": "Report for surgery on the scheduled OT date.",
+        "slip_kwarg": "ot_schedule_day_id",
+        "message_type": "ot_token",
+    },
+}
+
+
+async def _refuse_full(collection: Any, day: dict, cfg: dict) -> None:
+    """A single full day is a retry; every day of the type full is an admin problem."""
+    free = await collection.count_documents({
+        "camp_id": day.get("camp_id"),
+        "$expr": {"$lt": ["$seats_taken", "$seat_limit"]},
+    })
+    if free == 0:
+        raise HTTPException(status_code=409, detail={
+            "code": "NO_CLINICAL_DAY_AVAILABLE",
+            "message": cfg["none_free_err"],
+        })
+    raise HTTPException(status_code=409, detail=cfg["full_err"])
+
+
+def _assert_specs_measurements(item_type: str, transcription: dict) -> None:
+    if item_type != "specs":
+        return
+    m = transcription.get("specs_measurements") or {}
+    if not (str(m.get("r_sph") or "").strip() and str(m.get("l_sph") or "").strip()):
+        raise HTTPException(status_code=400, detail={
+            "code": "SPECS_MEASUREMENTS_REQUIRED",
+            "message": "Record the prescribed power for both eyes before recording a spectacles line.",
+        })
+
+
+async def _process_deferral(db: AsyncIOMotorDatabase, t: dict, body: FulfilmentBody, prior: dict | None = None) -> Optional[dict]:
+    if body.status != "deferred" or body.item_type not in DEFERRAL_CONFIG:
+        return None
+
+    cfg = DEFERRAL_CONFIG[body.item_type]
+    target_day_id = getattr(body, cfg["id_field"])
+    if not target_day_id:
+        raise HTTPException(status_code=400, detail=cfg["missing_err"])
+
+    held = bool(
+        prior
+        and prior.get("status") == "deferred"
+        and str(prior.get(cfg["id_field"])) == target_day_id
+    )
+    collection = getattr(db, cfg["collection_attr"])
+    if held:
+        day = await collection.find_one({"_id": ObjectId(target_day_id)})
         if not day:
-            raise HTTPException(status_code=409, detail=full_detail)
-        return day
-    return await _consume_day_seat(db, collection, day_id, full_detail)
+            raise HTTPException(status_code=409, detail=cfg["full_err"])
+    else:
+        day = await _consume_seat(collection, target_day_id)
+        if not day:
+            target = await collection.find_one({"_id": ObjectId(target_day_id)})
+            if not target:
+                raise HTTPException(status_code=409, detail=cfg["full_err"])
+            await _refuse_full(collection, target, cfg)
+    slip_kwargs = {cfg["slip_kwarg"]: day["_id"]}
+    return await _make_slip(t, body.item_type, day["day_date"], day["venue"], cfg["instructions"], **slip_kwargs)
 
 
-async def _process_deferral(db, t: dict, body: FulfilmentBody, prior: dict | None = None):
-    slip = None
-    if body.status == "deferred":
-        if body.item_type == "specs":
-            if not body.specs_collection_day_id:
-                raise HTTPException(status_code=400, detail="Spectacles to be made deferral needs a Specs collection day")
-            held = bool(
-                prior
-                and prior.get("status") == "deferred"
-                and str(prior.get("specs_collection_day_id")) == body.specs_collection_day_id
-            )
-            specs_day = await _day_or_consume(
-                db, db.specs_collection_days, body.specs_collection_day_id, held,
-                "Specs collection day is full or not found",
-            )
-            slip = await _make_slip(t, "specs", specs_day["day_date"], specs_day["venue"],
-                                    "Collect spectacles on the scheduled date.",
-                                    specs_collection_day_id=specs_day["_id"])
-        elif body.item_type == "ot":
-            if not body.ot_schedule_day_id:
-                raise HTTPException(status_code=400, detail="OT deferral needs a scheduled day")
-            held = bool(
-                prior
-                and prior.get("status") == "deferred"
-                and str(prior.get("ot_schedule_day_id")) == body.ot_schedule_day_id
-            )
-            ot_day = await _day_or_consume(
-                db, db.ot_schedule_days, body.ot_schedule_day_id, held,
-                "OT day is full or not found",
-            )
-            slip = await _make_slip(t, "ot", ot_day["day_date"], ot_day["venue"],
-                                    "Report for surgery on the scheduled OT date.",
-                                    ot_schedule_day_id=ot_day["_id"])
-    return slip
-
-
-async def _cleanup_prior_fulfilment(db, transcription_id, item_type: str, keep_ot=None, keep_specs=None):
+async def _cleanup_prior_fulfilment(
+    db: AsyncIOMotorDatabase,
+    transcription_id: ObjectId | str,
+    item_type: str,
+    keep_ot: Optional[ObjectId | str] = None,
+    keep_specs: Optional[ObjectId | str] = None,
+) -> None:
     prior = await db.fulfilments.find({"transcription_id": transcription_id, "item_type": item_type}).to_list(20)
     for pf in prior:
         if pf.get("status") != "deferred":
@@ -267,8 +314,27 @@ async def _cleanup_prior_fulfilment(db, transcription_id, item_type: str, keep_o
     await db.fulfilments.delete_many({"transcription_id": transcription_id, "item_type": item_type})
 
 
+def _build_fulfilment_doc(body: FulfilmentBody, transcription_id: ObjectId | str, slip: dict | None, actor_id: str) -> dict:
+    return {
+        "transcription_id": transcription_id,
+        "item_type": body.item_type,
+        "status": body.status,
+        "collection_date": (slip or {}).get("collection_date") or body.collection_date,
+        "collection_venue": (slip or {}).get("collection_venue") or body.collection_venue,
+        "ot_schedule_day_id": ObjectId(body.ot_schedule_day_id) if body.status == "deferred" and body.ot_schedule_day_id else None,
+        "specs_collection_day_id": ObjectId(body.specs_collection_day_id) if body.status == "deferred" and body.specs_collection_day_id else None,
+        "created_by": actor_id,
+        "created_at": now_utc(),
+    }
+
+
+async def _ensure_transcription_locked(db: AsyncIOMotorDatabase, transcription: dict) -> None:
+    if not transcription.get("locked"):
+        await db.transcriptions.update_one({"_id": transcription["_id"]}, {"$set": {"locked": True}})
+
+
 @router.post("/fulfilment")
-async def record_fulfilment(body: FulfilmentBody, actor: dict = Depends(require_clinical)):
+async def record_fulfilment(body: FulfilmentBody, actor: dict = Depends(require_clinical)) -> Dict[str, Any]:
     db = get_db()
     t = await db.transcriptions.find_one({"_id": ObjectId(body.transcription_id)})
     if not t:
@@ -281,6 +347,7 @@ async def record_fulfilment(body: FulfilmentBody, actor: dict = Depends(require_
         })
 
     _validate_fulfilment_matrix(body.item_type, body.status)
+    _assert_specs_measurements(body.item_type, t)
     prior = await db.fulfilments.find_one({"transcription_id": t["_id"], "item_type": body.item_type})
     if body.status != "deferred":
         await db.deferred_slips.update_many(
@@ -289,32 +356,32 @@ async def record_fulfilment(body: FulfilmentBody, actor: dict = Depends(require_
         )
     slip = await _process_deferral(db, t, body, prior)
 
-    doc = {
-        "transcription_id": t["_id"],
-        "item_type": body.item_type,
-        "status": body.status,
-        "collection_date": (slip or {}).get("collection_date") or body.collection_date,
-        "collection_venue": (slip or {}).get("collection_venue") or body.collection_venue,
-        "ot_schedule_day_id": ObjectId(body.ot_schedule_day_id) if body.status == "deferred" and body.ot_schedule_day_id else None,
-        "specs_collection_day_id": ObjectId(body.specs_collection_day_id) if body.status == "deferred" and body.specs_collection_day_id else None,
-        "created_by": str(actor["_id"]),
-        "created_at": now_utc(),
-    }
+    doc = _build_fulfilment_doc(body, t["_id"], slip, str(actor["_id"]))
     keep_ot = doc["ot_schedule_day_id"] if body.status == "deferred" else None
     keep_specs = doc["specs_collection_day_id"] if body.status == "deferred" else None
     await _cleanup_prior_fulfilment(db, t["_id"], body.item_type, keep_ot=keep_ot, keep_specs=keep_specs)
+
     res = await db.fulfilments.insert_one(doc)
     doc["_id"] = res.inserted_id
 
-    # lock transcription on first fulfilment
-    if not t.get("locked"):
-        await db.transcriptions.update_one({"_id": t["_id"]}, {"$set": {"locked": True}})
-
+    await _ensure_transcription_locked(db, t)
+    if slip:
+        await sms.send_patient_sms(
+            db, patient, DEFERRAL_CONFIG[body.item_type]["message_type"],
+            slip["collection_date"], slip["collection_venue"],
+        )
     return {"fulfilment": ser_fulfil(doc), "slip": ser_slip(slip) if slip else None}
 
 
-async def _make_slip(t, item_type, coll_date, venue, instructions, ot_schedule_day_id=None,
-                    specs_collection_day_id=None):
+async def _make_slip(
+    t: dict,
+    item_type: str,
+    coll_date: str,
+    venue: str,
+    instructions: str,
+    ot_schedule_day_id: Optional[ObjectId | str] = None,
+    specs_collection_day_id: Optional[ObjectId | str] = None,
+) -> dict:
     db = get_db()
     await db.deferred_slips.update_many(
         {"transcription_id": t["_id"], "item_type": item_type, "active": True},
@@ -341,7 +408,7 @@ async def _make_slip(t, item_type, coll_date, venue, instructions, ot_schedule_d
 
 
 @router.get("/slip/{slip_id}")
-async def get_slip(slip_id: str, actor: dict = Depends(require_clinical)):
+async def get_slip(slip_id: str, actor: dict = Depends(require_clinical)) -> Dict[str, Any]:
     db = get_db()
     s = await db.deferred_slips.find_one({"_id": ObjectId(slip_id)})
     if not s:
@@ -356,7 +423,7 @@ async def get_slip(slip_id: str, actor: dict = Depends(require_clinical)):
 
 
 @router.post("/correction")
-async def add_correction(body: CorrectionBody, actor: dict = Depends(require_clinical)):
+async def add_correction(body: CorrectionBody, actor: dict = Depends(require_clinical)) -> Dict[str, Any]:
     db = get_db()
     t = await db.transcriptions.find_one({"_id": ObjectId(body.transcription_id)})
     if not t:
@@ -380,7 +447,7 @@ async def add_correction(body: CorrectionBody, actor: dict = Depends(require_cli
 
 
 @router.get("/corrections/{transcription_id}")
-async def list_corrections(transcription_id: str, actor: dict = Depends(require_clinical)):
+async def list_corrections(transcription_id: str, actor: dict = Depends(require_clinical)) -> Dict[str, Any]:
     db = get_db()
     items = await db.corrections.find({"transcription_id": ObjectId(transcription_id)}).sort("created_at", 1).to_list(100)
     return {"corrections": [{
@@ -390,7 +457,7 @@ async def list_corrections(transcription_id: str, actor: dict = Depends(require_
 
 
 @router.get("/history/{person_id}")
-async def clinical_history(person_id: str, actor: dict = Depends(require_clinical)):
+async def clinical_history(person_id: str, actor: dict = Depends(require_clinical)) -> Dict[str, Any]:
     db = get_db()
     items = await db.transcriptions.find({"person_id": ObjectId(person_id)}).sort("created_at", -1).to_list(100)
     out = []
@@ -407,7 +474,7 @@ async def clinical_history(person_id: str, actor: dict = Depends(require_clinica
 
 # ---- OT schedule ----
 @router.post("/ot-days")
-async def create_ot_day(body: OtScheduleBody, actor: dict = Depends(require_admin)):
+async def create_ot_day(body: OtScheduleBody, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     existing = await db.ot_schedule_days.find_one({"camp_id": ObjectId(body.camp_id), "day_date": body.day_date})
     if existing:
@@ -431,7 +498,7 @@ async def create_ot_day(body: OtScheduleBody, actor: dict = Depends(require_admi
 
 
 @router.get("/ot-days")
-async def list_ot_days(actor: dict = Depends(require_any)):
+async def list_ot_days(actor: dict = Depends(require_any)) -> Dict[str, Any]:
     db = get_db()
     camp = await db.camps.find_one({"is_active": True})
     if not camp:
@@ -441,7 +508,7 @@ async def list_ot_days(actor: dict = Depends(require_any)):
 
 
 @router.post("/specs-days")
-async def create_specs_day(body: SpecsScheduleBody, actor: dict = Depends(require_admin)):
+async def create_specs_day(body: SpecsScheduleBody, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     existing = await db.specs_collection_days.find_one({"camp_id": ObjectId(body.camp_id), "day_date": body.day_date})
     if existing:
@@ -465,7 +532,7 @@ async def create_specs_day(body: SpecsScheduleBody, actor: dict = Depends(requir
 
 
 @router.get("/specs-days")
-async def list_specs_days(actor: dict = Depends(require_any)):
+async def list_specs_days(actor: dict = Depends(require_any)) -> Dict[str, Any]:
     db = get_db()
     camp = await db.camps.find_one({"is_active": True})
     if not camp:

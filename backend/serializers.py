@@ -1,4 +1,4 @@
-from helpers import iso, STATUS_LABELS, GENDER_LABELS, ROLE_LABELS
+from helpers import iso, STATUS_LABELS, GENDER_LABELS
 
 
 def ser_patient(p: dict) -> dict:
@@ -22,6 +22,8 @@ def ser_patient(p: dict) -> dict:
         "queue_status": p.get("queue_status", "registered"),
         "status_label": STATUS_LABELS.get(p.get("queue_status", "registered"), "Registered"),
         "patient_qr": p.get("patient_qr"),
+        "arrived_at": iso(p.get("arrived_at")),
+        "camp_day_changed_from": p.get("camp_day_changed_from"),
         "printed_at": iso(p.get("printed_at")),
         "seen_at": iso(p.get("seen_at")),
         "seen_by": str(p["seen_by"]) if p.get("seen_by") else None,

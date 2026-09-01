@@ -161,7 +161,7 @@ function Camps() {
 function CampDays({ campId }) {
   const [days, setDays] = useState([]);
   const [date, setDate] = useState("");
-  const [seat, setSeat] = useState(0);
+  const [seat, setSeat] = useState(50);
   const [err, setErr] = useState("");
   const load = useCallback(() => {
     api.get(`/camps/${campId}/days`).then((r) => setDays(r.data.days)).catch((e) => setErr(formatApiError(e)));
@@ -172,7 +172,7 @@ function CampDays({ campId }) {
     try {
       await api.post("/camps/days", { camp_id: campId, day_date: date, seat_limit: Number(seat) });
       setDate("");
-      setSeat(0);
+      setSeat(50);
       load();
     } catch (e) {
       setErr(formatApiError(e));
@@ -197,7 +197,7 @@ function CampDays({ campId }) {
           <CalendarDays className="w-4 h-4 text-slate-400" />
           <span className="font-medium text-slate-800 text-sm">{d.day_date}</span>
           {d.is_today && <Badge tone="emerald">Today</Badge>}
-          <span className="text-xs text-slate-400">seats: {d.seat_limit || "∞"}</span>
+          <span className="text-xs text-slate-400">seats: {d.seat_limit}</span>
           <div className="ml-auto flex items-center gap-2">
             <Badge tone={d.printing_open ? "emerald" : "slate"}>{d.printing_open ? "Print open" : "Print closed"}</Badge>
             <Button size="sm" variant={d.printing_open ? "outline" : "primary"} onClick={() => togglePrint(d.id, !d.printing_open)} data-testid={`toggle-print-window-${d.id}`}>
@@ -447,13 +447,11 @@ function Exports() {
       {msg && <Alert tone="emerald">{msg}</Alert>}
       <Card>
         <h3 className="font-display font-bold text-slate-900 mb-1">Camp Records Export</h3>
-        <p className="text-sm text-slate-500 mb-3">One row per seen patient. No Aadhaar / DOB.</p>
+        <p className="text-sm text-slate-500 mb-3">
+          One row per patient: identity, registration, arrival and seen times, clinical values,
+          each eye's power, all four Fulfilment lines and their assigned days.
+        </p>
         <Button variant="outline" onClick={() => download("/exports/camp-records", "camp_records.csv")} data-testid="export-camp-records-button"><Download className="w-4 h-4" /> Download CSV</Button>
-      </Card>
-      <Card>
-        <h3 className="font-display font-bold text-slate-900 mb-1">Clinical Audit Export</h3>
-        <p className="text-sm text-slate-500 mb-3">One row per append-only clinical event.</p>
-        <Button variant="outline" onClick={() => download("/exports/clinical-audit", "clinical_audit.csv")} data-testid="export-clinical-audit-button"><Download className="w-4 h-4" /> Download CSV</Button>
       </Card>
     </div>
   );

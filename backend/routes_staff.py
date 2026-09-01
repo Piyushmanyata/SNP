@@ -1,6 +1,7 @@
+from typing import Any, Dict
 from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
-from db import get_db, next_seq
+from db import get_db
 from models import CreateStaffBody
 from helpers import now_utc
 from security import (
@@ -18,7 +19,7 @@ VALID_ROLES = {"admin", "team_lead", "volunteer", "clinical_desk_operator"}
 
 
 @router.post("")
-async def create_staff(body: CreateStaffBody, actor: dict = Depends(get_current_user)):
+async def create_staff(body: CreateStaffBody, actor: dict = Depends(get_current_user)) -> Dict[str, Any]:
     db = get_db()
     if body.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail="Invalid role")
@@ -61,7 +62,7 @@ async def create_staff(body: CreateStaffBody, actor: dict = Depends(get_current_
 
 
 @router.get("")
-async def list_staff(actor: dict = Depends(require_staff)):
+async def list_staff(actor: dict = Depends(require_staff)) -> Dict[str, Any]:
     db = get_db()
     query = {}
     if actor["role"] == "team_lead":
@@ -71,14 +72,14 @@ async def list_staff(actor: dict = Depends(require_staff)):
 
 
 @router.get("/team-leads")
-async def team_leads(actor: dict = Depends(require_admin)):
+async def team_leads(actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     users = await db.users.find({"role": "team_lead", "disabled_at": None}).to_list(200)
     return {"team_leads": [serialize_user(u) for u in users]}
 
 
 @router.patch("/{staff_id}/disable")
-async def disable_staff(staff_id: str, actor: dict = Depends(require_admin)):
+async def disable_staff(staff_id: str, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     res = await db.users.update_one(
         {"_id": ObjectId(staff_id)}, {"$set": {"disabled_at": now_utc()}}
@@ -89,7 +90,7 @@ async def disable_staff(staff_id: str, actor: dict = Depends(require_admin)):
 
 
 @router.patch("/{staff_id}/enable")
-async def enable_staff(staff_id: str, actor: dict = Depends(require_admin)):
+async def enable_staff(staff_id: str, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     await db.users.update_one(
         {"_id": ObjectId(staff_id)}, {"$set": {"disabled_at": None}}

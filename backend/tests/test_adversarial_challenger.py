@@ -55,6 +55,9 @@ import db as db_module
 # IN-MEMORY ASYNC MONGO MOCK
 # =====================================================================
 
+RX = {"r_sph": "-1.00", "l_sph": "-1.25", "add": "+2.00"}
+
+
 class MockCursor:
     def __init__(self, docs):
         self._docs = [copy.deepcopy(d) for d in docs]
@@ -577,7 +580,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 "_id": p_id, "queue_status": "registered", "printed_at": None,
             })
             await mock_db.transcriptions.insert_one({
-                "_id": t_id, "patient_id": p_id, "locked": False,
+                "_id": t_id, "patient_id": p_id, "locked": False, "specs_measurements": RX,
             })
             body = FulfilmentBody(
                 transcription_id=str(t_id),
@@ -620,7 +623,7 @@ class TestFulfilmentDecomposedAndInvariants:
             day1 = ObjectId()
             day2 = ObjectId()
             await insert_seen_patient(mock_db, p_id)
-            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False})
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False, "specs_measurements": RX})
             await mock_db.specs_collection_days.insert_one({
                 "_id": day1, "camp_id": ObjectId(), "day_date": "2026-09-15",
                 "venue": "District Hospital", "seat_limit": 5, "seats_taken": 0,
@@ -690,7 +693,7 @@ class TestFulfilmentDecomposedAndInvariants:
             specs_day_id = ObjectId()
 
             await insert_seen_patient(mock_db, p_id)
-            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False})
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False, "specs_measurements": RX})
             await mock_db.specs_collection_days.insert_one({
                 "_id": specs_day_id,
                 "camp_id": ObjectId(),
@@ -714,7 +717,7 @@ class TestFulfilmentDecomposedAndInvariants:
 
             t_id2 = ObjectId()
             p_id2 = await insert_seen_patient(mock_db)
-            await mock_db.transcriptions.insert_one({"_id": t_id2, "patient_id": p_id2, "locked": False})
+            await mock_db.transcriptions.insert_one({"_id": t_id2, "patient_id": p_id2, "locked": False, "specs_measurements": RX})
             body2 = FulfilmentBody(
                 transcription_id=str(t_id2),
                 item_type="specs",
@@ -735,7 +738,7 @@ class TestFulfilmentDecomposedAndInvariants:
             day2 = ObjectId()
 
             await insert_seen_patient(mock_db, p_id)
-            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False})
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False, "specs_measurements": RX})
             await mock_db.specs_collection_days.insert_one({
                 "_id": day1, "camp_id": ObjectId(), "day_date": "2026-09-10",
                 "venue": "Optical 1", "seat_limit": 5, "seats_taken": 0,
@@ -772,7 +775,7 @@ class TestFulfilmentDecomposedAndInvariants:
             t_id = ObjectId()
             day_id = ObjectId()
             p_id = await insert_seen_patient(mock_db)
-            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False})
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False, "specs_measurements": RX})
             await mock_db.specs_collection_days.insert_one({
                 "_id": day_id, "camp_id": ObjectId(), "day_date": "2026-09-10",
                 "venue": "Optical", "seat_limit": 1, "seats_taken": 0,
@@ -799,7 +802,7 @@ class TestFulfilmentDecomposedAndInvariants:
             t_id = ObjectId()
             day_id = ObjectId()
             p_id = await insert_seen_patient(mock_db)
-            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False})
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False, "specs_measurements": RX})
             await mock_db.specs_collection_days.insert_one({
                 "_id": day_id, "camp_id": ObjectId(), "day_date": "2026-09-10",
                 "venue": "Optical", "seat_limit": 1, "seats_taken": 0,
@@ -827,8 +830,8 @@ class TestFulfilmentDecomposedAndInvariants:
             day_id = ObjectId()
             p_a = await insert_seen_patient(mock_db)
             p_b = await insert_seen_patient(mock_db)
-            await mock_db.transcriptions.insert_one({"_id": t_a, "patient_id": p_a, "locked": False})
-            await mock_db.transcriptions.insert_one({"_id": t_b, "patient_id": p_b, "locked": False})
+            await mock_db.transcriptions.insert_one({"_id": t_a, "patient_id": p_a, "locked": False, "specs_measurements": RX})
+            await mock_db.transcriptions.insert_one({"_id": t_b, "patient_id": p_b, "locked": False, "specs_measurements": RX})
             await mock_db.specs_collection_days.insert_one({
                 "_id": day_id, "camp_id": ObjectId(), "day_date": "2026-09-10",
                 "venue": "Optical", "seat_limit": 1, "seats_taken": 0,
@@ -873,7 +876,7 @@ class TestFulfilmentDecomposedAndInvariants:
             ot_day_id = ObjectId()
             
             await insert_seen_patient(mock_db, p_id)
-            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False})
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False, "specs_measurements": RX})
             await mock_db.ot_schedule_days.insert_one({
                 "_id": ot_day_id,
                 "camp_id": ObjectId(),
@@ -897,7 +900,7 @@ class TestFulfilmentDecomposedAndInvariants:
 
             t_id2 = ObjectId()
             p_id2 = await insert_seen_patient(mock_db)
-            await mock_db.transcriptions.insert_one({"_id": t_id2, "patient_id": p_id2, "locked": False})
+            await mock_db.transcriptions.insert_one({"_id": t_id2, "patient_id": p_id2, "locked": False, "specs_measurements": RX})
             body2 = FulfilmentBody(
                 transcription_id=str(t_id2),
                 item_type="ot",
@@ -907,7 +910,9 @@ class TestFulfilmentDecomposedAndInvariants:
             with pytest.raises(HTTPException) as exc:
                 await record_fulfilment(body2, actor={"_id": ObjectId(), "role": "doctor"})
             assert exc.value.status_code == 409
-            assert "OT day is full" in exc.value.detail
+            assert exc.value.detail["code"] == "NO_CLINICAL_DAY_AVAILABLE"
+            assert "Call the admin" in exc.value.detail["message"]
+
         asyncio.run(_run())
 
     def test_ot_rebooking_releases_prior_seat(self, monkeypatch):
@@ -919,7 +924,7 @@ class TestFulfilmentDecomposedAndInvariants:
             ot_day2 = ObjectId()
             
             await insert_seen_patient(mock_db, p_id)
-            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False})
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False, "specs_measurements": RX})
             await mock_db.ot_schedule_days.insert_one({
                 "_id": ot_day1, "camp_id": ObjectId(), "day_date": "2026-09-10", "venue": "OT 1", "seat_limit": 5, "seats_taken": 0
             })
@@ -959,7 +964,7 @@ class TestFulfilmentDecomposedAndInvariants:
             for i in range(10):
                 tid = ObjectId()
                 pid = await insert_seen_patient(mock_db)
-                await mock_db.transcriptions.insert_one({"_id": tid, "patient_id": pid, "locked": False})
+                await mock_db.transcriptions.insert_one({"_id": tid, "patient_id": pid, "locked": False, "specs_measurements": RX})
                 trans_ids.append(tid)
 
             async def attempt_booking(t_id):

@@ -1,12 +1,12 @@
 import os
-from motor.motor_asyncio import AsyncIOMotorClient
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo import ASCENDING
 
 _client: AsyncIOMotorClient | None = None
-_db = None
+_db: AsyncIOMotorDatabase | None = None
 
 
-def get_db():
+def get_db() -> AsyncIOMotorDatabase:
     global _client, _db
     if _db is None:
         _client = AsyncIOMotorClient(os.environ["MONGO_URL"])
@@ -33,13 +33,21 @@ PERSON_CAMP_INDEX = {
 }
 TRANSCRIPTION_PATIENT_INDEX = {"keys": "patient_id", "unique": True}
 
+LEDGER_INDEX_NAME = "patient_id_1_message_type_1_event_date_1"
+LEDGER_PARTIAL_FILTER = {"patient_id": {"$exists": True}}
+
 
 def should_drop_person_camp_index(index_info: dict) -> bool:
     old = index_info.get(PERSON_CAMP_INDEX_NAME)
     return bool(old) and not old.get("unique")
 
 
-async def init_indexes():
+def should_drop_ledger_index(index_info: dict) -> bool:
+    old = index_info.get(LEDGER_INDEX_NAME)
+    return bool(old) and old.get("partialFilterExpression") != LEDGER_PARTIAL_FILTER
+
+
+async def init_indexes() -> None:
     db = get_db()
     await db.users.create_index("email", unique=True)
     await db.login_attempts.create_index("identifier")
@@ -76,12 +84,16 @@ async def init_indexes():
     await db.specs_collection_days.create_index(
         [("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True
     )
+    # Rows written before the per-patient grain have no patient_id; excluding them
+    # keeps the unique index buildable on an existing database.
+    if should_drop_ledger_index(await db.reminder_ledger.index_information()):
+        await db.reminder_ledger.drop_index(LEDGER_INDEX_NAME)
     await db.reminder_ledger.create_index(
         [
-            ("number", ASCENDING),
-            ("reminder_type", ASCENDING),
+            ("patient_id", ASCENDING),
+            ("message_type", ASCENDING),
             ("event_date", ASCENDING),
-            ("send_date", ASCENDING),
         ],
         unique=True,
+        partialFilterExpression=LEDGER_PARTIAL_FILTER,
     )

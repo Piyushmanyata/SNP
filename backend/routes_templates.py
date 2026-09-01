@@ -1,42 +1,20 @@
 import base64
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
 from db import get_db
-from helpers import now_utc, iso
+from helpers import now_utc
 from security import require_admin, require_any
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
 
-DEFAULT_BLOCKS = [
-    {"id": "identity", "label": "Patient Identity", "type": "identity", "visible": True, "height": 0},
-    {"id": "diagnosis", "label": "Diagnosis", "type": "lines", "visible": True, "height": 24},
-    {"id": "vision", "label": "Vision (R / L)", "type": "lines", "visible": True, "height": 24},
-    {"id": "prescription", "label": "Prescription (Rx)", "type": "lines", "visible": True, "height": 48},
-    {"id": "vitals", "label": "BP / Blood Sugar", "type": "lines", "visible": True, "height": 18},
-    {"id": "advice", "label": "Advice", "type": "lines", "visible": True, "height": 24},
-    {"id": "signature", "label": "Doctor's Signature", "type": "signature", "visible": True, "height": 0},
-]
-
 MAX_LOGO_BYTES = 2 * 1024 * 1024
 ALLOWED_MIME = ("image/png", "image/jpeg", "image/webp")
-
-
-SNP_HEADER_TITLE = (
-    "Sikar Nagarik Parishad (Kolkata) / सीकर नागरिक परिषद (कोलकाता)\n"
-    "Sikar Zilla Welfare Trust / सीकर जिला वेलफेयर ट्रस्ट"
-)
-SNP_HEADER_SUBTITLE = (
-    "'Sikar Bhawan' 1A, Ashutosh Dey Lane (Near Girish Park Metro, Opp. Liberty Cinema), "
-    "KOLKATA-6. PHONE: 033 4006 4713, 2257 3521. E-mail: sikarkolkata@gmail.com. "
-    "Whatsapp: 86971 90268. FREE EYE SCREENING, FREE DISTRIBUTION OF SPECTACLES & MEDICINES "
-    "AND FREE ARRANGMENT OF CATARACT (IOL) OPERATION."
-)
-SNP_FOOTER = "Sponsorer: Rupa Foundation, Kolkata"
 _HEADER_JPG = Path(__file__).resolve().parent / "assets" / "eye-clinic-header.jpg"
 
 
-def _default_logos():
+def default_logos() -> List[Dict[str, Any]]:
     if not _HEADER_JPG.exists():
         return []
     data_url = "data:image/jpeg;base64," + base64.b64encode(_HEADER_JPG.read_bytes()).decode()
@@ -46,38 +24,7 @@ def _default_logos():
     ]
 
 
-def default_template(camp):
-    return {
-        "camp_id": str(camp["_id"]),
-        "header_title": SNP_HEADER_TITLE,
-        "header_subtitle": SNP_HEADER_SUBTITLE,
-        "footer_note": SNP_FOOTER,
-        "blocks": [dict(b) for b in DEFAULT_BLOCKS],
-        "logos": _default_logos(),
-        "status": "defaults",
-        "version": 0,
-    }
-
-
-def ser_tpl(t):
-    if not t:
-        return None
-    return {
-        "id": str(t["_id"]) if t.get("_id") else None,
-        "camp_id": str(t["camp_id"]),
-        "header_title": t.get("header_title", ""),
-        "header_subtitle": t.get("header_subtitle", ""),
-        "footer_note": t.get("footer_note", ""),
-        "blocks": t.get("blocks", []),
-        "logos": t.get("logos", []),
-        "status": t.get("status"),
-        "version": t.get("version", 0),
-        "published_at": iso(t.get("published_at")),
-        "updated_at": iso(t.get("updated_at")),
-    }
-
-
-def _validate_logos(logos):
+def _validate_logos(logos: Optional[List[dict]]) -> List[Dict[str, Any]]:
     out = []
     for lg in (logos or [])[:6]:
         data_url = lg.get("data_url", "")
@@ -99,100 +46,30 @@ def _validate_logos(logos):
     return out
 
 
-async def _get_camp(camp_id):
+async def _assert_camp(camp_id: str) -> None:
     db = get_db()
-    camp = await db.camps.find_one({"_id": ObjectId(camp_id)})
-    if not camp:
+    if not await db.camps.find_one({"_id": ObjectId(camp_id)}):
         raise HTTPException(status_code=404, detail="Camp not found")
-    return camp
 
 
-@router.get("")
-async def get_templates(camp_id: str, actor: dict = Depends(require_admin)):
+@router.get("/logos")
+async def get_logos(camp_id: str, actor: dict = Depends(require_any)) -> Dict[str, Any]:
     db = get_db()
-    camp = await _get_camp(camp_id)
-    draft = await db.prescription_templates.find_one({"camp_id": ObjectId(camp_id), "status": "draft"})
-    published = await db.prescription_templates.find(
-        {"camp_id": ObjectId(camp_id), "status": "published"}
-    ).sort("version", -1).limit(1).to_list(1)
-    return {
-        "defaults": default_template(camp),
-        "draft": ser_tpl(draft),
-        "published": ser_tpl(published[0]) if published else None,
-    }
+    await _assert_camp(camp_id)
+    record = await db.prescription_templates.find_one({"camp_id": ObjectId(camp_id)})
+    return {"logos": record["logos"] if record else default_logos()}
 
 
-@router.post("/draft")
-async def save_draft(body: dict, actor: dict = Depends(require_admin)):
+@router.put("/logos")
+async def save_logos(body: dict, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
+    """Sponsor logos are the only editable part of the prescription. Saving is live."""
     db = get_db()
     camp_id = body.get("camp_id")
-    await _get_camp(camp_id)
+    await _assert_camp(camp_id)
     logos = _validate_logos(body.get("logos"))
-    doc = {
-        "camp_id": ObjectId(camp_id),
-        "header_title": body.get("header_title", ""),
-        "header_subtitle": body.get("header_subtitle", ""),
-        "footer_note": body.get("footer_note", ""),
-        "blocks": body.get("blocks", DEFAULT_BLOCKS),
-        "logos": logos,
-        "status": "draft",
-        "updated_at": now_utc(),
-    }
-    existing = await db.prescription_templates.find_one({"camp_id": ObjectId(camp_id), "status": "draft"})
-    if existing:
-        await db.prescription_templates.update_one({"_id": existing["_id"]}, {"$set": doc})
-        t = await db.prescription_templates.find_one({"_id": existing["_id"]})
-    else:
-        res = await db.prescription_templates.insert_one(doc)
-        t = await db.prescription_templates.find_one({"_id": res.inserted_id})
-    return {"draft": ser_tpl(t)}
-
-
-@router.post("/publish")
-async def publish(body: dict, actor: dict = Depends(require_admin)):
-    db = get_db()
-    camp_id = body.get("camp_id")
-    await _get_camp(camp_id)
-    draft = await db.prescription_templates.find_one({"camp_id": ObjectId(camp_id), "status": "draft"})
-    if not draft:
-        raise HTTPException(status_code=400, detail="Save a draft before publishing.")
-    # single-page guard: total block height must fit an A4 writing area (~230mm)
-    total_h = sum(b.get("height", 0) for b in draft.get("blocks", []) if b.get("visible"))
-    if total_h > 230:
-        raise HTTPException(status_code=400, detail="Template exceeds one A4 page. Reduce block heights.")
-    last = await db.prescription_templates.find(
-        {"camp_id": ObjectId(camp_id), "status": "published"}
-    ).sort("version", -1).limit(1).to_list(1)
-    version = (last[0]["version"] + 1) if last else 1
-    pub = {k: draft[k] for k in ["camp_id", "header_title", "header_subtitle", "footer_note", "blocks", "logos"]}
-    pub.update({"status": "published", "version": version, "published_at": now_utc()})
-    res = await db.prescription_templates.insert_one(pub)
-    t = await db.prescription_templates.find_one({"_id": res.inserted_id})
-    return {"published": ser_tpl(t)}
-
-
-@router.post("/restore-defaults")
-async def restore_defaults(body: dict, actor: dict = Depends(require_admin)):
-    db = get_db()
-    camp_id = body.get("camp_id")
-    camp = await _get_camp(camp_id)
-    d = default_template(camp)
-    doc = {**d, "camp_id": ObjectId(camp_id), "status": "draft", "updated_at": now_utc()}
-    existing = await db.prescription_templates.find_one({"camp_id": ObjectId(camp_id), "status": "draft"})
-    if existing:
-        await db.prescription_templates.update_one({"_id": existing["_id"]}, {"$set": doc})
-        t = await db.prescription_templates.find_one({"_id": existing["_id"]})
-    else:
-        res = await db.prescription_templates.insert_one(doc)
-        t = await db.prescription_templates.find_one({"_id": res.inserted_id})
-    return {"draft": ser_tpl(t)}
-
-
-@router.get("/active")
-async def active_template(camp_id: str, actor: dict = Depends(require_any)):
-    db = get_db()
-    camp = await _get_camp(camp_id)
-    published = await db.prescription_templates.find(
-        {"camp_id": ObjectId(camp_id), "status": "published"}
-    ).sort("version", -1).limit(1).to_list(1)
-    return {"template": ser_tpl(published[0]) if published else default_template(camp)}
+    await db.prescription_templates.find_one_and_update(
+        {"camp_id": ObjectId(camp_id)},
+        {"$set": {"logos": logos, "updated_at": now_utc()}},
+        upsert=True,
+    )
+    return {"logos": logos}

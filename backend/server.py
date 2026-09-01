@@ -1,5 +1,6 @@
 import os
 from contextlib import asynccontextmanager
+from typing import AsyncGenerator
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -21,7 +22,7 @@ import routes_templates
 import routes_reminders
 
 
-async def seed_admin():
+async def seed_admin() -> None:
     db = get_db()
     email = os.environ["ADMIN_EMAIL"].lower().strip()
     password = os.environ["ADMIN_PASSWORD"]
@@ -35,7 +36,7 @@ async def seed_admin():
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_indexes()
     await seed_admin()
     yield

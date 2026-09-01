@@ -37,9 +37,11 @@ beforeEach(() => {
   api.get.mockResolvedValue({
     data: {
       camp: { id: "c-live", name: "Active Howrah Camp", venue: "Hall" },
+      total_seats: 80,
+      total_registered: 15,
       days: [
         { id: "d-1", day_date: "2026-09-01", registered: 12, seat_limit: 50, remaining: 38 },
-        { id: "d-2", day_date: "2026-09-02", registered: 3, seat_limit: 0, remaining: "unlimited" },
+        { id: "d-2", day_date: "2026-09-02", registered: 3, seat_limit: 30, remaining: 27 },
       ],
     },
   });
@@ -55,7 +57,7 @@ afterEach(() => {
 });
 
 describe("Login page occupancy", () => {
-  test("shows Public occupancy under the patient self-registration link with counts not names", async () => {
+  test("leads with registrations against total camp seats and shows no patient details", async () => {
     await act(async () => {
       root.render(
         <MemoryRouter>
@@ -65,20 +67,25 @@ describe("Login page occupancy", () => {
     });
 
     expect(container.querySelector('[data-testid="goto-self-register-link"]')).not.toBeNull();
-    const board = container.querySelector('[data-testid="public-occupancy"]');
-    expect(board).not.toBeNull();
-    expect(container.textContent).toContain("2026-09-01");
-    expect(container.textContent).toContain("12");
-    expect(container.textContent).toContain("50");
-    expect(container.textContent).toContain("38");
-    expect(container.textContent).toContain("unlimited");
+    expect(container.querySelector('[data-testid="public-occupancy"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="occupancy-headline"]').textContent).toBe("15 / 80");
+    expect(container.textContent).toContain("registered against 80 seats");
+    expect(container.textContent).toContain("65 left");
     expect(container.textContent).not.toContain("Anil Kapoor");
     expect(container.textContent).not.toContain("9876543210");
     expect(api.get).toHaveBeenCalledWith("/camps/active/public");
+  });
 
-    const link = container.querySelector('[data-testid="goto-self-register-link"]');
-    const boardPos = board.compareDocumentPosition(link);
-    expect(boardPos & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  test("replaces the marketing copy", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <Login />
+        </MemoryRouter>
+      );
+    });
+    expect(container.textContent).not.toContain("calm precision");
+    expect(container.textContent).not.toContain("Aadhaar-based registration, prescription printing");
   });
 
   test("refreshes occupancy on a short poll", async () => {

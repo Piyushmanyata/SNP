@@ -23,12 +23,18 @@ def _camp(admin, suffix):
     return cid
 
 
-def _day(admin, camp_id, day_date, seat_limit=0):
+def _day(admin, camp_id, day_date, seat_limit=50):
     r = admin.post(f"{API}/camps/days", json={
         "camp_id": camp_id, "day_date": day_date, "seat_limit": seat_limit,
     }, timeout=30)
     assert r.status_code == 200, r.text
     return r.json()["day"]
+
+
+def _arrive(admin, patient_id):
+    r = admin.post(f"{API}/desk/arrive/{patient_id}", timeout=30)
+    assert r.status_code == 200, r.text
+    return r.json()["registration"]
 
 
 def _open_print(admin, day_id, open_=True):
@@ -69,6 +75,7 @@ class TestPrintWindowNoCalendar:
         r = _reg(admin, day["id"], full_name=f"TEST PrintFuture {TAG}", phone="9876500101")
         assert r.status_code == 200, r.text
         pid = r.json()["registration"]["id"]
+        _arrive(admin, pid)
         p = admin.post(f"{API}/desk/print/{pid}", timeout=30)
         assert p.status_code == 200, p.text
         assert p.json()["registration"]["printed_at"]
@@ -80,6 +87,7 @@ class TestPrintWindowNoCalendar:
         r = _reg(admin, day["id"], full_name=f"TEST PrintClosed {TAG}", phone="9876500102")
         assert r.status_code == 200, r.text
         pid = r.json()["registration"]["id"]
+        _arrive(admin, pid)
         p = admin.post(f"{API}/desk/print/{pid}", timeout=30)
         assert p.status_code == 409, p.text
         assert p.json()["detail"]["code"] == "PRINT_WINDOW_CLOSED"
@@ -91,6 +99,7 @@ class TestPrintWindowNoCalendar:
         r = _reg(admin, day["id"], full_name=f"TEST PrintPast {TAG}", phone="9876500103")
         assert r.status_code == 200, r.text
         pid = r.json()["registration"]["id"]
+        _arrive(admin, pid)
         p = admin.post(f"{API}/desk/print/{pid}", timeout=30)
         assert p.status_code == 409, p.text
         assert p.json()["detail"]["code"] == "PRINT_WINDOW_CLOSED"
@@ -297,8 +306,8 @@ class TestAadhaarOverwrite:
         assert lock.status_code == 409, lock.text
         assert lock.json()["detail"]["code"] == "DUPLICATE_IN_CAMP"
         assert lock.json()["detail"]["registration"]["reg_no"] == orig["reg_no"]
-        listed = admin.get(f"{API}/patients", timeout=30).json()["patients"]
-        row = next(p for p in listed if p["id"] == orig["id"])
+        row = admin.post(f"{API}/desk/lookup", json={"value": str(orig["reg_no"])},
+                         timeout=30).json()["registration"]
         assert row["full_name"] == f"TEST Desk Manual {TAG}"
         assert row["aadhaar_scanned"] is False
 
@@ -332,22 +341,30 @@ class TestCampDayCapacity:
         assert s.status_code == 409, s.text
         assert s.json()["detail"]["code"] == "CAMP_DAY_FULL"
 
-    def test_limit_zero_is_unlimited(self, admin):
+    def test_seat_limit_must_be_greater_than_zero(self, admin):
         camp_id = _camp(admin, "capzero")
-        day = _day(admin, camp_id, TODAY_IST, seat_limit=0)
-        a = _reg(admin, day["id"], full_name=f"TEST Unlim A {TAG}", phone="9876500403",
-                 manual_entry=True)
-        b = _reg(admin, day["id"], full_name=f"TEST Unlim B {TAG}", phone="9876500404",
+        for limit in (0, -5):
+            r = admin.post(f"{API}/camps/days", json={
+                "camp_id": camp_id, "day_date": TODAY_IST, "seat_limit": limit,
+            }, timeout=30)
+            assert r.status_code == 422, r.text
+
+    def test_arrival_is_allowed_to_exceed_the_day_limit(self, admin):
+        camp_id = _camp(admin, "caparrive")
+        day = _day(admin, camp_id, TODAY_IST, seat_limit=1)
+        a = _reg(admin, day["id"], full_name=f"TEST CapArrive {TAG}", phone="9876500405",
                  manual_entry=True)
         assert a.status_code == 200, a.text
-        assert b.status_code == 200, b.text
+        arrived = _arrive(admin, a.json()["registration"]["id"])
+        assert arrived["arrived_at"]
+        assert arrived["queue_status"] == "arrived"
 
 
 class TestPublicOccupancy:
     def test_counts_remaining_and_no_phi(self, admin, anon):
         camp_id = _camp(admin, "occ")
         limited = _day(admin, camp_id, FUTURE, seat_limit=10)
-        unlim = _day(admin, camp_id, PAST, seat_limit=0)
+        other = _day(admin, camp_id, PAST, seat_limit=5)
         secret_name = f"TEST SecretPhi {TAG}"
         r = _reg(admin, limited["id"], full_name=secret_name, age=77,
                  phone="9876500501", aadhaar_last4="5050", manual_entry=True)
@@ -357,13 +374,14 @@ class TestPublicOccupancy:
         body = pub.json()
         assert body["camp"]["id"] == camp_id
         lim_row = next(d for d in body["days"] if d["id"] == limited["id"])
-        un_row = next(d for d in body["days"] if d["id"] == unlim["id"])
+        other_row = next(d for d in body["days"] if d["id"] == other["id"])
         assert lim_row["registered"] == 1
         assert lim_row["seat_limit"] == 10
         assert lim_row["remaining"] == 9
-        assert un_row["registered"] == 0
-        assert un_row["seat_limit"] == 0
-        assert un_row["remaining"] == "unlimited"
+        assert other_row["registered"] == 0
+        assert other_row["remaining"] == 5
+        assert body["total_seats"] == 15
+        assert body["total_registered"] == 1
         blob = pub.text.lower()
         assert secret_name.lower() not in blob
         assert "9876500501" not in blob
@@ -392,47 +410,53 @@ class TestSelfRegisterLockRequired:
         assert r.status_code == 400, r.text
 
 
-class TestSnpDefaultTemplate:
-    def test_defaults_and_restore_carry_snp_header_logos_footer(self, admin):
+class TestPrescriptionLockdown:
+    def test_only_sponsor_logos_are_editable(self, admin):
         camp_id = _camp(admin, "tpl")
-        g = admin.get(f"{API}/templates?camp_id={camp_id}", timeout=30)
+        g = admin.get(f"{API}/templates/logos?camp_id={camp_id}", timeout=30)
         assert g.status_code == 200, g.text
-        d = g.json()["defaults"]
-        title = d["header_title"]
-        sub = d["header_subtitle"]
-        foot = d["footer_note"]
-        assert "Sikar Nagarik Parishad" in title
-        assert "Sikar Zilla Welfare Trust" in title
-        assert "सीकर" in title
-        assert "Sikar Bhawan" in sub or "SIKAR BHAWAN" in sub.upper()
-        assert "sikarkolkata@gmail.com" in sub.lower()
-        assert "Rupa" in foot
-        assert len(d["logos"]) >= 2
-        assert all(lg.get("data_url", "").startswith("data:image/") for lg in d["logos"])
+        logos = g.json()["logos"]
+        assert len(logos) >= 2
+        assert all(lg.get("data_url", "").startswith("data:image/") for lg in logos)
+        assert set(g.json().keys()) == {"logos"}
 
-        admin.post(f"{API}/templates/draft", json={
+    def test_header_subtitle_footer_and_blocks_have_no_endpoint(self, admin):
+        camp_id = _camp(admin, "tpllocked")
+        for path, method in [
+            ("/templates/draft", "post"),
+            ("/templates/publish", "post"),
+            ("/templates/restore-defaults", "post"),
+            ("/templates/active", "get"),
+        ]:
+            call = getattr(admin, method)
+            r = call(f"{API}{path}?camp_id={camp_id}", json={"camp_id": camp_id}, timeout=30)                 if method == "post" else call(f"{API}{path}?camp_id={camp_id}", timeout=30)
+            assert r.status_code == 404, f"{path} still exists: {r.status_code}"
+
+    def test_saving_logos_is_live_immediately(self, admin):
+        camp_id = _camp(admin, "tpllogos")
+        png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        r = admin.put(f"{API}/templates/logos", json={
             "camp_id": camp_id,
-            "header_title": "TEST Published Keep",
-            "header_subtitle": "keep sub",
-            "footer_note": "keep foot",
-            "blocks": [{"id": "identity", "label": "I", "type": "identity", "visible": True, "height": 0}],
-            "logos": [],
+            "logos": [{"id": "a", "name": "a.png", "data_url": png, "order": 0}],
         }, timeout=30)
-        pub = admin.post(f"{API}/templates/publish", json={"camp_id": camp_id}, timeout=30)
-        assert pub.status_code == 200, pub.text
-        published_version = pub.json()["published"]["version"]
-        published_title = pub.json()["published"]["header_title"]
+        assert r.status_code == 200, r.text
+        assert len(r.json()["logos"]) == 1
+        again = admin.get(f"{API}/templates/logos?camp_id={camp_id}", timeout=30).json()
+        assert again["logos"][0]["name"] == "a.png"
 
-        rest = admin.post(f"{API}/templates/restore-defaults", json={"camp_id": camp_id}, timeout=30)
-        assert rest.status_code == 200, rest.text
-        draft = rest.json()["draft"]
-        assert "Sikar Nagarik Parishad" in draft["header_title"]
-        assert "Rupa" in draft["footer_note"]
-        assert len(draft["logos"]) >= 2
-
-        after = admin.get(f"{API}/templates?camp_id={camp_id}", timeout=30).json()
-        assert after["published"]["version"] == published_version
-        assert after["published"]["header_title"] == published_title
+    def test_logo_bad_mime_and_oversize_rejected(self, admin):
+        camp_id = _camp(admin, "tpllogobad")
+        bad = admin.put(f"{API}/templates/logos", json={
+            "camp_id": camp_id,
+            "logos": [{"id": "g", "name": "g.gif", "data_url": "data:image/gif;base64,R0lGODlhAQABAAAAACw=", "order": 0}],
+        }, timeout=30)
+        assert bad.status_code == 400, bad.text
+        big = "data:image/png;base64," + "A" * (3 * 1024 * 1024)
+        oversize = admin.put(f"{API}/templates/logos", json={
+            "camp_id": camp_id,
+            "logos": [{"id": "b", "name": "big.png", "data_url": big, "order": 0}],
+        }, timeout=60)
+        assert oversize.status_code == 400, oversize.text
 
 
 def test_zz_leave_active_camp_with_today(admin):

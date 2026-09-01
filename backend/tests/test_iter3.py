@@ -158,145 +158,46 @@ def camp(admin):
     return cid
 
 
-class TestTemplates:
-    def test_get_templates_returns_defaults(self, admin, camp):
-        r = admin.get(f"{API}/templates?camp_id={camp}", timeout=30)
+class TestPrescriptionTemplateLockdown:
+    def test_logos_are_the_only_template_surface(self, admin, camp):
+        r = admin.get(f"{API}/templates/logos?camp_id={camp}", timeout=30)
         assert r.status_code == 200, r.text
-        j = r.json()
-        assert j["draft"] is None and j["published"] is None
-        d = j["defaults"]
-        assert len(d["blocks"]) == 7
-        assert "Sikar Nagarik Parishad" in d["header_title"]
-        assert "Sikar Zilla Welfare Trust" in d["header_title"]
-        assert "Sikar Bhawan" in d["header_subtitle"] or "SIKAR BHAWAN" in d["header_subtitle"].upper()
-        assert "Rupa" in d["footer_note"]
-        assert len(d["logos"]) >= 2
-        assert [b["id"] for b in d["blocks"]][0] == "identity"
+        assert set(r.json().keys()) == {"logos"}
+        assert len(r.json()["logos"]) >= 2
 
-    def test_requires_admin(self, camp):
+    def test_reading_logos_requires_auth_and_saving_requires_admin(self, camp):
         fresh = requests.Session()  # session-scoped anon may carry cookies from earlier tests
-        assert fresh.get(f"{API}/templates?camp_id={camp}", timeout=30).status_code in (401, 403)
-        assert fresh.post(f"{API}/templates/draft", json={"camp_id": camp}, timeout=30).status_code in (401, 403)
-        assert fresh.post(f"{API}/templates/publish", json={"camp_id": camp}, timeout=30).status_code in (401, 403)
-        assert fresh.get(f"{API}/templates/active?camp_id={camp}", timeout=30).status_code in (401, 403)
+        assert fresh.get(f"{API}/templates/logos?camp_id={camp}", timeout=30).status_code in (401, 403)
+        assert fresh.put(f"{API}/templates/logos", json={"camp_id": camp, "logos": []},
+                         timeout=30).status_code in (401, 403)
 
     def test_bad_camp_404(self, admin):
-        r = admin.get(f"{API}/templates?camp_id=507f1f77bcf86cd799439011", timeout=30)
+        r = admin.get(f"{API}/templates/logos?camp_id=507f1f77bcf86cd799439011", timeout=30)
         assert r.status_code == 404, r.status_code
 
-    def test_publish_without_draft_400(self, admin, camp):
-        r = admin.post(f"{API}/templates/publish", json={"camp_id": camp}, timeout=30)
-        assert r.status_code == 400, r.text
-        assert "draft" in r.json()["detail"].lower()
-
-    def test_save_draft_and_persist(self, admin, camp):
-        blocks = [
-            {"id": "identity", "label": "Patient Identity", "type": "identity", "visible": True, "height": 0},
-            {"id": "vision", "label": "Vision R/L", "type": "lines", "visible": True, "height": 30},
-            {"id": "prescription", "label": "Rx", "type": "lines", "visible": True, "height": 50},
-            {"id": "advice", "label": "Advice", "type": "lines", "visible": False, "height": 200},
-            {"id": "signature", "label": "Sign", "type": "signature", "visible": True, "height": 0},
-        ]
-        body = {"camp_id": camp, "header_title": "TEST Sankalp Netra Shivir",
-                "header_subtitle": "TEST Rampur", "footer_note": "TEST footer note",
-                "blocks": blocks, "logos": [{"id": "l1", "name": "sponsor.png", "data_url": PNG_DATA_URL, "order": 0}]}
-        r = admin.post(f"{API}/templates/draft", json=body, timeout=30)
+    def test_saving_logos_persists_without_a_publish_step(self, admin, camp):
+        r = admin.put(f"{API}/templates/logos", json={
+            "camp_id": camp,
+            "logos": [{"id": "l1", "name": "s.png", "data_url": PNG_DATA_URL, "order": 0}],
+        }, timeout=30)
         assert r.status_code == 200, r.text
-        d = r.json()["draft"]
-        assert d["header_title"] == "TEST Sankalp Netra Shivir"
-        assert len(d["blocks"]) == 5 and len(d["logos"]) == 1
-        assert d["status"] == "draft"
-        # GET verifies persistence
-        g = admin.get(f"{API}/templates?camp_id={camp}", timeout=30).json()
-        assert g["draft"]["footer_note"] == "TEST footer note"
-        assert g["draft"]["blocks"][1]["label"] == "Vision R/L"
-        assert g["draft"]["logos"][0]["data_url"].startswith("data:image/png;base64,")
-
-    def test_draft_is_upserted_not_duplicated(self, admin, camp):
-        r = admin.post(f"{API}/templates/draft", json={"camp_id": camp, "header_title": "TEST v2",
-                                                       "header_subtitle": "s", "footer_note": "f",
-                                                       "blocks": [{"id": "identity", "label": "I", "type": "identity",
-                                                                   "visible": True, "height": 0}], "logos": []},
-                       timeout=30)
-        assert r.status_code == 200, r.text
-        g = admin.get(f"{API}/templates?camp_id={camp}", timeout=30).json()
-        assert g["draft"]["header_title"] == "TEST v2"
-        assert len(g["draft"]["blocks"]) == 1
+        again = admin.get(f"{API}/templates/logos?camp_id={camp}", timeout=30).json()
+        assert [lg["name"] for lg in again["logos"]] == ["s.png"]
 
     def test_logo_too_large_rejected(self, admin, camp):
-        big = base64.b64encode(b"\x00" * (2 * 1024 * 1024 + 10)).decode()
-        r = admin.post(f"{API}/templates/draft",
-                       json={"camp_id": camp, "blocks": [], "logos": [{"id": "b", "name": "big.png",
-                                                                       "data_url": f"data:image/png;base64,{big}"}]},
-                       timeout=60)
-        assert r.status_code == 400, r.status_code
-        assert "2 MB" in r.json()["detail"] or "2MB" in r.json()["detail"], r.text
+        big = "data:image/png;base64," + "A" * (3 * 1024 * 1024)
+        r = admin.put(f"{API}/templates/logos", json={
+            "camp_id": camp, "logos": [{"id": "b", "name": "b.png", "data_url": big, "order": 0}],
+        }, timeout=60)
+        assert r.status_code == 400, r.text
 
     def test_logo_bad_mime_rejected(self, admin, camp):
-        r = admin.post(f"{API}/templates/draft",
-                       json={"camp_id": camp, "blocks": [], "logos": [{"id": "g", "name": "a.gif",
-                                                                       "data_url": f"data:image/gif;base64,{PNG_1PX}"}]},
-                       timeout=30)
-        assert r.status_code == 400, r.status_code
-        assert "Unsupported image type" in r.json()["detail"], r.text
-
-    def test_one_page_guard(self, admin, camp):
-        blocks = [{"id": "a", "label": "A", "type": "lines", "visible": True, "height": 120},
-                  {"id": "b", "label": "B", "type": "lines", "visible": True, "height": 120}]
-        assert admin.post(f"{API}/templates/draft", json={"camp_id": camp, "header_title": "TEST too tall",
-                                                          "blocks": blocks, "logos": []},
-                          timeout=30).status_code == 200
-        r = admin.post(f"{API}/templates/publish", json={"camp_id": camp}, timeout=30)
+        r = admin.put(f"{API}/templates/logos", json={
+            "camp_id": camp,
+            "logos": [{"id": "g", "name": "g.gif",
+                       "data_url": "data:image/gif;base64,R0lGODlhAQABAAAAACw=", "order": 0}],
+        }, timeout=30)
         assert r.status_code == 400, r.text
-        assert "exceeds one A4 page" in r.json()["detail"], r.text
-
-    def test_hidden_blocks_excluded_from_guard(self, admin, camp):
-        blocks = [{"id": "a", "label": "A", "type": "lines", "visible": True, "height": 120},
-                  {"id": "b", "label": "B", "type": "lines", "visible": False, "height": 500}]
-        assert admin.post(f"{API}/templates/draft", json={"camp_id": camp, "header_title": "TEST hidden ok",
-                                                          "blocks": blocks, "logos": []},
-                          timeout=30).status_code == 200
-        r = admin.post(f"{API}/templates/publish", json={"camp_id": camp}, timeout=30)
-        assert r.status_code == 200, r.text
-        assert r.json()["published"]["version"] == 1
-
-    def test_publish_versioning_and_active(self, admin, camp):
-        admin.post(f"{API}/templates/draft", json={"camp_id": camp, "header_title": "TEST Published Title",
-                                                   "header_subtitle": "TEST sub", "footer_note": "TEST foot",
-                                                   "blocks": [{"id": "identity", "label": "Identity",
-                                                               "type": "identity", "visible": True, "height": 0},
-                                                              {"id": "rx", "label": "Rx", "type": "lines",
-                                                               "visible": True, "height": 60}],
-                                                   "logos": [{"id": "l1", "name": "s.png",
-                                                              "data_url": PNG_DATA_URL, "order": 0}]}, timeout=30)
-        r = admin.post(f"{API}/templates/publish", json={"camp_id": camp}, timeout=30)
-        assert r.status_code == 200, r.text
-        pub = r.json()["published"]
-        assert pub["version"] == 2, pub
-        assert pub["published_at"]
-        act = admin.get(f"{API}/templates/active?camp_id={camp}", timeout=30)
-        assert act.status_code == 200, act.text
-        t = act.json()["template"]
-        assert t["header_title"] == "TEST Published Title"
-        assert t["version"] == 2
-        assert len(t["logos"]) == 1
-
-    def test_restore_defaults(self, admin, camp):
-        r = admin.post(f"{API}/templates/restore-defaults", json={"camp_id": camp}, timeout=30)
-        assert r.status_code == 200, r.text
-        d = r.json()["draft"]
-        assert len(d["blocks"]) == 7
-        assert "Sikar Nagarik Parishad" in d["header_title"]
-        assert "Rupa" in d["footer_note"]
-        assert len(d["logos"]) >= 2
-        g = admin.get(f"{API}/templates?camp_id={camp}", timeout=30).json()
-        assert len(g["draft"]["blocks"]) == 7
-        assert g["published"]["version"] == 2
-        assert g["published"]["header_title"] == "TEST Published Title"
-
-    def test_no_mongo_id_leak(self, admin, camp):
-        for url in [f"{API}/templates?camp_id={camp}", f"{API}/templates/active?camp_id={camp}"]:
-            assert '"_id"' not in admin.get(url, timeout=30).text
 
 
 # ---------------- print includes camp_id + template driven ----------------
@@ -320,25 +221,19 @@ class TestPrintTemplate:
             "registration_request_id": str(uuid.uuid4())}, timeout=30)
         assert reg.status_code in (200, 201), reg.text
         pid = reg.json()["registration"]["id"]
+        blocked = admin.post(f"{API}/desk/print/{pid}", timeout=30)
+        assert blocked.status_code == 409, blocked.text
+        assert blocked.json()["detail"]["code"] == "NOT_ARRIVED"
+        assert admin.post(f"{API}/desk/arrive/{pid}", timeout=30).status_code == 200
         pr = admin.post(f"{API}/desk/print/{pid}", timeout=30)
         assert pr.status_code == 200, pr.text
         presc = pr.json()["prescription"]
         assert presc.get("camp_id") == camp_id, presc
-        # publish a custom template for the active camp so the print sheet uses it
-        admin.post(f"{API}/templates/draft", json={
-            "camp_id": camp_id, "header_title": "TEST Sankalp Netra Shivir",
-            "header_subtitle": "TEST Rampur Community Hall", "footer_note": "TEST print footer",
-            "blocks": [{"id": "identity", "label": "Patient Identity", "type": "identity",
-                        "visible": True, "height": 0},
-                       {"id": "vision", "label": "TEST Vision Block", "type": "lines",
-                        "visible": True, "height": 40},
-                       {"id": "signature", "label": "Doctor's Signature", "type": "signature",
-                        "visible": True, "height": 0}],
+        admin.put(f"{API}/templates/logos", json={
+            "camp_id": camp_id,
             "logos": [{"id": "l1", "name": "s.png", "data_url": PNG_DATA_URL, "order": 0}]}, timeout=30)
-        p = admin.post(f"{API}/templates/publish", json={"camp_id": camp_id}, timeout=30)
-        assert p.status_code == 200, p.text
-        t = admin.get(f"{API}/templates/active?camp_id={camp_id}", timeout=30).json()["template"]
-        assert t["header_title"] == "TEST Sankalp Netra Shivir"
+        t = admin.get(f"{API}/templates/logos?camp_id={camp_id}", timeout=30).json()
+        assert [lg["name"] for lg in t["logos"]] == ["s.png"]
         S["print_patient_id"] = pid
         S["print_camp_id"] = camp_id
         print("PRINT_PATIENT", pid, "CAMP", camp_id, "REG", reg.json()["registration"].get("reg_no"))

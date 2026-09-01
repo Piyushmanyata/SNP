@@ -1,64 +1,94 @@
-# Project: SNP Application Remediation & PR Lifecycle
+# Project: Camp lifecycle — pre-registration, Arrival, per-patient SMS, four Fulfilment lines
+
+Spec: `docs/specs/camp-lifecycle-arrival-sms-fulfilment.md`
 
 ## Architecture
 The application stack consists of:
-- `frontend/`: React single-page application (React 18 + Tailwind CSS + Lucide + getUserMedia / BarcodeDetector + zxing-wasm)
+- `frontend/`: React single-page application (React 18 + Tailwind CSS + Lucide + BarcodeDetector / zxing-wasm)
 - `backend/`: FastAPI async Python application with Motor MongoDB driver
-- `.github/workflows/`: CI verification workflows
 
 ```
                     ┌─────────────────────────┐
-                    │      React Frontend     │
-                    │  (Desk, Clinical, Admin)│
-                    └────────────┬────────────┘
-                                 │ REST API (JSON)
-                                 ▼
-                    ┌─────────────────────────┐
-                    │     FastAPI Backend     │
-                    │  (Auth, Reg, Clin, Rpt) │
-                    └────────────┬────────────┘
-                                 │ Async Motor
-                                 ▼
-                    ┌─────────────────────────┐
-                    │     MongoDB Database    │
+                    │   React SPA (frontend)  │
+                    │  Desk · Clinical · Admin│
+                    └───────────┬─────────────┘
+                                │ HTTPS /api
+                    ┌───────────▼─────────────┐
+                    │  FastAPI (backend)      │
+                    │  registration · desk    │
+                    │  clinical · reports     │
+                    │  sms · cron             │
+                    └───────────┬─────────────┘
+                                │ Motor
+                    ┌───────────▼─────────────┐
+                    │       MongoDB           │
                     └─────────────────────────┘
 ```
 
 ## Feature Inventory
-| # | Feature | Description | Milestone | Source |
+| # | Feature | Description | Milestone | Status |
 |---|---------|-------------|-----------|--------|
-| 1 | Backend Lifespan & Deprecation Cleanup | Upgrade `@app.on_event("startup")` in `backend/server.py` to FastAPI lifespan handler | M1 | Survey E1 |
-| 2 | MongoDB Motor Index Synchronization | Verify and maintain automated index setup in `backend/db.py` | M1 | Survey E1 |
-| 3 | Frontend Lint Script & ESLint Configuration | Add `"lint": "eslint src"` and `eslintConfig` in `frontend/package.json` | M1 | Survey E2 |
-| 4 | Desk Flow State Machine Verification | Ensure registration -> print -> mark seen -> fulfilment invariants | M1 | Survey E1/E2 |
-| 5 | Automated Verification Suite | Run `pytest backend/`, `npm run build`, and `npm run lint` | M2 | Survey E1/E2 |
-| 6 | Feature Branch Creation & Commit | Create `remediation/audit-and-lifecycle-fixes` branch with clean commits | M3 | Survey E3 |
-| 7 | PR Creation & CI Resolution | Open PR targeting `main` via `gh pr create` and verify all CI checks green | M3 | Survey E3 |
-| 8 | PR Merge & Branch Purge | Squash merge PR into `main`, push to `origin`, delete branch locally/remotely | M3 | Survey E3 |
-| 9 | Multi-Agent Review & Forensic Audit Gate | Independent Reviewers, Challengers, and Forensic Auditor verification | M4 | Survey/Gate |
+| 1 | Per-patient SMS with `reg_no` | `sms.py` sends one DLT message per patient per type per event date; six templates; ledger keyed on patient/type/date | M1 | DONE |
+| 2 | Registration confirmation and Token SMS | Best-effort sends on the registration create path and on OT/Specs deferral | M1 | DONE |
+| 3 | Arrival as a distinct state | `arrived_at` on the registration; `registered -> arrived -> seen`; Print and Seen gated on Arrival | M2 | DONE |
+| 4 | Camp-day scan resolution | `POST /api/desk/scan` returns arrived / mismatch_review / ambiguous / no_match; `POST /api/desk/scan/confirm` applies the overwrite and checks in | M2 | DONE |
+| 5 | Wrong-day check-in | Arrival moves the registration to the day they came and records the change; capacity never blocks Arrival | M2 | DONE |
+| 6 | Camp-day capacity and public occupancy | Seat limit must be > 0; public endpoint returns camp totals; login screen leads with registrations / seats | M3 | DONE |
+| 7 | Four Fulfilment lines | Medicine, Fixed-power specs, Spectacles to be made, OT; measurements required on both specs lines; day picker pre-selects the earliest free day | M3 | DONE |
+| 8 | Desk patient list removed | `GET /api/patients` removed; Seen is reached through QR, `reg_no` or name lookup | M3 | DONE |
+| 9 | Single wide export | One admin-only CSV, one row per patient, no-shows included | M4 | DONE |
+| 10 | Prescription lockdown | Layout constants in the print component; only sponsor logos editable; draft/publish/restore removed | M4 | DONE |
+| 11 | Live scan on poor hardware | 1080p + continuous focus ladder, full-sensor still where offered, twenty-second Scan stall revealing torch / upload / manual entry | M4 | DONE |
+| 12 | Cloud deployment over HTTPS | `docker-compose.prod.yml`, static frontend behind nginx, Caddy terminating TLS with automatic certificates | M5 | DONE |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | Codebase Remediation & MongoDB Index Sync | `backend/server.py`, `backend/db.py`, `frontend/package.json` | none | DONE |
-| M2 | Automated Verification & Typechecks | `pytest backend/`, `npm test`, `npm run build`, `npm run lint` | M1 | DONE |
-| M3 | PR Lifecycle, CI Resolution & Branch Purge | Git branch, `gh pr create`, CI verify, merge, branch delete | M2 | IN_PROGRESS |
-| M4 | Comprehensive Verification Gate & Audit | Reviewers, Challengers, Forensic Auditor Gate | M1, M2, M3 | PLANNED |
+| M1 | SMS grain change | `backend/sms.py`, `backend/msg91.py`, `backend/routes_reminders.py`, `backend/db.py` | none | DONE |
+| M2 | Arrival and scan resolution | `backend/routes_desk.py`, `backend/routes_registration.py`, `backend/serializers.py`, `frontend/src/pages/Desk.js`, `frontend/src/components/desk/` | none | DONE |
+| M3 | Capacity, occupancy and the four lines | `backend/routes_camps.py`, `backend/routes_clinical.py`, `frontend/src/pages/Login.js`, `frontend/src/components/clinical/` | M2 | DONE |
+| M4 | Reporting, prescription lockdown, live scan | `backend/routes_reports.py`, `backend/routes_templates.py`, `frontend/src/pages/PrintPrescription.js`, `frontend/src/components/aadhaar/` | M3 | DONE |
+| M5 | Production deployment | `docker-compose.prod.yml`, `Caddyfile`, `frontend/Dockerfile.prod`, `frontend/nginx.conf` | M4 | DONE |
 
 ## Interface Contracts
 
-### Backend Lifespan & DB Setup
-- `lifespan(app: FastAPI)`: Context manager running `init_indexes()` and graceful startup/shutdown.
-- `init_indexes()`: Ensures unique `(person_id, camp_id)` partial index and 11 collection indexes.
+### Desk scan resolution
+- `POST /api/desk/scan {payload}` → `{outcome: "arrived" | "mismatch_review" | "ambiguous" | "no_match", ...}`.
+  `arrived` stamps Arrival and returns the registration; `mismatch_review` returns the card values, the
+  stored registration and a field-level `diff`, and mutates nothing; `ambiguous` lists the candidates;
+  `no_match` returns the card and registers nobody.
+- `POST /api/desk/scan/confirm {patient_id, payload}` → applies the Aadhaar overwrite (name, age, gender,
+  DOB, last-4, address) and stamps Arrival in one operation, preserving phone, camp day, `reg_no` and
+  lifecycle timestamps.
+- `POST /api/desk/arrive/{patient_id}` → stamps Arrival for a walk-in or a lookup match.
 
-### Frontend Package Scripts
-- `npm run lint`: Runs `eslint src` with 0 warnings/errors.
-- `npm run build`: Compiles production bundle with exit code 0.
-- `npm test`: Runs Jest suites with 100% pass rate.
+### SMS
+- `sms.send_patient_sms(db, patient, message_type, event_date, venue) -> bool` — never raises; records one
+  ledger row per `(patient_id, message_type, event_date)`; skips missing or dummy numbers.
+- Message types: `registration`, `camp`, `ot_token`, `ot`, `specs_token`, `specs`. Each is its own DLT
+  template taking `reg_no`, `date` and `venue`.
+
+### Fulfilment
+- `POST /api/clinical/fulfilment` refuses a `specs` line with 400 `SPECS_MEASUREMENTS_REQUIRED` unless the
+  transcription carries a power for both eyes.
+- A deferral to a full day is 409 `full or not found`; when no day of that type has a free seat it is
+  409 `NO_CLINICAL_DAY_AVAILABLE` naming the admin action.
+
+### Prescription template
+- `GET /api/templates/logos?camp_id=` → `{logos}` (any staff). `PUT /api/templates/logos` → saves live (admin).
+- Header, subtitle, footer and block layout are constants in `frontend/src/pages/PrintPrescription.js`.
+
+### Export
+- `GET /api/exports/camp-records?camp_id=` (admin) → one CSV row per patient of the camp, including
+  no-shows, with the header fixed by `EXPORT_COLUMNS` in `backend/routes_reports.py`.
 
 ## Code Layout
-- `backend/server.py`
-- `backend/db.py`
-- `backend/routes_*.py`
-- `frontend/package.json`
-- `frontend/src/*`
+- `backend/*.py`
+- `frontend/src/**/*.js`
+- `docker-compose.prod.yml`, `Caddyfile`, `frontend/Dockerfile.prod`, `frontend/nginx.conf`
+
+## Outstanding, external to this repository
+- The six DLT template approvals. Sending is skipped entirely until `MSG91_AUTH_KEY` and all six template
+  ids are set, so the app runs without them.
+- A domain and certificate for `APP_DOMAIN`. Live scan cannot be tested on a phone until HTTPS is in place.
+- Camp days created before this change with a zero seat limit need a one-time backfill to a real number.

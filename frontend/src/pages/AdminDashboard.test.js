@@ -217,7 +217,7 @@ describe("AdminDashboard component", () => {
     });
 
     expect(container.querySelector('[data-testid="export-camp-records-button"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="export-clinical-audit-button"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="export-clinical-audit-button"]')).toBeNull();
   });
 
   test("manages camps: creates camp and expands camp days with printing window toggle", async () => {

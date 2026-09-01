@@ -174,13 +174,18 @@ class TestRegistration:
         assert "_id" not in reg and isinstance(reg["id"], str)
         assert reg["queue_status"] == "registered"
         assert reg["printed_at"] is None
+        assert reg["arrived_at"] is None
         assert reg["patient_qr"]
         assert isinstance(reg["reg_no"], int)
         STATE["p1"] = reg
 
-        # verify persistence via list
-        pts = admin.get(f"{API}/patients", timeout=30).json()["patients"]
-        assert any(p["id"] == reg["id"] for p in pts)
+        # verify persistence via lookup; there is no patient list on the desk
+        found = admin.post(f"{API}/desk/lookup", json={"value": str(reg["reg_no"])}, timeout=30)
+        assert found.status_code == 200, found.text
+        assert found.json()["registration"]["id"] == reg["id"]
+
+    def test_patient_list_endpoint_is_gone(self, admin):
+        assert admin.get(f"{API}/patients", timeout=30).status_code == 404
 
     def test_idempotent_registration(self, admin):
         r = admin.post(f"{API}/register", json={
@@ -242,7 +247,30 @@ class TestRegistration:
 
 
 # ---------------- desk: print window / presence ----------------
+RX_MEASUREMENTS = {
+    "r_sph": "-1.00", "r_cyl": "-0.50", "r_axis": "90",
+    "l_sph": "-1.25", "l_cyl": "-0.25", "l_axis": "85", "add": "+2.00",
+}
+
+
 class TestDeskPrintWindow:
+    def test_print_blocked_before_arrival(self, admin):
+        r = admin.post(f"{API}/desk/print/{STATE['p1']['id']}", timeout=30)
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["code"] == "NOT_ARRIVED"
+
+    def test_mark_seen_blocked_before_arrival(self, admin):
+        r = admin.post(f"{API}/desk/mark-seen/{STATE['p1']['id']}", timeout=30)
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["code"] == "NOT_ARRIVED"
+
+    def test_arrival_stamps_presence(self, admin):
+        r = admin.post(f"{API}/desk/arrive/{STATE['p1']['id']}", timeout=30)
+        assert r.status_code == 200, r.text
+        reg = r.json()["registration"]
+        assert reg["arrived_at"]
+        assert reg["queue_status"] == "arrived"
+
     def test_print_blocked_when_window_closed(self, admin):
         r = admin.post(f"{API}/desk/print/{STATE['p1']['id']}", timeout=30)
         assert r.status_code == 409, r.text
@@ -303,7 +331,7 @@ class TestDeskPrintWindow:
     def test_undo_seen_within_window(self, admin):
         r = admin.post(f"{API}/desk/undo-seen/{STATE['p1']['id']}", timeout=30)
         assert r.status_code == 200, f"undo-seen failed: {r.status_code} {r.text[:300]}"
-        assert r.json()["registration"]["queue_status"] == "registered"
+        assert r.json()["registration"]["queue_status"] == "arrived"
         # re-mark seen for downstream clinical tests
         r = admin.post(f"{API}/desk/mark-seen/{STATE['p1']['id']}", timeout=30)
         assert r.status_code == 200, r.text
@@ -345,6 +373,7 @@ class TestClinical:
             "patient_id": STATE["p1"]["id"], "diagnosis_options": ["Cataract", "Presbyopia"],
             "bp": "130/85", "blood_sugar": "110", "remarks": "TEST remarks",
             "ot_eye": "right", "ot_procedure": "Cataract Surgery",
+            "specs_measurements": RX_MEASUREMENTS,
         }, timeout=30)
         assert r.status_code == 200, r.text
         t = r.json()["transcription"]
@@ -361,6 +390,7 @@ class TestClinical:
         r = admin.post(f"{API}/clinical/transcription", json={
             "patient_id": STATE["p1"]["id"], "diagnosis_options": ["Cataract"],
             "bp": "120/80", "ot_eye": "left", "ot_procedure": "Cataract Surgery",
+            "specs_measurements": RX_MEASUREMENTS,
         }, timeout=30)
         assert r.status_code == 200, r.text
         assert r.json()["transcription"]["bp"] == "120/80"
@@ -491,10 +521,12 @@ class TestClinical:
 
     def test_ot_day_full_rejects_further_deferral(self, admin):
         # print + mark seen p2 then transcribe and try to defer to the full OT day
+        assert admin.post(f"{API}/desk/arrive/{STATE['p2']['id']}", timeout=30).status_code == 200
         assert admin.post(f"{API}/desk/print/{STATE['p2']['id']}", timeout=30).status_code == 200
         assert admin.post(f"{API}/desk/mark-seen/{STATE['p2']['id']}", timeout=30).status_code == 200
         r = admin.post(f"{API}/clinical/transcription", json={
             "patient_id": STATE["p2"]["id"], "diagnosis_options": ["Cataract"],
+            "specs_measurements": RX_MEASUREMENTS,
         }, timeout=30)
         assert r.status_code == 200, r.text
         t2 = r.json()["transcription"]["id"]
@@ -654,18 +686,23 @@ class TestReports:
         assert isinstance(body["volunteers"], list)
         assert isinstance(body["team_leads"], list)
 
-    def test_export_camp_records(self, admin):
+    def test_single_export_is_one_wide_row_per_patient(self, admin):
         r = admin.get(f"{API}/exports/camp-records", timeout=60)
         assert r.status_code == 200, r.text
         assert "text/csv" in r.headers.get("content-type", "")
-        assert "reg_no,full_name" in r.text
+        header = r.text.splitlines()[0]
+        assert header == (
+            "reg_no,full_name,age,gender,phone,address,aadhaar_last4,"
+            "manual_entry,camp_day,registered_at,arrived_at,seen_at,"
+            "diagnosis,bp,blood_sugar,"
+            "r_sph,r_cyl,r_axis,l_sph,l_cyl,l_axis,add,"
+            "medicine,fixed_power_specs,spectacles_to_be_made,ot,"
+            "ot_day,ot_venue,specs_day,specs_venue"
+        ), header
         assert str(STATE["p1"]["reg_no"]) in r.text
 
-    def test_export_clinical_audit(self, admin):
-        r = admin.get(f"{API}/exports/clinical-audit", timeout=60)
-        assert r.status_code == 200, r.text
-        assert "event,transcription_id" in r.text
-        assert "transcription" in r.text
+    def test_clinical_audit_export_is_gone(self, admin):
+        assert admin.get(f"{API}/exports/clinical-audit", timeout=60).status_code == 404
 
     def test_exports_require_admin(self, anon):
         c = STATE["clinical_desk_operator"]
@@ -720,6 +757,7 @@ class TestFixRegressions:
         }, timeout=30)
         assert r.status_code == 200, r.text
         pid = r.json()["registration"]["id"]
+        assert admin.post(f"{API}/desk/arrive/{pid}", timeout=30).status_code == 200
         pr = admin.post(f"{API}/desk/print/{pid}", timeout=30)
         assert pr.status_code == 200, pr.text
         printed_at = pr.json()["registration"]["printed_at"]
@@ -728,12 +766,12 @@ class TestFixRegressions:
         u = admin.post(f"{API}/desk/undo-seen/{pid}", timeout=30)
         assert u.status_code == 200, f"{u.status_code} {u.text[:300]}"
         reg = u.json()["registration"]
-        assert reg["queue_status"] == "registered"
+        assert reg["queue_status"] == "arrived"
         assert reg["printed_at"] == printed_at, "presence (printed_at) must be preserved on undo"
         assert reg.get("seen_at") in (None, "")
         # verify persisted
         g = admin.post(f"{API}/desk/lookup", json={"value": str(reg["reg_no"])}, timeout=30)
-        assert g.json()["registration"]["queue_status"] == "registered"
+        assert g.json()["registration"]["queue_status"] == "arrived"
         assert g.json()["registration"]["printed_at"] == printed_at
         STATE["p_undo"] = reg
 

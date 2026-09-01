@@ -8,10 +8,12 @@ import {
   AadhaarCameraView,
   AadhaarManualInput,
   AadhaarScannerStatus,
+  AadhaarFallbackPanel,
 } from "./aadhaar";
 
-export default function AadhaarScanner({ onScanned, onFailure, disabled }) {
+export default function AadhaarScanner({ onScanned, onFailure, onScanStall, disabled }) {
   const [mode, setMode] = useState("idle");
+  const [fallbacksRevealed, setFallbacksRevealed] = useState(false);
   const fileRef = useRef(null);
 
   const {
@@ -43,6 +45,11 @@ export default function AadhaarScanner({ onScanned, onFailure, disabled }) {
     setError("Can't read the QR. Try a photo or USB scanner.");
   }, [setError]);
 
+  const handleScanStall = useCallback(() => {
+    setFallbacksRevealed(true);
+    if (onScanStall) onScanStall();
+  }, [onScanStall]);
+
   const {
     cameraState,
     cameras,
@@ -58,12 +65,14 @@ export default function AadhaarScanner({ onScanned, onFailure, disabled }) {
     onLock: handleLock,
     onError: handleCameraError,
     onHintFallbacks: handleHintFallbacks,
+    onScanStall: handleScanStall,
   });
 
   const startCamera = useCallback(
     async (cameraIndexToUse) => {
       setError("");
       setOutcome("");
+      setFallbacksRevealed(false);
       setMode("camera");
       await baseStartCamera(cameraIndexToUse);
     },
@@ -82,6 +91,15 @@ export default function AadhaarScanner({ onScanned, onFailure, disabled }) {
       <p className="text-xs text-slate-500 mb-3">
         Scan the QR on the Aadhaar card / e-Aadhaar. Camera, USB scanner, or photo upload — decoded on-device, no UIDAI call, only last-4 stored.
       </p>
+
+      <AadhaarFallbackPanel
+        revealed={fallbacksRevealed}
+        torchAvailable={torchAvailable}
+        torchOn={torchOn}
+        toggleTorch={toggleTorch}
+        onUpload={() => fileRef.current?.click()}
+        onManual={() => setMode("manual")}
+      />
 
       <AadhaarModeButtons
         mode={mode}

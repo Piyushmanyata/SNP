@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import api, { formatApiError, errorPayload } from "../lib/api";
+import logger from "../lib/logger";
 import Layout from "../components/Layout";
 import {
   ClinicalLookupForm,
@@ -50,7 +51,7 @@ export default function Clinical() {
       .get("/clinical/diagnosis-options")
       .then((r) => setDiagOpts(r.data?.options || []))
       .catch((err) => {
-        console.warn("Failed to fetch diagnosis options:", err);
+        logger.warn("Failed to fetch diagnosis options:", err);
         setDiagOpts([]);
       });
 
@@ -58,7 +59,7 @@ export default function Clinical() {
       .get("/clinical/ot-days")
       .then((r) => setOtDays(r.data?.ot_days || []))
       .catch((err) => {
-        console.warn("Failed to fetch OT days:", err);
+        logger.warn("Failed to fetch OT days:", err);
         setOtDays([]);
       });
 
@@ -66,12 +67,12 @@ export default function Clinical() {
       .get("/clinical/specs-days")
       .then((r) => setSpecsDays(r.data?.specs_days || []))
       .catch((err) => {
-        console.warn("Failed to fetch Specs collection days:", err);
+        logger.warn("Failed to fetch Specs collection days:", err);
         setSpecsDays([]);
       });
   }, []);
 
-  const doLookup = async (e) => {
+  const doLookup = useCallback(async (e) => {
     e?.preventDefault();
     setError("");
     setBanner("");
@@ -98,7 +99,7 @@ export default function Clinical() {
       setData(null);
       setError(p?.message || formatApiError(err));
     }
-  };
+  }, [lookup]);
 
   const reload = useCallback(async () => {
     if (!lookup.trim()) return;
@@ -119,11 +120,12 @@ export default function Clinical() {
           : emptyRx
       );
     } catch (err) {
-      console.warn("Failed to reload clinical data:", err);
+      logger.warn("Failed to reload clinical data:", err);
     }
   }, [lookup]);
 
-  const saveRx = async () => {
+  const saveRx = useCallback(async () => {
+    if (!data?.registration?.id) return;
     setBusy(true);
     setError("");
     try {
@@ -138,26 +140,26 @@ export default function Clinical() {
     } finally {
       setBusy(false);
     }
-  };
+  }, [data?.registration?.id, rx, reload]);
 
-  const toggleDiag = (opt) => {
+  const toggleDiag = useCallback((opt) => {
     setRx((r) => ({
       ...r,
       diagnosis_options: r.diagnosis_options.includes(opt)
         ? r.diagnosis_options.filter((o) => o !== opt)
         : [...r.diagnosis_options, opt],
     }));
-  };
+  }, []);
 
-  const openHistory = async () => {
-    if (!data?.person) return;
+  const openHistory = useCallback(async () => {
+    if (!data?.person?.id) return;
     try {
       const { data: h } = await api.get(`/clinical/history/${data.person.id}`);
       setHistory(h.history);
     } catch (err) {
       setError(formatApiError(err));
     }
-  };
+  }, [data?.person?.id]);
 
   const locked = data?.transcription?.locked;
 

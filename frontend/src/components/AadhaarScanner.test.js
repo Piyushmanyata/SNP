@@ -169,7 +169,7 @@ describe("AadhaarScanner component", () => {
     expect(api.post).toHaveBeenCalledWith("/aadhaar/decode", {
       payload: "AADHAAR|Priya Sharma|F|1992-04-10|9876|45 Station Rd, Howrah",
     });
-    expect(onScannedMock).toHaveBeenCalledWith(fakeData);
+    expect(onScannedMock).toHaveBeenCalledWith(fakeData, expect.any(String));
     expect(container.textContent).toContain("Identity locked from card");
   });
 
@@ -211,7 +211,8 @@ describe("AadhaarScanner component", () => {
       expect.objectContaining({
         full_name: "Ramesh Kumar",
         aadhaar_last4: "5678",
-      })
+      }),
+      expect.any(String)
     );
   });
 
@@ -283,7 +284,8 @@ describe("AadhaarScanner component", () => {
       payload: "AADHAAR|Test Person|M|1980-01-01|1234|Test Address",
     });
     expect(onScannedMock).toHaveBeenCalledWith(
-      expect.objectContaining({ full_name: "Test Person", aadhaar_last4: "1234" })
+      expect.objectContaining({ full_name: "Test Person", aadhaar_last4: "1234" }),
+      expect.any(String)
     );
   });
 
@@ -380,7 +382,8 @@ describe("AadhaarScanner component", () => {
       payload: "AADHAAR|Anita Rao|F|1990-02-14|4321|MG Road",
     });
     expect(onScannedMock).toHaveBeenCalledWith(
-      expect.objectContaining({ full_name: "Anita Rao", aadhaar_last4: "4321" })
+      expect.objectContaining({ full_name: "Anita Rao", aadhaar_last4: "4321" }),
+      expect.any(String)
     );
   });
 
@@ -402,7 +405,7 @@ describe("AadhaarScanner component", () => {
     expect(mediaTrack.stop).toHaveBeenCalled();
   });
 
-  test("requests 720p as ideal and still starts if the track is 640x480", async () => {
+  test("requests 1080p with continuous focus and still starts if the track is 640x480", async () => {
     mediaTrack.getSettings.mockReturnValue({ width: 640, height: 480 });
 
     act(() => {
@@ -417,8 +420,9 @@ describe("AadhaarScanner component", () => {
     expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalledWith(
       expect.objectContaining({
         video: expect.objectContaining({
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          focusMode: { ideal: "continuous" },
         }),
       })
     );

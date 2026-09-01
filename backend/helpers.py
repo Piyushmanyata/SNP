@@ -76,7 +76,7 @@ def new_uuid() -> str:
 
 # ---- labellers (never render raw enums) ----
 
-STATUS_LABELS = {"registered": "Registered", "seen": "Seen", "waiting": "Registered"}
+STATUS_LABELS = {"registered": "Registered", "arrived": "Arrived", "seen": "Seen", "waiting": "Registered"}
 ROLE_LABELS = {
     "admin": "Admin",
     "team_lead": "Team Lead",

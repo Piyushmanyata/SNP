@@ -4,29 +4,36 @@ import urllib.request
 
 MSG91_FLOW_URL = "https://control.msg91.com/api/v5/flow"
 
+TEMPLATE_ENV = {
+    "registration": "MSG91_TEMPLATE_REGISTRATION",
+    "camp": "MSG91_TEMPLATE_CAMP",
+    "ot_token": "MSG91_TEMPLATE_OT_TOKEN",
+    "ot": "MSG91_TEMPLATE_OT",
+    "specs_token": "MSG91_TEMPLATE_SPECS_TOKEN",
+    "specs": "MSG91_TEMPLATE_SPECS",
+}
+
 
 def configured() -> bool:
-    return bool(
-        os.environ.get("MSG91_AUTH_KEY")
-        and os.environ.get("MSG91_TEMPLATE_CAMP")
-        and os.environ.get("MSG91_TEMPLATE_OT")
-        and os.environ.get("MSG91_TEMPLATE_SPECS")
+    return bool(os.environ.get("MSG91_AUTH_KEY")) and all(
+        os.environ.get(name) for name in TEMPLATE_ENV.values()
     )
 
 
-def template_id(reminder_type: str) -> str:
-    return {
-        "camp": os.environ["MSG91_TEMPLATE_CAMP"],
-        "ot": os.environ["MSG91_TEMPLATE_OT"],
-        "specs": os.environ["MSG91_TEMPLATE_SPECS"],
-    }[reminder_type]
+def template_id(message_type: str) -> str:
+    return os.environ[TEMPLATE_ENV[message_type]]
 
 
-def send_dlt_sms(reminder_type: str, mobile: str, venue: str) -> str:
+def send_dlt_sms(message_type: str, mobile: str, reg_no: int, event_date: str, venue: str) -> str:
     payload = {
-        "template_id": template_id(reminder_type),
+        "template_id": template_id(message_type),
         "short_url": "0",
-        "recipients": [{"mobiles": f"91{mobile}", "venue": venue}],
+        "recipients": [{
+            "mobiles": f"91{mobile}",
+            "reg_no": str(reg_no),
+            "date": event_date,
+            "venue": venue,
+        }],
     }
     req = urllib.request.Request(
         MSG91_FLOW_URL,

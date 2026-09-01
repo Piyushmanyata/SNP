@@ -1,5 +1,6 @@
 import io
 import csv
+from typing import Any, Dict, List
 from bson import ObjectId
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -11,7 +12,7 @@ router = APIRouter(prefix="/api", tags=["reports"])
 
 
 @router.get("/kpis")
-async def kpis(actor: dict = Depends(require_any)):
+async def kpis(actor: dict = Depends(require_any)) -> Dict[str, Any]:
     db = get_db()
     camp = await db.camps.find_one({"is_active": True})
     if not camp:
@@ -27,7 +28,7 @@ async def kpis(actor: dict = Depends(require_any)):
 
 
 @router.get("/leaderboard")
-async def leaderboard(actor: dict = Depends(require_staff)):
+async def leaderboard(actor: dict = Depends(require_staff)) -> Dict[str, Any]:
     db = get_db()
     camp = await db.camps.find_one({"is_active": True})
     if not camp:
@@ -66,48 +67,84 @@ async def leaderboard(actor: dict = Depends(require_staff)):
     return {"volunteers": volunteers, "team_leads": team_leads}
 
 
+EXPORT_COLUMNS = [
+    "reg_no", "full_name", "age", "gender", "phone", "address", "aadhaar_last4",
+    "manual_entry", "camp_day", "registered_at", "arrived_at", "seen_at",
+    "diagnosis", "bp", "blood_sugar",
+    "r_sph", "r_cyl", "r_axis", "l_sph", "l_cyl", "l_axis", "add",
+    "medicine", "fixed_power_specs", "spectacles_to_be_made", "ot",
+    "ot_day", "ot_venue", "specs_day", "specs_venue",
+]
+
+
+def _line_statuses(fulfilments: dict) -> List[str]:
+    specs = fulfilments.get("specs", {}).get("status")
+    return [
+        fulfilments.get("medicine", {}).get("status", ""),
+        "issued" if specs == "fulfilled" else "",
+        "deferred" if specs == "deferred" else "",
+        fulfilments.get("ot", {}).get("status", ""),
+    ]
+
+
+def _diagnosis(t: dict) -> str:
+    parts = list(t.get("diagnosis_options") or [])
+    if t.get("diagnosis_other"):
+        parts.append(t["diagnosis_other"])
+    return ";".join(parts)
+
+
+async def _export_row(db: Any, p: dict, day_dates: dict) -> List[Any]:
+    t = await db.transcriptions.find_one({"patient_id": p["_id"]}) or {}
+    fulfilments = {}
+    if t:
+        for f in await db.fulfilments.find({"transcription_id": t["_id"]}).to_list(20):
+            fulfilments[f["item_type"]] = f
+    m = t.get("specs_measurements") or {}
+    ot = fulfilments.get("ot", {})
+    specs = fulfilments.get("specs", {})
+    return [
+        p.get("reg_no", ""), p.get("full_name", ""), p.get("age", ""),
+        p.get("gender", ""), p.get("phone", ""), p.get("address", ""),
+        p.get("aadhaar_last4", ""),
+        "yes" if (p.get("manual_entry") or p.get("manual_exception")) else "no",
+        day_dates.get(p.get("camp_day_id"), ""),
+        iso(p.get("created_at")) or "", iso(p.get("arrived_at")) or "", iso(p.get("seen_at")) or "",
+        _diagnosis(t), t.get("bp", "") or "", t.get("blood_sugar", "") or "",
+        *[m.get(k, "") or "" for k in ("r_sph", "r_cyl", "r_axis", "l_sph", "l_cyl", "l_axis", "add")],
+        *_line_statuses(fulfilments),
+        ot.get("collection_date", "") or "", ot.get("collection_venue", "") or "",
+        specs.get("collection_date", "") or "" if specs.get("status") == "deferred" else "",
+        specs.get("collection_venue", "") or "" if specs.get("status") == "deferred" else "",
+    ]
+
+
 @router.get("/exports/camp-records")
-async def export_camp_records(actor: dict = Depends(require_admin)):
+async def export_camp_records(camp_id: str | None = None, actor: dict = Depends(require_admin)) -> StreamingResponse:
+    """One wide row per patient in the camp, including no-shows."""
     db = get_db()
-    camp = await db.camps.find_one({"is_active": True})
+    camp = await db.camps.find_one({"_id": ObjectId(camp_id)}) if camp_id else await db.camps.find_one({"is_active": True})
     buf = io.StringIO()
     writer = csv.writer(buf)
-    writer.writerow(["reg_no", "full_name", "gender", "age", "phone", "address", "seen_at"])
+    writer.writerow(EXPORT_COLUMNS)
     if camp:
-        pts = await db.patients.find({"camp_id": camp["_id"], "queue_status": "seen"}).to_list(100000)
+        days = await db.camp_days.find({"camp_id": camp["_id"]}).to_list(1000)
+        day_dates = {d["_id"]: d["day_date"] for d in days}
+        pts = await db.patients.find({"camp_id": camp["_id"]}).to_list(100000)
         for p in pts:
-            writer.writerow([p["reg_no"], p["full_name"], p.get("gender", ""), p.get("age", ""),
-                             p.get("phone", ""), p.get("address", ""), iso(p.get("seen_at"))])
+            writer.writerow(await _export_row(db, p, day_dates))
     buf.seek(0)
     return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": "attachment; filename=camp_records.csv"})
 
 
-@router.get("/exports/clinical-audit")
-async def export_clinical_audit(actor: dict = Depends(require_admin)):
-    db = get_db()
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(["event", "transcription_id", "reg_no", "detail", "at"])
-    async for t in db.transcriptions.find():
-        p = await db.patients.find_one({"_id": t["patient_id"]})
-        reg = p["reg_no"] if p else ""
-        writer.writerow(["transcription", str(t["_id"]), reg,
-                         ";".join(t.get("diagnosis_options", [])), iso(t.get("created_at"))])
-    async for c in db.corrections.find():
-        writer.writerow(["correction", str(c["transcription_id"]), "", c.get("reason", ""), iso(c.get("created_at"))])
-    buf.seek(0)
-    return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
-                             headers={"Content-Disposition": "attachment; filename=clinical_audit.csv"})
-
-
 @router.get("/health")
-async def health():
+async def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
 @router.get("/health/ready")
-async def readiness():
+async def readiness() -> Dict[str, Any]:
     db = get_db()
     try:
         await db.command("ping")
@@ -115,5 +152,5 @@ async def readiness():
         if n_active > 1:
             return JSONResponse(status_code=503, content={"ready": False, "reason": "multiple active camps"})
         return {"ready": True, "db": "reachable", "active_camps": n_active}
-    except Exception as e:
+    except Exception:
         return JSONResponse(status_code=503, content={"ready": False, "reason": "db unreachable"})

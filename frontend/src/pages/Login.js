@@ -1,9 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth, roleHome } from "../context/AuthContext";
 import { Button, Input, Field, Alert } from "../components/ui";
 import api, { formatApiError } from "../lib/api";
-import { Stethoscope, ScanLine } from "lucide-react";
+import { Stethoscope } from "lucide-react";
 
 export default function Login() {
   const { login, user } = useAuth();
@@ -30,7 +30,7 @@ export default function Login() {
     return () => { cancelled = true; clearInterval(t); };
   }, []);
 
-  const submit = async (e) => {
+  const submit = useCallback(async (e) => {
     e.preventDefault();
     setBusy(true); setError("");
     try {
@@ -41,7 +41,7 @@ export default function Login() {
     } finally {
       setBusy(false);
     }
-  };
+  }, [email, password, login, navigate]);
 
   return (
     <div className="min-h-screen grid lg:grid-cols-2">
@@ -52,19 +52,8 @@ export default function Login() {
           </div>
           <span className="font-display font-extrabold text-xl">SNP Camps</span>
         </div>
-        <div>
-          <h1 className="font-display text-4xl font-extrabold leading-tight">
-            Run eye camps with<br /><span className="text-emerald-400">calm precision.</span>
-          </h1>
-          <p className="mt-4 text-slate-400 max-w-md">
-            Aadhaar-based registration, prescription printing, and a full clinical desk — built for the field, on any device.
-          </p>
-          <div className="mt-8 flex items-center gap-3 text-slate-300">
-            <ScanLine className="w-5 h-5 text-emerald-400" />
-            <span className="text-sm">Scan · Register · Print · See · Transcribe</span>
-          </div>
-        </div>
-        <p className="text-xs text-slate-500 font-mono">Registered → Seen · one active camp · presence-once</p>
+        <Occupancy occupancy={occupancy} />
+        <p className="text-xs text-slate-500 font-mono">Registered → Arrived → Seen · one active camp</p>
       </div>
 
       <div className="flex items-center justify-center p-6 sm:p-12 bg-slate-50">
@@ -97,22 +86,41 @@ export default function Login() {
             <a href="/self-register" className="block text-center text-sm font-semibold text-emerald-600 hover:text-emerald-700 min-h-[44px] flex items-center justify-center" data-testid="goto-self-register-link">
               Patient self-registration →
             </a>
-            {occupancy?.camp && (
-              <div className="mt-4 rounded-xl border border-slate-200 bg-white p-3 space-y-2" data-testid="public-occupancy">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{occupancy.camp.name}</p>
-                {(occupancy.days || []).map((d) => (
-                  <div key={d.id} className="flex flex-wrap gap-x-3 gap-y-1 text-sm text-slate-700" data-testid={`occupancy-day-${d.id}`}>
-                    <span className="font-medium">{d.day_date}</span>
-                    <span>Registered {d.registered}</span>
-                    <span>Limit {d.seat_limit === 0 ? "unlimited" : d.seat_limit}</span>
-                    <span>Remaining {d.remaining}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            <div className="lg:hidden mt-4">
+              <Occupancy occupancy={occupancy} compact />
+            </div>
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function Occupancy({ occupancy, compact }) {
+  if (!occupancy?.camp) return null;
+  const seats = occupancy.total_seats ?? 0;
+  const registered = occupancy.total_registered ?? 0;
+  const remaining = Math.max(0, seats - registered);
+  return (
+    <div
+      className={compact ? "rounded-xl border border-slate-200 bg-white p-4" : ""}
+      data-testid="public-occupancy"
+    >
+      <p className={`text-xs font-semibold uppercase tracking-wide ${compact ? "text-slate-500" : "text-emerald-400"}`}>
+        {occupancy.camp.name}
+      </p>
+      <p
+        className={`font-display font-extrabold leading-tight ${compact ? "text-2xl text-slate-900 mt-1" : "text-5xl mt-3"}`}
+        data-testid="occupancy-headline"
+      >
+        {registered} / {seats}
+      </p>
+      <p className={`mt-2 text-sm ${compact ? "text-slate-600" : "text-slate-400"}`}>
+        registered against {seats} seats · {remaining} left
+      </p>
+      <p className={`mt-1 text-xs ${compact ? "text-slate-500" : "text-slate-500"}`}>
+        {occupancy.camp.venue}
+      </p>
     </div>
   );
 }
