@@ -66,6 +66,10 @@ class MockCursor:
         self._docs = self._docs[:n]
         return self
 
+    def sort(self, field, direction=1):
+        self._docs.sort(key=lambda d: d.get(field), reverse=direction < 0)
+        return self
+
     async def to_list(self, length=None):
         if length is not None:
             return self._docs[:length]
@@ -170,6 +174,25 @@ class MockCollection:
     async def count_documents(self, query):
         async with self._lock:
             return sum(1 for d in self.docs if self._matches(d, query))
+
+    def aggregate(self, pipeline):
+        docs = self.docs
+        for stage in pipeline:
+            if "$match" in stage:
+                docs = [d for d in docs if self._matches(d, stage["$match"])]
+            elif "$group" in stage:
+                spec = stage["$group"]
+                key = spec["_id"].lstrip("$")
+                counters = {name: f["$sum"] for name, f in spec.items() if name != "_id"}
+                grouped = {}
+                for d in docs:
+                    row = grouped.setdefault(d.get(key), {"_id": d.get(key)})
+                    for name, amount in counters.items():
+                        row[name] = row.get(name, 0) + amount
+                docs = list(grouped.values())
+            else:
+                raise NotImplementedError(f"MockCollection.aggregate: {stage}")
+        return MockCursor(docs)
 
     def _apply_update(self, doc, update):
         if "$set" in update:

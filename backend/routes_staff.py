@@ -92,7 +92,9 @@ async def disable_staff(staff_id: str, actor: dict = Depends(require_admin)) -> 
 @router.patch("/{staff_id}/enable")
 async def enable_staff(staff_id: str, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
-    await db.users.update_one(
+    res = await db.users.update_one(
         {"_id": ObjectId(staff_id)}, {"$set": {"disabled_at": None}}
     )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Staff not found")
     return {"ok": True}

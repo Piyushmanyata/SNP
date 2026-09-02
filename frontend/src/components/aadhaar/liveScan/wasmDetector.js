@@ -1,5 +1,7 @@
 import logger from "../../../lib/logger";
 
+export const WASM_DETECT_TIMEOUT_MS = 4000;
+
 let worker = null;
 let seq = 0;
 const pending = new Map();
@@ -7,6 +9,19 @@ const pending = new Map();
 function workerUrl() {
   const base = process.env.PUBLIC_URL || "";
   return `${base}/zxing-worker.js`;
+}
+
+function settle(id, text) {
+  const job = pending.get(id);
+  if (!job) return;
+  pending.delete(id);
+  clearTimeout(job.timer);
+  job.resolve(text);
+}
+
+function releaseWaiters(reason) {
+  logger.warn("zxing worker error:", reason);
+  for (const id of [...pending.keys()]) settle(id, null);
 }
 
 export function loadZxingWorker() {
@@ -17,14 +32,9 @@ export function loadZxingWorker() {
   worker = new Worker(workerUrl());
   worker.onmessage = (event) => {
     const { id, text } = event.data || {};
-    const job = pending.get(id);
-    if (!job) return;
-    pending.delete(id);
-    job.resolve(text || null);
+    settle(id, text || null);
   };
-  worker.onerror = (err) => {
-    logger.warn("zxing worker error:", err);
-  };
+  worker.onerror = releaseWaiters;
   return Promise.resolve();
 }
 
@@ -32,7 +42,8 @@ export function detectWasmImageData(imageData) {
   if (!worker || !imageData) return Promise.resolve(null);
   const id = (seq += 1);
   return new Promise((resolve) => {
-    pending.set(id, { resolve });
+    const timer = setTimeout(() => settle(id, null), WASM_DETECT_TIMEOUT_MS);
+    pending.set(id, { resolve, timer });
     worker.postMessage({ id, imageData });
   });
 }

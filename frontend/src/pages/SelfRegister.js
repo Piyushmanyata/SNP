@@ -16,6 +16,12 @@ export default function SelfRegister() {
   const [busy, setBusy] = useState(false);
   const [receipt, setReceipt] = useState(null);
   const [loadErr, setLoadErr] = useState("");
+  const [reqId, setReqId] = useState("");
+
+  const onScanned = useCallback((card) => {
+    setScanned(card);
+    setReqId(v4());
+  }, []);
 
   useEffect(() => {
     api.get("/camps/active/public")
@@ -30,7 +36,7 @@ export default function SelfRegister() {
   }, []);
 
   const submit = useCallback(async () => {
-    if (!scanned || !dayId) return;
+    if (!scanned || !dayId || !reqId) return;
     setBusy(true); setError("");
     try {
       const { data } = await api.post("/self-register", {
@@ -44,7 +50,7 @@ export default function SelfRegister() {
         phone: phone || null,
         camp_day_id: dayId,
         is_self_registered: true,
-        registration_request_id: v4(),
+        registration_request_id: reqId,
       });
       setReceipt(data.receipt);
     } catch (err) {
@@ -52,7 +58,7 @@ export default function SelfRegister() {
     } finally {
       setBusy(false);
     }
-  }, [scanned, phone, dayId]);
+  }, [scanned, phone, dayId, reqId]);
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -83,7 +89,7 @@ export default function SelfRegister() {
             </Card>
 
             <Card className="space-y-4">
-              <AadhaarScanner onScanned={setScanned} />
+              <AadhaarScanner onScanned={onScanned} />
 
               {scanned && (
                 <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-1.5" data-testid="self-scanned-preview">
@@ -132,7 +138,7 @@ export default function SelfRegister() {
               <p><span className="text-slate-400">Venue:</span> {receipt.venue}</p>
               <p><span className="text-slate-400">Day:</span> {receipt.day_date}</p>
             </div>
-            <Button variant="outline" className="mt-6 w-full" onClick={() => { setReceipt(null); setScanned(null); setPhone(""); }} data-testid="self-register-another">
+            <Button variant="outline" className="mt-6 w-full" onClick={() => { setReceipt(null); setScanned(null); setPhone(""); setReqId(""); }} data-testid="self-register-another">
               Register another patient
             </Button>
           </Card>

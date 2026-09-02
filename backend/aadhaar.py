@@ -10,9 +10,17 @@ import zlib
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
+from helpers import IST
+
+# A Secure QR carrying a photo runs to roughly 7k digits; anything larger is not a
+# card, and int(str) is quadratic, so the cap is what keeps an unauthenticated
+# decode cheap.
+MAX_SECURE_QR_DIGITS = 16000
+MAX_DECOMPRESSED_BYTES = 256 * 1024
+
 if hasattr(sys, "set_int_max_str_digits"):
     try:
-        sys.set_int_max_str_digits(200000)
+        sys.set_int_max_str_digits(MAX_SECURE_QR_DIGITS)
     except Exception:
         pass
 
@@ -59,7 +67,7 @@ def _calc_age(dob: str | None) -> int | None:
         return None
     try:
         d = datetime.strptime(dob, "%Y-%m-%d")
-        today = datetime.now()
+        today = datetime.now(IST)
         return today.year - d.year - ((today.month, today.day) < (d.month, d.day))
     except Exception:
         return None
@@ -70,22 +78,25 @@ def _normalize_gender(g: str | None) -> str:
     return gender if gender in ("M", "F") else "O"
 
 
+def _bounded_inflate(data: bytes, wbits: int) -> bytes:
+    obj = zlib.decompressobj(wbits)
+    out = obj.decompress(data, MAX_DECOMPRESSED_BYTES)
+    if not obj.eof:
+        raise zlib.error("Secure QR payload is truncated or over the decode limit")
+    return out
+
+
 def _decompress(qr: str) -> bytes:
+    if len(qr) > MAX_SECURE_QR_DIGITS:
+        raise ValueError("Secure QR payload is too long to be a card")
     big = int(qr)
     byte_array = big.to_bytes((big.bit_length() + 7) // 8, "big")
     for b_arr in (byte_array, b"\x00" + byte_array, b"\x00\x00" + byte_array):
-        try:
-            return zlib.decompress(b_arr, 16 + zlib.MAX_WBITS)
-        except zlib.error:
-            pass
-        try:
-            return zlib.decompress(b_arr)
-        except zlib.error:
-            pass
-        try:
-            return zlib.decompress(b_arr, -zlib.MAX_WBITS)
-        except zlib.error:
-            pass
+        for wbits in (16 + zlib.MAX_WBITS, zlib.MAX_WBITS, -zlib.MAX_WBITS):
+            try:
+                return _bounded_inflate(b_arr, wbits)
+            except zlib.error:
+                pass
     raise ValueError("Could not decompress Secure QR payload")
 
 

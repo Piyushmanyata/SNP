@@ -67,16 +67,22 @@ async def active_camp_public() -> Dict[str, Any]:
     if not c:
         return {"camp": None, "days": []}
     days = await db.camp_days.find({"camp_id": c["_id"]}).sort("day_date", 1).to_list(100)
+    grouped = await db.patients.aggregate([
+        {"$match": {"camp_id": c["_id"]}},
+        {"$group": {"_id": "$camp_day_id", "n": {"$sum": 1}}},
+    ]).to_list(1000)
+    per_day = {g["_id"]: g["n"] for g in grouped}
+    today = today_ist_str()
     out = []
     total_seats = 0
     for d in days:
-        n = await db.patients.count_documents({"camp_day_id": d["_id"]})
+        n = per_day.get(d["_id"], 0)
         limit = d.get("seat_limit") or 0
         total_seats += limit
         out.append({
             "id": str(d["_id"]),
             "day_date": d["day_date"],
-            "is_today": d["day_date"] == today_ist_str(),
+            "is_today": d["day_date"] == today,
             "registered": n,
             "seat_limit": limit,
             "remaining": max(0, limit - n),
@@ -84,7 +90,7 @@ async def active_camp_public() -> Dict[str, Any]:
     return {
         "camp": {"id": str(c["_id"]), "name": c["name"], "venue": c["venue"]},
         "total_seats": total_seats,
-        "total_registered": await db.patients.count_documents({"camp_id": c["_id"]}),
+        "total_registered": sum(per_day.values()),
         "days": out,
     }
 

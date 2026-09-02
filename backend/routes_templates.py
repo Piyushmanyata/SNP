@@ -48,6 +48,8 @@ def _validate_logos(logos: Optional[List[dict]]) -> List[Dict[str, Any]]:
 
 async def _assert_camp(camp_id: str) -> None:
     db = get_db()
+    if not camp_id:
+        raise HTTPException(status_code=400, detail="camp_id is required")
     if not await db.camps.find_one({"_id": ObjectId(camp_id)}):
         raise HTTPException(status_code=404, detail="Camp not found")
 
