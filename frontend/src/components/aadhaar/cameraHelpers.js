@@ -85,12 +85,14 @@ export async function attachStreamToVideo(video, stream) {
   }
   if (!video.videoWidth) {
     await new Promise((resolve) => {
+      let timer = null;
       const done = () => {
+        clearTimeout(timer);
         video.removeEventListener("loadedmetadata", done);
         resolve();
       };
       video.addEventListener("loadedmetadata", done);
-      setTimeout(done, 800);
+      timer = setTimeout(done, 800);
     });
   }
 }

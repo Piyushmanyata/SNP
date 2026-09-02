@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from db import get_db
 from models import QrLookupBody, ScanBody, ScanConfirmBody, RegisterBody
@@ -8,7 +9,9 @@ from helpers import now_utc, as_utc, today_ist_str, age_from_dob, normalize_name
 from serializers import ser_patient
 from security import require_staff
 from aadhaar import decode_aadhaar
-from routes_registration import _duplicate_hits, _is_manual, _is_scanned_row, _resolve_person
+from routes_registration import (
+    _dup_409, _duplicate_hits, _is_manual, _is_scanned_row, _resolve_person,
+)
 from datetime import timedelta
 
 router = APIRouter(prefix="/api/desk", tags=["desk"])
@@ -169,14 +172,23 @@ async def scan_confirm(body: ScanConfirmBody, actor: dict = Depends(require_staf
             "dob": card["dob"],
             "gender": card["gender"],
         })
-    await db.patients.update_one({"_id": patient["_id"]}, {"$set": {
-        **{field: card[field] for field in OVERWRITTEN_FIELDS},
-        "full_name_normalized": normalize_name(card["full_name"] or ""),
-        "aadhaar_scanned": True,
-        "person_id": person["_id"] if person else None,
-        "manual_entry": False,
-        "manual_exception": None,
-    }})
+    try:
+        await db.patients.update_one({"_id": patient["_id"]}, {"$set": {
+            **{field: card[field] for field in OVERWRITTEN_FIELDS},
+            "full_name_normalized": normalize_name(card["full_name"] or ""),
+            "aadhaar_scanned": True,
+            "person_id": person["_id"] if person else None,
+            "manual_entry": False,
+            "manual_exception": None,
+        }})
+    except DuplicateKeyError:
+        if person:
+            existing = await db.patients.find_one(
+                {"person_id": person["_id"], "camp_id": patient["camp_id"]}
+            )
+            if existing:
+                raise _dup_409(existing)
+        raise
     patient = await db.patients.find_one({"_id": patient["_id"]})
     arrived = await _stamp_arrival(db, patient, str(actor["_id"]))
     return {"outcome": "arrived", "registration": ser_patient(arrived)}

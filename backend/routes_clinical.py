@@ -314,6 +314,14 @@ async def _cleanup_prior_fulfilment(
     await db.fulfilments.delete_many({"transcription_id": transcription_id, "item_type": item_type})
 
 
+def _deferred_day_id(body: FulfilmentBody, item_type: str) -> Optional[ObjectId]:
+    """A day is only booked for the line that owns it: a specs line never holds an OT seat."""
+    if body.status != "deferred" or body.item_type != item_type:
+        return None
+    raw = getattr(body, DEFERRAL_CONFIG[item_type]["id_field"])
+    return ObjectId(raw) if raw else None
+
+
 def _build_fulfilment_doc(body: FulfilmentBody, transcription_id: ObjectId | str, slip: dict | None, actor_id: str) -> dict:
     return {
         "transcription_id": transcription_id,
@@ -321,8 +329,8 @@ def _build_fulfilment_doc(body: FulfilmentBody, transcription_id: ObjectId | str
         "status": body.status,
         "collection_date": (slip or {}).get("collection_date") or body.collection_date,
         "collection_venue": (slip or {}).get("collection_venue") or body.collection_venue,
-        "ot_schedule_day_id": ObjectId(body.ot_schedule_day_id) if body.status == "deferred" and body.ot_schedule_day_id else None,
-        "specs_collection_day_id": ObjectId(body.specs_collection_day_id) if body.status == "deferred" and body.specs_collection_day_id else None,
+        "ot_schedule_day_id": _deferred_day_id(body, "ot"),
+        "specs_collection_day_id": _deferred_day_id(body, "specs"),
         "created_by": actor_id,
         "created_at": now_utc(),
     }

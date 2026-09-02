@@ -4,8 +4,10 @@ from typing import AsyncGenerator
 from dotenv import load_dotenv
 load_dotenv()
 
-from fastapi import FastAPI
+from bson.errors import InvalidId
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from db import get_db, init_indexes
 from security import hash_password
@@ -43,6 +45,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(title="SNP Camps API", lifespan=lifespan)
+
+
+@app.exception_handler(InvalidId)
+async def invalid_id_handler(request: Request, exc: InvalidId) -> JSONResponse:
+    return JSONResponse(status_code=400, content={"detail": "Malformed identifier"})
 
 LAN_ORIGIN_REGEX = (
     r"^https?://("

@@ -398,7 +398,7 @@ function Board({ title, rows, testid }) {
       <div className="space-y-2" data-testid={testid}>
         {rows.length === 0 && <p className="text-slate-400 text-sm">No points yet.</p>}
         {rows.map((r, i) => (
-          <div key={r.user_id || r.id || r.name || i} className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-50">
+          <div key={`${r.name}-${i}`} className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-50">
             <span className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold ${i === 0 ? "bg-amber-400 text-white" : "bg-slate-200 text-slate-600"}`}>
               {i + 1}
             </span>
@@ -438,7 +438,7 @@ function Exports() {
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const a = document.createElement("a");
       a.href = url; a.download = filename; a.click();
-      window.URL.revokeObjectURL(url);
+      setTimeout(() => window.URL.revokeObjectURL(url), 0);
       setMsg(`Downloaded ${filename}`);
     } catch (e) { setMsg(formatApiError(e)); }
   }, []);

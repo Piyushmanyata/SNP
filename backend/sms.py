@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, Dict, Optional
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -84,7 +85,9 @@ async def send_patient_sms(
         row = await _claim(db, patient["_id"], message_type, event_date, number, venue, copy)
         if not row:
             return False
-        provider_id = msg91.send_dlt_sms(message_type, number, reg_no, event_date, venue)
+        provider_id = await asyncio.to_thread(
+            msg91.send_dlt_sms, message_type, number, reg_no, event_date, venue
+        )
         await db.reminder_ledger.update_one(
             {"_id": row["_id"]},
             {"$set": {"status": "sent", "provider_id": provider_id}},

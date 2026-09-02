@@ -376,8 +376,11 @@ async def desk_register(body: RegisterBody, request: Request, actor: dict = Depe
 async def self_register(body: RegisterBody, request: Request) -> Dict[str, Any]:
     ip = request.client.host if request.client else "unknown"
     now = now_utc()
+    cutoff = now - timedelta(minutes=10)
+    for seen_ip in [k for k, w in _rl.items() if w[-1] <= cutoff]:
+        del _rl[seen_ip]
     window = _rl.setdefault(ip, [])
-    window[:] = [t for t in window if t > now - timedelta(minutes=10)]
+    window[:] = [t for t in window if t > cutoff]
     if len(window) >= 300:
         raise HTTPException(status_code=429, detail="Too many attempts. Please try again later.")
     window.append(now)
