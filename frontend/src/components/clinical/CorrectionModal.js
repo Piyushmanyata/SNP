@@ -1,11 +1,17 @@
 import React, { useState } from "react";
 import api, { formatApiError } from "../../lib/api";
 import { Modal, Field, Input, Alert, Button } from "../ui";
+import { SpecsMeasurementsGrid } from "./SpecsMeasurementsGrid";
+
+const EMPTY_MEASUREMENTS = {
+  r_sph: "", r_cyl: "", r_axis: "", l_sph: "", l_cyl: "", l_axis: "", add: "",
+};
 
 export function CorrectionForm({ transcriptionId, onDone }) {
   const [reason, setReason] = useState("");
   const [field, setField] = useState("remarks");
   const [value, setValue] = useState("");
+  const [measurements, setMeasurements] = useState(EMPTY_MEASUREMENTS);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -13,10 +19,11 @@ export function CorrectionForm({ transcriptionId, onDone }) {
     setBusy(true);
     setError("");
     try {
+      const changeValue = field === "specs_measurements" ? measurements : value;
       await api.post("/clinical/correction", {
         transcription_id: transcriptionId,
         reason,
-        changes: { [field]: value },
+        changes: { [field]: changeValue },
       });
       onDone();
     } catch (err) {
@@ -35,7 +42,7 @@ export function CorrectionForm({ transcriptionId, onDone }) {
           onChange={(e) => setField(e.target.value)}
           data-testid="correction-field-select"
         >
-          {["remarks", "diagnosis_other", "bp", "blood_sugar", "ot_procedure"].map(
+          {["remarks", "diagnosis_other", "bp", "blood_sugar", "ot_procedure", "specs_measurements"].map(
             (f) => (
               <option key={f} value={f}>
                 {f}
@@ -44,13 +51,20 @@ export function CorrectionForm({ transcriptionId, onDone }) {
           )}
         </select>
       </Field>
-      <Field label="New value">
-        <Input
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          data-testid="correction-value-input"
+      {field === "specs_measurements" ? (
+        <SpecsMeasurementsGrid
+          specsMeasurements={measurements}
+          onChange={setMeasurements}
         />
-      </Field>
+      ) : (
+        <Field label="New value">
+          <Input
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            data-testid="correction-value-input"
+          />
+        </Field>
+      )}
       <Field label="Reason (audited)" required>
         <Input
           value={reason}

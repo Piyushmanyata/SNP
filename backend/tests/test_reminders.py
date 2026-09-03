@@ -225,7 +225,7 @@ class TestReminderCronHttp:
                 "collection_date": TOMORROW, "collection_venue": "OT Theatre", "version": 1,
             })
             await mock_db.deferred_slips.insert_one({
-                "patient_id": pid, "item_type": "specs", "active": False, "cancelled": True,
+                "patient_id": pid, "item_type": "specs_made", "active": False, "cancelled": True,
                 "collection_date": TOMORROW, "collection_venue": "Optical", "version": 1,
             })
         asyncio.run(seed())
@@ -284,7 +284,7 @@ class TestReminderCronHttp:
                 "seat_limit": 10, "seats_taken": 1, "camp_id": ObjectId(),
             })
             await mock_db.deferred_slips.insert_one({
-                "patient_id": pid, "item_type": "specs", "active": True, "cancelled": False,
+                "patient_id": pid, "item_type": "specs_made", "active": True, "cancelled": False,
                 "collection_date": TOMORROW, "collection_venue": "stale",
                 "specs_collection_day_id": specs_day, "version": 1,
             })

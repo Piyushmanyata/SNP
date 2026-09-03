@@ -8,39 +8,53 @@ export const FULFILMENT_LINES = {
     label: "Medicine",
     icon: Pill,
     itemType: "medicine",
-    statuses: ["fulfilled", "not_available", "not_required"],
+    actions: [
+      { status: "fulfilled", label: "Given" },
+      { status: "not_available", label: "Out of stock" },
+    ],
   },
   specs_fixed: {
     label: "Fixed-power specs",
     icon: Glasses,
-    itemType: "specs",
-    statuses: ["fulfilled", "not_required"],
+    itemType: "specs_fixed",
     needsMeasurements: true,
+    actions: [{ status: "fulfilled", label: "Issue" }],
   },
   specs_made: {
     label: "Spectacles to be made",
     icon: Glasses,
-    itemType: "specs",
-    statuses: ["deferred"],
+    itemType: "specs_made",
     needsMeasurements: true,
     dayField: "specs_collection_day_id",
     dayLabel: "Specs collection day",
+    actions: [{ status: "deferred", label: "Defer and print Token" }],
   },
   ot: {
-    label: "OT / Surgery",
+    label: "OT",
     icon: Scissors,
     itemType: "ot",
-    statuses: ["fulfilled", "deferred", "not_required"],
     dayField: "ot_schedule_day_id",
     dayLabel: "OT Schedule Day",
+    actions: [
+      { status: "fulfilled", label: "Done at camp" },
+      { status: "deferred", label: "Schedule" },
+    ],
   },
 };
-
-export const LINE_ORDER = ["medicine", "specs_fixed", "specs_made", "ot"];
 
 export function hasMeasurements(transcription) {
   const m = transcription?.specs_measurements || {};
   return Boolean(String(m.r_sph || "").trim() && String(m.l_sph || "").trim());
+}
+
+export function transcriptionImpliesLine(transcription, lineKey) {
+  if (!transcription) return false;
+  if (lineKey === "medicine") {
+    return Boolean((transcription.diagnosis_options || []).length || transcription.diagnosis_other);
+  }
+  if (lineKey === "specs_fixed" || lineKey === "specs_made") return hasMeasurements(transcription);
+  if (lineKey === "ot") return Boolean(transcription.ot_eye || transcription.ot_procedure);
+  return false;
 }
 
 export function earliestFreeDay(days, currentId) {
@@ -91,16 +105,15 @@ export function FulfilmentStation({
   const days = line.dayField === "ot_schedule_day_id" ? otDays : specsDays;
 
   const existing = useMemo(() => {
-    const found = data?.fulfilments?.find((f) => f.item_type === line.itemType);
-    return found && line.statuses.includes(found.status) ? found : null;
+    return data?.fulfilments?.find((f) => f.item_type === line.itemType) || null;
   }, [data, line]);
   const slip = data?.slips?.find((s) => s.item_type === line.itemType && s.active);
-  const [status, setStatus] = useState(existing?.status || "");
+  const [status, setStatus] = useState(existing?.status || line.actions[0].status);
   const [dayId, setDayId] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    setStatus(line.statuses.length === 1 ? line.statuses[0] : existing?.status || "");
+    setStatus(existing?.status || line.actions[0].status);
   }, [existing?.status, line]);
 
   useEffect(() => {
@@ -109,22 +122,23 @@ export function FulfilmentStation({
   }, [days, existing, line.dayField]);
 
   const needsDay = Boolean(line.dayField) && status === "deferred";
-  const recordsPower = line.needsMeasurements && (status === "fulfilled" || status === "deferred");
+  const recordsPower = line.needsMeasurements;
   const measurementsMissing = recordsPower && !hasMeasurements(data?.transcription);
 
-  const save = useCallback(async () => {
+  const save = useCallback(async (chosen) => {
     if (!data?.transcription?.id) return;
+    const nextStatus = chosen || status;
     setBusy(true);
     setError("");
     try {
       const { data: res } = await api.post("/clinical/fulfilment", {
         transcription_id: data.transcription.id,
         item_type: line.itemType,
-        status,
+        status: nextStatus,
         ot_schedule_day_id: line.dayField === "ot_schedule_day_id" ? dayId || null : null,
         specs_collection_day_id: line.dayField === "specs_collection_day_id" ? dayId || null : null,
       });
-      setBanner(`${line.label}: ${status.replace(/_/g, " ")}`);
+      setBanner(`${line.label}: ${nextStatus.replace(/_/g, " ")}`);
       if (res.slip) {
         navigate(`/print/slip/${res.slip.id}`);
       } else {
@@ -137,6 +151,31 @@ export function FulfilmentStation({
     }
   }, [data?.transcription?.id, line, status, dayId, navigate, onDone, setBanner, setError]);
 
+  if (existing) {
+    return (
+      <div className="rounded-xl border border-slate-200 p-4" data-testid={`station-${lineKey}`}>
+        <div className="flex items-center gap-2 mb-3">
+          <Icon className="w-5 h-5 text-emerald-600" />
+          <p className="font-semibold text-slate-900 text-sm">{line.label}</p>
+        </div>
+        <Badge tone={existing.status === "deferred" ? "amber" : "emerald"} data-testid={`station-${lineKey}-recorded`}>
+          {existing.status.replace(/_/g, " ")}
+        </Badge>
+        {slip && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="w-full mt-2"
+            onClick={() => navigate(`/print/slip/${slip.id}`)}
+            data-testid={`station-${lineKey}-print-token`}
+          >
+            <Printer className="w-4 h-4" /> Reprint Token
+          </Button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-xl border border-slate-200 p-4" data-testid={`station-${lineKey}`}>
       <div className="flex items-center gap-2 mb-3">
@@ -144,59 +183,59 @@ export function FulfilmentStation({
         <p className="font-semibold text-slate-900 text-sm">{line.label}</p>
       </div>
 
-      {line.statuses.length === 1 ? (
-        <p className="text-xs text-slate-500">
-          Assign a {line.dayLabel} and print the Token.
-        </p>
-      ) : (
-        <select
-          className="w-full min-h-[44px] px-3 rounded-xl border border-slate-300 text-sm"
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          data-testid={`station-${lineKey}-status`}
-        >
-          <option value="">Select…</option>
-          {line.statuses.map((s) => (
-            <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
+      {line.actions.length > 1 && (
+        <div className="flex flex-col gap-2">
+          {line.actions.map((a) => (
+            <Button
+              key={a.status}
+              size="sm"
+              variant={status === a.status ? "primary" : "outline"}
+              className="w-full"
+              disabled={busy || measurementsMissing || (a.status === "deferred" && line.dayField && !dayId && status === "deferred")}
+              onClick={() => {
+                setStatus(a.status);
+                if (a.status !== "deferred" || !line.dayField) save(a.status);
+              }}
+              data-testid={`station-${lineKey}-${a.status}`}
+            >
+              {a.label}
+            </Button>
           ))}
-        </select>
+        </div>
       )}
 
       {needsDay && (
         <DayPicker line={line} days={days} value={dayId} onChange={setDayId} />
       )}
 
+      {line.actions.length === 1 && (
+        <Button
+          size="sm"
+          className="w-full mt-2"
+          onClick={() => save(line.actions[0].status)}
+          disabled={!status || busy || measurementsMissing || (needsDay && !dayId)}
+          data-testid={`station-${lineKey}-save`}
+        >
+          {line.actions[0].label}
+        </Button>
+      )}
+
+      {line.actions.length > 1 && status === "deferred" && line.dayField && (
+        <Button
+          size="sm"
+          className="w-full mt-2"
+          onClick={() => save("deferred")}
+          disabled={busy || !dayId}
+          data-testid={`station-${lineKey}-save`}
+        >
+          {line.actions.find((a) => a.status === "deferred")?.label || "Save"}
+        </Button>
+      )}
+
       {measurementsMissing && (
         <p className="text-xs text-amber-800 mt-2" data-testid={`station-${lineKey}-needs-power`}>
           Record the prescribed power for both eyes before recording this line.
         </p>
-      )}
-
-      <Button
-        size="sm"
-        className="w-full mt-3"
-        onClick={save}
-        disabled={!status || busy || measurementsMissing || (needsDay && !dayId)}
-        data-testid={`station-${lineKey}-save`}
-      >
-        Save
-      </Button>
-
-      {existing && (
-        <Badge tone={existing.status === "deferred" ? "amber" : "emerald"} className="mt-3">
-          {existing.status.replace(/_/g, " ")}
-        </Badge>
-      )}
-      {existing && slip && (
-        <Button
-          size="sm"
-          variant="outline"
-          className="w-full mt-2"
-          onClick={() => navigate(`/print/slip/${slip.id}`)}
-          data-testid={`station-${lineKey}-print-token`}
-        >
-          <Printer className="w-4 h-4" /> Reprint Token
-        </Button>
       )}
     </div>
   );

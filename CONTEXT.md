@@ -72,16 +72,24 @@ _Avoid_: USB scanner as a synonym for desk camera
 An admin-created day, unique per camp and date, on which deferred OT patients are assigned. It has a venue and a finite seat limit.
 _Avoid_: OT slot, surgery day, OT appointment
 
+**Doctor's Rx**:
+The desk where a patient's paper prescription is transcribed. The only place a transcription can be edited, and the only clinical posting that is not a Fulfilment line. Every line desk reads what it wrote.
+_Avoid_: transcription desk, doctor's desk, clinical desk (that is the whole area)
+
+**Operator line**:
+Where a clinical operator is posted: Doctor's Rx, or one of the four Fulfilment lines. An admin sets it on the account and the operator may override it for their own session. It is a posting, not a permission — nothing is refused because of it.
+_Avoid_: role, station, desk assignment
+
 **Fulfilment line**:
-One of the four things a patient can be sent to after Seen: medicine, Fixed-power specs, Spectacles to be made, OT. Each is a physical desk at the camp and one item type on the record. A patient may go to more than one.
-_Avoid_: station, queue, counter, three lines
+One of the four things a patient can be sent to after Seen: medicine, Fixed-power specs, Spectacles to be made, OT. Each is a physical desk at the camp, its own item type, and its own record. A patient may go to more than one, except that the two specs lines are mutually exclusive. A line is recorded or it is absent, and absent means not needed.
+_Avoid_: station, queue, counter, three lines, not required (never a recorded outcome)
 
 **Fixed-power specs**:
-The clinical fulfilment outcome for ready-made spectacles handed over at camp. The operator records the power the doctor prescribed before issuing. No Token, no SMS, no collection day. The common case, about 70-80% of patients.
+The clinical fulfilment outcome for ready-made spectacles handed over at camp. The power comes from Doctor's Rx; the desk reads it and cannot change it. No Token, no SMS, no collection day. The common case, about 70-80% of patients.
 _Avoid_: ready specs, stock specs, issued specs
 
 **Spectacles to be made**:
-The clinical fulfilment outcome for spectacles that cannot be issued at camp and must be collected later. Deferral assigns the patient to a Specs collection day.
+The clinical fulfilment outcome for spectacles that cannot be issued at camp and must be collected later. Deferral assigns the patient to a Specs collection day. A patient already issued Fixed-power specs cannot also be deferred here, and the reverse.
 _Avoid_: to-be specs, TBD specs, specs order, glasses order
 
 **Specs collection day**:
@@ -92,9 +100,21 @@ _Avoid_: specs slot, collection appointment, specs schedule
 The paper printed when OT or Spectacles to be made is deferred. Hindi and English labels; name and venue as stored. The patient brings it to the OT Schedule Day or Specs collection day. A new deferral of the same type cancels the previous Token.
 _Avoid_: slip, deferred slip, thermal slip, queue ticket, final token
 
+**Reference prescription**:
+The trust's own printed eye-camp form, photographed in the repository root. It is the authority for every string and every band of the printed prescription, including its two original misspellings.
+_Avoid_: template, Rx template, sample prescription
+
+**Sponsor logo**:
+An image of the camp's sponsor, printed in the prescription footer under "Sponsorer :". The only stored template data and the only part of the printed form an admin can change.
+_Avoid_: logo (the trust's own emblems are fixed masthead artwork, not sponsor logos), header image
+
 **Print window**:
-Admin-declared open/closed state on a camp day. Open: printing is enabled. Closed: printing is disabled. Not derived from the calendar.
+Admin-declared open/closed state on a camp day. Open: printing is enabled. Closed: printing is disabled. Not derived from the calendar. Today's camp day's Print window also chooses the Desk mode.
 _Avoid_: IST print gate, today-only print
+
+**Desk mode**:
+Which of two layouts the registration desk shows, chosen by today's camp day and its Print window. Open is camp-day mode: Scan at the door first, Pre-registration hidden. Closed, or no camp day today, is pre-registration mode: Pre-registration first, Scan at the door last.
+_Avoid_: camp mode, desk state, kiosk mode
 
 **Manual entry**:
 A desk registration typed after two Failures, or after a Scan stall. Marked on the registration. Not an admin approval and not an audited reason. Self-register has no typed path.
@@ -107,6 +127,10 @@ _Avoid_: scan timeout, camera failure, give up
 **Arrival**:
 The patient is physically at the camp on a camp day. Stamped by a desk Lock that matches their registration in this camp, or by the registration that creates a walk-in. Registration is a booking; Arrival is presence. Stamped once: a second Lock does not re-stamp it or move the patient again. A registration reaches Seen only through Arrival. Print Prescription is gated on Arrival, not on Registration. The desk offers no way to check a patient in from a name or number lookup.
 _Avoid_: check-in, presence, attendance, walk-in (a walk-in registers and arrives in one action)
+
+**Door walk-in**:
+A registration created at the door from the card a Scan at the door has already decoded, needing only the household phone typed. Registers and stamps Arrival in one action, and is a scanned registration, not a Manual entry.
+_Avoid_: rescan, second scan, walk-in registration (also used for the typed path)
 
 **Aadhaar overwrite**:
 A Lock that matches exactly one Manual entry updates that registration in place. Name, age, gender, DOB, last-4, and address come from the card. Household phone, camp day, and reg_no stay. The Manual entry mark clears. Not a second registration. On a camp day the overwrite is not silent: it goes through Mismatch review first.
@@ -129,7 +153,7 @@ Every camp day has a seat limit greater than zero; there is no unlimited day. Th
 _Avoid_: seats_taken (that counter is OT and Spectacles to be made only), unlimited day
 
 **Camp records export**:
-The single admin-only CSV for a camp, one row per patient including no-shows. Carries identity (name, age, gender, household phone, address, Aadhaar last-4, reg_no), the Manual entry mark, the registration / arrival / seen timestamps, diagnosis, BP and blood sugar, each eye's power, the status of all four Fulfilment lines, and the assigned clinical day and venue for each deferral. It is a wide file of patient data and is not downloadable by a volunteer.
+The single admin-only CSV for a camp, one row per patient including no-shows. Carries identity (name, age, gender, household phone, address, Aadhaar last-4, reg_no), the Manual entry mark, the registration / arrival / seen timestamps, diagnosis, BP and blood sugar, each eye's power, the status of each of the four Fulfilment lines with blank meaning the patient was never recorded at that desk, and the assigned clinical day and venue for each deferral. It is a wide file of patient data and is not downloadable by a volunteer.
 _Avoid_: camp records, clinical audit, the reports (there is exactly one export)
 
 Every SMS below is Devanagari, per patient, and carries that patient's reg_no. A household number covering three patients receives three messages. Each is its own DLT template.

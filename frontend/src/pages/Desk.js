@@ -12,6 +12,16 @@ import {
   UserPlus, Search, Printer, CheckCircle2, Undo2, ScanLine,
 } from "lucide-react";
 
+const EMPTY_REG_FORM = Object.freeze({
+  full_name: "",
+  age: "",
+  phone: "",
+  gender: "",
+  address: "",
+  aadhaar_last4: "",
+  dob: "",
+});
+
 export default function Desk() {
   const navigate = useNavigate();
   const [kpi, setKpi] = useState(null);
@@ -19,7 +29,6 @@ export default function Desk() {
   const [days, setDays] = useState([]);
   const [camp, setCamp] = useState(null);
   const [showReg, setShowReg] = useState(false);
-  const [walkIn, setWalkIn] = useState(false);
   const [scanResult, setScanResult] = useState(null);
   const [scanPayload, setScanPayload] = useState("");
   const [busy, setBusy] = useState(false);
@@ -29,6 +38,10 @@ export default function Desk() {
   const [searchResults, setSearchResults] = useState(null);
   const [banner, setBanner] = useState("");
   const [error, setError] = useState("");
+  const [doorFailures, setDoorFailures] = useState(0);
+  const [doorPhone, setDoorPhone] = useState("");
+  const [doorForm, setDoorForm] = useState(EMPTY_REG_FORM);
+  const [doorReqId, setDoorReqId] = useState(v4());
 
   const load = useCallback(async () => {
     setLoadErr("");
@@ -46,6 +59,18 @@ export default function Desk() {
 
   const onScanned = useCallback(async (_card, payload) => {
     setBanner(""); setError(""); setSearchResults(null); setFound(null);
+    setDoorFailures(0);
+    if (_card) {
+      setDoorForm({
+        full_name: _card.full_name || "",
+        age: _card.age ?? "",
+        phone: doorPhone,
+        gender: _card.gender || "",
+        address: _card.address || "",
+        aadhaar_last4: _card.aadhaar_last4 || "",
+        dob: _card.dob || "",
+      });
+    }
     setScanPayload(payload);
     try {
       const { data } = await api.post("/desk/scan", { payload });
@@ -58,7 +83,7 @@ export default function Desk() {
       setScanResult(null);
       setError(formatApiError(err));
     }
-  }, [load]);
+  }, [load, doorPhone]);
 
   const confirmMismatch = useCallback(async () => {
     if (!scanResult?.registration) return;
@@ -122,8 +147,110 @@ export default function Desk() {
   const undoSeen = useCallback((reg) => act("/desk/undo-seen", reg), [act]);
   const print = useCallback((reg) => navigate(`/print/prescription/${reg.id}`), [navigate]);
 
-  const openWalkIn = useCallback(() => { setWalkIn(true); setShowReg(true); }, []);
-  const openPreReg = useCallback(() => { setWalkIn(false); setShowReg(true); }, []);
+  const openPreReg = useCallback(() => { setShowReg(true); }, []);
+
+  const todayDay = days.find((d) => d.is_today);
+  const campDayMode = Boolean(todayDay?.printing_open);
+
+  const onDoorFailure = useCallback((outcome) => {
+    if (outcome === "garbage" || outcome === "not-aadhaar") {
+      setDoorFailures((n) => n + 1);
+    }
+  }, []);
+  const onDoorStall = useCallback(() => setDoorFailures(2), []);
+
+  const submitRegister = useCallback(async ({ form, scanned, dayId, reqId, walkIn: asWalkIn }) => {
+    const { data } = await api.post("/register", {
+      full_name: form.full_name,
+      age: form.age ? Number(form.age) : null,
+      phone: form.phone || null,
+      gender: form.gender || null,
+      address: form.address || null,
+      aadhaar_last4: form.aadhaar_last4 || null,
+      dob: form.dob || null,
+      aadhaar_scanned: scanned,
+      camp_day_id: dayId,
+      registration_request_id: reqId,
+      manual_entry: !scanned,
+    });
+    let reg = data.registration;
+    if (asWalkIn) {
+      const arrived = await api.post(`/desk/arrive/${reg.id}`);
+      reg = arrived.data.registration;
+    }
+    return reg;
+  }, []);
+
+  const submitDoorWalkIn = useCallback(async () => {
+    if (!scanResult?.card) return;
+    if (!todayDay) {
+      setError("No camp day today. Use Pre-registration.");
+      return;
+    }
+    setBusy(true); setError("");
+    try {
+      const card = scanResult.card;
+      const reg = await submitRegister({
+        form: {
+          full_name: card.full_name,
+          age: card.age ?? "",
+          phone: doorPhone,
+          gender: card.gender,
+          address: card.address,
+          aadhaar_last4: card.aadhaar_last4,
+          dob: card.dob,
+        },
+        scanned: true,
+        dayId: todayDay.id,
+        reqId: v4(),
+        walkIn: true,
+      });
+      setScanResult(null);
+      setFound(reg);
+      setBanner(`Registered and checked in #${reg.reg_no} — ${reg.full_name}`);
+      setDoorPhone("");
+      await load();
+    } catch (err) {
+      const payload = errorPayload(err);
+      if (payload && payload.code === "DUPLICATE_IN_CAMP") {
+        setError(`Already registered as #${payload.registration.reg_no}. Check them in instead.`);
+      } else {
+        setError(formatApiError(err));
+      }
+    } finally { setBusy(false); }
+  }, [scanResult, todayDay, doorPhone, submitRegister, load]);
+
+  const submitDoorManual = useCallback(async () => {
+    const dayId = todayDay?.id || days[0]?.id;
+    if (!dayId) return;
+    setBusy(true); setError("");
+    try {
+      const reg = await submitRegister({
+        form: doorForm,
+        scanned: false,
+        dayId,
+        reqId: doorReqId,
+        walkIn: Boolean(todayDay?.printing_open),
+      });
+      setFound(reg);
+      setBanner(
+        todayDay?.printing_open
+          ? `Registered and checked in #${reg.reg_no} — ${reg.full_name}`
+          : `Registered #${reg.reg_no} — ${reg.full_name}. SMS sent.`
+      );
+      setDoorFailures(0);
+      setDoorForm(EMPTY_REG_FORM);
+      setDoorReqId(v4());
+      await load();
+    } catch (err) {
+      const payload = errorPayload(err);
+      if (payload && payload.code === "DUPLICATE_IN_CAMP") {
+        setError(`Already registered as #${payload.registration.reg_no}. Check them in instead.`);
+      } else {
+        setError(formatApiError(err));
+      }
+    } finally { setBusy(false); }
+  }, [todayDay, days, doorForm, doorReqId, submitRegister, load]);
 
   if (loadErr) return <Layout title="Desk"><ErrorCard message={loadErr} onRetry={load} /></Layout>;
 
@@ -133,33 +260,46 @@ export default function Desk() {
     <Layout title="Registration Desk">
       {noCamp && <Alert tone="amber" className="mb-4">No active camp. Ask an admin to activate one.</Alert>}
 
-      <div className="grid grid-cols-3 gap-3 mb-5">
+      <div className={`grid gap-3 mb-5 ${campDayMode ? "grid-cols-3" : "grid-cols-1"}`}>
         <Stat label="Registered" value={kpi?.registered ?? "—"} testid="kpi-registered-count" />
-        <Stat label="Seen" value={kpi?.seen ?? "—"} tone="emerald" testid="kpi-seen-count" />
-        <Stat label="Pending" value={kpi?.pending ?? "—"} tone="amber" testid="kpi-pending-count" />
+        {campDayMode && <Stat label="Seen" value={kpi?.seen ?? "—"} tone="emerald" testid="kpi-seen-count" />}
+        {campDayMode && <Stat label="Pending" value={kpi?.pending ?? "—"} tone="amber" testid="kpi-pending-count" />}
       </div>
 
-      <Card className="mb-5">
-        <div className="flex items-center gap-2 mb-3">
-          <ScanLine className="w-5 h-5 text-emerald-600" />
-          <h3 className="font-display font-bold text-slate-900">Scan at the door</h3>
-        </div>
-        <AadhaarScanner onScanned={onScanned} disabled={noCamp} />
-        {error && <Alert className="mt-3">{error}</Alert>}
-        {banner && <Alert tone="emerald" className="mt-3">{banner}</Alert>}
-        <div className="mt-3">
-          <ScanOutcome
-            result={scanResult}
-            busy={busy}
-            onPrint={print}
-            onMarkSeen={markSeen}
-            onConfirm={confirmMismatch}
-            onRegisterNew={openWalkIn}
-          />
-        </div>
-      </Card>
+      {!campDayMode && (
+        <Card className="mb-5" data-desk-card="prereg" data-testid="desk-card-prereg">
+          <h3 className="font-display font-bold text-slate-900 mb-1">Pre-registration</h3>
+          <p className="text-sm text-slate-500 mb-3">
+            Books a seat and sends the patient their registration number. Nothing prints.
+          </p>
+          <Button size="lg" onClick={openPreReg} disabled={noCamp} data-testid="new-registration-button">
+            <UserPlus className="w-5 h-5" /> New Registration
+          </Button>
+        </Card>
+      )}
 
-      <Card className="mb-5">
+      {campDayMode && <DoorScanCard
+        noCamp={noCamp}
+        onScanned={onScanned}
+        onDoorFailure={onDoorFailure}
+        onDoorStall={onDoorStall}
+        error={error}
+        banner={banner}
+        scanResult={scanResult}
+        busy={busy}
+        print={print}
+        markSeen={markSeen}
+        confirmMismatch={confirmMismatch}
+        doorPhone={doorPhone}
+        setDoorPhone={setDoorPhone}
+        submitDoorWalkIn={submitDoorWalkIn}
+        doorFailures={doorFailures}
+        doorForm={doorForm}
+        setDoorForm={setDoorForm}
+        submitDoorManual={submitDoorManual}
+      />}
+
+      <Card className="mb-5" data-desk-card="find" data-testid="desk-card-find">
         <h3 className="font-display font-bold text-slate-900 mb-3">Find one patient</h3>
         <form onSubmit={doLookup} className="flex gap-2">
           <Input value={lookupVal} onChange={(e) => setLookupVal(e.target.value)}
@@ -193,19 +333,36 @@ export default function Desk() {
         )}
       </Card>
 
-      <Card>
-        <h3 className="font-display font-bold text-slate-900 mb-1">Pre-registration</h3>
-        <p className="text-sm text-slate-500 mb-3">
-          Books a seat and sends the patient their registration number. Nothing prints.
-        </p>
-        <Button size="lg" onClick={openPreReg} disabled={noCamp} data-testid="new-registration-button">
-          <UserPlus className="w-5 h-5" /> New Registration
-        </Button>
-      </Card>
+      {!campDayMode && (
+        <details className="mb-5" data-desk-card="scan" data-testid="door-scan-details">
+          <summary className="cursor-pointer font-display font-bold text-slate-900 py-2 min-h-[44px]">Scan at the door</summary>
+          <DoorScanCard
+            noCamp={noCamp}
+            onScanned={onScanned}
+            onDoorFailure={onDoorFailure}
+            onDoorStall={onDoorStall}
+            error={error}
+            banner={banner}
+            scanResult={scanResult}
+            busy={busy}
+            print={print}
+            markSeen={markSeen}
+            confirmMismatch={confirmMismatch}
+            doorPhone={doorPhone}
+            setDoorPhone={setDoorPhone}
+            submitDoorWalkIn={submitDoorWalkIn}
+            doorFailures={doorFailures}
+            doorForm={doorForm}
+            setDoorForm={setDoorForm}
+            submitDoorManual={submitDoorManual}
+            collapsed
+          />
+        </details>
+      )}
 
       <RegisterModal
         open={showReg}
-        walkIn={walkIn}
+        walkIn={false}
         onClose={() => setShowReg(false)}
         days={days}
         onDone={load}
@@ -213,6 +370,62 @@ export default function Desk() {
         onRegistered={setFound}
       />
     </Layout>
+  );
+}
+
+function DoorScanCard({
+  noCamp, onScanned, onDoorFailure, onDoorStall, error, banner, scanResult, busy,
+  print, markSeen, confirmMismatch, doorPhone, setDoorPhone, submitDoorWalkIn,
+  doorFailures, doorForm, setDoorForm, submitDoorManual, collapsed,
+}) {
+  const showManual = doorFailures >= 2;
+  return (
+    <Card className={collapsed ? "mt-2" : "mb-5"} data-desk-card={collapsed ? undefined : "scan"} data-testid="desk-card-scan">
+      {!collapsed && (
+        <div className="flex items-center gap-2 mb-3">
+          <ScanLine className="w-5 h-5 text-emerald-600" />
+          <h3 className="font-display font-bold text-slate-900">Scan at the door</h3>
+        </div>
+      )}
+      <AadhaarScanner onScanned={onScanned} onFailure={onDoorFailure} onScanStall={onDoorStall} disabled={noCamp} />
+      {error && <Alert className="mt-3">{error}</Alert>}
+      {banner && <Alert tone="emerald" className="mt-3">{banner}</Alert>}
+      <div className="mt-3">
+        <ScanOutcome
+          result={scanResult}
+          busy={busy}
+          onPrint={print}
+          onMarkSeen={markSeen}
+          onConfirm={confirmMismatch}
+          phone={doorPhone}
+          setPhone={setDoorPhone}
+          onWalkIn={submitDoorWalkIn}
+        />
+      </div>
+      {showManual && (
+        <div className="mt-4 space-y-3" data-testid="door-manual-form">
+          <p className="text-sm font-semibold text-amber-800" data-testid="manual-entry-note">Manual entry</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <Field label="Full name" required>
+              <Input value={doorForm.full_name} onChange={(e) => setDoorForm({ ...doorForm, full_name: e.target.value })} data-testid="reg-fullname-input" />
+            </Field>
+            <Field label="Age" required>
+              <Input type="number" value={doorForm.age} onChange={(e) => setDoorForm({ ...doorForm, age: e.target.value })} data-testid="reg-age-input" />
+            </Field>
+            <Field label="Phone (household)" required>
+              <Input value={doorForm.phone} onChange={(e) => setDoorForm({ ...doorForm, phone: e.target.value })} inputMode="numeric" data-testid="reg-phone-input" />
+            </Field>
+          </div>
+          <Button
+            onClick={submitDoorManual}
+            disabled={busy || !doorForm.full_name || !doorForm.age || !/^\d{10}$/.test(doorForm.phone || "")}
+            data-testid="door-manual-submit"
+          >
+            Register
+          </Button>
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -258,16 +471,6 @@ export function PatientRow({ p, onPrint, onMarkSeen, onUndo }) {
     </div>
   );
 }
-
-const EMPTY_REG_FORM = Object.freeze({
-  full_name: "",
-  age: "",
-  phone: "",
-  gender: "",
-  address: "",
-  aadhaar_last4: "",
-  dob: "",
-});
 
 export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, onRegistered }) {
   const [form, setForm] = useState(EMPTY_REG_FORM);

@@ -128,12 +128,9 @@ describe("CHALLENGE 1: FulfilmentStation & FulfilmentSection Patient Switch Stat
       );
     });
 
-    const statusSelect = container.querySelector('[data-testid="station-ot-status"]');
-    const otDaySelect = container.querySelector('[data-testid="ot_schedule_day_id-select"]');
-    expect(statusSelect.value).toBe("deferred");
-    expect(otDaySelect.value).toBe("day-1");
+    expect(container.querySelector('[data-testid="station-ot-recorded"]').textContent).toContain("deferred");
+    expect(container.querySelector('[data-testid="station-ot-print-token"]')).toBeNull();
 
-    // Switch to patient 2 with different fulfilment
     const patient2Data = {
       transcription: { id: "tx-2" },
       registration: { id: "reg-2" },
@@ -156,7 +153,7 @@ describe("CHALLENGE 1: FulfilmentStation & FulfilmentSection Patient Switch Stat
       );
     });
 
-    expect(statusSelect.value).toBe("fulfilled");
+    expect(container.querySelector('[data-testid="station-ot-recorded"]').textContent).toContain("fulfilled");
     expect(container.querySelector('[data-testid="ot_schedule_day_id-select"]')).toBeNull();
   });
 
@@ -185,22 +182,16 @@ describe("CHALLENGE 1: FulfilmentStation & FulfilmentSection Patient Switch Stat
       );
     });
 
-    const statusSelect = container.querySelector('[data-testid="station-ot-status"]');
-    expect(statusSelect.value).toBe("");
-
-    // User selects 'deferred' for Patient 1 but does NOT save
-    act(() => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set;
-      setter.call(statusSelect, "deferred");
-      statusSelect.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(container.querySelector('[data-testid="station-ot-fulfilled"]')).not.toBeNull();
+    await act(async () => {
+      container.querySelector('[data-testid="station-ot-deferred"]').click();
     });
-    expect(statusSelect.value).toBe("deferred");
+    expect(container.querySelector('[data-testid="ot_schedule_day_id-select"]')).not.toBeNull();
 
-    // Parent switches to Patient 2 who has existing 'not_required'
     const patient2Data = {
       transcription: { id: "tx-2" },
       registration: { id: "reg-2" },
-      fulfilments: [{ item_type: "ot", status: "not_required" }],
+      fulfilments: [{ item_type: "ot", status: "fulfilled" }],
     };
 
     await act(async () => {
@@ -217,8 +208,7 @@ describe("CHALLENGE 1: FulfilmentStation & FulfilmentSection Patient Switch Stat
       );
     });
 
-    // Must synchronize to Patient 2's existing record 'not_required'
-    expect(statusSelect.value).toBe("not_required");
+    expect(container.querySelector('[data-testid="station-ot-recorded"]').textContent).toContain("fulfilled");
   });
 
   test("1.3: FulfilmentSection properly keys FulfilmentStation so patient switches cleanly reset station state even if both have empty fulfilments", async () => {
@@ -231,6 +221,7 @@ describe("CHALLENGE 1: FulfilmentStation & FulfilmentSection Patient Switch Stat
     await act(async () => {
       root.render(
         <FulfilmentSection
+          line="medicine"
           data={patient1Data}
           otDays={[]}
           specsDays={[]}
@@ -242,27 +233,18 @@ describe("CHALLENGE 1: FulfilmentStation & FulfilmentSection Patient Switch Stat
       );
     });
 
-    const statusSelect = container.querySelector('[data-testid="station-medicine-status"]');
-    expect(statusSelect.value).toBe("");
+    expect(container.querySelector('[data-testid="station-medicine-fulfilled"]')).not.toBeNull();
 
-    // Dirty uncommitted selection for Patient 1
-    act(() => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set;
-      setter.call(statusSelect, "fulfilled");
-      statusSelect.dispatchEvent(new Event("change", { bubbles: true }));
-    });
-    expect(statusSelect.value).toBe("fulfilled");
-
-    // Switch to Patient 2 who also has empty fulfilments
     const patient2Data = {
       transcription: { id: "tx-2" },
       registration: { id: "reg-2" },
-      fulfilments: [],
+      fulfilments: [{ item_type: "medicine", status: "not_available" }],
     };
 
     await act(async () => {
       root.render(
         <FulfilmentSection
+          line="medicine"
           data={patient2Data}
           otDays={[]}
           specsDays={[]}
@@ -274,9 +256,7 @@ describe("CHALLENGE 1: FulfilmentStation & FulfilmentSection Patient Switch Stat
       );
     });
 
-    // Keying by patient ID prevents dirty state bleed across patients
-    const patient2Select = container.querySelector('[data-testid="station-medicine-status"]');
-    expect(patient2Select.value).toBe("");
+    expect(container.querySelector('[data-testid="station-medicine-recorded"]').textContent).toContain("not available");
   });
 
   test("1.4: Save sends the active patient's transcription_id and correct item parameters", async () => {
@@ -325,7 +305,7 @@ describe("CHALLENGE 1: FulfilmentStation & FulfilmentSection Patient Switch Stat
 
     expect(api.post).toHaveBeenCalledWith("/clinical/fulfilment", {
       transcription_id: "tx-specs-99",
-      item_type: "specs",
+      item_type: "specs_made",
       status: "deferred",
       ot_schedule_day_id: null,
       specs_collection_day_id: "sp-day-1",
@@ -685,12 +665,9 @@ describe("CHALLENGE 4: Prescription lockdown and logo validation", () => {
     );
     expect(blockIds).toEqual([
       "rx-block-identity",
-      "rx-block-diagnosis",
-      "rx-block-vision",
-      "rx-block-prescription",
-      "rx-block-vitals",
-      "rx-block-advice",
     ]);
+    expect(container.querySelector('[data-testid="rx-diagnosis-row"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="rx-operation-box"]')).not.toBeNull();
   });
 
   test("4.3: the sheet carries the trust letterhead and footer regardless of stored data", () => {
@@ -707,10 +684,11 @@ describe("CHALLENGE 4: Prescription lockdown and logo validation", () => {
 
     const sheet = container.querySelector('[data-testid="a4-prescription-sheet"]');
     expect(sheet).not.toBeNull();
-    expect(sheet.textContent).toContain("Sikar Nagarik Parishad");
+    expect(sheet.textContent).toContain("SIKAR NAGARIK PARISHAD (KOLKATA)");
     expect(sheet.textContent).toContain("sikarkolkata@gmail.com");
-    expect(sheet.textContent).toContain("Sponsorer: Rupa Foundation, Kolkata");
-    expect(container.querySelectorAll("img").length).toBe(1);
+    expect(sheet.textContent).toContain("Sponsorer :");
+    expect(sheet.textContent).toContain("ARRANGMENT");
+    expect(container.querySelectorAll("img").length).toBeGreaterThan(1);
   });
 
   test("4.4: validateLogoFile enforces size <= 2MB and allowed image MIME types", () => {

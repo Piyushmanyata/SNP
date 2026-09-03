@@ -101,8 +101,8 @@ describe("TemplateEditor", () => {
     await render();
     const preview = container.querySelector('[data-testid="tpl-preview"]');
     expect(preview).not.toBeNull();
-    expect(preview.textContent).toContain("Sikar Nagarik Parishad");
-    expect(preview.textContent).toContain("Rupa Foundation");
+    expect(preview.textContent).toContain("SIKAR NAGARIK PARISHAD (KOLKATA)");
+    expect(preview.textContent).toContain("Sponsorer :");
   });
 
   test("surfaces a save failure", async () => {

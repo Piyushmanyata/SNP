@@ -192,9 +192,10 @@ async def create_transcription(body: TranscriptionBody, actor: dict = Depends(re
 
 def _validate_fulfilment_matrix(item_type: str, status: str) -> None:
     valid = {
-        "medicine": {"fulfilled", "not_available", "not_required"},
-        "specs": {"fulfilled", "deferred", "not_required"},
-        "ot": {"fulfilled", "deferred", "not_required"},
+        "medicine": {"fulfilled", "not_available"},
+        "specs_fixed": {"fulfilled"},
+        "specs_made": {"deferred"},
+        "ot": {"fulfilled", "deferred"},
     }
     if item_type not in valid or status not in valid[item_type]:
         raise HTTPException(status_code=400, detail="Invalid fulfilment item/status")
@@ -209,8 +210,13 @@ async def _consume_seat(collection: AsyncIOMotorCollection, day_id: str) -> Opti
     )
 
 
+SPECS_EXCLUSION = {
+    "specs_fixed": ("specs_made", "Spectacles to be made"),
+    "specs_made": ("specs_fixed", "Fixed-power specs"),
+}
+
 DEFERRAL_CONFIG = {
-    "specs": {
+    "specs_made": {
         "id_field": "specs_collection_day_id",
         "collection_attr": "specs_collection_days",
         "missing_err": "Spectacles to be made deferral needs a Specs collection day",
@@ -248,7 +254,7 @@ async def _refuse_full(collection: AsyncIOMotorCollection, day: dict, cfg: dict)
 
 
 def _assert_specs_measurements(item_type: str, status: str, transcription: dict) -> None:
-    if item_type != "specs" or status not in ("fulfilled", "deferred"):
+    if item_type not in ("specs_fixed", "specs_made"):
         return
     m = transcription.get("specs_measurements") or {}
     if not (str(m.get("r_sph") or "").strip() and str(m.get("l_sph") or "").strip()):
@@ -315,7 +321,7 @@ async def _cleanup_prior_fulfilment(
 
 
 def _deferred_day_id(body: FulfilmentBody, item_type: str) -> Optional[ObjectId]:
-    """A day is only booked for the line that owns it: a specs line never holds an OT seat."""
+    """A day is only booked for the line that owns it: a specs_made line never holds an OT seat."""
     if body.status != "deferred" or body.item_type != item_type:
         return None
     raw = getattr(body, DEFERRAL_CONFIG[item_type]["id_field"])
@@ -330,7 +336,7 @@ def _build_fulfilment_doc(body: FulfilmentBody, transcription_id: ObjectId | str
         "collection_date": (slip or {}).get("collection_date") or body.collection_date,
         "collection_venue": (slip or {}).get("collection_venue") or body.collection_venue,
         "ot_schedule_day_id": _deferred_day_id(body, "ot"),
-        "specs_collection_day_id": _deferred_day_id(body, "specs"),
+        "specs_collection_day_id": _deferred_day_id(body, "specs_made"),
         "created_by": actor_id,
         "created_at": now_utc(),
     }
@@ -356,6 +362,15 @@ async def record_fulfilment(body: FulfilmentBody, actor: dict = Depends(require_
 
     _validate_fulfilment_matrix(body.item_type, body.status)
     _assert_specs_measurements(body.item_type, body.status, t)
+    other = SPECS_EXCLUSION.get(body.item_type)
+    if other:
+        other_type, other_label = other
+        clash = await db.fulfilments.find_one({"transcription_id": t["_id"], "item_type": other_type})
+        if clash:
+            raise HTTPException(status_code=409, detail={
+                "code": "SPECS_LINE_EXCLUSIVE",
+                "message": f"This patient already has a {other_label} record.",
+            })
     prior = await db.fulfilments.find_one({"transcription_id": t["_id"], "item_type": body.item_type})
     if body.status != "deferred":
         await db.deferred_slips.update_many(

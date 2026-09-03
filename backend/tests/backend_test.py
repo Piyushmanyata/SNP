@@ -455,24 +455,24 @@ class TestClinical:
 
     def test_specs_deferral_requires_day_id(self, admin):
         r = admin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": STATE["trans_id"], "item_type": "specs", "status": "deferred",
+            "transcription_id": STATE["trans_id"], "item_type": "specs_made", "status": "deferred",
         }, timeout=30)
         assert r.status_code == 400, r.text
 
         r = admin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": STATE["trans_id"], "item_type": "specs", "status": "deferred",
+            "transcription_id": STATE["trans_id"], "item_type": "specs_made", "status": "deferred",
             "collection_date": "2026-12-05", "collection_venue": "TEST Optical",
         }, timeout=30)
         assert r.status_code == 400, r.text
 
     def test_specs_deferral_consumes_seat_and_prints_token(self, admin):
         r = admin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": STATE["trans_id"], "item_type": "specs", "status": "deferred",
+            "transcription_id": STATE["trans_id"], "item_type": "specs_made", "status": "deferred",
             "specs_collection_day_id": STATE["specs_day_id"],
         }, timeout=30)
         assert r.status_code == 200, r.text
         slip = r.json()["slip"]
-        assert slip["item_type"] == "specs"
+        assert slip["item_type"] == "specs_made"
         assert slip["collection_date"] == "2026-12-05"
         assert slip["collection_venue"] == STATE["specs_day_venue"]
         assert slip["active"] == True
@@ -509,7 +509,7 @@ class TestClinical:
 
         looked = admin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
         active = [s for s in looked.json()["slips"] if s.get("active")]
-        assert {s["item_type"] for s in active} == {"ot", "specs"}
+        assert {s["item_type"] for s in active} == {"ot", "specs_made"}
 
     def test_seat_limit_below_assigned(self, admin):
         r = admin.post(f"{API}/clinical/ot-days", json={
@@ -539,7 +539,7 @@ class TestClinical:
 
     def test_specs_day_full_rejects_further_deferral(self, admin):
         r = admin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": STATE["trans2_id"], "item_type": "specs", "status": "deferred",
+            "transcription_id": STATE["trans2_id"], "item_type": "specs_made", "status": "deferred",
             "specs_collection_day_id": STATE["specs_day_id"],
         }, timeout=30)
         assert r.status_code == 409, f"expected full-day refusal, got {r.status_code}: {r.text[:200]}"
@@ -818,7 +818,7 @@ class TestFixRegressions:
 
         t2 = STATE["trans2_id"]
         r = admin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": t2, "item_type": "specs", "status": "deferred",
+            "transcription_id": t2, "item_type": "specs_made", "status": "deferred",
             "specs_collection_day_id": day_a}, timeout=30)
         assert r.status_code == 200, r.text
 
@@ -828,21 +828,21 @@ class TestFixRegressions:
 
         assert seats(day_a) == 1
         r = admin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": t2, "item_type": "specs", "status": "deferred",
+            "transcription_id": t2, "item_type": "specs_made", "status": "deferred",
             "specs_collection_day_id": day_b}, timeout=30)
         assert r.status_code == 200, r.text
         assert seats(day_b) == 1, "new day should hold the seat"
         assert seats(day_a) == 0, "previous Specs collection day seat leaked (not released)"
 
         r = admin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": t2, "item_type": "specs", "status": "fulfilled"}, timeout=30)
-        assert r.status_code == 200, r.text
-        assert r.json()["slip"] is None
-        assert seats(day_b) == 0, "fulfilled must release the Specs collection day seat"
+            "transcription_id": t2, "item_type": "specs_fixed", "status": "fulfilled"}, timeout=30)
+        assert r.status_code == 409, r.text
+        assert "Spectacles to be made" in str(r.json())
+        assert seats(day_b) == 1
         looked = admin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p2"]["reg_no"])}, timeout=30)
         assert looked.status_code == 200, looked.text
-        active_specs = [s for s in looked.json()["slips"] if s.get("active") and s["item_type"] == "specs"]
-        assert active_specs == [], "fulfilled must cancel the Specs Token"
+        active_specs = [s for s in looked.json()["slips"] if s.get("active") and s["item_type"] == "specs_made"]
+        assert len(active_specs) == 1
 
     def test_specs_fulfil_then_redefer_consumes_and_full_day_409(self, admin):
         c = admin.post(f"{API}/clinical/specs-days", json={
@@ -853,12 +853,7 @@ class TestFixRegressions:
         t2 = STATE["trans2_id"]
 
         r = admin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": t2, "item_type": "specs", "status": "deferred",
-            "specs_collection_day_id": day_c}, timeout=30)
-        assert r.status_code == 200, r.text
-
-        r = admin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": t2, "item_type": "specs", "status": "fulfilled",
+            "transcription_id": t2, "item_type": "specs_made", "status": "deferred",
             "specs_collection_day_id": day_c}, timeout=30)
         assert r.status_code == 200, r.text
 
@@ -866,15 +861,14 @@ class TestFixRegressions:
             days = admin.get(f"{API}/clinical/specs-days", timeout=30).json()["specs_days"]
             return next(d for d in days if d["id"] == day_c)["seats_taken"]
 
-        assert seats() == 0
+        assert seats() == 1
         r = admin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": t2, "item_type": "specs", "status": "deferred",
+            "transcription_id": t2, "item_type": "specs_fixed", "status": "fulfilled",
             "specs_collection_day_id": day_c}, timeout=30)
-        assert r.status_code == 200, r.text
-        assert r.json()["slip"]["active"] is True
-        assert seats() == 1, "re-defer after fulfil must consume a seat"
+        assert r.status_code == 409, r.text
+        assert seats() == 1
         r = admin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": STATE["trans_id"], "item_type": "specs", "status": "deferred",
+            "transcription_id": STATE["trans_id"], "item_type": "specs_made", "status": "deferred",
             "specs_collection_day_id": day_c}, timeout=30)
         assert r.status_code == 409, f"expected full-day refusal, got {r.status_code}: {r.text[:200]}"
         assert seats() == 1

@@ -5,29 +5,9 @@ import api, { formatApiError } from "../lib/api";
 import logger from "../lib/logger";
 import { Button, Alert, Spinner } from "../components/ui";
 import { Printer, ArrowLeft } from "lucide-react";
-
-export const RX_HEADER_LINES = [
-  "Sikar Nagarik Parishad (Kolkata) / सीकर नागरिक परिषद (कोलकाता)",
-  "Sikar Zilla Welfare Trust / सीकर जिला वेलफेयर ट्रस्ट",
-];
-
-export const RX_HEADER_SUBTITLE =
-  "'Sikar Bhawan' 1A, Ashutosh Dey Lane (Near Girish Park Metro, Opp. Liberty Cinema), " +
-  "KOLKATA-6. PHONE: 033 4006 4713, 2257 3521. E-mail: sikarkolkata@gmail.com. " +
-  "Whatsapp: 86971 90268. FREE EYE SCREENING, FREE DISTRIBUTION OF SPECTACLES & MEDICINES " +
-  "AND FREE ARRANGMENT OF CATARACT (IOL) OPERATION.";
-
-export const RX_FOOTER = "Sponsorer: Rupa Foundation, Kolkata";
-
-export const RX_BLOCKS = [
-  { id: "identity", label: "Patient Identity", type: "identity", height: 0 },
-  { id: "diagnosis", label: "Diagnosis", type: "lines", height: 24 },
-  { id: "vision", label: "Vision (R / L)", type: "lines", height: 24 },
-  { id: "prescription", label: "Prescription (Rx)", type: "lines", height: 48 },
-  { id: "vitals", label: "BP / Blood Sugar", type: "lines", height: 18 },
-  { id: "advice", label: "Advice", type: "lines", height: 24 },
-  { id: "signature", label: "Doctor's Signature", type: "signature", height: 0 },
-];
+import rxEmblem from "../assets/rx-emblem.png";
+import rxInstrument from "../assets/rx-instrument.png";
+import rxEye from "../assets/rx-eye.png";
 
 export default function PrintPrescription() {
   const { id } = useParams();
@@ -75,7 +55,21 @@ export default function PrintPrescription() {
   return <PrescriptionSheet rx={rx} logos={logos} navigate={navigate} />;
 }
 
+function SexBox({ mark, label }) {
+  return (
+    <span className="inline-flex items-center gap-1 ml-2">
+      <span className="inline-block w-3.5 h-3.5 border border-slate-800 text-center text-[9px] leading-3.5">
+        {mark ? "✓" : ""}
+      </span>
+      {label}
+    </span>
+  );
+}
+
 export function PrescriptionSheet({ rx, logos = [], navigate, preview }) {
+  const sex = String(rx.gender || rx.gender_label || "").toUpperCase();
+  const male = sex.startsWith("M");
+  const female = sex.startsWith("F");
   return (
     <div className={preview ? "" : "bg-slate-100 min-h-screen py-6"}>
       {!preview && (
@@ -85,64 +79,164 @@ export function PrescriptionSheet({ rx, logos = [], navigate, preview }) {
         </div>
       )}
 
-      <div className="print-a4 bg-white mx-auto shadow-lg" style={{ width: "210mm", minHeight: preview ? "auto" : "297mm", padding: "16mm" }} data-testid="a4-prescription-sheet">
-        <div className="flex items-start justify-between border-b-2 border-slate-900 pb-4 gap-4">
-          <div className="flex items-center gap-3">
-            {logos.map((lg, i) => (
-              <img key={lg.id || i} src={lg.data_url} alt={lg.name} className="h-12 w-auto object-contain" />
-            ))}
-            <div>
-              <h1 className="font-display text-lg font-extrabold text-slate-900" data-testid="rx-header-title">
-                {RX_HEADER_LINES.map((l) => <span key={l} className="block">{l}</span>)}
-              </h1>
-              <p className="text-[10px] text-slate-600 mt-1" data-testid="rx-header-subtitle">{RX_HEADER_SUBTITLE}</p>
-              <p className="text-xs text-slate-500 mt-1">{rx.camp_name} · {rx.venue}</p>
+      <div
+        className="print-a4 bg-white mx-auto shadow-lg text-slate-900"
+        style={{ width: "210mm", minHeight: preview ? "auto" : "297mm", padding: "10mm 12mm" }}
+        data-testid="a4-prescription-sheet"
+      >
+        <div className="flex items-start justify-between border-b-4 border-slate-900 pb-2">
+          <img src={rxEmblem} alt="" className="h-16 w-auto object-contain" data-testid="rx-emblem" />
+          <div className="flex-1 text-center px-2">
+            <p className="font-display font-extrabold text-base tracking-wide" data-testid="rx-masthead-en-1">
+              SIKAR NAGARIK PARISHAD (KOLKATA)
+            </p>
+            <p className="text-[11px] leading-tight">सीकर नागरिक परिषद (कोलकाता) ॐ সীকর নাগরিক পরিষদ (কোলকাতা)</p>
+            <p className="font-display font-extrabold text-base tracking-wide mt-1" data-testid="rx-masthead-en-2">
+              SIKAR ZILLA WELFARE TRUST
+            </p>
+            <p className="text-[11px] leading-tight">सीकर जिला वेलफेयर ट्रस्ट ॐ সীকর জিলা ওয়েল ফেয়ার ট্রাস্ট</p>
+          </div>
+          <img src={rxInstrument} alt="" className="h-16 w-auto object-contain" data-testid="rx-instrument" />
+        </div>
+
+        <div className="border-b border-slate-900 py-1 text-[10px] leading-tight" data-testid="rx-address-band">
+          <p>✚ &apos;SIKAR BHAWAN&apos; 1A, ASHUTOSH DEY LANE (Near Girish Park Metro, Opp. Liberty Cinema), KOLKATA-6</p>
+          <p>PHONE : 033 4006 4713, 2257 3521, E-mail : sikarkolkata@gmail.com   Whatsapp : 86971 90268</p>
+        </div>
+
+        <div className="flex items-center justify-between py-1" data-testid="rx-services-band">
+          <div className="flex-1 text-center font-bold text-[11px] leading-tight">
+            <p>FREE EYE SCREENING, FREE DISTRIBUTION OF SPECTACLES &amp; MEDICINES</p>
+            <p>AND FREE ARRANGMENT OF CATARACT (IOL) OPERATION.</p>
+          </div>
+          <img src={rxEye} alt="" className="h-8 w-auto object-contain ml-2" data-testid="rx-eye" />
+        </div>
+
+        <div className="grid grid-cols-[1fr_70mm] gap-3 mt-2 text-[12px]" data-testid="rx-block-identity">
+          <div className="space-y-1">
+            <Leader k="Venue" v={rx.venue} />
+            <Leader k="Name" v={rx.full_name} />
+            <Leader k="Address" v={rx.address} />
+            <Leader k="E-mail" v="" />
+          </div>
+          <div>
+            <div className="border border-slate-900 p-2">
+              <p>Reg. No. <span className="font-bold">#{rx.reg_no}</span></p>
+              <p>Date <span className="font-semibold">{rx.date}</span></p>
+              <p>
+                Age <span className="font-semibold">{rx.age ?? "—"}</span>
+                <SexBox mark={male} label="M" />
+                <SexBox mark={female} label="F" />
+              </p>
+              <p>Contact No. <span className="font-semibold">{rx.phone || "—"}</span></p>
+            </div>
+            <div className="flex justify-end mt-1">
+              <QRCodeSVG value={`snp:${rx.patient_qr}`} size={68} />
             </div>
           </div>
-          <div className="text-center shrink-0">
-            <QRCodeSVG value={`snp:${rx.patient_qr}`} size={90} />
-            <p className="font-mono text-xs mt-1">#{rx.reg_no}</p>
+        </div>
+
+        <div className="flex items-center gap-2 mt-2 text-[11px]" data-testid="rx-diagnosis-row">
+          <span className="font-semibold">Diagnosis :</span>
+          <div className="flex-1 border border-slate-900 px-2 py-1 flex flex-wrap gap-3">
+            {["RE - CATARACT", "LE - CATARACT", "REFRACTION", "MEDICINE"].map((l) => (
+              <label key={l} className="inline-flex items-center gap-1">
+                <span className="inline-block w-3 h-3 border border-slate-800" />
+                {l}
+              </label>
+            ))}
           </div>
         </div>
 
-        <div className="mt-5 space-y-5">
-          {RX_BLOCKS.map((b) => {
-            if (b.type === "identity") {
-              return (
-                <div key={b.id} className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm" data-testid="rx-block-identity">
-                  <Line k="Reg No" v={`#${rx.reg_no}`} />
-                  <Line k="Date" v={rx.date} />
-                  <Line k="Name" v={rx.full_name} />
-                  <Line k="Age / Sex" v={`${rx.age ?? "-"} / ${rx.gender || "-"}`} />
-                  <Line k="Phone" v={rx.phone || "-"} />
-                  <Line k="Address" v={rx.address || "-"} />
-                </div>
-              );
-            }
-            if (b.type === "signature") {
-              return (
-                <div key={b.id} className="flex justify-end pt-6 text-sm text-slate-500">
-                  <span className="border-t border-slate-400 pt-1 px-8">{b.label}</span>
-                </div>
-              );
-            }
-            return (
-              <div key={b.id} data-testid={`rx-block-${b.id}`}>
-                <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">{b.label}</p>
-                <div style={{ height: `${b.height || 20}mm` }} className="border-b border-slate-300 mt-1" />
-              </div>
-            );
-          })}
+        <div className="grid grid-cols-2 gap-3 mt-2 text-[12px]">
+          <div className="space-y-2">
+            <p>Blood Sugar (Random) : <span className="border-b border-slate-400 inline-block min-w-[40mm]">&nbsp;</span></p>
+            <p>BP : <span className="border-b border-slate-400 inline-block min-w-[40mm]">&nbsp;</span></p>
+            <p>Remaks : <span className="border-b border-slate-400 inline-block min-w-[40mm]">&nbsp;</span></p>
+          </div>
+          <div>
+            <p className="font-bold">MEDICINES :</p>
+            <div className="border-b border-slate-400 h-10 mt-1" />
+            <div className="border-b border-slate-400 h-6 mt-1" />
+          </div>
         </div>
 
-        <div className="border-t border-slate-300 pt-3 mt-6 text-xs text-slate-500" data-testid="rx-footer">
-          {RX_FOOTER}
+        <div className="border border-slate-900 mt-3 p-2" data-testid="rx-operation-box">
+          <p className="text-[12px]">Operation will be done at : <span className="border-b border-slate-400 inline-block min-w-[80mm]">&nbsp;</span></p>
+          <p className="text-center font-bold text-[12px] my-1 tracking-wide">PRESCRIPTION FOR GLASSES</p>
+          <table className="w-full border-collapse text-[10px] text-center">
+            <thead>
+              <tr>
+                <th className="border border-slate-800 w-16" />
+                <th className="border border-slate-800" colSpan={4}>RE</th>
+                <th className="border border-slate-800" colSpan={4}>LE</th>
+              </tr>
+              <tr>
+                <th className="border border-slate-800" />
+                {["Dsph", "Dcyl", "Axis", "Vision", "Dsph", "Dcyl", "Axis", "Vision"].map((h, i) => (
+                  <th key={i} className="border border-slate-800 font-medium">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td className="border border-slate-800 text-left px-1">Distance</td>
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <td key={i} className="border border-slate-800 h-6" />
+                ))}
+              </tr>
+              <tr>
+                <td className="border border-slate-800 text-left px-1">Near</td>
+                <td className="border border-slate-800" colSpan={2}>Add. Dsph</td>
+                <td className="border border-slate-800" colSpan={2} />
+                <td className="border border-slate-800" colSpan={2}>Add. Dsph</td>
+                <td className="border border-slate-800" colSpan={2} />
+              </tr>
+            </tbody>
+          </table>
+          <p className="text-[12px] mt-2">
+            Inter Pupillary distance <span className="border-b border-slate-400 inline-block min-w-[30mm]">&nbsp;</span> mm
+            <span className="border-b border-slate-400 inline-block min-w-[30mm] ml-2">&nbsp;</span>
+          </p>
+        </div>
+
+        <div className="border border-slate-900 mt-2 p-2 text-[11px] leading-tight" data-testid="rx-declaration">
+          SIKAR NAGARIK PARISHAD(KOLKATA) &amp; SIKAR ZILLA WELFARE TRUST have done Eye Screening, distributed spectacles and Cataract (IOL) Operation will be done by :
+          <span className="border-b border-slate-400 inline-block min-w-[50mm] ml-1">&nbsp;</span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4 mt-3 items-end" data-testid="rx-footer">
+          <div>
+            <p className="font-semibold text-[12px]">Sponsorer :</p>
+            <div className="flex flex-wrap gap-2 mt-1">
+              {logos.map((lg, i) => (
+                <img
+                  key={lg.id || i}
+                  src={lg.data_url}
+                  alt={lg.name}
+                  className="object-contain"
+                  style={{ height: "18mm" }}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="text-right text-[12px]">
+            <p>Signature of</p>
+            <p className="border-t border-slate-800 inline-block mt-8 px-4">Optometrist / Eye Surgeon</p>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
-function Line({ k, v }) {
-  return <div><span className="text-slate-400 mr-2">{k}:</span><span className="font-semibold text-slate-900">{v}</span></div>;
+function Leader({ k, v }) {
+  return (
+    <p>
+      <span className="inline-block w-16">{k}</span>
+      <span className="border-b border-dotted border-slate-500 inline-block min-w-[50mm] font-semibold">
+        {v || "\u00a0"}
+      </span>
+    </p>
+  );
 }

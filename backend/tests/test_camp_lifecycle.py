@@ -450,7 +450,7 @@ class TestFulfilmentLines:
         async def run():
             mock_db = _mock(monkeypatch)
             _camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db)
-            body = FulfilmentBody(transcription_id=str(trans_id), item_type="specs",
+            body = FulfilmentBody(transcription_id=str(trans_id), item_type="specs_fixed",
                                   status="fulfilled")
             with pytest.raises(HTTPException) as exc:
                 await record_fulfilment(body, actor=ACTOR)
@@ -463,7 +463,7 @@ class TestFulfilmentLines:
             mock_db = _mock(monkeypatch)
             sent = _recorder(monkeypatch)
             _camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db, RX)
-            body = FulfilmentBody(transcription_id=str(trans_id), item_type="specs",
+            body = FulfilmentBody(transcription_id=str(trans_id), item_type="specs_fixed",
                                   status="fulfilled")
             out = await record_fulfilment(body, actor=ACTOR)
             assert out["fulfilment"]["status"] == "fulfilled"
@@ -475,10 +475,11 @@ class TestFulfilmentLines:
         async def run():
             mock_db = _mock(monkeypatch)
             _camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db)
-            body = FulfilmentBody(transcription_id=str(trans_id), item_type="specs",
+            body = FulfilmentBody(transcription_id=str(trans_id), item_type="specs_fixed",
                                   status="not_required")
-            out = await record_fulfilment(body, actor=ACTOR)
-            assert out["fulfilment"]["status"] == "not_required"
+            with pytest.raises(HTTPException) as exc:
+                await record_fulfilment(body, actor=ACTOR)
+            assert exc.value.status_code == 400
         asyncio.run(run())
 
     def test_medicine_is_unaffected_by_the_measurement_rule(self, monkeypatch):
@@ -501,7 +502,7 @@ class TestFulfilmentLines:
                 "_id": specs_day, "camp_id": camp_id, "day_date": "2026-09-20",
                 "venue": "Optical Desk", "seat_limit": 2, "seats_taken": 0,
             })
-            body = FulfilmentBody(transcription_id=str(trans_id), item_type="specs",
+            body = FulfilmentBody(transcription_id=str(trans_id), item_type="specs_made",
                                   status="deferred", specs_collection_day_id=str(specs_day))
             out = await record_fulfilment(body, actor=ACTOR)
             assert out["slip"]["collection_date"] == "2026-09-20"

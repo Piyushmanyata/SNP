@@ -78,16 +78,11 @@ EXPORT_COLUMNS = [
 ]
 
 
-SPECS_FIXED_COLUMN = {"fulfilled": "issued", "not_required": "not_required"}
-SPECS_MADE_COLUMN = {"deferred": "deferred", "not_required": "not_required"}
-
-
 def _line_statuses(fulfilments: dict) -> List[str]:
-    specs = fulfilments.get("specs", {}).get("status")
     return [
         fulfilments.get("medicine", {}).get("status", ""),
-        SPECS_FIXED_COLUMN.get(specs, ""),
-        SPECS_MADE_COLUMN.get(specs, ""),
+        fulfilments.get("specs_fixed", {}).get("status", ""),
+        fulfilments.get("specs_made", {}).get("status", ""),
         fulfilments.get("ot", {}).get("status", ""),
     ]
 
@@ -107,7 +102,7 @@ async def _export_row(db: AsyncIOMotorDatabase, p: dict, day_dates: dict) -> Lis
             fulfilments[f["item_type"]] = f
     m = t.get("specs_measurements") or {}
     ot = fulfilments.get("ot", {})
-    specs = fulfilments.get("specs", {})
+    specs = fulfilments.get("specs_made", {})
     return [
         p.get("reg_no", ""), p.get("full_name", ""), p.get("age", ""),
         p.get("gender", ""), p.get("phone", ""), p.get("address", ""),
@@ -119,8 +114,8 @@ async def _export_row(db: AsyncIOMotorDatabase, p: dict, day_dates: dict) -> Lis
         *[m.get(k, "") or "" for k in ("r_sph", "r_cyl", "r_axis", "l_sph", "l_cyl", "l_axis", "add")],
         *_line_statuses(fulfilments),
         ot.get("collection_date", "") or "", ot.get("collection_venue", "") or "",
-        specs.get("collection_date", "") or "" if specs.get("status") == "deferred" else "",
-        specs.get("collection_venue", "") or "" if specs.get("status") == "deferred" else "",
+        specs.get("collection_date", "") or "",
+        specs.get("collection_venue", "") or "",
     ]
 
 

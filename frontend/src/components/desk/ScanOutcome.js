@@ -1,6 +1,6 @@
 import React from "react";
-import { Button, Badge, Alert } from "../ui";
-import { Printer, CheckCircle2, UserPlus, Search } from "lucide-react";
+import { Button, Badge, Alert, Input, Field } from "../ui";
+import { Printer, CheckCircle2 } from "lucide-react";
 
 const FIELD_LABELS = {
   full_name: "Name",
@@ -109,31 +109,39 @@ export function AmbiguousMatch({ registrations }) {
   );
 }
 
-export function NoMatch({ card, onRegisterNew }) {
+export function NoMatch({ card, phone, setPhone, busy, onSubmit }) {
+  const ready = /^\d{10}$/.test(phone || "");
   return (
     <div className="rounded-xl border border-slate-300 bg-slate-50 p-4" data-testid="scan-no-match">
       <p className="font-display font-bold text-slate-900">No booking found for this card</p>
-      <p className="text-xs text-slate-600 mt-1">
-        {card?.full_name} · {card?.age ?? "-"} yrs. Search by name or phone first — they may have
-        registered under a different spelling.
-      </p>
-      <div className="flex items-center gap-2 mt-3 text-xs text-slate-500">
-        <Search className="w-4 h-4" /> Use the search below before registering anyone.
+      <div className="mt-3 space-y-1 text-sm" data-testid="door-card-readonly">
+        <p data-testid="door-card-name"><span className="text-slate-400 mr-2">Name:</span>{card?.full_name}</p>
+        <p><span className="text-slate-400 mr-2">Age:</span>{card?.age ?? "—"}</p>
+        <p><span className="text-slate-400 mr-2">Gender:</span>{card?.gender || "—"}</p>
+        <p><span className="text-slate-400 mr-2">Address:</span>{card?.address || "—"}</p>
       </div>
+      <Field label="Household mobile" required className="mt-3">
+        <Input
+          value={phone}
+          onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+          inputMode="numeric"
+          data-testid="door-phone-input"
+        />
+      </Field>
       <Button
         size="sm"
-        variant="outline"
         className="mt-3"
-        onClick={onRegisterNew}
-        data-testid="register-walk-in-button"
+        onClick={onSubmit}
+        disabled={!ready || busy}
+        data-testid="door-register-button"
       >
-        <UserPlus className="w-4 h-4" /> Register as new walk-in
+        Register and check in
       </Button>
     </div>
   );
 }
 
-export function ScanOutcome({ result, busy, onPrint, onMarkSeen, onConfirm, onRegisterNew }) {
+export function ScanOutcome({ result, busy, onPrint, onMarkSeen, onConfirm, phone, setPhone, onWalkIn }) {
   if (!result) return null;
   if (result.outcome === "arrived") {
     return (
@@ -154,7 +162,15 @@ export function ScanOutcome({ result, busy, onPrint, onMarkSeen, onConfirm, onRe
     return <AmbiguousMatch registrations={result.registrations} />;
   }
   if (result.outcome === "no_match") {
-    return <NoMatch card={result.card} onRegisterNew={onRegisterNew} />;
+    return (
+      <NoMatch
+        card={result.card}
+        phone={phone}
+        setPhone={setPhone}
+        busy={busy}
+        onSubmit={onWalkIn}
+      />
+    );
   }
   return <Alert>Unrecognised scan outcome.</Alert>;
 }

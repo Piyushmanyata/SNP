@@ -1,0 +1,48 @@
+import React from "react";
+import { Card } from "../ui";
+import { hasMeasurements } from "./FulfilmentStation";
+
+function Row({ k, v }) {
+  return (
+    <div>
+      <span className="text-slate-400 mr-2">{k}:</span>
+      <span className="font-semibold text-slate-900">{v || "—"}</span>
+    </div>
+  );
+}
+
+export function ReadOnlyPrescription({ transcription, emphasizePowers }) {
+  if (!transcription) return null;
+  const m = transcription.specs_measurements || {};
+  const diagnosis = [
+    ...(transcription.diagnosis_options || []),
+    transcription.diagnosis_other,
+  ].filter(Boolean).join("; ");
+  return (
+    <Card className="mb-5" data-testid="readonly-prescription">
+      <h3 className="font-display font-bold text-slate-900 mb-3">Prescription</h3>
+      <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
+        <Row k="Diagnosis" v={diagnosis} />
+        <Row k="Blood sugar" v={transcription.blood_sugar} />
+        <Row k="BP" v={transcription.bp} />
+        <Row k="Remarks" v={transcription.remarks} />
+        <Row k="OT eye" v={transcription.ot_eye} />
+        <Row k="OT procedure" v={transcription.ot_procedure} />
+        <Row k="OT notes" v={transcription.ot_notes} />
+      </div>
+      <div className={`mt-4 ${emphasizePowers ? "text-lg" : "text-sm"}`} data-testid="readonly-powers">
+        <p className="text-xs font-semibold text-slate-500 uppercase mb-1">Powers</p>
+        {hasMeasurements(transcription) ? (
+          <p className="font-mono font-bold text-slate-900">
+            RE {m.r_sph || "—"} / {m.r_cyl || "—"} × {m.r_axis || "—"}
+            {" · "}
+            LE {m.l_sph || "—"} / {m.l_cyl || "—"} × {m.l_axis || "—"}
+            {m.add ? ` · Add ${m.add}` : ""}
+          </p>
+        ) : (
+          <p className="text-amber-800">No powers recorded.</p>
+        )}
+      </div>
+    </Card>
+  );
+}

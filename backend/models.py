@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 from typing import Optional, List, Dict, Any
 
 
@@ -15,6 +15,12 @@ class CreateStaffBody(BaseModel):
     role: str  # admin | team_lead | volunteer | clinical_desk_operator
     phone: Optional[str] = None
     team_lead_id: Optional[str] = None
+    line: Optional[str] = None  # rx | medicine | specs_fixed | specs_made | ot
+
+
+class PatchStaffLineBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    line: Optional[str] = None
 
 
 # ---- camps ----
@@ -94,8 +100,8 @@ class TranscriptionBody(BaseModel):
 
 class FulfilmentBody(BaseModel):
     transcription_id: str
-    item_type: str  # medicine | specs | ot
-    status: str  # fulfilled | not_available | not_required | deferred
+    item_type: str  # medicine | specs_fixed | specs_made | ot
+    status: str  # fulfilled | not_available | deferred
     collection_date: Optional[str] = None
     collection_venue: Optional[str] = None
     ot_schedule_day_id: Optional[str] = None
