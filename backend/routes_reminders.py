@@ -78,7 +78,7 @@ async def send_d1_reminders() -> Dict[str, Any]:
     db = get_db()
     sent = await _send_each(db, "camp", await _camp_targets(db, tomorrow), tomorrow)
     sent += await _send_each(db, "ot", await _token_targets(db, "ot", tomorrow), tomorrow)
-    sent += await _send_each(db, "specs", await _token_targets(db, "specs", tomorrow), tomorrow)
+    sent += await _send_each(db, "specs", await _token_targets(db, "specs_made", tomorrow), tomorrow)
     return {"ok": True, "sent": sent, "event_date": tomorrow, "send_date": today}
 
 

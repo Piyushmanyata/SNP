@@ -739,7 +739,7 @@ class TestFulfilmentStateMachineAndDeskStress:
             async def book_worker(tid):
                 body = FulfilmentBody(
                     transcription_id=str(tid),
-                    item_type="specs",
+                    item_type="specs_made",
                     status="deferred",
                     specs_collection_day_id=str(specs_day_id),
                 )

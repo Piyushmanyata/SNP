@@ -3,8 +3,17 @@ import ReactDOM from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import Clinical from "./Clinical";
 import api from "../lib/api";
+import { LINE_STORAGE_KEY } from "../lib/operatorLines";
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
+
+const auth = {
+  user: { id: "u1", name: "Op", role: "clinical_desk_operator", line: "rx" },
+};
+
+jest.mock("../context/AuthContext", () => ({
+  useAuth: () => auth,
+}));
 
 jest.mock("../lib/api", () => {
   const actual = jest.requireActual("../lib/api");
@@ -35,6 +44,8 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = ReactDOM.createRoot(container);
   jest.clearAllMocks();
+  sessionStorage.clear();
+  auth.user = { id: "u1", name: "Op", role: "clinical_desk_operator", line: "rx" };
 
   api.get.mockImplementation((url) => {
     if (url === "/clinical/diagnosis-options") {
@@ -164,7 +175,128 @@ describe("Clinical page component", () => {
     expect(otSelect.value).toBe("R");
 
     const medicineStation = container.querySelector('[data-testid="station-medicine"]');
-    expect(medicineStation).not.toBeNull();
+    expect(medicineStation).toBeNull();
+    expect(container.querySelector('[data-testid="fulfilment-section"]')).toBeNull();
+  });
+
+  test("a line desk renders one control and a read-only prescription", async () => {
+    auth.user.line = "medicine";
+    const mockLookupData = {
+      registration: { id: "reg-101", reg_no: "1001", full_name: "Subhash Bose", gender_label: "Male", age: 58, queue_status: "seen" },
+      person: { id: "p-101" },
+      transcription: {
+        id: "tx-101", locked: true, diagnosis_options: ["Cataract"],
+        specs_measurements: { r_sph: "-1.5", l_sph: "-1.0" },
+      },
+      fulfilments: [],
+      slips: [],
+    };
+    api.post.mockResolvedValueOnce({ data: mockLookupData });
+    await act(async () => {
+      root.render(<MemoryRouter><Clinical /></MemoryRouter>);
+    });
+    const lookupInput = container.querySelector('[data-testid="clinical-lookup-input"]');
+    act(() => {
+      const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      nativeSetter.call(lookupInput, "1001");
+      lookupInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="clinical-lookup-button"]').click();
+    });
+    expect(container.querySelector('[data-testid="clinical-prescription-form"]')).toBeNull();
+    expect(container.querySelector('[data-testid="readonly-prescription"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="station-medicine"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="station-ot"]')).toBeNull();
+    expect(container.querySelector('[data-testid="station-medicine-fulfilled"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="station-medicine-not_available"]')).not.toBeNull();
+  });
+
+  test("the line picker appears when there is no line", async () => {
+    auth.user.line = null;
+    await act(async () => {
+      root.render(<MemoryRouter><Clinical /></MemoryRouter>);
+    });
+    expect(container.querySelector('[data-testid="line-picker"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="clinical-lookup-input"]')).toBeNull();
+  });
+
+  test("a session override survives remount and a fresh load uses the account default", async () => {
+    sessionStorage.setItem(LINE_STORAGE_KEY, "ot");
+    await act(async () => {
+      root.render(<MemoryRouter><Clinical /></MemoryRouter>);
+    });
+    expect(container.querySelector('[data-testid="line-chip"]').textContent).toContain("OT");
+
+    act(() => { root.unmount(); });
+    root = ReactDOM.createRoot(container);
+    await act(async () => {
+      root.render(<MemoryRouter><Clinical /></MemoryRouter>);
+    });
+    expect(container.querySelector('[data-testid="line-chip"]').textContent).toContain("OT");
+
+    sessionStorage.clear();
+    auth.user.line = "medicine";
+    act(() => { root.unmount(); });
+    root = ReactDOM.createRoot(container);
+    await act(async () => {
+      root.render(<MemoryRouter><Clinical /></MemoryRouter>);
+    });
+    expect(container.querySelector('[data-testid="line-chip"]').textContent).toContain("Medicine");
+  });
+
+  test("a mismatch is advisory and the control stays usable", async () => {
+    auth.user.line = "ot";
+    api.post.mockResolvedValueOnce({
+      data: {
+        registration: { id: "reg-101", reg_no: "1001", full_name: "Subhash Bose", gender_label: "Male", age: 58 },
+        person: { id: "p-101" },
+        transcription: { id: "tx-101", locked: true, diagnosis_options: ["Cataract"], specs_measurements: { r_sph: "-1", l_sph: "-1" } },
+        fulfilments: [],
+        slips: [],
+      },
+    });
+    await act(async () => {
+      root.render(<MemoryRouter><Clinical /></MemoryRouter>);
+    });
+    const lookupInput = container.querySelector('[data-testid="clinical-lookup-input"]');
+    act(() => {
+      const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      nativeSetter.call(lookupInput, "1001");
+      lookupInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="clinical-lookup-button"]').click();
+    });
+    expect(container.querySelector('[data-testid="line-mismatch-warning"]').textContent).toContain("Record anyway");
+    expect(container.querySelector('[data-testid="station-ot-fulfilled"]').disabled).toBe(false);
+  });
+
+  test("no transcription sends the patient to Doctor's Rx", async () => {
+    auth.user.line = "medicine";
+    api.post.mockResolvedValueOnce({
+      data: {
+        registration: { id: "reg-101", reg_no: "1001", full_name: "Subhash Bose", gender_label: "Male", age: 58 },
+        person: { id: "p-101" },
+        transcription: null,
+        fulfilments: [],
+        slips: [],
+      },
+    });
+    await act(async () => {
+      root.render(<MemoryRouter><Clinical /></MemoryRouter>);
+    });
+    const lookupInput = container.querySelector('[data-testid="clinical-lookup-input"]');
+    act(() => {
+      const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+      nativeSetter.call(lookupInput, "1001");
+      lookupInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="clinical-lookup-button"]').click();
+    });
+    expect(container.querySelector('[data-testid="send-to-rx"]').textContent).toContain("Doctor");
+    expect(container.querySelector('[data-testid="station-medicine"]')).toBeNull();
   });
 
   test("handles lookup failure gracefully", async () => {
@@ -226,6 +358,7 @@ describe("Clinical page component", () => {
   });
 
   test("Spectacles to be made assigns a Specs collection day with full days unselectable", async () => {
+    auth.user.line = "specs_made";
     const mockLookupData = {
       registration: {
         id: "reg-101",

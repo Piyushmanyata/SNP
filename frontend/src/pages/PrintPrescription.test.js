@@ -1,7 +1,7 @@
 import React, { act } from "react";
 import ReactDOM from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
-import PrintPrescription from "./PrintPrescription";
+import PrintPrescription, { PrescriptionSheet } from "./PrintPrescription";
 import api from "../lib/api";
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
@@ -79,11 +79,13 @@ describe("PrintPrescription component", () => {
 
     const sheet = container.querySelector('[data-testid="a4-prescription-sheet"]');
     expect(sheet).not.toBeNull();
-    expect(container.textContent).toContain("Sikar Nagarik Parishad");
-    expect(container.textContent).toContain("Sikar Zilla Welfare Trust");
+    expect(container.textContent).toContain("SIKAR NAGARIK PARISHAD (KOLKATA)");
+    expect(container.textContent).toContain("SIKAR ZILLA WELFARE TRUST");
     expect(container.textContent).toContain("sikarkolkata@gmail.com");
-    expect(container.textContent).toContain("Rupa Foundation");
-    expect(container.textContent).toContain("SNP Camp Nadia");
+    expect(container.textContent).toContain("ARRANGMENT");
+    expect(container.textContent).toContain("Remaks");
+    expect(container.textContent).toContain("Sponsorer :");
+    expect(container.textContent).toContain("Community Center");
     expect(container.textContent).toContain("Aparna Sen");
     expect(container.textContent).toContain("#1001");
 
@@ -113,10 +115,36 @@ describe("PrintPrescription component", () => {
     });
 
     expect(api.get).toHaveBeenCalledWith("/templates/logos?camp_id=camp-001");
-    for (const block of ["diagnosis", "vision", "prescription", "vitals", "advice"]) {
-      expect(container.querySelector(`[data-testid="rx-block-${block}"]`)).not.toBeNull();
-    }
     expect(container.querySelector('[data-testid="rx-block-identity"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="rx-diagnosis-row"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="rx-operation-box"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="rx-footer"]')).not.toBeNull();
+  });
+
+  test("the reference form snapshot and named strings stay put", () => {
+    const sample = {
+      camp_name: "Kolkata Eye Camp",
+      venue: "Rotary Club",
+      reg_no: "101",
+      patient_qr: "qr-fixed",
+      full_name: "Sample Patient",
+      age: 52,
+      gender: "M",
+      date: "2026-09-01",
+      phone: "9876543210",
+      address: "12 MG Road",
+    };
+    const logos = [{ id: "logo-1", name: "rupa.png", data_url: "data:image/png;base64,aaa" }];
+    act(() => {
+      root.render(<PrescriptionSheet rx={sample} logos={logos} preview />);
+    });
+    const sheet = container.querySelector('[data-testid="a4-prescription-sheet"]');
+    expect(sheet.textContent).toContain("ARRANGMENT");
+    expect(sheet.textContent).toContain("Remaks");
+    expect(sheet.textContent).toContain("PRESCRIPTION FOR GLASSES");
+    expect(sheet.textContent).toContain("Inter Pupillary distance");
+    expect(sheet.textContent).toContain("Sponsorer :");
+    expect(sheet).toMatchSnapshot();
   });
 
   test("handles prescription loading error", async () => {

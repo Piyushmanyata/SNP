@@ -416,7 +416,8 @@ class TestPrescriptionLockdown:
         g = admin.get(f"{API}/templates/logos?camp_id={camp_id}", timeout=30)
         assert g.status_code == 200, g.text
         logos = g.json()["logos"]
-        assert len(logos) >= 2
+        assert len(logos) == 1
+        assert logos[0]["name"] == "rupa-foundation.png"
         assert all(lg.get("data_url", "").startswith("data:image/") for lg in logos)
         assert set(g.json().keys()) == {"logos"}
 

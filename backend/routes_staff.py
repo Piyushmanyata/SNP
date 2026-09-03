@@ -1,8 +1,8 @@
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
 from db import get_db
-from models import CreateStaffBody
+from models import CreateStaffBody, PatchStaffLineBody
 from helpers import now_utc
 from security import (
     hash_password,
@@ -16,6 +16,18 @@ from security import (
 router = APIRouter(prefix="/api/staff", tags=["staff"])
 
 VALID_ROLES = {"admin", "team_lead", "volunteer", "clinical_desk_operator"}
+VALID_LINES = {"rx", "medicine", "specs_fixed", "specs_made", "ot"}
+CLINICAL_ROLE = "clinical_desk_operator"
+
+
+def assigned_line(role: str, line: Optional[str]) -> Optional[str]:
+    if role != CLINICAL_ROLE:
+        return None
+    if line is None or line == "":
+        return None
+    if line not in VALID_LINES:
+        raise HTTPException(status_code=400, detail="Invalid line")
+    return line
 
 
 @router.post("")
@@ -52,6 +64,7 @@ async def create_staff(body: CreateStaffBody, actor: dict = Depends(get_current_
         "role": body.role,
         "phone": body.phone,
         "team_lead_id": team_lead_id if body.role == "volunteer" else None,
+        "line": assigned_line(body.role, body.line),
         "disabled_at": None,
         "created_at": now_utc(),
         "created_by": str(actor["_id"]),
@@ -76,6 +89,18 @@ async def team_leads(actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     users = await db.users.find({"role": "team_lead", "disabled_at": None}).to_list(200)
     return {"team_leads": [serialize_user(u) for u in users]}
+
+
+@router.patch("/{staff_id}")
+async def patch_staff_line(staff_id: str, body: PatchStaffLineBody, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
+    db = get_db()
+    user = await db.users.find_one({"_id": ObjectId(staff_id)})
+    if not user:
+        raise HTTPException(status_code=404, detail="Staff not found")
+    line = assigned_line(user["role"], body.line)
+    await db.users.update_one({"_id": user["_id"]}, {"$set": {"line": line}})
+    user["line"] = line
+    return {"staff": serialize_user(user)}
 
 
 @router.patch("/{staff_id}/disable")

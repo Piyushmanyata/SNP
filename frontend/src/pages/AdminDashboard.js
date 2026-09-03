@@ -10,6 +10,7 @@ import {
   Plus, PrinterCheck, ClipboardList, Stethoscope, FileText,
 } from "lucide-react";
 import TemplateEditor from "../components/TemplateEditor";
+import { OPERATOR_LINES } from "../lib/operatorLines";
 
 const TABS = [
   { id: "overview", label: "Overview", icon: ClipboardList },
@@ -221,7 +222,7 @@ function Staff() {
   const [leads, setLeads] = useState([]);
   const [err, setErr] = useState("");
   const [show, setShow] = useState(false);
-  const [form, setForm] = useState({ email: "", password: "", name: "", role: "volunteer", phone: "", team_lead_id: "" });
+  const [form, setForm] = useState({ email: "", password: "", name: "", role: "volunteer", phone: "", team_lead_id: "", line: "" });
 
   const load = useCallback(() => {
     Promise.all([api.get("/staff"), api.get("/staff/team-leads")])
@@ -233,14 +234,24 @@ function Staff() {
   const create = useCallback(async () => {
     setErr("");
     try {
-      await api.post("/staff", { ...form, team_lead_id: form.role === "volunteer" ? (form.team_lead_id || null) : null });
+      await api.post("/staff", {
+        ...form,
+        team_lead_id: form.role === "volunteer" ? (form.team_lead_id || null) : null,
+        line: form.role === "clinical_desk_operator" ? (form.line || null) : null,
+      });
       setShow(false);
-      setForm({ email: "", password: "", name: "", role: "volunteer", phone: "", team_lead_id: "" });
+      setForm({ email: "", password: "", name: "", role: "volunteer", phone: "", team_lead_id: "", line: "" });
       load();
     } catch (e) { setErr(formatApiError(e)); }
   }, [form, load]);
   const disable = useCallback(async (id) => { try { await api.patch(`/staff/${id}/disable`); load(); } catch (e) { setErr(formatApiError(e)); } }, [load]);
   const enable = useCallback(async (id) => { try { await api.patch(`/staff/${id}/enable`); load(); } catch (e) { setErr(formatApiError(e)); } }, [load]);
+  const setLine = useCallback(async (id, line) => {
+    try {
+      await api.patch(`/staff/${id}`, { line: line || null });
+      load();
+    } catch (e) { setErr(formatApiError(e)); }
+  }, [load]);
 
   const roleLabel = { admin: "Admin", team_lead: "Team Lead", volunteer: "Volunteer", clinical_desk_operator: "Clinical Desk" };
 
@@ -257,6 +268,20 @@ function Staff() {
                 <p className="text-xs text-slate-400">{s.email}</p>
               </div>
               <Badge tone="slate">{roleLabel[s.role]}</Badge>
+              {s.role === "clinical_desk_operator" && (
+                <select
+                  className="min-h-[44px] px-2 rounded-xl border border-slate-300 text-sm"
+                  value={s.line || ""}
+                  onChange={(e) => setLine(s.id, e.target.value)}
+                  data-testid={`staff-line-${s.id}`}
+                >
+                  <option value="">No line</option>
+                  {OPERATOR_LINES.map((l) => (
+                    <option key={l.key} value={l.key}>{l.label}</option>
+                  ))}
+                </select>
+              )}
+
               {s.role !== "admin" && (s.disabled_at
                 ? <Button size="sm" variant="outline" onClick={() => enable(s.id)} data-testid={`enable-staff-${s.id}`}>Enable</Button>
                 : <Button size="sm" variant="ghost" onClick={() => disable(s.id)} data-testid={`disable-staff-${s.id}`}><Power className="w-4 h-4 text-rose-500" /></Button>)}
@@ -278,6 +303,14 @@ function Staff() {
               <option value="admin">Admin</option>
             </select>
           </Field>
+          {form.role === "clinical_desk_operator" && (
+            <Field label="Line">
+              <select className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300" value={form.line} onChange={(e) => setForm({ ...form, line: e.target.value })} data-testid="staff-line-select">
+                <option value="">Unset</option>
+                {OPERATOR_LINES.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
+              </select>
+            </Field>
+          )}
           {form.role === "volunteer" && (
             <Field label="Team Lead (optional)">
               <select className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300" value={form.team_lead_id} onChange={(e) => setForm({ ...form, team_lead_id: e.target.value })} data-testid="staff-teamlead-select">

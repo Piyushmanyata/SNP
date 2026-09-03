@@ -63,6 +63,7 @@ def serialize_user(user: dict) -> dict:
         "role": user["role"],
         "phone": user.get("phone"),
         "team_lead_id": user.get("team_lead_id"),
+        "line": user.get("line"),
         "disabled_at": user.get("disabled_at").isoformat() if user.get("disabled_at") else None,
     }
 

@@ -171,6 +171,14 @@ class MockCollection:
             self.docs = [d for d in self.docs if not self._matches(d, query)]
             return orig_len - len(self.docs)
 
+    async def delete_one(self, query):
+        async with self._lock:
+            for i, d in enumerate(self.docs):
+                if self._matches(d, query):
+                    self.docs.pop(i)
+                    return
+            return
+
     async def count_documents(self, query):
         async with self._lock:
             return sum(1 for d in self.docs if self._matches(d, query))
@@ -617,20 +625,17 @@ class TestFulfilmentDecomposedAndInvariants:
     def test_fulfilment_matrix_validation(self):
         _validate_fulfilment_matrix("medicine", "fulfilled")
         _validate_fulfilment_matrix("medicine", "not_available")
-        _validate_fulfilment_matrix("medicine", "not_required")
-        _validate_fulfilment_matrix("specs", "fulfilled")
-        _validate_fulfilment_matrix("specs", "deferred")
-        _validate_fulfilment_matrix("specs", "not_required")
+        _validate_fulfilment_matrix("specs_fixed", "fulfilled")
+        _validate_fulfilment_matrix("specs_made", "deferred")
         _validate_fulfilment_matrix("ot", "fulfilled")
         _validate_fulfilment_matrix("ot", "deferred")
-        _validate_fulfilment_matrix("ot", "not_required")
 
         with pytest.raises(HTTPException) as exc:
-            _validate_fulfilment_matrix("medicine", "deferred")
+            _validate_fulfilment_matrix("medicine", "not_required")
         assert exc.value.status_code == 400
 
         with pytest.raises(HTTPException) as exc:
-            _validate_fulfilment_matrix("specs", "not_available")
+            _validate_fulfilment_matrix("specs_fixed", "deferred")
         assert exc.value.status_code == 400
 
         with pytest.raises(HTTPException) as exc:
@@ -655,14 +660,14 @@ class TestFulfilmentDecomposedAndInvariants:
                 "venue": "Community Health Center", "seat_limit": 5, "seats_taken": 0,
             })
 
-            bad_body = FulfilmentBody(transcription_id=str(t_id), item_type="specs", status="deferred")
+            bad_body = FulfilmentBody(transcription_id=str(t_id), item_type="specs_made", status="deferred")
             with pytest.raises(HTTPException) as exc:
                 await record_fulfilment(bad_body, actor={"_id": ObjectId(), "role": "optometrist"})
             assert exc.value.status_code == 400
 
             freeform = FulfilmentBody(
                 transcription_id=str(t_id),
-                item_type="specs",
+                item_type="specs_made",
                 status="deferred",
                 collection_date="2026-09-15",
                 collection_venue="District Hospital",
@@ -673,7 +678,7 @@ class TestFulfilmentDecomposedAndInvariants:
 
             good_body = FulfilmentBody(
                 transcription_id=str(t_id),
-                item_type="specs",
+                item_type="specs_made",
                 status="deferred",
                 specs_collection_day_id=str(day1),
             )
@@ -688,7 +693,7 @@ class TestFulfilmentDecomposedAndInvariants:
 
             update_body = FulfilmentBody(
                 transcription_id=str(t_id),
-                item_type="specs",
+                item_type="specs_made",
                 status="deferred",
                 specs_collection_day_id=str(day2),
             )
@@ -727,7 +732,7 @@ class TestFulfilmentDecomposedAndInvariants:
 
             body1 = FulfilmentBody(
                 transcription_id=str(t_id),
-                item_type="specs",
+                item_type="specs_made",
                 status="deferred",
                 specs_collection_day_id=str(specs_day_id),
             )
@@ -742,7 +747,7 @@ class TestFulfilmentDecomposedAndInvariants:
             await mock_db.transcriptions.insert_one({"_id": t_id2, "patient_id": p_id2, "locked": False, "specs_measurements": RX})
             body2 = FulfilmentBody(
                 transcription_id=str(t_id2),
-                item_type="specs",
+                item_type="specs_made",
                 status="deferred",
                 specs_collection_day_id=str(specs_day_id),
             )
@@ -771,7 +776,7 @@ class TestFulfilmentDecomposedAndInvariants:
             })
 
             body1 = FulfilmentBody(
-                transcription_id=str(t_id), item_type="specs", status="deferred",
+                transcription_id=str(t_id), item_type="specs_made", status="deferred",
                 specs_collection_day_id=str(day1),
             )
             await record_fulfilment(body1, actor={"_id": ObjectId(), "role": "optometrist"})
@@ -780,7 +785,7 @@ class TestFulfilmentDecomposedAndInvariants:
             assert d1["seats_taken"] == 1
 
             body2 = FulfilmentBody(
-                transcription_id=str(t_id), item_type="specs", status="deferred",
+                transcription_id=str(t_id), item_type="specs_made", status="deferred",
                 specs_collection_day_id=str(day2),
             )
             await record_fulfilment(body2, actor={"_id": ObjectId(), "role": "optometrist"})
@@ -803,19 +808,19 @@ class TestFulfilmentDecomposedAndInvariants:
                 "venue": "Optical", "seat_limit": 1, "seats_taken": 0,
             })
             await record_fulfilment(
-                FulfilmentBody(transcription_id=str(t_id), item_type="specs", status="deferred",
+                FulfilmentBody(transcription_id=str(t_id), item_type="specs_made", status="deferred",
                                specs_collection_day_id=str(day_id)),
                 actor={"_id": ObjectId(), "role": "optometrist"},
             )
-            res = await record_fulfilment(
-                FulfilmentBody(transcription_id=str(t_id), item_type="specs", status="fulfilled"),
-                actor={"_id": ObjectId(), "role": "optometrist"},
-            )
-            assert res["slip"] is None
+            with pytest.raises(HTTPException) as exc:
+                await record_fulfilment(
+                    FulfilmentBody(transcription_id=str(t_id), item_type="specs_fixed", status="fulfilled"),
+                    actor={"_id": ObjectId(), "role": "optometrist"},
+                )
+            assert exc.value.status_code == 409
             day = await mock_db.specs_collection_days.find_one({"_id": day_id})
-            assert day["seats_taken"] == 0
-            assert all(not s["active"] for s in mock_db.deferred_slips.docs)
-            assert all(s["cancelled"] for s in mock_db.deferred_slips.docs)
+            assert day["seats_taken"] == 1
+            assert any(s["active"] for s in mock_db.deferred_slips.docs)
         asyncio.run(_run())
 
     def test_specs_same_day_rerecord_on_full_day(self, monkeypatch):
@@ -830,12 +835,12 @@ class TestFulfilmentDecomposedAndInvariants:
                 "venue": "Optical", "seat_limit": 1, "seats_taken": 0,
             })
             await record_fulfilment(
-                FulfilmentBody(transcription_id=str(t_id), item_type="specs", status="deferred",
+                FulfilmentBody(transcription_id=str(t_id), item_type="specs_made", status="deferred",
                                specs_collection_day_id=str(day_id)),
                 actor={"_id": ObjectId(), "role": "optometrist"},
             )
             res = await record_fulfilment(
-                FulfilmentBody(transcription_id=str(t_id), item_type="specs", status="deferred",
+                FulfilmentBody(transcription_id=str(t_id), item_type="specs_made", status="deferred",
                                specs_collection_day_id=str(day_id)),
                 actor={"_id": ObjectId(), "role": "optometrist"},
             )
@@ -860,28 +865,15 @@ class TestFulfilmentDecomposedAndInvariants:
             })
             actor = {"_id": ObjectId(), "role": "optometrist"}
             await record_fulfilment(
-                FulfilmentBody(transcription_id=str(t_a), item_type="specs", status="deferred",
+                FulfilmentBody(transcription_id=str(t_a), item_type="specs_made", status="deferred",
                                specs_collection_day_id=str(day_id)),
                 actor=actor,
             )
-            await record_fulfilment(
-                FulfilmentBody(transcription_id=str(t_a), item_type="specs", status="fulfilled",
-                               specs_collection_day_id=str(day_id)),
-                actor=actor,
-            )
-            day = await mock_db.specs_collection_days.find_one({"_id": day_id})
-            assert day["seats_taken"] == 0
-            res = await record_fulfilment(
-                FulfilmentBody(transcription_id=str(t_a), item_type="specs", status="deferred",
-                               specs_collection_day_id=str(day_id)),
-                actor=actor,
-            )
-            assert res["slip"]["active"] is True
             day = await mock_db.specs_collection_days.find_one({"_id": day_id})
             assert day["seats_taken"] == 1
             with pytest.raises(HTTPException) as exc:
                 await record_fulfilment(
-                    FulfilmentBody(transcription_id=str(t_b), item_type="specs", status="deferred",
+                    FulfilmentBody(transcription_id=str(t_b), item_type="specs_made", status="deferred",
                                    specs_collection_day_id=str(day_id)),
                     actor=actor,
                 )

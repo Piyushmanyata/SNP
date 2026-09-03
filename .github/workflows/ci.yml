@@ -32,7 +32,7 @@ jobs:
         run: |
           python -m py_compile backend/*.py
           python -c "import sys; sys.path.insert(0, 'backend'); import server, db, models, security, helpers, serializers, aadhaar, msg91, sms, routes_auth, routes_staff, routes_camps, routes_registration, routes_desk, routes_clinical, routes_reports, routes_templates, routes_reminders; print('Backend modules verified')"
-          pytest backend/tests/test_aadhaar_unit.py backend/tests/test_seed_admin.py backend/tests/test_cors.py backend/tests/test_indexes.py backend/tests/test_adversarial_challenger.py backend/tests/test_adversarial_stress_suite.py backend/tests/test_camp_lifecycle.py backend/tests/test_reminders.py backend/tests/test_hardening.py
+          pytest backend/tests/test_aadhaar_unit.py backend/tests/test_seed_admin.py backend/tests/test_cors.py backend/tests/test_indexes.py backend/tests/test_adversarial_challenger.py backend/tests/test_adversarial_stress_suite.py backend/tests/test_camp_lifecycle.py backend/tests/test_reminders.py backend/tests/test_hardening.py backend/tests/test_operator_line.py
 
       - name: Lint Backend
         run: flake8 --select=F,E9 backend/*.py

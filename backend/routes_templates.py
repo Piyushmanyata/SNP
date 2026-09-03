@@ -11,16 +11,15 @@ router = APIRouter(prefix="/api/templates", tags=["templates"])
 
 MAX_LOGO_BYTES = 2 * 1024 * 1024
 ALLOWED_MIME = ("image/png", "image/jpeg", "image/webp")
-_HEADER_JPG = Path(__file__).resolve().parent / "assets" / "eye-clinic-header.jpg"
+_RUPA_PNG = Path(__file__).resolve().parent / "assets" / "rupa-sponsor.png"
 
 
 def default_logos() -> List[Dict[str, Any]]:
-    if not _HEADER_JPG.exists():
+    if not _RUPA_PNG.exists():
         return []
-    data_url = "data:image/jpeg;base64," + base64.b64encode(_HEADER_JPG.read_bytes()).decode()
+    data_url = "data:image/png;base64," + base64.b64encode(_RUPA_PNG.read_bytes()).decode()
     return [
-        {"id": "snp-parishad", "name": "sikar-nagarik-parishad.jpg", "data_url": data_url, "order": 0},
-        {"id": "szwt-trust", "name": "sikar-zilla-welfare-trust.jpg", "data_url": data_url, "order": 1},
+        {"id": "rupa-foundation", "name": "rupa-foundation.png", "data_url": data_url, "order": 0},
     ]
 
 

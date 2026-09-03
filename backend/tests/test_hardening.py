@@ -118,11 +118,11 @@ class TestDeferralSeatFields:
         ot_day = str(ObjectId())
         specs_day = str(ObjectId())
         body = self._body(
-            item_type="specs", status="deferred",
+            item_type="specs_made", status="deferred",
             ot_schedule_day_id=ot_day, specs_collection_day_id=specs_day,
         )
         assert _deferred_day_id(body, "ot") is None
-        assert _deferred_day_id(body, "specs") == ObjectId(specs_day)
+        assert _deferred_day_id(body, "specs_made") == ObjectId(specs_day)
 
     def test_a_deferred_OT_line_never_records_a_specs_day(self):
         ot_day = str(ObjectId())
@@ -130,7 +130,7 @@ class TestDeferralSeatFields:
             item_type="ot", status="deferred",
             ot_schedule_day_id=ot_day, specs_collection_day_id=str(ObjectId()),
         )
-        assert _deferred_day_id(body, "specs") is None
+        assert _deferred_day_id(body, "specs_made") is None
         assert _deferred_day_id(body, "ot") == ObjectId(ot_day)
 
     def test_a_line_that_is_not_deferred_books_no_day_at_all(self):
@@ -138,7 +138,7 @@ class TestDeferralSeatFields:
             item_type="ot", status="fulfilled", ot_schedule_day_id=str(ObjectId()),
         )
         assert _deferred_day_id(body, "ot") is None
-        assert _deferred_day_id(body, "specs") is None
+        assert _deferred_day_id(body, "specs_made") is None
 
 
 # --------------------------------------------------------------------------
