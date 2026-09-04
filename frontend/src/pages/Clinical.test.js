@@ -45,6 +45,7 @@ beforeEach(() => {
   root = ReactDOM.createRoot(container);
   jest.clearAllMocks();
   sessionStorage.clear();
+  sessionStorage.setItem("snp.roster", JSON.stringify({ id: "r-1", name: "Op" }));
   auth.user = { id: "u1", name: "Op", role: "clinical_desk_operator", line: "rx" };
 
   api.get.mockImplementation((url) => {
@@ -408,5 +409,55 @@ describe("Clinical page component", () => {
     expect(fullOpt.disabled).toBe(true);
     const openOpt = Array.from(daySelect.options).find((o) => o.value === "sp-1");
     expect(openOpt.disabled).toBe(false);
+  });
+
+  test("after save on the rx line the lookup input has focus", async () => {
+    jest.useFakeTimers();
+    const mockLookupData = {
+      registration: {
+        id: "reg-101",
+        reg_no: "1001",
+        full_name: "Subhash Bose",
+        gender_label: "Male",
+        age: 58,
+        queue_status: "seen",
+      },
+      person: { id: "p-101" },
+      transcription: null,
+      fulfilments: [],
+      slips: [],
+    };
+    api.post.mockResolvedValueOnce({ data: mockLookupData });
+    api.post.mockResolvedValueOnce({ data: { transcription: { id: "tx-1" } } });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <Clinical />
+        </MemoryRouter>
+      );
+    });
+    const lookupInput = container.querySelector('[data-testid="clinical-lookup-input"]');
+    act(() => {
+      const nativeSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        "value"
+      ).set;
+      nativeSetter.call(lookupInput, "1001");
+      lookupInput.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="clinical-lookup-button"]').click();
+    });
+    await act(async () => { jest.runAllTimers(); });
+    expect(document.activeElement).toBe(container.querySelector('[data-testid="sugar-input"]'));
+
+    await act(async () => {
+      container.querySelector('[data-testid="save-transcription-button"]').click();
+    });
+    await act(async () => { jest.runAllTimers(); });
+    expect(container.textContent).toContain("Saved #1001");
+    expect(document.activeElement).toBe(container.querySelector('[data-testid="clinical-lookup-input"]'));
+    jest.useRealTimers();
   });
 });

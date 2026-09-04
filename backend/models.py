@@ -126,3 +126,8 @@ class SpecsScheduleBody(BaseModel):
     day_date: str
     venue: str
     seat_limit: int
+
+
+class RosterBulkBody(BaseModel):
+    camp_id: str
+    names: List[str]

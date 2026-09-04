@@ -103,3 +103,6 @@ async def init_indexes() -> None:
         unique=True,
         partialFilterExpression=LEDGER_PARTIAL_FILTER,
     )
+    await db.roster.create_index(
+        [("camp_id", ASCENDING), ("name_normalized", ASCENDING)], unique=True
+    )

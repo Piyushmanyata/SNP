@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
@@ -8,6 +8,7 @@ from models import QrLookupBody, ScanBody, ScanConfirmBody, RegisterBody
 from helpers import now_utc, as_utc, today_ist_str, age_from_dob, normalize_name, person_key
 from serializers import ser_patient
 from security import require_staff
+from routes_roster import on_desk_volunteer
 from aadhaar import decode_aadhaar
 from routes_registration import (
     _dup_409, _duplicate_hits, _is_manual, _is_scanned_row, _resolve_person,
@@ -94,13 +95,16 @@ async def _active_camp(db: AsyncIOMotorDatabase) -> dict:
     return camp
 
 
-async def _stamp_arrival(db: AsyncIOMotorDatabase, patient: dict, actor_id: str) -> Dict[str, Any]:
+async def _stamp_arrival(
+    db: AsyncIOMotorDatabase, patient: dict, actor_id: str, roster_id: Optional[str] = None,
+) -> Dict[str, Any]:
     """Arrival is a presence. It never consults camp-day capacity."""
     if patient.get("arrived_at"):
         return patient
     updates: Dict[str, Any] = {
         "arrived_at": now_utc(),
         "arrived_by": actor_id,
+        "arrived_roster_id": roster_id,
         "queue_status": "arrived" if patient.get("queue_status") == "registered"
                         else patient.get("queue_status"),
     }
@@ -115,55 +119,35 @@ async def _stamp_arrival(db: AsyncIOMotorDatabase, patient: dict, actor_id: str)
     return await db.patients.find_one({"_id": patient["_id"]})
 
 
-def _diff(card: dict, stored: dict) -> List[Dict[str, Any]]:
-    return [
-        {"field": field, "card": card.get(field), "stored": stored.get(field)}
-        for field in OVERWRITTEN_FIELDS
-        if str(card.get(field) or "") != str(stored.get(field) or "")
-    ]
+def _material_diff(card: dict, stored: dict) -> List[Dict[str, Any]]:
+    diff: List[Dict[str, Any]] = []
+    for field in OVERWRITTEN_FIELDS:
+        cv, sv = card.get(field), stored.get(field)
+        if sv is None or sv == "":
+            continue
+        if field == "address":
+            continue
+        trivial = False
+        if field == "full_name":
+            cn, sn = normalize_name(cv or ""), normalize_name(sv or "")
+            trivial = cn == sn or sorted(cn.split()) == sorted(sn.split())
+        elif field == "age":
+            try:
+                trivial = abs(int(cv) - int(sv)) <= 1
+            except (TypeError, ValueError):
+                trivial = False
+        elif field == "gender":
+            c0 = str(cv)[:1].upper() if cv else ""
+            s0 = str(sv)[:1].upper() if sv else ""
+            trivial = bool(c0) and c0 == s0
+        elif field in ("dob", "aadhaar_last4"):
+            trivial = str(cv or "").strip() == str(sv or "").strip()
+        if not trivial:
+            diff.append({"field": field, "card": cv, "stored": sv})
+    return diff
 
 
-@router.post("/scan")
-async def scan(body: ScanBody, actor: dict = Depends(require_staff)) -> Dict[str, Any]:
-    """Resolve a camp-day Lock against the active camp. Never creates a registration."""
-    db = get_db()
-    camp = await _active_camp(db)
-    card = _decode_card(body.payload)
-    person = await _known_person(db, card)
-    hits = await _duplicate_hits(db, camp["_id"], _card_as_register_body(card), person)
-
-    scanned_hits = [h for h in hits if _is_scanned_row(h)]
-    if scanned_hits:
-        arrived = await _stamp_arrival(db, scanned_hits[0], str(actor["_id"]))
-        return {"outcome": "arrived", "registration": ser_patient(arrived)}
-
-    manual_hits = [h for h in hits if _is_manual(h)]
-    if len(manual_hits) > 1:
-        return {"outcome": "ambiguous", "registrations": [ser_patient(h) for h in manual_hits]}
-    if len(manual_hits) == 1:
-        return {
-            "outcome": "mismatch_review",
-            "registration": ser_patient(manual_hits[0]),
-            "card": card,
-            "diff": _diff(card, manual_hits[0]),
-        }
-    return {"outcome": "no_match", "card": card}
-
-
-@router.post("/scan/confirm")
-async def scan_confirm(body: ScanConfirmBody, actor: dict = Depends(require_staff)) -> Dict[str, Any]:
-    """Apply the Aadhaar overwrite to a Manual entry and stamp Arrival in one operation."""
-    db = get_db()
-    await _active_camp(db)
-    card = _decode_card(body.payload)
-    patient = await db.patients.find_one({"_id": ObjectId(body.patient_id)})
-    if not patient:
-        raise HTTPException(status_code=404, detail="Registration not found")
-    if not _is_manual(patient):
-        raise HTTPException(status_code=409, detail={
-            "code": "NOT_A_MANUAL_ENTRY",
-            "message": "This registration already has Aadhaar on file.",
-        })
+async def _apply_overwrite(db: AsyncIOMotorDatabase, patient: dict, card: dict) -> dict:
     person = None
     if card["aadhaar_last4"] and card["dob"]:
         person, _ = await _resolve_person({
@@ -189,23 +173,97 @@ async def scan_confirm(body: ScanConfirmBody, actor: dict = Depends(require_staf
             if existing:
                 raise _dup_409(existing)
         raise
-    patient = await db.patients.find_one({"_id": patient["_id"]})
-    arrived = await _stamp_arrival(db, patient, str(actor["_id"]))
+    return await db.patients.find_one({"_id": patient["_id"]})
+
+
+@router.post("/scan")
+async def scan(
+    body: ScanBody,
+    actor: dict = Depends(require_staff),
+    roster: Annotated[Optional[dict], Depends(on_desk_volunteer)] = None,
+) -> Dict[str, Any]:
+    """Resolve a camp-day Lock against the active camp. Never creates a registration."""
+    db = get_db()
+    camp = await _active_camp(db)
+    card = _decode_card(body.payload)
+    person = await _known_person(db, card)
+    hits = await _duplicate_hits(db, camp["_id"], _card_as_register_body(card), person)
+    roster_id = str(roster["_id"]) if roster else None
+
+    scanned_hits = [h for h in hits if _is_scanned_row(h)]
+    if scanned_hits:
+        arrived = await _stamp_arrival(db, scanned_hits[0], str(actor["_id"]), roster_id)
+        return {"outcome": "arrived", "registration": ser_patient(arrived)}
+
+    manual_hits = [h for h in hits if _is_manual(h)]
+    if len(manual_hits) > 1:
+        return {"outcome": "ambiguous", "registrations": [ser_patient(h) for h in manual_hits]}
+    if len(manual_hits) == 1:
+        diff = _material_diff(card, manual_hits[0])
+        if not diff:
+            patient = await _apply_overwrite(db, manual_hits[0], card)
+            arrived = await _stamp_arrival(db, patient, str(actor["_id"]), roster_id)
+            return {
+                "outcome": "arrived",
+                "registration": ser_patient(arrived),
+                "overwritten": True,
+            }
+        return {
+            "outcome": "mismatch_review",
+            "registration": ser_patient(manual_hits[0]),
+            "card": card,
+            "diff": diff,
+        }
+    return {"outcome": "no_match", "card": card}
+
+
+@router.post("/scan/confirm")
+async def scan_confirm(
+    body: ScanConfirmBody,
+    actor: dict = Depends(require_staff),
+    roster: Annotated[Optional[dict], Depends(on_desk_volunteer)] = None,
+) -> Dict[str, Any]:
+    """Apply the Aadhaar overwrite to a Manual entry and stamp Arrival in one operation."""
+    db = get_db()
+    await _active_camp(db)
+    card = _decode_card(body.payload)
+    patient = await db.patients.find_one({"_id": ObjectId(body.patient_id)})
+    if not patient:
+        raise HTTPException(status_code=404, detail="Registration not found")
+    if not _is_manual(patient):
+        raise HTTPException(status_code=409, detail={
+            "code": "NOT_A_MANUAL_ENTRY",
+            "message": "This registration already has Aadhaar on file.",
+        })
+    patient = await _apply_overwrite(db, patient, card)
+    arrived = await _stamp_arrival(
+        db, patient, str(actor["_id"]), str(roster["_id"]) if roster else None,
+    )
     return {"outcome": "arrived", "registration": ser_patient(arrived)}
 
 
 @router.post("/arrive/{patient_id}")
-async def arrive(patient_id: str, actor: dict = Depends(require_staff)) -> Dict[str, Any]:
+async def arrive(
+    patient_id: str,
+    actor: dict = Depends(require_staff),
+    roster: Annotated[Optional[dict], Depends(on_desk_volunteer)] = None,
+) -> Dict[str, Any]:
     db = get_db()
     p = await db.patients.find_one({"_id": ObjectId(patient_id)})
     if not p:
         raise HTTPException(status_code=404, detail="Registration not found")
-    arrived = await _stamp_arrival(db, p, str(actor["_id"]))
+    arrived = await _stamp_arrival(
+        db, p, str(actor["_id"]), str(roster["_id"]) if roster else None,
+    )
     return {"registration": ser_patient(arrived)}
 
 
 @router.post("/print/{patient_id}")
-async def print_prescription(patient_id: str, actor: dict = Depends(require_staff)) -> Dict[str, Any]:
+async def print_prescription(
+    patient_id: str,
+    actor: dict = Depends(require_staff),
+    roster: Annotated[Optional[dict], Depends(on_desk_volunteer)] = None,
+) -> Dict[str, Any]:
     db = get_db()
     p = await db.patients.find_one({"_id": ObjectId(patient_id)})
     if not p:
@@ -230,7 +288,11 @@ async def print_prescription(patient_id: str, actor: dict = Depends(require_staf
     if not p.get("printed_at"):
         await db.patients.update_one(
             {"_id": p["_id"], "printed_at": None},
-            {"$set": {"printed_at": now_utc(), "checked_in_by": str(actor["_id"])}},
+            {"$set": {
+                "printed_at": now_utc(),
+                "checked_in_by": str(actor["_id"]),
+                "printed_roster_id": str(roster["_id"]) if roster else None,
+            }},
         )
         p = await db.patients.find_one({"_id": p["_id"]})
 
@@ -254,7 +316,11 @@ async def print_prescription(patient_id: str, actor: dict = Depends(require_staf
 
 
 @router.post("/mark-seen/{patient_id}")
-async def mark_seen(patient_id: str, actor: dict = Depends(require_staff)) -> Dict[str, Any]:
+async def mark_seen(
+    patient_id: str,
+    actor: dict = Depends(require_staff),
+    roster: Annotated[Optional[dict], Depends(on_desk_volunteer)] = None,
+) -> Dict[str, Any]:
     db = get_db()
     p = await db.patients.find_one({"_id": ObjectId(patient_id)})
     if not p:
@@ -273,14 +339,23 @@ async def mark_seen(patient_id: str, actor: dict = Depends(require_staff)) -> Di
         return {"registration": ser_patient(p), "changed": False}
     await db.patients.update_one(
         {"_id": p["_id"], "seen_at": None},
-        {"$set": {"queue_status": "seen", "seen_at": now_utc(), "seen_by": str(actor["_id"])}},
+        {"$set": {
+            "queue_status": "seen",
+            "seen_at": now_utc(),
+            "seen_by": str(actor["_id"]),
+            "seen_roster_id": str(roster["_id"]) if roster else None,
+        }},
     )
     p = await db.patients.find_one({"_id": p["_id"]})
     return {"registration": ser_patient(p), "changed": True}
 
 
 @router.post("/undo-seen/{patient_id}")
-async def undo_seen(patient_id: str, actor: dict = Depends(require_staff)) -> Dict[str, Any]:
+async def undo_seen(
+    patient_id: str,
+    actor: dict = Depends(require_staff),
+    roster: Annotated[Optional[dict], Depends(on_desk_volunteer)] = None,
+) -> Dict[str, Any]:
     db = get_db()
     p = await db.patients.find_one({"_id": ObjectId(patient_id)})
     if not p:
@@ -293,7 +368,9 @@ async def undo_seen(patient_id: str, actor: dict = Depends(require_staff)) -> Di
         raise HTTPException(status_code=409, detail="Cannot undo: clinical transcription exists")
     updated = await db.patients.find_one_and_update(
         {"_id": p["_id"], "seen_at": {"$ne": None}},
-        {"$set": {"queue_status": "arrived", "seen_at": None, "seen_by": None}},
+        {"$set": {
+            "queue_status": "arrived", "seen_at": None, "seen_by": None, "seen_roster_id": None,
+        }},
         return_document=True,
     )
     if updated is None:
@@ -306,6 +383,7 @@ async def undo_seen(patient_id: str, actor: dict = Depends(require_staff)) -> Di
                 "queue_status": "seen",
                 "seen_at": p["seen_at"],
                 "seen_by": p.get("seen_by"),
+                "seen_roster_id": p.get("seen_roster_id"),
             }},
         )
         raise HTTPException(status_code=409, detail="Cannot undo: clinical transcription exists")

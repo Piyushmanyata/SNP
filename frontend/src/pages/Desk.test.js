@@ -3,6 +3,13 @@ import ReactDOM from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import Desk from "./Desk";
 import api from "../lib/api";
+import { ROSTER_STORAGE_KEY } from "../lib/roster";
+
+const mockAuth = { user: { id: "u1", name: "Lead", role: "team_lead" } };
+
+jest.mock("../context/AuthContext", () => ({
+  useAuth: () => mockAuth,
+}));
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -107,8 +114,13 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = ReactDOM.createRoot(container);
   jest.clearAllMocks();
+  sessionStorage.clear();
+  mockAuth.user = { id: "u1", name: "Lead", role: "team_lead" };
 
   api.get.mockImplementation((url) => {
+    if (url === "/roster") {
+      return Promise.resolve({ data: { entries: [{ id: "r-1", name: "Ramesh Kumar" }] } });
+    }
     if (url === "/kpis") {
       return Promise.resolve({ data: { registered: 45, seen: 30, pending: 15 } });
     }
@@ -666,6 +678,59 @@ describe("Desk page", () => {
     act(() => { deskScanner().parentNode.querySelector('[data-testid="mock-failure-trigger"]').click(); });
     expect(container.querySelector('[data-testid="door-manual-form"]')).not.toBeNull();
     expect(container.querySelectorAll('[data-testid="mock-aadhaar-scanner"]').length).toBe(1);
+  });
+
+  test("camp-day desk shows wedge-panel and hides scanner behind camera-fallback", async () => {
+    await renderDesk();
+    expect(container.querySelector('[data-testid="wedge-panel"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="camera-fallback"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="camera-fallback"] [data-testid="mock-aadhaar-scanner"]')).not.toBeNull();
+  });
+
+  async function fireBurst(text) {
+    let t = Number(performance.now()) || 0;
+    const spy = jest.spyOn(performance, "now").mockImplementation(() => t);
+    await act(async () => {
+      for (const ch of text) {
+        t += 10;
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: ch, bubbles: true, cancelable: true }));
+      }
+      t += 10;
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    spy.mockRestore();
+  }
+
+  test("a wedge burst posts /desk/scan", async () => {
+    api.post.mockResolvedValueOnce({ data: { outcome: "arrived", registration: ARRIVED } });
+    await renderDesk();
+    await fireBurst(CARD_PAYLOAD);
+    expect(api.post).toHaveBeenCalledWith("/desk/scan", { payload: CARD_PAYLOAD });
+  });
+
+  test("two NOT_A_CARD bursts reveal the typed form", async () => {
+    await renderDesk();
+    const rejectCard = () => api.post.mockRejectedValueOnce({
+      response: { status: 400, data: { detail: { code: "NOT_A_CARD", message: "not a card" } } },
+    });
+    rejectCard();
+    await fireBurst("X".repeat(24));
+    expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
+    rejectCard();
+    await fireBurst("Y".repeat(24));
+    expect(container.querySelector('[data-testid="door-manual-form"]')).not.toBeNull();
+  });
+
+  test("a 428 re-opens the picker", async () => {
+    mockAuth.user = { id: "u1", name: "Desk 1", role: "volunteer" };
+    sessionStorage.setItem(ROSTER_STORAGE_KEY, JSON.stringify({ id: "r-1", name: "Ramesh Kumar" }));
+    api.post.mockRejectedValueOnce({
+      response: { data: { detail: { code: "ROSTER_REQUIRED", message: "Pick your name before posting." } } },
+    });
+    await renderDesk();
+    expect(document.querySelector('[data-testid="roster-search"]')).toBeNull();
+    await scanAtDoor();
+    expect(document.querySelector('[data-testid="roster-search"]')).not.toBeNull();
   });
 
   test("a Scan stall at the door reveals the typed form", async () => {

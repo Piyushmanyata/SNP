@@ -52,9 +52,9 @@ export function Field({ label, children, required, hint }) {
 const inputCls =
   "w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500";
 
-export function Input({ className = "", ...props }) {
-  return <input className={`${inputCls} ${className}`} {...props} />;
-}
+export const Input = React.forwardRef(function Input({ className = "", ...props }, ref) {
+  return <input ref={ref} className={`${inputCls} ${className}`} {...props} />;
+});
 
 export function Textarea({ className = "", ...props }) {
   return <textarea className={`${inputCls} py-2.5 min-h-[80px] ${className}`} {...props} />;

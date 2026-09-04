@@ -106,6 +106,7 @@ require_admin = require_roles("admin")
 require_staff = require_roles("admin", "team_lead", "volunteer")
 require_clinical = require_roles("admin", "clinical_desk_operator")
 require_any = require_roles("admin", "team_lead", "volunteer", "clinical_desk_operator")
+require_lead = require_roles("admin", "team_lead")
 
 
 def is_admin(user: dict) -> bool:

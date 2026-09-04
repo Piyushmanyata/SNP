@@ -1,13 +1,14 @@
 import io
 import csv
+from datetime import timedelta
 from typing import Any, Dict, List
 from bson import ObjectId
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from db import get_db
-from helpers import iso
-from security import require_admin, require_staff, require_any
+from helpers import iso, ist_day_bounds, now_utc, today_ist_str
+from security import require_admin, require_staff, require_any, require_lead
 
 router = APIRouter(prefix="/api", tags=["reports"])
 
@@ -33,39 +34,25 @@ async def leaderboard(actor: dict = Depends(require_staff)) -> Dict[str, Any]:
     db = get_db()
     camp = await db.camps.find_one({"is_active": True})
     if not camp:
-        return {"volunteers": [], "team_leads": []}
-
-    # 1 point per registration that reached 'seen', credited to original registrar,
-    # manual exceptions excluded
-    pipeline = [
-        {"$match": {"camp_id": camp["_id"], "queue_status": "seen",
-                    "manual_exception": None, "created_by": {"$ne": None}}},
-        {"$group": {"_id": "$created_by", "points": {"$sum": 1}}},
-    ]
-    agg = await db.patients.aggregate(pipeline).to_list(1000)
-    points_map = {r["_id"]: r["points"] for r in agg}
-
-    users = await db.users.find({"role": {"$in": ["volunteer", "team_lead"]}}).to_list(1000)
-    volunteers, tl_points = [], {}
-    for u in users:
-        uid = str(u["_id"])
-        pts = points_map.get(uid, 0)
-        if u["role"] == "volunteer":
-            volunteers.append({"name": u["name"], "points": pts, "team_lead_id": u.get("team_lead_id")})
-            tl = u.get("team_lead_id")
-            if tl:
-                tl_points[tl] = tl_points.get(tl, 0) + pts
-    team_leads = []
-    for u in users:
-        if u["role"] == "team_lead":
-            uid = str(u["_id"])
-            own = points_map.get(uid, 0)
-            rollup = tl_points.get(uid, 0)
-            team_leads.append({"name": u["name"], "points": own + rollup})
-
-    volunteers.sort(key=lambda x: x["points"], reverse=True)
-    team_leads.sort(key=lambda x: x["points"], reverse=True)
-    return {"volunteers": volunteers, "team_leads": team_leads}
+        return {"volunteers": []}
+    entries = await db.roster.find({"camp_id": camp["_id"]}).to_list(1000)
+    volunteers = []
+    for e in entries:
+        eid = str(e["_id"])
+        registrations = await db.patients.count_documents(
+            {"camp_id": camp["_id"], "created_roster_id": eid}
+        )
+        arrivals = await db.patients.count_documents(
+            {"camp_id": camp["_id"], "arrived_roster_id": eid}
+        )
+        volunteers.append({
+            "name": e["name"],
+            "registrations": registrations,
+            "arrivals": arrivals,
+            "points": registrations + arrivals,
+        })
+    volunteers.sort(key=lambda x: (-x["points"], x["name"]))
+    return {"volunteers": volunteers}
 
 
 EXPORT_COLUMNS = [
@@ -136,6 +123,96 @@ async def export_camp_records(camp_id: str | None = None, actor: dict = Depends(
     buf.seek(0)
     return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": "attachment; filename=camp_records.csv"})
+
+
+@router.get("/board")
+async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
+    db = get_db()
+    empty = {
+        "camp": None, "day": None, "arrived_today": 0, "seen_today": 0,
+        "transcription_backlog": 0, "desks": [],
+        "lines": {"medicine": 0, "specs_fixed": 0, "specs_made": 0, "ot": 0},
+        "next_ot_day": None, "next_specs_day": None, "sms_failed_today": 0,
+    }
+    camp = await db.camps.find_one({"is_active": True})
+    if not camp:
+        return empty
+    today = today_ist_str()
+    start, end = ist_day_bounds(today)
+    now = now_utc()
+    day = await db.camp_days.find_one({"camp_id": camp["_id"], "day_date": today})
+    arrived_today = await db.patients.count_documents(
+        {"camp_id": camp["_id"], "arrived_at": {"$gte": start, "$lt": end}}
+    )
+    seen_today = await db.patients.count_documents(
+        {"camp_id": camp["_id"], "seen_at": {"$gte": start, "$lt": end}}
+    )
+    seen_rows = await db.patients.find(
+        {"camp_id": camp["_id"], "seen_at": {"$gte": start, "$lt": end}}
+    ).to_list(100000)
+    seen_ids = [p["_id"] for p in seen_rows]
+    tx_rows = await db.transcriptions.find({"patient_id": {"$in": seen_ids}}).to_list(100000) if seen_ids else []
+    tx_ids = {t["patient_id"] for t in tx_rows}
+    backlog = len([i for i in seen_ids if i not in tx_ids])
+    desks = []
+    users = await db.users.find({"role": "volunteer", "disabled_at": None}).to_list(1000)
+    users.sort(key=lambda u: u.get("name") or "")
+    for u in users:
+        uid = str(u["_id"])
+        last_60m = await db.patients.count_documents({
+            "arrived_by": uid, "arrived_at": {"$gte": now - timedelta(minutes=60)},
+        })
+        last_15m = await db.patients.count_documents({
+            "arrived_by": uid, "arrived_at": {"$gte": now - timedelta(minutes=15)},
+        })
+        today_arrivals = await db.patients.find({
+            "arrived_by": uid, "arrived_at": {"$gte": start, "$lt": end},
+        }).to_list(10000)
+        last_at = max((p["arrived_at"] for p in today_arrivals), default=None)
+        desks.append({
+            "account_id": uid,
+            "name": u.get("name"),
+            "last_15m": last_15m,
+            "last_60m": last_60m,
+            "last_arrival_at": iso(last_at),
+            "quiet": last_15m == 0,
+        })
+    lines = {"medicine": 0, "specs_fixed": 0, "specs_made": 0, "ot": 0}
+    fulfilments = await db.fulfilments.find(
+        {"created_at": {"$gte": start, "$lt": end}}
+    ).to_list(100000)
+    for f in fulfilments:
+        k = f.get("item_type")
+        if k in lines:
+            lines[k] += 1
+
+    async def _next_day(coll):
+        rows = await coll.find({
+            "camp_id": camp["_id"], "day_date": {"$gte": today},
+        }).to_list(1000)
+        if not rows:
+            return None
+        chosen = min(rows, key=lambda d: d["day_date"])
+        return {
+            "day_date": chosen["day_date"],
+            "seats_left": chosen.get("seat_limit", 0) - chosen.get("seats_taken", 0),
+        }
+
+    sms_failed_today = await db.reminder_ledger.count_documents(
+        {"status": "failed", "created_at": {"$gte": start, "$lt": end}}
+    )
+    return {
+        "camp": {"id": str(camp["_id"]), "name": camp["name"]},
+        "day": {"id": str(day["_id"]), "day_date": day["day_date"]} if day else None,
+        "arrived_today": arrived_today,
+        "seen_today": seen_today,
+        "transcription_backlog": backlog,
+        "desks": desks,
+        "lines": lines,
+        "next_ot_day": await _next_day(db.ot_schedule_days),
+        "next_specs_day": await _next_day(db.specs_collection_days),
+        "sms_failed_today": sms_failed_today,
+    }
 
 
 @router.get("/health")

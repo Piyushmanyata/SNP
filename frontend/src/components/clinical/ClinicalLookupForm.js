@@ -8,15 +8,18 @@ export function ClinicalLookupForm({
   doLookup,
   error,
   banner,
+  inputRef,
 }) {
   return (
     <Card className="mb-5">
       <form onSubmit={doLookup} className="flex gap-2">
         <Input
+          ref={inputRef}
           value={lookup}
           onChange={(e) => setLookup(e.target.value)}
           placeholder="Type Reg # or scan patient QR (USB wedge)"
           data-testid="clinical-lookup-input"
+          autoComplete="off"
         />
         <Button type="submit" variant="secondary" data-testid="clinical-lookup-button">
           <ScanLine className="w-5 h-5" /> Find

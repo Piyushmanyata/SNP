@@ -35,6 +35,12 @@ def tomorrow_ist_str() -> str:
     return (date.fromisoformat(today_ist_str()) + timedelta(days=1)).isoformat()
 
 
+def ist_day_bounds(day_str: str) -> tuple[datetime, datetime]:
+    start_ist = datetime.strptime(day_str, "%Y-%m-%d").replace(tzinfo=IST)
+    end_ist = start_ist + timedelta(days=1)
+    return start_ist.astimezone(timezone.utc), end_ist.astimezone(timezone.utc)
+
+
 # ---- normalization ----
 
 def normalize_name(name: str) -> str:

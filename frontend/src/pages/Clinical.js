@@ -1,10 +1,13 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import api, { formatApiError, errorPayload } from "../lib/api";
 import logger from "../lib/logger";
 import Layout from "../components/Layout";
+import RosterPicker from "../components/RosterPicker";
 import { useAuth } from "../context/AuthContext";
 import { OPERATOR_LINES, effectiveLine, lineLabel, writeSessionLine } from "../lib/operatorLines";
+import { clearRoster, needsRoster, readRoster } from "../lib/roster";
+import { useWedgeBurst } from "../components/aadhaar";
 import {
   ClinicalLookupForm,
   PatientSummaryCard,
@@ -38,9 +41,15 @@ const emptyRx = {
   ot_notes: "",
 };
 
+function isRosterDenied(err) {
+  const code = errorPayload(err)?.code;
+  return code === "ROSTER_REQUIRED" || code === "ROSTER_INVALID";
+}
+
 export default function Clinical() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const [roster, setRoster] = useState(readRoster);
   const [line, setLine] = useState(() => effectiveLine(user));
   const [picking, setPicking] = useState(() => !effectiveLine(user));
   const [lookup, setLookup] = useState("");
@@ -54,6 +63,8 @@ export default function Clinical() {
   const [busy, setBusy] = useState(false);
   const [showCorrection, setShowCorrection] = useState(false);
   const [history, setHistory] = useState(null);
+  const firstFieldRef = useRef(null);
+  const lookupRef = useRef(null);
 
   useEffect(() => {
     const next = effectiveLine(user);
@@ -93,15 +104,14 @@ export default function Clinical() {
       });
   }, []);
 
-  const doLookup = useCallback(async (e) => {
-    e?.preventDefault();
+  const lookupValue = useCallback(async (value) => {
     setError("");
     setBanner("");
     setHistory(null);
-    if (!lookup.trim()) return;
+    if (!value.trim()) return;
     try {
       const { data: resData } = await api.post("/clinical/lookup", {
-        value: lookup.trim(),
+        value: value.trim(),
       });
       setData(resData);
       setRx(
@@ -115,12 +125,29 @@ export default function Clinical() {
             }
           : emptyRx
       );
+      if (line === "rx") {
+        setTimeout(() => firstFieldRef.current?.focus(), 0);
+      }
     } catch (err) {
+      if (isRosterDenied(err)) { clearRoster(); setRoster(null); return; }
       const p = errorPayload(err);
       setData(null);
       setError(p?.message || formatApiError(err));
     }
-  }, [lookup]);
+  }, [line]);
+
+  const doLookup = useCallback((e) => {
+    e?.preventDefault();
+    lookupValue(lookup.trim());
+  }, [lookup, lookupValue]);
+
+  useWedgeBurst({
+    enabled: !picking,
+    onBurst: (v) => {
+      setLookup(v);
+      lookupValue(v);
+    },
+  });
 
   const reload = useCallback(async () => {
     if (!lookup.trim()) return;
@@ -141,12 +168,14 @@ export default function Clinical() {
           : emptyRx
       );
     } catch (err) {
+      if (isRosterDenied(err)) { clearRoster(); setRoster(null); return; }
       logger.warn("Failed to reload clinical data:", err);
     }
   }, [lookup]);
 
   const saveRx = useCallback(async () => {
     if (!data?.registration?.id) return;
+    const regNo = data.registration.reg_no;
     setBusy(true);
     setError("");
     try {
@@ -154,14 +183,23 @@ export default function Clinical() {
         patient_id: data.registration.id,
         ...rx,
       });
-      setBanner("Transcription saved.");
-      await reload();
+      if (line === "rx") {
+        setBanner(`Saved #${regNo}`);
+        setData(null);
+        setRx(emptyRx);
+        setLookup("");
+        setTimeout(() => lookupRef.current?.focus(), 0);
+      } else {
+        setBanner("Transcription saved.");
+        await reload();
+      }
     } catch (err) {
+      if (isRosterDenied(err)) { clearRoster(); setRoster(null); return; }
       setError(formatApiError(err));
     } finally {
       setBusy(false);
     }
-  }, [data?.registration?.id, rx, reload]);
+  }, [data?.registration?.id, data?.registration?.reg_no, rx, reload, line]);
 
   const toggleDiag = useCallback((opt) => {
     setRx((r) => ({
@@ -178,6 +216,7 @@ export default function Clinical() {
       const { data: h } = await api.get(`/clinical/history/${data.person.id}`);
       setHistory(h.history);
     } catch (err) {
+      if (isRosterDenied(err)) { clearRoster(); setRoster(null); return; }
       setError(formatApiError(err));
     }
   }, [data?.person?.id]);
@@ -192,9 +231,15 @@ export default function Clinical() {
     setHistory(null);
   }, []);
 
+  const picker = (
+    <RosterPicker open={needsRoster(user) && !roster} onPicked={setRoster} />
+  );
+  const handOver = () => setRoster(null);
+
   if (picking || !line) {
     return (
-      <Layout title="Clinical Desk">
+      <Layout title="Clinical Desk" onHandOver={handOver}>
+        {picker}
         <div className="max-w-md mx-auto" data-testid="line-picker">
           <p className="font-display font-bold text-slate-900 mb-3">Pick a station</p>
           <div className="grid gap-2">
@@ -216,7 +261,8 @@ export default function Clinical() {
   }
 
   return (
-    <Layout title="Clinical Desk">
+    <Layout title="Clinical Desk" onHandOver={handOver}>
+      {picker}
       <div className="flex items-center gap-2 mb-4" data-testid="line-chip">
         <Badge tone="emerald">{lineLabel(line)}</Badge>
         <Button size="sm" variant="ghost" onClick={() => setPicking(true)} data-testid="line-change-button">
@@ -230,6 +276,7 @@ export default function Clinical() {
         doLookup={doLookup}
         error={error}
         banner={banner}
+        inputRef={lookupRef}
       />
 
       {data && (
@@ -257,6 +304,7 @@ export default function Clinical() {
                 saveRx={saveRx}
                 hasExistingTranscription={!!data.transcription}
                 setShowCorrection={setShowCorrection}
+                firstFieldRef={firstFieldRef}
               />
             </>
           )}

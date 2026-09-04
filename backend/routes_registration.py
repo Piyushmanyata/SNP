@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Annotated, Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, HTTPException, Depends, Request
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
@@ -11,6 +11,7 @@ from helpers import (
 )
 from serializers import ser_patient
 from security import require_staff, require_any
+from routes_roster import on_desk_volunteer
 from aadhaar import decode_aadhaar
 import sms
 from datetime import timedelta
@@ -202,6 +203,7 @@ def _build_patient_document(
     age: int | None,
     actor_id: Optional[ObjectId | str],
     is_self: bool,
+    roster_id: Optional[str] = None,
 ) -> dict:
     norm = normalize_name(body.full_name)
     is_manual = (body.manual_entry or body.manual_exception) and not body.aadhaar_scanned
@@ -233,6 +235,7 @@ def _build_patient_document(
         "seen_by": None,
         "checked_in_by": None,
         "created_by": str(actor_id) if actor_id else None,
+        "created_roster_id": roster_id,
         "is_self_registered": is_self,
         "manual_entry": is_manual,
         "manual_exception": True if is_manual else None,
@@ -300,6 +303,7 @@ async def _create_registration(
     actor_id: Optional[ObjectId | str],
     is_self: bool,
     request: Request,
+    roster_id: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], bool]:
     db = get_db()
     camp, day = await _validate_camp_and_day(db, body.camp_day_id)
@@ -343,6 +347,7 @@ async def _create_registration(
         age=age,
         actor_id=actor_id,
         is_self=is_self,
+        roster_id=roster_id,
     )
     return await _insert_patient_document(db, doc, body, person, camp["_id"])
 
@@ -358,7 +363,12 @@ async def _confirm_registration(patient: Dict[str, Any]) -> None:
 
 
 @router.post("/register")
-async def desk_register(body: RegisterBody, request: Request, actor: dict = Depends(require_staff)) -> Dict[str, Any]:
+async def desk_register(
+    body: RegisterBody,
+    request: Request,
+    actor: dict = Depends(require_staff),
+    roster: Annotated[Optional[dict], Depends(on_desk_volunteer)] = None,
+) -> Dict[str, Any]:
     if not body.full_name or not body.full_name.strip():
         raise HTTPException(status_code=400, detail="Full name is required")
     if body.age is None and not body.aadhaar_scanned:
@@ -366,7 +376,10 @@ async def desk_register(body: RegisterBody, request: Request, actor: dict = Depe
     phone_norm = normalize_phone(body.phone)
     if not phone_norm or is_dummy_phone(phone_norm):
         raise HTTPException(status_code=400, detail="A valid 10-digit household mobile number is required")
-    patient, created = await _create_registration(body, actor["_id"], False, request)
+    patient, created = await _create_registration(
+        body, actor["_id"], False, request,
+        roster_id=str(roster["_id"]) if roster else None,
+    )
     if created:
         await _confirm_registration(patient)
     return {"registration": patient, "created": created}

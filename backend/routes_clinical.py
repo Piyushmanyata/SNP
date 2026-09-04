@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Annotated, Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from pymongo.errors import DuplicateKeyError
 from bson import ObjectId
@@ -8,6 +8,7 @@ from models import TranscriptionBody, FulfilmentBody, CorrectionBody, OtSchedule
 from helpers import now_utc, iso, DIAGNOSIS_OPTIONS
 from serializers import ser_patient, ser_person
 from security import require_clinical, require_admin, require_any
+from routes_roster import on_desk_volunteer
 import sms
 
 router = APIRouter(prefix="/api/clinical", tags=["clinical"])
@@ -139,7 +140,11 @@ async def clinical_lookup(body: dict, actor: dict = Depends(require_clinical)) -
 
 
 @router.post("/transcription")
-async def create_transcription(body: TranscriptionBody, actor: dict = Depends(require_clinical)) -> Dict[str, Any]:
+async def create_transcription(
+    body: TranscriptionBody,
+    actor: dict = Depends(require_clinical),
+    roster: Annotated[Optional[dict], Depends(on_desk_volunteer)] = None,
+) -> Dict[str, Any]:
     db = get_db()
     p = await db.patients.find_one({"_id": ObjectId(body.patient_id)})
     if not p:
@@ -163,6 +168,7 @@ async def create_transcription(body: TranscriptionBody, actor: dict = Depends(re
             "ot_notes": body.ot_notes,
             "locked": False,
             "created_by": str(actor["_id"]),
+            "roster_id": str(roster["_id"]) if roster else None,
             "created_at": now_utc(),
         }
         try:
@@ -328,7 +334,13 @@ def _deferred_day_id(body: FulfilmentBody, item_type: str) -> Optional[ObjectId]
     return ObjectId(raw) if raw else None
 
 
-def _build_fulfilment_doc(body: FulfilmentBody, transcription_id: ObjectId | str, slip: dict | None, actor_id: str) -> dict:
+def _build_fulfilment_doc(
+    body: FulfilmentBody,
+    transcription_id: ObjectId | str,
+    slip: dict | None,
+    actor_id: str,
+    roster_id: Optional[str] = None,
+) -> dict:
     return {
         "transcription_id": transcription_id,
         "item_type": body.item_type,
@@ -338,6 +350,7 @@ def _build_fulfilment_doc(body: FulfilmentBody, transcription_id: ObjectId | str
         "ot_schedule_day_id": _deferred_day_id(body, "ot"),
         "specs_collection_day_id": _deferred_day_id(body, "specs_made"),
         "created_by": actor_id,
+        "roster_id": roster_id,
         "created_at": now_utc(),
     }
 
@@ -348,7 +361,11 @@ async def _ensure_transcription_locked(db: AsyncIOMotorDatabase, transcription: 
 
 
 @router.post("/fulfilment")
-async def record_fulfilment(body: FulfilmentBody, actor: dict = Depends(require_clinical)) -> Dict[str, Any]:
+async def record_fulfilment(
+    body: FulfilmentBody,
+    actor: dict = Depends(require_clinical),
+    roster: Annotated[Optional[dict], Depends(on_desk_volunteer)] = None,
+) -> Dict[str, Any]:
     db = get_db()
     t = await db.transcriptions.find_one({"_id": ObjectId(body.transcription_id)})
     if not t:
@@ -379,7 +396,10 @@ async def record_fulfilment(body: FulfilmentBody, actor: dict = Depends(require_
         )
     slip = await _process_deferral(db, t, body, prior)
 
-    doc = _build_fulfilment_doc(body, t["_id"], slip, str(actor["_id"]))
+    doc = _build_fulfilment_doc(
+        body, t["_id"], slip, str(actor["_id"]),
+        roster_id=str(roster["_id"]) if roster else None,
+    )
     keep_ot = doc["ot_schedule_day_id"] if body.status == "deferred" else None
     keep_specs = doc["specs_collection_day_id"] if body.status == "deferred" else None
     await _cleanup_prior_fulfilment(db, t["_id"], body.item_type, keep_ot=keep_ot, keep_specs=keep_specs)
@@ -446,7 +466,11 @@ async def get_slip(slip_id: str, actor: dict = Depends(require_clinical)) -> Dic
 
 
 @router.post("/correction")
-async def add_correction(body: CorrectionBody, actor: dict = Depends(require_clinical)) -> Dict[str, Any]:
+async def add_correction(
+    body: CorrectionBody,
+    actor: dict = Depends(require_clinical),
+    roster: Annotated[Optional[dict], Depends(on_desk_volunteer)] = None,
+) -> Dict[str, Any]:
     db = get_db()
     t = await db.transcriptions.find_one({"_id": ObjectId(body.transcription_id)})
     if not t:
@@ -457,6 +481,7 @@ async def add_correction(body: CorrectionBody, actor: dict = Depends(require_cli
         "reason": body.reason,
         "changes": body.changes,
         "created_by": str(actor["_id"]),
+        "roster_id": str(roster["_id"]) if roster else None,
         "created_at": now_utc(),
     }
     res = await db.corrections.insert_one(doc)

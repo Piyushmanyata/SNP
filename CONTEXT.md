@@ -5,7 +5,7 @@ Field medical camp operations: desk registration, presence, clinical fulfilment.
 ## Language
 
 **Aadhaar Secure QR**:
-The dense UIDAI Secure QR printed on a PVC Aadhaar card. This is the primary artefact the desk camera must read.
+The dense UIDAI Secure QR printed on a PVC Aadhaar card. This is the primary artefact the Registration desk must read.
 _Avoid_: Aadhaar QR (ambiguous — also used for e-Aadhaar, mAadhaar, and older XML QRs)
 
 **e-Aadhaar QR**:
@@ -20,17 +20,37 @@ _Avoid_: Aadhaar QR
 The older Aadhaar card QR that encodes XML attributes. Fallback artefact, not the optimisation target.
 _Avoid_: Aadhaar QR
 
+**Registration desk**:
+One laptop, one USB imager, one volunteer seat. Ten per camp day; pairs share one A4 printer. The USB imager is the primary capture device for Aadhaar Secure QR; the desk camera is the fallback.
+_Avoid_: reg station, station, desk (alone, when the clinical desks could be meant)
+
+**USB imager**:
+The 2D barcode scanner on a Registration desk that reads Aadhaar Secure QR and types the payload into the page as keystrokes. Primary capture device at the desk.
+_Avoid_: USB scanner (also used for 1D scanners that cannot read Secure QR), barcode gun
+
+**Desk account**:
+The login a Registration desk or a Fulfilment line desk uses for the day. One per desk, signed in once in the morning by a team lead, shared by every volunteer who sits there. Not a person. Team leads and admins sign in as themselves.
+_Avoid_: volunteer login, shared password, kiosk account
+
+**Volunteer roster**:
+The admin-kept list of volunteer names for a camp. A roster entry is a person, not a login; it has no password and no PIN.
+_Avoid_: staff list (that is the accounts), user list
+
+**On-desk volunteer**:
+The roster name a volunteer picks when they sit at a desk. It rides on every registration and clinical posting made at that desk until they hand over or a team lead clears it. A desk with no On-desk volunteer refuses to post. Honesty-based: nothing verifies the pick. The leaderboard counts by this name.
+_Avoid_: current user, operator (that is a clinical account), logged-in volunteer
+
 **Desk camera**:
-The volunteer-held phone camera at the registration desk. Primary capture device for Aadhaar Secure QR.
+The volunteer-held phone camera at a Registration desk. Fallback capture device for Aadhaar Secure QR when the USB imager cannot read the card. Primary capture at the door and for self-register.
 _Avoid_: patient camera, self-register camera
 
 **Desk phone**:
-A volunteer's own Android or iPhone used at the registration desk. Both platforms must read Aadhaar Secure QR.
+A volunteer's own Android or iPhone used at a Registration desk for the fallback ladder. Both platforms must read Aadhaar Secure QR.
 _Avoid_: camp-issued device, patient phone
 
 **Live scan**:
 Reading Aadhaar Secure QR through the desk-camera viewfinder.
-_Avoid_: scan (also used for photo upload and USB wedge)
+_Avoid_: scan (also used for photo upload and the USB imager)
 
 **Guide ROI**:
 The centered square on the live-scan preview, about 90% of the video's short edge, where the volunteer holds Aadhaar Secure QR. The first detect looks here at native pixels; a miss uses the full frame next. It is a place to look, not a smaller image.
@@ -64,9 +84,9 @@ _Avoid_: Soft Hold, stop camera (unless the stream is actually torn down)
 The volunteer gives the app a still image of the QR; the app reads the QR from the file.
 _Avoid_: scan, gallery scan
 
-**USB wedge**:
-A hardware scanner that types the QR payload into the page.
-_Avoid_: USB scanner as a synonym for desk camera
+**Wedge burst**:
+The keystroke stream a USB imager emits for one card: the whole payload followed by a terminator. On a camp day the Registration desk listens for it wherever focus is, with no mode to select and no field to click; the terminator fires Decode.
+_Avoid_: USB wedge (the old name for the fallback textarea), paste mode, manual USB mode
 
 **OT Schedule Day**:
 An admin-created day, unique per camp and date, on which deferred OT patients are assigned. It has a venue and a finite seat limit.
@@ -137,8 +157,12 @@ A Lock that matches exactly one Manual entry updates that registration in place.
 _Avoid_: merge, bind Aadhaar, rescan button
 
 **Mismatch review**:
-The camp-day screen shown when a Lock matches a registration whose stored fields differ from the card. Card values and stored values side by side; a volunteer or team lead confirms. Confirming applies the Aadhaar overwrite and stamps Arrival. There is no way to keep the stored values and no way to edit the card values.
+The camp-day screen shown when a Lock matches a registration whose stored fields differ materially from the card. Card values and stored values side by side; a volunteer or team lead confirms. Confirming applies the Aadhaar overwrite and stamps Arrival. There is no way to keep the stored values and no way to edit the card values. A Trivial diff never reaches this screen.
 _Avoid_: conflict resolution, merge screen, override prompt
+
+**Trivial diff**:
+A difference between a stored registration and the card that a Lock resolves on its own by applying the Aadhaar overwrite and stamping Arrival with no screen: letter case, spacing and punctuation, initials order in the name, age within one year, any field the registration never had, and the address (never an identity field). Anything else is material and goes to Mismatch review.
+_Avoid_: fuzzy match, close enough, auto-merge
 
 **Duplicate in camp**:
 A second registration in the same camp for the same person. Blocked when Person, last-4+name, last-4+DOB, or name+age+household phone already exists in that camp. There is no override.
@@ -151,6 +175,14 @@ _Avoid_: live feed, registration ticker, public patient list
 **Camp-day capacity**:
 Every camp day has a seat limit greater than zero; there is no unlimited day. The limit counts bookings, which Arrival never moves: a patient booked for one camp day who arrives on another is checked in on the day they came without consuming a seat there or releasing one on the day they left. Camp-day capacity is a planning number for footfall. OT Schedule Day and Specs collection day seats are surgical and workshop capacity, and those stay a hard block.
 _Avoid_: seats_taken (that counter is OT and Spectacles to be made only), unlimited day
+
+**Camp-day board**:
+The read-only page a team lead watches during a camp day. Per Registration desk, Arrivals in the last fifteen minutes and the last hour, with a desk that has gone quiet highlighted; the transcription backlog; each Fulfilment line's count today; seats left on the next OT Schedule Day and Specs collection day; SMS failures. Counts only, refreshes on its own, no actions and no patient names.
+_Avoid_: dashboard (that is the admin area), live feed, monitor, alerts (the board pushes nothing)
+
+**Transcription backlog**:
+Patients who have reached Seen today and have no transcription yet at Doctor's Rx. The number that says whether the specs desk is about to stall.
+_Avoid_: pending Rx, queue at Doctor's Rx (a physical queue is not the backlog)
 
 **Camp records export**:
 The single admin-only CSV for a camp, one row per patient including no-shows. Carries identity (name, age, gender, household phone, address, Aadhaar last-4, reg_no), the Manual entry mark, the registration / arrival / seen timestamps, diagnosis, BP and blood sugar, each eye's power, the status of each of the four Fulfilment lines with blank meaning the patient was never recorded at that desk, and the assigned clinical day and venue for each deferral. It is a wide file of patient data and is not downloadable by a volunteer.

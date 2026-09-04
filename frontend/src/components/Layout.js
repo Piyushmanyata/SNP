@@ -1,8 +1,10 @@
 import React from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { LogOut, Stethoscope } from "lucide-react";
 import { Badge } from "./ui";
+import { needsRoster, readRoster, clearRoster } from "../lib/roster";
+import { LEAD_ROLES } from "../constants/roles";
 
 const ROLE_LABELS = {
   admin: "Admin",
@@ -11,9 +13,10 @@ const ROLE_LABELS = {
   clinical_desk_operator: "Clinical Desk",
 };
 
-export default function Layout({ children, title }) {
+export default function Layout({ children, title, onHandOver }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const roster = needsRoster(user) ? readRoster() : null;
 
   return (
     <div className="min-h-screen">
@@ -34,7 +37,34 @@ export default function Layout({ children, title }) {
                 <p className="text-sm font-semibold leading-none">{user.name}</p>
                 <p className="text-[11px] text-slate-400 mt-1">{user.email}</p>
               </div>
+              {LEAD_ROLES.includes(user.role) && (
+                <Link
+                  to="/board"
+                  data-testid="board-link"
+                  className="min-h-[44px] px-3 rounded-xl text-sm font-semibold text-slate-300 hover:text-white hover:bg-slate-800 flex items-center"
+                >
+                  Board
+                </Link>
+              )}
               <Badge tone="emerald">{ROLE_LABELS[user.role] || user.role}</Badge>
+              {roster && (
+                <>
+                  <span data-testid="roster-name" className="text-sm font-semibold">
+                    {roster.name}
+                  </span>
+                  <button
+                    type="button"
+                    data-testid="roster-handover"
+                    className="min-h-[44px] min-w-[44px] px-3 rounded-xl text-sm font-semibold text-slate-300 hover:text-white hover:bg-slate-800"
+                    onClick={() => {
+                      clearRoster();
+                      onHandOver?.();
+                    }}
+                  >
+                    Hand over
+                  </button>
+                </>
+              )}
               <button
                 onClick={async () => { await logout(); navigate("/login"); }}
                 className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-slate-300 hover:text-white hover:bg-slate-800"

@@ -1,4 +1,5 @@
 import axios from "axios";
+import { readRoster } from "./roster";
 
 function isLoopback(host) {
   return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
@@ -28,6 +29,15 @@ export function backendOrigin() {
 const api = axios.create({
   baseURL: `${backendOrigin()}/api`,
   withCredentials: true,
+});
+
+api.interceptors.request.use((config) => {
+  const entry = readRoster();
+  if (entry) {
+    config.headers = config.headers || {};
+    config.headers["X-Roster-Id"] = entry.id;
+  }
+  return config;
 });
 
 export function formatApiError(err) {

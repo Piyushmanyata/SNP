@@ -77,7 +77,37 @@ services:
       - frontend
       - backend
 
+  backup:
+    image: mongo:7
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    environment:
+      DB_NAME: ${DB_NAME:?set DB_NAME}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-3600}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes:
+      - backups:/backups
+      - ./ops/backup.sh:/backup.sh:ro
+    command: sh /backup.sh
+
+  backup-sync:
+    image: rclone/rclone:1
+    restart: unless-stopped
+    depends_on:
+      - backup
+    env_file: ./backup.env
+    environment:
+      BACKUP_REMOTE: ${BACKUP_REMOTE:?set BACKUP_REMOTE, e.g. offbox:snp-backups}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-3600}
+    volumes:
+      - backups:/backups:ro
+    entrypoint: sh
+    command: -c 'while true; do rclone copy /backups "$BACKUP_REMOTE" --min-age 60s; sleep "$BACKUP_INTERVAL_SECONDS"; done'
+
 volumes:
   mongo_data:
   caddy_data:
   caddy_config:
+  backups:

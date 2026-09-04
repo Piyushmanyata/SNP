@@ -197,14 +197,15 @@ class TestScanResolution:
             mock_db = _mock(monkeypatch)
             _camp_id, (day_id,) = await _seed_camp(mock_db)
             reg = await _register(
-                day_id, full_name="Sunita Devi", age=48, aadhaar_last4="1234",
-                dob="1975-06-14", manual_entry=True,
+                day_id, full_name="Ramesh Kumar", age=48, aadhaar_last4="1234",
+                dob="1975-06-14", gender="M", manual_entry=True,
             )
             out = await scan(ScanBody(payload=CARD), actor=ACTOR)
             assert out["outcome"] == "mismatch_review"
             assert out["registration"]["reg_no"] == reg["reg_no"]
             assert out["card"]["full_name"] == "Sunita Devi"
-            assert {d["field"] for d in out["diff"]} >= {"age", "gender", "address"}
+            assert {d["field"] for d in out["diff"]} >= {"full_name", "age", "gender"}
+            assert "address" not in {d["field"] for d in out["diff"]}
             stored = await mock_db.patients.find_one({"_id": ObjectId(reg["id"])})
             assert stored["age"] == 48
             assert stored["arrived_at"] is None

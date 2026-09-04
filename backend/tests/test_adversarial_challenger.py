@@ -105,7 +105,35 @@ class MockCollection:
                 elif doc.get(k) != v:
                     return False
             else:
-                if doc.get(k) != v:
+                if isinstance(v, dict):
+                    dv = doc.get(k)
+                    for op, ov in v.items():
+                        if op in ("$gte", "$gt", "$lte", "$lt") and dv is None:
+                            return False
+                        if op == "$gte":
+                            if not (dv >= ov):
+                                return False
+                        elif op == "$gt":
+                            if not (dv > ov):
+                                return False
+                        elif op == "$lte":
+                            if not (dv <= ov):
+                                return False
+                        elif op == "$lt":
+                            if not (dv < ov):
+                                return False
+                        elif op == "$ne":
+                            if dv == ov:
+                                return False
+                        elif op == "$in":
+                            if dv not in ov:
+                                return False
+                        elif op == "$nin":
+                            if dv in ov:
+                                return False
+                        else:
+                            return False
+                elif doc.get(k) != v:
                     return False
         return True
 

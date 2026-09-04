@@ -19,6 +19,8 @@ export function SpecsMeasurementsGrid({ specsMeasurements = {}, onChange, disabl
               className="text-center px-1"
               value={specsMeasurements?.[k] || ""}
               disabled={disabled}
+              inputMode="decimal"
+              autoComplete="off"
               onChange={(e) =>
                 onChange?.({
                   ...specsMeasurements,

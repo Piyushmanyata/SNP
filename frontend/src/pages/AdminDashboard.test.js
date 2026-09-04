@@ -114,8 +114,7 @@ beforeEach(() => {
     if (url === "/leaderboard") {
       return Promise.resolve({
         data: {
-          volunteers: [{ user_id: "u-2", name: "Vol 1", points: 80 }],
-          team_leads: [{ user_id: "tl-1", name: "Lead One", points: 200 }],
+          volunteers: [{ name: "Vol 1", registrations: 50, arrivals: 30, points: 80 }],
         },
       });
     }

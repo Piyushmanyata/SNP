@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import api, { formatApiError } from "../lib/api";
 import Layout from "../components/Layout";
 import {
-  Button, Card, Input, Field, Alert, Modal, Stat, Badge, ErrorCard,
+  Button, Card, Input, Field, Alert, Modal, Stat, Badge, ErrorCard, Textarea,
 } from "../components/ui";
 import {
   Tent, Users, CalendarDays, Trophy, Download, Scissors, Glasses, Power, Trash2,
@@ -16,6 +16,7 @@ const TABS = [
   { id: "overview", label: "Overview", icon: ClipboardList },
   { id: "camps", label: "Camps & Days", icon: Tent },
   { id: "staff", label: "Staff", icon: Users },
+  { id: "roster", label: "Roster", icon: Users },
   { id: "template", label: "Rx Template", icon: FileText },
   { id: "ot", label: "OT & Specs", icon: Scissors },
   { id: "board", label: "Leaderboards", icon: Trophy },
@@ -41,6 +42,7 @@ export default function AdminDashboard() {
       {tab === "overview" && <Overview />}
       {tab === "camps" && <Camps />}
       {tab === "staff" && <Staff />}
+      {tab === "roster" && <Roster />}
       {tab === "template" && <TemplateEditor />}
       {tab === "ot" && <div className="space-y-5"><OtSchedule /><SpecsCollectionDays /></div>}
       {tab === "board" && <Leaderboards />}
@@ -328,6 +330,87 @@ function Staff() {
   );
 }
 
+function Roster() {
+  const [names, setNames] = useState("");
+  const [entries, setEntries] = useState([]);
+  const [camp, setCamp] = useState(null);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+
+  const load = useCallback(() => {
+    Promise.all([api.get("/camps/active"), api.get("/roster?include_disabled=true")])
+      .then(([a, r]) => {
+        setCamp(a.data.camp);
+        setEntries(r.data.entries || []);
+      })
+      .catch((e) => setErr(formatApiError(e)));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const add = useCallback(async () => {
+    setErr("");
+    setMsg("");
+    try {
+      const { data } = await api.post("/roster", {
+        camp_id: camp.id,
+        names: names.split("\n"),
+      });
+      setMsg(`Added ${data.entries.length}, skipped ${data.skipped.length}`);
+      setNames("");
+      load();
+    } catch (e) {
+      setErr(formatApiError(e));
+    }
+  }, [camp, names, load]);
+
+  const toggle = useCallback(async (entry) => {
+    try {
+      if (entry.disabled_at) await api.patch(`/roster/${entry.id}/enable`);
+      else await api.patch(`/roster/${entry.id}/disable`);
+      load();
+    } catch (e) {
+      setErr(formatApiError(e));
+    }
+  }, [load]);
+
+  return (
+    <div className="space-y-4">
+      {err && <Alert>{err}</Alert>}
+      {msg && <Alert tone="emerald">{msg}</Alert>}
+      <Card>
+        <Field label="One name per line">
+          <Textarea
+            data-testid="roster-names-input"
+            value={names}
+            onChange={(e) => setNames(e.target.value)}
+          />
+        </Field>
+        <Button className="mt-3" onClick={add} disabled={!camp} data-testid="roster-add-button">
+          Add names
+        </Button>
+      </Card>
+      <Card>
+        <div className="space-y-2">
+          {entries.map((e) => (
+            <div key={e.id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-200">
+              <span className="flex-1 font-semibold text-slate-900">{e.name}</span>
+              {e.disabled_at && <Badge tone="rose">Disabled</Badge>}
+              <Button
+                size="sm"
+                variant={e.disabled_at ? "primary" : "outline"}
+                data-testid={e.disabled_at ? `roster-enable-${e.id}` : `roster-disable-${e.id}`}
+                onClick={() => toggle(e)}
+              >
+                {e.disabled_at ? "Enable" : "Disable"}
+              </Button>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 function OtSchedule() {
   const [days, setDays] = useState([]);
   const [camp, setCamp] = useState(null);
@@ -436,6 +519,8 @@ function Board({ title, rows, testid }) {
               {i + 1}
             </span>
             <span className="flex-1 font-medium text-slate-800">{r.name}</span>
+            <Badge tone="slate">{r.registrations} registrations</Badge>
+            <Badge tone="slate">{r.arrivals} arrivals</Badge>
             <Badge tone="emerald">{r.points} pts</Badge>
           </div>
         ))}
@@ -455,9 +540,8 @@ function Leaderboards() {
   if (!data) return null;
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div className="grid grid-cols-1 gap-4">
       <Board title="Volunteers" rows={data.volunteers} testid="leaderboard-volunteers-table" />
-      <Board title="Team Leads" rows={data.team_leads} testid="leaderboard-team-leads-table" />
     </div>
   );
 }

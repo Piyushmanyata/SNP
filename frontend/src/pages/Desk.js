@@ -2,7 +2,11 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import api, { formatApiError, errorPayload } from "../lib/api";
 import Layout from "../components/Layout";
+import RosterPicker from "../components/RosterPicker";
+import { useAuth } from "../context/AuthContext";
+import { clearRoster, needsRoster, readRoster } from "../lib/roster";
 import AadhaarScanner from "../components/AadhaarScanner";
+import { useWedgeBurst } from "../components/aadhaar";
 import { ScanOutcome } from "../components/desk/ScanOutcome";
 import { v4 } from "../lib/uuid";
 import {
@@ -22,8 +26,15 @@ const EMPTY_REG_FORM = Object.freeze({
   dob: "",
 });
 
+function isRosterDenied(err) {
+  const code = errorPayload(err)?.code;
+  return code === "ROSTER_REQUIRED" || code === "ROSTER_INVALID";
+}
+
 export default function Desk() {
   const navigate = useNavigate();
+  const { user } = useAuth() || {};
+  const [roster, setRoster] = useState(readRoster);
   const [kpi, setKpi] = useState(null);
   const [loadErr, setLoadErr] = useState("");
   const [days, setDays] = useState([]);
@@ -42,6 +53,11 @@ export default function Desk() {
   const [doorPhone, setDoorPhone] = useState("");
   const [doorForm, setDoorForm] = useState(EMPTY_REG_FORM);
   const [doorReqId, setDoorReqId] = useState(v4());
+  const [scanning, setScanning] = useState(false);
+  const lastBurstRef = useRef({ payload: "", at: 0 });
+  const todayDay = days.find((d) => d.is_today);
+  const campDayMode = Boolean(todayDay?.printing_open);
+  const noCamp = !camp;
 
   const load = useCallback(async () => {
     setLoadErr("");
@@ -51,39 +67,65 @@ export default function Desk() {
       setCamp(a.data.camp);
       setDays(a.data.days || []);
     } catch (e) {
+      if (isRosterDenied(e)) { clearRoster(); setRoster(null); return; }
       setLoadErr(formatApiError(e));
     }
   }, []);
 
   useEffect(() => { load(); }, [load]);
 
+  const onDoorFailure = useCallback((outcome) => {
+    if (outcome === "garbage" || outcome === "not-aadhaar") {
+      setDoorFailures((n) => n + 1);
+    }
+  }, []);
+
+  const fillDoorForm = useCallback((card) => {
+    if (!card) return;
+    setDoorForm({
+      full_name: card.full_name || "",
+      age: card.age ?? "",
+      phone: doorPhone,
+      gender: card.gender || "",
+      address: card.address || "",
+      aadhaar_last4: card.aadhaar_last4 || "",
+      dob: card.dob || "",
+    });
+  }, [doorPhone]);
+
   const onScanned = useCallback(async (_card, payload) => {
     setBanner(""); setError(""); setSearchResults(null); setFound(null);
-    setDoorFailures(0);
-    if (_card) {
-      setDoorForm({
-        full_name: _card.full_name || "",
-        age: _card.age ?? "",
-        phone: doorPhone,
-        gender: _card.gender || "",
-        address: _card.address || "",
-        aadhaar_last4: _card.aadhaar_last4 || "",
-        dob: _card.dob || "",
-      });
-    }
+    fillDoorForm(_card);
     setScanPayload(payload);
+    setScanning(true);
     try {
       const { data } = await api.post("/desk/scan", { payload });
       setScanResult(data);
+      if (data.card) fillDoorForm(data.card);
       if (data.outcome === "arrived") {
-        setBanner(`Checked in #${data.registration.reg_no} — ${data.registration.full_name}`);
+        setDoorFailures(0);
+        const extra = data.overwritten ? " (card details updated)" : "";
+        setBanner(`Checked in #${data.registration.reg_no} — ${data.registration.full_name}${extra}`);
         await load();
       }
     } catch (err) {
+      if (isRosterDenied(err)) { clearRoster(); setRoster(null); return; }
+      if (errorPayload(err)?.code === "NOT_A_CARD") onDoorFailure("garbage");
       setScanResult(null);
       setError(formatApiError(err));
+    } finally {
+      setScanning(false);
     }
-  }, [load, doorPhone]);
+  }, [load, fillDoorForm, onDoorFailure]);
+
+  useWedgeBurst({
+    enabled: campDayMode && !showReg && !noCamp,
+    onBurst: (payload) => {
+      if (payload === lastBurstRef.current.payload && Date.now() - lastBurstRef.current.at < 3000) return;
+      lastBurstRef.current = { payload, at: Date.now() };
+      onScanned(null, payload);
+    },
+  });
 
   const confirmMismatch = useCallback(async () => {
     if (!scanResult?.registration) return;
@@ -97,6 +139,7 @@ export default function Desk() {
       setBanner(`Checked in #${data.registration.reg_no} — ${data.registration.full_name}`);
       await load();
     } catch (err) {
+      if (isRosterDenied(err)) { clearRoster(); setRoster(null); return; }
       setError(formatApiError(err));
     } finally {
       setBusy(false);
@@ -112,6 +155,7 @@ export default function Desk() {
       setFound(data.registration);
       setLookupVal("");
     } catch (err) {
+      if (isRosterDenied(err)) { clearRoster(); setRoster(null); return; }
       setFound(null);
       setError(formatApiError(err));
     }
@@ -124,7 +168,10 @@ export default function Desk() {
     try {
       const { data } = await api.get(`/patients/search?q=${encodeURIComponent(searchVal.trim())}`);
       setSearchResults(data.results);
-    } catch (err) { setError(formatApiError(err)); }
+    } catch (err) {
+      if (isRosterDenied(err)) { clearRoster(); setRoster(null); return; }
+      setError(formatApiError(err));
+    }
   }, [searchVal]);
 
   const act = useCallback(async (path, reg) => {
@@ -138,6 +185,7 @@ export default function Desk() {
       await load();
       return data.registration;
     } catch (err) {
+      if (isRosterDenied(err)) { clearRoster(); setRoster(null); return null; }
       setError(formatApiError(err));
       return null;
     }
@@ -149,14 +197,6 @@ export default function Desk() {
 
   const openPreReg = useCallback(() => { setShowReg(true); }, []);
 
-  const todayDay = days.find((d) => d.is_today);
-  const campDayMode = Boolean(todayDay?.printing_open);
-
-  const onDoorFailure = useCallback((outcome) => {
-    if (outcome === "garbage" || outcome === "not-aadhaar") {
-      setDoorFailures((n) => n + 1);
-    }
-  }, []);
   const onDoorStall = useCallback(() => setDoorFailures(2), []);
 
   const submitRegister = useCallback(async ({ form, scanned, dayId, reqId, walkIn: asWalkIn }) => {
@@ -211,6 +251,7 @@ export default function Desk() {
       setDoorPhone("");
       await load();
     } catch (err) {
+      if (isRosterDenied(err)) { clearRoster(); setRoster(null); return; }
       const payload = errorPayload(err);
       if (payload && payload.code === "DUPLICATE_IN_CAMP") {
         setError(`Already registered as #${payload.registration.reg_no}. Check them in instead.`);
@@ -243,6 +284,7 @@ export default function Desk() {
       setDoorReqId(v4());
       await load();
     } catch (err) {
+      if (isRosterDenied(err)) { clearRoster(); setRoster(null); return; }
       const payload = errorPayload(err);
       if (payload && payload.code === "DUPLICATE_IN_CAMP") {
         setError(`Already registered as #${payload.registration.reg_no}. Check them in instead.`);
@@ -252,12 +294,16 @@ export default function Desk() {
     } finally { setBusy(false); }
   }, [todayDay, days, doorForm, doorReqId, submitRegister, load]);
 
-  if (loadErr) return <Layout title="Desk"><ErrorCard message={loadErr} onRetry={load} /></Layout>;
+  const picker = (
+    <RosterPicker open={needsRoster(user) && !roster} onPicked={setRoster} />
+  );
+  const handOver = () => setRoster(null);
 
-  const noCamp = !camp;
+  if (loadErr) return <Layout title="Desk" onHandOver={handOver}>{picker}<ErrorCard message={loadErr} onRetry={load} /></Layout>;
 
   return (
-    <Layout title="Registration Desk">
+    <Layout title="Registration Desk" onHandOver={handOver}>
+      {picker}
       {noCamp && <Alert tone="amber" className="mb-4">No active camp. Ask an admin to activate one.</Alert>}
 
       <div className={`grid gap-3 mb-5 ${campDayMode ? "grid-cols-3" : "grid-cols-1"}`}>
@@ -297,6 +343,7 @@ export default function Desk() {
         doorForm={doorForm}
         setDoorForm={setDoorForm}
         submitDoorManual={submitDoorManual}
+        scanning={scanning}
       />}
 
       <Card className="mb-5" data-desk-card="find" data-testid="desk-card-find">
@@ -368,6 +415,7 @@ export default function Desk() {
         onDone={load}
         setBanner={setBanner}
         onRegistered={setFound}
+        onRosterDenied={() => { clearRoster(); setRoster(null); }}
       />
     </Layout>
   );
@@ -376,9 +424,12 @@ export default function Desk() {
 function DoorScanCard({
   noCamp, onScanned, onDoorFailure, onDoorStall, error, banner, scanResult, busy,
   print, markSeen, confirmMismatch, doorPhone, setDoorPhone, submitDoorWalkIn,
-  doorFailures, doorForm, setDoorForm, submitDoorManual, collapsed,
+  doorFailures, doorForm, setDoorForm, submitDoorManual, collapsed, scanning,
 }) {
   const showManual = doorFailures >= 2;
+  const scanner = (
+    <AadhaarScanner onScanned={onScanned} onFailure={onDoorFailure} onScanStall={onDoorStall} disabled={noCamp} />
+  );
   return (
     <Card className={collapsed ? "mt-2" : "mb-5"} data-desk-card={collapsed ? undefined : "scan"} data-testid="desk-card-scan">
       {!collapsed && (
@@ -387,7 +438,11 @@ function DoorScanCard({
           <h3 className="font-display font-bold text-slate-900">Scan at the door</h3>
         </div>
       )}
-      <AadhaarScanner onScanned={onScanned} onFailure={onDoorFailure} onScanStall={onDoorStall} disabled={noCamp} />
+      {collapsed ? scanner : (
+        <div data-testid="wedge-panel">
+          <Badge>{scanning ? "Decoding…" : "Ready for USB scan"}</Badge>
+        </div>
+      )}
       {error && <Alert className="mt-3">{error}</Alert>}
       {banner && <Alert tone="emerald" className="mt-3">{banner}</Alert>}
       <div className="mt-3">
@@ -402,6 +457,12 @@ function DoorScanCard({
           onWalkIn={submitDoorWalkIn}
         />
       </div>
+      {!collapsed && (
+        <details className="mt-3" data-testid="camera-fallback">
+          <summary>Use phone camera</summary>
+          {scanner}
+        </details>
+      )}
       {showManual && (
         <div className="mt-4 space-y-3" data-testid="door-manual-form">
           <p className="text-sm font-semibold text-amber-800" data-testid="manual-entry-note">Manual entry</p>
@@ -472,7 +533,7 @@ export function PatientRow({ p, onPrint, onMarkSeen, onUndo }) {
   );
 }
 
-export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, onRegistered }) {
+export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, onRegistered, onRosterDenied }) {
   const [form, setForm] = useState(EMPTY_REG_FORM);
   const [scanned, setScanned] = useState(false);
   const [dayId, setDayId] = useState("");
@@ -517,6 +578,19 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
     }
   }, []);
 
+  useWedgeBurst({
+    enabled: open,
+    onBurst: async (payload) => {
+      try {
+        const { data } = await api.post("/aadhaar/decode", { payload });
+        if (data.outcome === "card") onScan(data.data);
+        else onFailure(data.outcome);
+      } catch {
+        onFailure("garbage");
+      }
+    },
+  });
+
   const onScanStall = useCallback(() => setFailures(2), []);
 
   const showForm = scanned || failures >= 2;
@@ -551,6 +625,10 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
       onClose(); onDone();
     } catch (err) {
       const payload = errorPayload(err);
+      if (payload && (payload.code === "ROSTER_REQUIRED" || payload.code === "ROSTER_INVALID")) {
+        onRosterDenied?.();
+        return;
+      }
       if (payload && payload.code === "DUPLICATE_IN_CAMP") {
         setError(`Already registered as #${payload.registration.reg_no}. Check them in instead.`);
       } else if (payload && payload.code === "AMBIGUOUS_MANUAL_ENTRY") {
@@ -560,7 +638,7 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
         setError(formatApiError(err));
       }
     } finally { setBusy(false); }
-  }, [form, scanned, dayId, reqId, walkIn, onClose, onDone, onRegistered, setBanner]);
+  }, [form, scanned, dayId, reqId, walkIn, onClose, onDone, onRegistered, onRosterDenied, setBanner]);
 
   return (
     <Modal open={open} onClose={onClose} title={walkIn ? "Register walk-in" : "New Registration"} size="lg">
