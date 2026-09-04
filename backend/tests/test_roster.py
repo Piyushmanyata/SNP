@@ -42,6 +42,7 @@ PASS = "DeskRoster1!"
 ADMIN = {"_id": ObjectId(), "role": "admin"}
 TEAM_LEAD = {"_id": ObjectId(), "role": "team_lead", "email": "lead@snpcamps.org"}
 VOLUNTEER = {"_id": ObjectId(), "role": "volunteer", "email": "desk1@snpcamps.org"}
+CLINICAL = {"_id": ObjectId(), "role": "clinical_desk_operator", "email": "rx1@snpcamps.org"}
 
 
 def _async_noop():
@@ -184,6 +185,53 @@ class TestOnDeskVolunteerHeader:
             assert r.status_code != 428
             assert r.status_code == 200
             assert r.json()["outcome"] == "no_match"
+        asyncio.run(run())
+
+    def test_clinical_operator_without_header_is_428_required(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            await _seed_camp(mock_db)
+            await _user(mock_db, CLINICAL, name="Rx 1", line="rx")
+            client = _client(monkeypatch, mock_db)
+            r = client.post(
+                "/api/clinical/transcription",
+                json={"patient_id": str(ObjectId()), "diagnosis_options": []},
+                headers=_auth(CLINICAL),
+            )
+            assert r.status_code == 428
+            assert r.json()["detail"]["code"] == "ROSTER_REQUIRED"
+        asyncio.run(run())
+
+    def test_print_without_header_is_428_required(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            await _seed_camp(mock_db)
+            await _user(mock_db, VOLUNTEER, name="Desk 1")
+            client = _client(monkeypatch, mock_db)
+            r = client.post(
+                f"/api/desk/print/{ObjectId()}",
+                headers=_auth(VOLUNTEER),
+            )
+            assert r.status_code == 428
+            assert r.json()["detail"]["code"] == "ROSTER_REQUIRED"
+        asyncio.run(run())
+
+    def test_foreign_camp_roster_id_is_428_invalid(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            _patch_db(monkeypatch, mock_db)
+            camp_id, _days = await _seed_camp(mock_db)
+            await _user(mock_db, VOLUNTEER, name="Desk 1")
+            other = ObjectId()
+            await mock_db.roster.insert_one({
+                "_id": other, "camp_id": ObjectId(), "name": "Foreign",
+                "name_normalized": "foreign", "disabled_at": None,
+            })
+            client = _client(monkeypatch, mock_db)
+            headers = {**_auth(VOLUNTEER), "X-Roster-Id": str(other)}
+            r = client.post("/api/desk/scan", json={"payload": CARD}, headers=headers)
+            assert r.status_code == 428
+            assert r.json()["detail"]["code"] == "ROSTER_INVALID"
         asyncio.run(run())
 
 

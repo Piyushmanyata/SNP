@@ -708,6 +708,20 @@ describe("Desk page", () => {
     expect(api.post).toHaveBeenCalledWith("/desk/scan", { payload: CARD_PAYLOAD });
   });
 
+  test("a second identical burst within 3 s is ignored", async () => {
+    api.post.mockResolvedValue({ data: { outcome: "arrived", registration: ARRIVED } });
+    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(1_000_000);
+    await renderDesk();
+    await fireBurst(CARD_PAYLOAD);
+    await fireBurst(CARD_PAYLOAD);
+    const scans = api.post.mock.calls.filter((c) => c[0] === "/desk/scan");
+    expect(scans).toHaveLength(1);
+    nowSpy.mockReturnValue(1_000_000 + 3001);
+    await fireBurst(CARD_PAYLOAD);
+    expect(api.post.mock.calls.filter((c) => c[0] === "/desk/scan")).toHaveLength(2);
+    nowSpy.mockRestore();
+  });
+
   test("two NOT_A_CARD bursts reveal the typed form", async () => {
     await renderDesk();
     const rejectCard = () => api.post.mockRejectedValueOnce({

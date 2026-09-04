@@ -31,6 +31,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = ReactDOM.createRoot(container);
   now = 0;
+  jest.useFakeTimers();
   jest.spyOn(performance, "now").mockImplementation(() => now);
 });
 
@@ -38,6 +39,7 @@ afterEach(() => {
   act(() => { root.unmount(); });
   container.remove();
   performance.now.mockRestore();
+  jest.useRealTimers();
 });
 
 describe("useWedgeBurst", () => {
@@ -88,6 +90,18 @@ describe("useWedgeBurst", () => {
     fireKey("Enter");
     expect(onBurst).toHaveBeenCalledTimes(1);
     expect(onBurst).toHaveBeenCalledWith("B".repeat(40));
+  });
+
+  test("Tab also terminates a burst", async () => {
+    const onBurst = jest.fn();
+    await act(async () => {
+      root.render(<Harness onBurst={onBurst} />);
+    });
+    typeFast("A".repeat(40), 10);
+    now += 10;
+    const tab = fireKey("Tab");
+    expect(onBurst).toHaveBeenCalledWith("A".repeat(40));
+    expect(tab.defaultPrevented).toBe(true);
   });
 });
 

@@ -88,7 +88,8 @@ describe("PrescriptionForm", () => {
     const bp = container.querySelector('[data-testid="bp-input"]');
     await act(async () => {
       bp.focus();
-      bp.closest("form").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      bp.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      bp.closest("form").requestSubmit();
     });
     expect(saveRx).toHaveBeenCalled();
   });
