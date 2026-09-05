@@ -19,6 +19,13 @@ jest.mock("../../lib/api", () => {
 });
 
 const RX = { r_sph: "-1.00", l_sph: "-1.25", add: "+2.00" };
+const MEDICINE = { medicine_id: "med-1", name: "Moxifloxacin" };
+const POWERS = [
+  { id: "p1", value: -1.5, label: "-1.50", active: true },
+  { id: "p2", value: 2, label: "+2.00", active: true },
+  { id: "p3", value: 2.25, label: "+2.25", active: true },
+];
+const FIXED = { fixed_power_r: 2, fixed_power_l: 2 };
 
 let container = null;
 let root = null;
@@ -72,12 +79,79 @@ async function renderSection(data, otDays = [], specsDays = [], line = "medicine
 
 describe("Fulfilment lines", () => {
   test("a line section shows only that line", async () => {
-    await renderSection({ transcription: { id: "tx-1" }, registration: { id: "reg-1" }, fulfilments: [] }, [], [], "medicine");
+    await renderSection({
+      transcription: { id: "tx-1", prescribed_medicines: [MEDICINE] },
+      registration: { id: "reg-1" },
+      fulfilments: [],
+    }, [], [], "medicine");
 
     expect(container.querySelector('[data-testid="station-medicine"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="station-ot"]')).toBeNull();
+    expect(container.textContent).toContain("Moxifloxacin");
     expect(container.textContent).toContain("Given");
-    expect(container.textContent).toContain("Out of stock");
+    expect(container.textContent).toContain("Not available");
+  });
+
+  test("each prescribed medicine carries its own outcome and the server derives the status", async () => {
+    await renderStation({
+      line: "medicine",
+      powers: POWERS,
+      data: {
+        transcription: {
+          id: "tx-1",
+          prescribed_medicines: [MEDICINE, { medicine_id: "med-2", name: "Timolol" }],
+        },
+        registration: { id: "reg-1" },
+        fulfilments: [],
+      },
+    });
+
+    await act(async () => {
+      container.querySelector('[data-testid="medicine-med-2-missing"]').click();
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="station-medicine-paper-review"]').click();
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="station-medicine-save"]').click();
+    });
+
+    expect(api.post).toHaveBeenCalledWith("/clinical/fulfilment", expect.objectContaining({
+      item_type: "medicine",
+      medicine_outcomes: [
+        { medicine_id: "med-1", given: true },
+        { medicine_id: "med-2", given: false },
+      ],
+    }));
+  });
+
+  test("a power that ran out can be substituted and both powers are sent", async () => {
+    await renderStation({
+      line: "specs_fixed",
+      powers: POWERS,
+      data: {
+        transcription: { id: "tx-1", ...FIXED },
+        registration: { id: "reg-1" },
+        fulfilments: [],
+      },
+    });
+
+    await act(async () => {
+      container.querySelector('[data-testid="fixed-power-both-2.25"]').click();
+    });
+    expect(container.querySelector('[data-testid="power-substituted"]')).not.toBeNull();
+    await act(async () => {
+      container.querySelector('[data-testid="station-specs_fixed-paper-review"]').click();
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="station-specs_fixed-save"]').click();
+    });
+
+    expect(api.post).toHaveBeenCalledWith("/clinical/fulfilment", expect.objectContaining({
+      item_type: "specs_fixed",
+      issued_power_r: 2.25,
+      issued_power_l: 2.25,
+    }));
   });
 
   test("issuing specs is blocked until both eyes have a power", async () => {
@@ -100,17 +174,18 @@ describe("Fulfilment lines", () => {
       data: { transcription: { id: "tx-1" }, registration: { id: "reg-1" }, fulfilments: [] },
     });
     expect(container.querySelector('[data-testid="station-medicine-needs-power"]')).toBeNull();
-    expect(container.querySelector('[data-testid="station-medicine-fulfilled"]').disabled).toBe(true);
+    expect(container.querySelector('[data-testid="station-medicine-save"]').disabled).toBe(true);
     act(() => {
       container.querySelector('[data-testid="station-medicine-paper-review"]').click();
     });
-    expect(container.querySelector('[data-testid="station-medicine-fulfilled"]').disabled).toBe(false);
+    expect(container.querySelector('[data-testid="station-medicine-save"]').disabled).toBe(false);
   });
 
   test("recording Fixed-power specs posts a fulfilled specs_fixed line", async () => {
     await renderStation({
       line: "specs_fixed",
-      data: { transcription: { id: "tx-9", specs_measurements: RX }, registration: { id: "r" }, fulfilments: [] },
+      powers: POWERS,
+      data: { transcription: { id: "tx-9", ...FIXED }, registration: { id: "r" }, fulfilments: [] },
     });
 
     await act(async () => {
@@ -127,6 +202,36 @@ describe("Fulfilment lines", () => {
         paper_reviewed: true,
       }),
     );
+  });
+
+  test("a prescription with different powers per eye opens split and never fuses the two", async () => {
+    await renderStation({
+      line: "specs_fixed",
+      powers: POWERS,
+      data: {
+        transcription: { id: "tx-1", fixed_power_r: -1.5, fixed_power_l: 2 },
+        registration: { id: "reg-1" },
+        fulfilments: [],
+      },
+    });
+
+    expect(container.querySelector('[data-testid="fixed-power-split"]').checked).toBe(true);
+    expect(container.querySelector('[data-testid="fixed-power-both--1.5"]')).toBeNull();
+
+    await act(async () => {
+      container.querySelector('[data-testid="fixed-power-r-2.25"]').click();
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="station-specs_fixed-paper-review"]').click();
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="station-specs_fixed-save"]').click();
+    });
+
+    expect(api.post).toHaveBeenCalledWith("/clinical/fulfilment", expect.objectContaining({
+      issued_power_r: 2.25,
+      issued_power_l: 2,
+    }));
   });
 
   test("the specs picker shows date venue and window and omits incomplete days", async () => {
@@ -226,10 +331,10 @@ describe("Fulfilment lines", () => {
       container.querySelector('[data-testid="station-medicine-paper-review"]').click();
     });
     await act(async () => {
-      container.querySelector('[data-testid="station-medicine-fulfilled"]').click();
+      container.querySelector('[data-testid="station-medicine-save"]').click();
     });
     await act(async () => {
-      container.querySelector('[data-testid="station-medicine-fulfilled"]').click();
+      container.querySelector('[data-testid="station-medicine-save"]').click();
     });
     const ids = api.post.mock.calls.map((call) => call[1].operation_id);
     expect(ids).toEqual(["op-retry-1", "op-retry-1"]);

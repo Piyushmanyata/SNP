@@ -7,6 +7,7 @@ export function FulfilmentSection({
   data,
   otDays,
   specsDays,
+  powers,
   onDone,
   navigate,
   setBanner,
@@ -22,6 +23,7 @@ export function FulfilmentSection({
         data={data}
         otDays={otDays}
         specsDays={specsDays}
+        powers={powers}
         onDone={onDone}
         navigate={navigate}
         setBanner={setBanner}

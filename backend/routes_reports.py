@@ -6,6 +6,7 @@ from typing import Any, Dict, List
 from bson import ObjectId
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
+from catalogue import format_power
 from db import get_db
 from helpers import as_utc, iso, ist_day_bounds, now_utc, today_ist_str
 from security import require_admin, require_staff, require_any, require_lead
@@ -91,6 +92,8 @@ EXPORT_COLUMNS = [
     "manual_entry", "camp_day", "registered_at", "arrived_at", "seen_at",
     "diagnosis", "bp", "blood_sugar",
     "r_sph", "r_cyl", "r_axis", "l_sph", "l_cyl", "l_axis", "add",
+    "medicines_prescribed", "medicines_not_given",
+    "fixed_power_r", "fixed_power_l", "issued_power_r", "issued_power_l",
     "medicine", "fixed_power_specs", "spectacles_to_be_made", "ot",
     "ot_day", "ot_venue", "specs_day", "specs_venue", "specs_start", "specs_end",
 ]
@@ -119,10 +122,23 @@ def csv_cell(value: Any) -> str:
     return text
 
 
+def _power_cell(value: Any) -> str:
+    return "" if value is None else format_power(value)
+
+
+def _medicine_cells(t: dict, medicine: dict) -> List[str]:
+    prescribed = [m.get("name", "") for m in (t.get("prescribed_medicines") or [])]
+    not_given = [
+        o.get("name", "") for o in (medicine.get("medicine_outcomes") or []) if not o.get("given")
+    ]
+    return [";".join(prescribed), ";".join(not_given)]
+
+
 def _export_row(p: dict, t: dict, fulfilments: dict, day_dates: dict) -> List[Any]:
     m = t.get("specs_measurements") or {}
     ot = fulfilments.get("ot", {})
     specs = fulfilments.get("specs_made", {})
+    fixed = fulfilments.get("specs_fixed", {})
     cells = [
         p.get("reg_no", ""), p.get("full_name", ""), p.get("age", ""),
         p.get("gender", ""), p.get("phone", ""), p.get("address", ""),
@@ -132,6 +148,9 @@ def _export_row(p: dict, t: dict, fulfilments: dict, day_dates: dict) -> List[An
         iso(p.get("created_at")) or "", iso(p.get("arrived_at")) or "", iso(p.get("seen_at")) or "",
         _diagnosis(t), t.get("bp", "") or "", t.get("blood_sugar", "") or "",
         *[m.get(k, "") or "" for k in ("r_sph", "r_cyl", "r_axis", "l_sph", "l_cyl", "l_axis", "add")],
+        *_medicine_cells(t, fulfilments.get("medicine", {})),
+        _power_cell(t.get("fixed_power_r")), _power_cell(t.get("fixed_power_l")),
+        _power_cell(fixed.get("issued_power_r")), _power_cell(fixed.get("issued_power_l")),
         *_line_statuses(fulfilments),
         ot.get("collection_date", "") or "", ot.get("collection_venue", "") or "",
         specs.get("collection_date", "") or "",
@@ -184,7 +203,7 @@ def _empty_board(as_of: str, state: str) -> Dict[str, Any]:
             "transcription_backlog": 0,
         },
         "fulfilment": {
-            "medicine": {"fulfilled": 0, "not_available": 0},
+            "medicine": {"fulfilled": 0, "not_available": 0, "partially_fulfilled": 0},
             "specs_fixed": {"fulfilled": 0},
             "specs_made": {"deferred": 0},
             "ot": {"fulfilled": 0, "deferred": 0},
@@ -249,7 +268,7 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
     quiet_count = sum(1 for r in activity if r["quiet"])
 
     fulfil_counts = {
-        "medicine": {"fulfilled": 0, "not_available": 0},
+        "medicine": {"fulfilled": 0, "not_available": 0, "partially_fulfilled": 0},
         "specs_fixed": {"fulfilled": 0},
         "specs_made": {"deferred": 0},
         "ot": {"fulfilled": 0, "deferred": 0},

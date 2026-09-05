@@ -44,6 +44,10 @@ import db as db_module
 # =====================================================================
 
 RX = {"r_sph": "-1.00", "l_sph": "-1.25", "add": "+2.00"}
+MEDICINE = {"medicine_id": str(ObjectId()), "name": "Moxifloxacin"}
+MEDICINE_ALT = {"medicine_id": str(ObjectId()), "name": "Chloramphenicol"}
+STOCKED_POWERS = (-1.5, 2.0, 2.25)
+FIXED_POWER = 2.0
 
 
 class MockCursor:
@@ -277,6 +281,13 @@ def setup_mock_db(monkeypatch):
     monkeypatch.setattr(routes_reports, "get_db", lambda: mock_db, raising=False)
     monkeypatch.setattr(routes_registration, "next_seq", mock_db.next_seq)
     monkeypatch.setattr(db_module, "next_seq", mock_db.next_seq)
+    for medicine in (MEDICINE, MEDICINE_ALT):
+        mock_db.medicines.docs.append({
+            "_id": ObjectId(medicine["medicine_id"]), "name": medicine["name"],
+            "name_key": medicine["name"].casefold(), "active": True,
+        })
+    for value in STOCKED_POWERS:
+        mock_db.fixed_powers.docs.append({"_id": ObjectId(), "value": value, "active": True})
     return mock_db
 
 
@@ -298,7 +309,8 @@ async def insert_seen_patient(mock_db, p_id=None):
         "_id": rev_id, "patient_id": p_id,
         "prescribed_lines": ["medicine", "specs_fixed", "specs_made", "ot"],
         "none_prescribed": False, "specs_measurements": RX,
-        "medication_instructions": "drops", "ot_eye": "R", "ot_procedure": "Cataract Surgery",
+        "prescribed_medicines": [MEDICINE], "fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER,
+        "ot_eye": "R", "ot_procedure": "Cataract Surgery",
     })
     mock_db.last_rev_id = rev_id
     return p_id
@@ -723,7 +735,9 @@ class TestFulfilmentDecomposedAndInvariants:
             day1 = ObjectId()
             day2 = ObjectId()
             await insert_seen_patient(mock_db, p_id)
-            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False, "specs_measurements": RX})
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False,
+                "specs_measurements": RX, "prescribed_medicines": [MEDICINE],
+                "fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER})
             await mock_db.specs_collection_days.insert_one({
                 "_id": day1, "camp_id": ObjectId(), "day_date": "2026-09-15",
                 "venue": "District Hospital", "start_time": "09:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
@@ -793,7 +807,9 @@ class TestFulfilmentDecomposedAndInvariants:
             specs_day_id = ObjectId()
 
             await insert_seen_patient(mock_db, p_id)
-            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False, "specs_measurements": RX})
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False,
+                "specs_measurements": RX, "prescribed_medicines": [MEDICINE],
+                "fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER})
             await mock_db.specs_collection_days.insert_one({
                 "_id": specs_day_id,
                 "camp_id": ObjectId(),
@@ -840,7 +856,9 @@ class TestFulfilmentDecomposedAndInvariants:
             day2 = ObjectId()
 
             await insert_seen_patient(mock_db, p_id)
-            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False, "specs_measurements": RX})
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False,
+                "specs_measurements": RX, "prescribed_medicines": [MEDICINE],
+                "fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER})
             await mock_db.specs_collection_days.insert_one({
                 "_id": day1, "camp_id": ObjectId(), "day_date": "2026-09-10",
                 "venue": "Optical 1", "start_time": "09:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
@@ -877,7 +895,9 @@ class TestFulfilmentDecomposedAndInvariants:
             t_id = ObjectId()
             day_id = ObjectId()
             p_id = await insert_seen_patient(mock_db)
-            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False, "specs_measurements": RX})
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False,
+                "specs_measurements": RX, "prescribed_medicines": [MEDICINE],
+                "fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER})
             await mock_db.specs_collection_days.insert_one({
                 "_id": day_id, "camp_id": ObjectId(), "day_date": "2026-09-10",
                 "venue": "Optical", "start_time": "09:00", "end_time": "17:00", "seat_limit": 1, "seats_taken": 0,
@@ -904,7 +924,9 @@ class TestFulfilmentDecomposedAndInvariants:
             t_id = ObjectId()
             day_id = ObjectId()
             p_id = await insert_seen_patient(mock_db)
-            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False, "specs_measurements": RX})
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False,
+                "specs_measurements": RX, "prescribed_medicines": [MEDICINE],
+                "fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER})
             await mock_db.specs_collection_days.insert_one({
                 "_id": day_id, "camp_id": ObjectId(), "day_date": "2026-09-10",
                 "venue": "Optical", "start_time": "09:00", "end_time": "17:00", "seat_limit": 1, "seats_taken": 0,
@@ -964,7 +986,9 @@ class TestFulfilmentDecomposedAndInvariants:
             ot_day_id = ObjectId()
             
             await insert_seen_patient(mock_db, p_id)
-            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False, "specs_measurements": RX})
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False,
+                "specs_measurements": RX, "prescribed_medicines": [MEDICINE],
+                "fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER})
             await mock_db.ot_schedule_days.insert_one({
                 "_id": ot_day_id,
                 "camp_id": ObjectId(),
@@ -1012,7 +1036,9 @@ class TestFulfilmentDecomposedAndInvariants:
             ot_day2 = ObjectId()
             
             await insert_seen_patient(mock_db, p_id)
-            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False, "specs_measurements": RX})
+            await mock_db.transcriptions.insert_one({"_id": t_id, "patient_id": p_id, "locked": False,
+                "specs_measurements": RX, "prescribed_medicines": [MEDICINE],
+                "fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER})
             await mock_db.ot_schedule_days.insert_one({
                 "_id": ot_day1, "camp_id": ObjectId(), "day_date": "2026-09-10", "venue": "OT 1", "seat_limit": 5, "seats_taken": 0
             })

@@ -257,6 +257,8 @@ RX_MEASUREMENTS = {
     "r_sph": "-1.00", "r_cyl": "-0.50", "r_axis": "90",
     "l_sph": "-1.25", "l_cyl": "-0.25", "l_axis": "85", "add": "+2.00",
 }
+FIXED_POWER = 2.0
+SUBSTITUTE_POWER = 2.25
 
 
 class TestDeskPrintWindow:
@@ -342,7 +344,19 @@ class TestDeskPrintWindow:
         assert r.status_code == 409, r.text
 
 
+def _catalogue(admin):
+    if "medicine_id" not in STATE:
+        r = admin.post(f"{API}/catalogue/medicines", json={"name": f"TEST Moxifloxacin {TAG}"}, timeout=30)
+        assert r.status_code == 200, r.text
+        STATE["medicine_id"] = r.json()["medicine"]["id"]
+    for value in (FIXED_POWER, SUBSTITUTE_POWER):
+        r = admin.post(f"{API}/catalogue/powers", json={"value": value}, timeout=30)
+        assert r.status_code == 200, r.text
+    return STATE["medicine_id"]
+
+
 def _clinical(admin):
+    _catalogue(admin)
     if "clinical_http" in STATE:
         return STATE["clinical_http"]
     name = f"TEST flow clinical {TAG}"
@@ -368,12 +382,14 @@ def _complete_rx(client, patient_id, operation_id, **extra):
         "prescribed_lines": ["medicine", "specs_fixed", "specs_made", "ot"],
         "operation_id": operation_id,
         "diagnosis_options": ["Cataract", "Presbyopia"],
-        "medication_instructions": "Moxifloxacin 1 drop QID",
+        "prescribed_medicine_ids": [STATE["medicine_id"]],
         "bp": "120/80",
         "blood_sugar": "110",
         "ot_eye": "left",
         "ot_procedure": "Cataract Surgery",
         "specs_measurements": RX_MEASUREMENTS,
+        "fixed_power_r": FIXED_POWER,
+        "fixed_power_l": FIXED_POWER,
     }
     payload.update(extra)
     return client.post(f"{API}/clinical/transcription/complete", json=payload, timeout=30)
@@ -418,7 +434,7 @@ class TestClinical:
         r = clin.post(f"{API}/clinical/transcription", json={
             "patient_id": STATE["p1"]["id"], "diagnosis_options": ["Cataract", "Presbyopia"],
             "bp": "130/85", "blood_sugar": "110", "remarks": "TEST remarks",
-            "medication_instructions": "drops",
+            "prescribed_medicine_ids": [STATE["medicine_id"]],
             "ot_eye": "right", "ot_procedure": "Cataract Surgery",
             "specs_measurements": RX_MEASUREMENTS,
         }, timeout=30)
@@ -438,7 +454,7 @@ class TestClinical:
         r = clin.post(f"{API}/clinical/transcription", json={
             "patient_id": STATE["p1"]["id"], "diagnosis_options": ["Cataract"],
             "bp": "120/80", "ot_eye": "left", "ot_procedure": "Cataract Surgery",
-            "medication_instructions": "Moxifloxacin 1 drop QID",
+            "prescribed_medicine_ids": [STATE["medicine_id"]],
             "specs_measurements": RX_MEASUREMENTS,
         }, timeout=30)
         assert r.status_code == 200, r.text
@@ -494,6 +510,7 @@ class TestClinical:
         clin = _clinical(admin)
         r = clin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": STATE["trans_id"], "item_type": "medicine", "status": "fulfilled",
+            "medicine_outcomes": [{"medicine_id": STATE["medicine_id"], "given": True}],
             "paper_reviewed": True, "reviewed_revision_id": STATE["rev_id"],
             "reviewed_generation": STATE["gen"], "operation_id": f"op-med-{TAG}",
         }, timeout=30)
@@ -514,11 +531,22 @@ class TestClinical:
     def test_invalid_fulfilment_status(self, admin):
         clin = _clinical(admin)
         r = clin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": STATE["trans_id"], "item_type": "medicine", "status": "deferred",
+            "transcription_id": STATE["trans_id"], "item_type": "specs_made", "status": "fulfilled",
             "paper_reviewed": True, "reviewed_revision_id": STATE["rev_id"],
             "reviewed_generation": STATE["gen"], "operation_id": f"op-bad-{TAG}",
         }, timeout=30)
         assert r.status_code == 400, r.text
+
+    def test_medicine_outcomes_must_cover_every_prescribed_medicine(self, admin):
+        clin = _clinical(admin)
+        r = clin.post(f"{API}/clinical/fulfilment", json={
+            "transcription_id": STATE["trans_id"], "item_type": "medicine", "status": "fulfilled",
+            "medicine_outcomes": [],
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev_id"],
+            "reviewed_generation": STATE["gen"], "operation_id": f"op-bad-out-{TAG}",
+        }, timeout=30)
+        assert r.status_code == 400, r.text
+        assert r.json()["detail"]["code"] == "MEDICINE_OUTCOMES_MISMATCH"
 
     def test_specs_deferral_requires_day_id(self, admin):
         clin = _clinical(admin)
@@ -639,7 +667,7 @@ class TestClinical:
             "full_transcription_confirmed": True,
             "prescribed_lines": ["medicine", "specs_fixed", "specs_made", "ot"],
             "diagnosis_options": ["Cataract"],
-            "medication_instructions": "Moxifloxacin 1 drop QID",
+            "prescribed_medicine_ids": [STATE["medicine_id"]],
             "bp": "140/90",
             "ot_eye": "left",
             "ot_procedure": "Cataract Surgery",
@@ -787,6 +815,8 @@ class TestReports:
             "manual_entry,camp_day,registered_at,arrived_at,seen_at,"
             "diagnosis,bp,blood_sugar,"
             "r_sph,r_cyl,r_axis,l_sph,l_cyl,l_axis,add,"
+            "medicines_prescribed,medicines_not_given,"
+            "fixed_power_r,fixed_power_l,issued_power_r,issued_power_l,"
             "medicine,fixed_power_specs,spectacles_to_be_made,ot,"
             "ot_day,ot_venue,specs_day,specs_venue,specs_start,specs_end"
         ), header

@@ -144,6 +144,8 @@ async def init_indexes() -> None:
         TRANSCRIPTION_PATIENT_INDEX["keys"],
         unique=TRANSCRIPTION_PATIENT_INDEX["unique"],
     )
+    await db.medicines.create_index("name_key", unique=True)
+    await db.fixed_powers.create_index("value", unique=True)
     await db.prescription_revisions.create_index("operation_id", unique=True)
     await db.prescription_revisions.create_index([("patient_id", ASCENDING), ("created_at", ASCENDING)])
     await db.clinical_operations.create_index("operation_id", unique=True)

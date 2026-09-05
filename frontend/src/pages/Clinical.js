@@ -9,7 +9,7 @@ import { useWedgeBurst } from "../components/aadhaar";
 import {
   ClinicalLookupForm,
   PatientSummaryCard,
-  PrescriptionForm,
+  PrescriptionWizard,
   FulfilmentSection,
   CorrectionModal,
   HistoryModal,
@@ -35,11 +35,25 @@ const emptyRx = {
   ot_eye: "",
   ot_procedure: "",
   ot_notes: "",
-  medication_instructions: "",
+  prescribed_medicine_ids: [],
+  fixed_power_r: null,
+  fixed_power_l: null,
   prescribed_lines: [],
   none_prescribed: false,
   full_transcription_confirmed: false,
 };
+
+function rxFromTranscription(transcription) {
+  if (!transcription) return emptyRx;
+  return {
+    ...emptyRx,
+    ...transcription,
+    specs_measurements: transcription.specs_measurements || emptyRx.specs_measurements,
+    prescribed_medicine_ids: (transcription.prescribed_medicines || []).map(
+      (m) => m.medicine_id,
+    ),
+  };
+}
 
 export default function Clinical() {
   const navigate = useNavigate();
@@ -51,6 +65,8 @@ export default function Clinical() {
   const [error, setError] = useState("");
   const [banner, setBanner] = useState("");
   const [diagOpts, setDiagOpts] = useState([]);
+  const [medicines, setMedicines] = useState([]);
+  const [powers, setPowers] = useState([]);
   const [otDays, setOtDays] = useState([]);
   const [specsDays, setSpecsDays] = useState([]);
   const [rx, setRx] = useState(emptyRx);
@@ -98,6 +114,22 @@ export default function Clinical() {
       });
 
     api
+      .get("/catalogue/medicines")
+      .then((r) => setMedicines(r.data?.medicines || []))
+      .catch((err) => {
+        logger.warn("Failed to fetch medicines:", err);
+        setMedicines([]);
+      });
+
+    api
+      .get("/catalogue/powers")
+      .then((r) => setPowers(r.data?.powers || []))
+      .catch((err) => {
+        logger.warn("Failed to fetch fixed powers:", err);
+        setPowers([]);
+      });
+
+    api
       .get("/clinical/ot-days")
       .then((r) => setOtDays(r.data?.ot_days || []))
       .catch((err) => {
@@ -128,17 +160,7 @@ export default function Clinical() {
       });
       if (request !== lookupSequence.current) return;
       setData(resData);
-      setRx(
-        resData.transcription
-          ? {
-              ...emptyRx,
-              ...resData.transcription,
-              specs_measurements:
-                resData.transcription.specs_measurements ||
-                emptyRx.specs_measurements,
-            }
-          : emptyRx
-      );
+      setRx(rxFromTranscription(resData.transcription));
     } catch (err) {
       if (request !== lookupSequence.current) return;
       const p = errorPayload(err);
@@ -169,40 +191,23 @@ export default function Clinical() {
       });
       if (request !== lookupSequence.current) return;
       setData(resData);
-      setRx(
-        resData.transcription
-          ? {
-              ...emptyRx,
-              ...resData.transcription,
-              specs_measurements:
-                resData.transcription.specs_measurements ||
-                emptyRx.specs_measurements,
-            }
-          : emptyRx
-      );
+      setRx(rxFromTranscription(resData.transcription));
     } catch (err) {
       logger.warn("Failed to reload clinical data:", err);
     }
   }, [data?.registration?.reg_no]);
 
-  const saveRx = useCallback(async () => {
+  const saveStep = useCallback(async () => {
     if (!data?.registration?.id) return;
-    setBusy(true);
-    setError("");
     try {
-      const { data: result } = await api.post("/clinical/transcription", {
+      await api.post("/clinical/transcription", {
         patient_id: data.registration.id,
         ...rx,
       });
-      setData((current) => current?.registration?.id === patientId ? { ...current, transcription: result.transcription } : current);
-      setEditing(false);
-      setBanner("Draft saved. Completing the prescription marks the patient seen.");
     } catch (err) {
       setError(formatApiError(err));
-    } finally {
-      setBusy(false);
     }
-  }, [data?.registration?.id, patientId, rx]);
+  }, [data?.registration?.id, rx]);
 
   const completeRx = useCallback(async () => {
     if (!data?.registration?.id) return;
@@ -315,17 +320,17 @@ export default function Clinical() {
           />
 
           {!locked && (!data.transcription || editing) && (
-              <PrescriptionForm
-                line={line}
+              <PrescriptionWizard
                 rx={rx}
                 setRx={setRx}
                 diagOpts={diagOpts}
+                medicines={medicines}
+                powers={powers}
                 toggleDiag={toggleDiag}
                 locked={locked}
                 busy={busy}
-                saveRx={saveRx}
+                saveStep={saveStep}
                 completeRx={completeRx}
-                hasExistingTranscription={!!data.transcription}
                 setShowCorrection={setShowCorrection}
                 firstFieldRef={firstFieldRef}
               />
@@ -350,6 +355,7 @@ export default function Clinical() {
                   data={data}
                   otDays={otDays}
                   specsDays={specsDays}
+                  powers={powers}
                   onDone={clearPatient}
                   navigate={navigate}
                   setBanner={setBanner}
@@ -368,6 +374,8 @@ export default function Clinical() {
         transcription={data?.transcription}
         line={line}
         diagOpts={diagOpts}
+        medicines={medicines}
+        powers={powers}
         expectedGeneration={data?.clinical_generation ?? data?.registration?.clinical_generation ?? 0}
         patientId={data?.registration?.id}
         prescribedLines={data?.committed_revision?.prescribed_lines || []}

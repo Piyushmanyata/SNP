@@ -47,7 +47,7 @@ from routes_clinical import (
 )
 from routes_desk import arrive, mark_seen, print_prescription
 from routes_registration import _create_registration, desk_register
-from test_adversarial_challenger import setup_mock_db
+from test_adversarial_challenger import FIXED_POWER, MEDICINE, MEDICINE_ALT, setup_mock_db
 from test_camp_lifecycle import _Request
 
 from datetime import timezone as _tz
@@ -131,7 +131,7 @@ def _complete_body(patient_id, operation_id, **extra):
         prescribed_lines=["medicine"],
         operation_id=operation_id,
         diagnosis_options=["Cataract"],
-        medication_instructions="Moxifloxacin 1 drop QID",
+        prescribed_medicine_ids=[MEDICINE["medicine_id"]],
         bp="120/80",
     )
     data.update(extra)
@@ -149,6 +149,10 @@ def _issue_body(transcription_id, revision_id, generation, operation_id, **extra
         operation_id=operation_id,
     )
     data.update(extra)
+    if data.get("item_type") == "medicine" and "medicine_outcomes" not in data:
+        data["medicine_outcomes"] = [
+            {"medicine_id": MEDICINE["medicine_id"], "given": data.get("status") != "not_available"},
+        ]
     return FulfilmentBody(**data)
 
 
@@ -326,11 +330,13 @@ class TestClinicalMatrix:
             other = {"_id": ObjectId(), "role": "clinical_desk_operator", "name": "Clin2"}
             results = await asyncio.gather(
                 complete_prescription(
-                    _complete_body(patient["_id"], "op-c11a", medication_instructions="Winner drops"),
+                    _complete_body(patient["_id"], "op-c11a",
+                                   prescribed_medicine_ids=[MEDICINE["medicine_id"]]),
                     actor=CLINICAL,
                 ),
                 complete_prescription(
-                    _complete_body(patient["_id"], "op-c11b", medication_instructions="Loser drops"),
+                    _complete_body(patient["_id"], "op-c11b",
+                                   prescribed_medicine_ids=[MEDICINE_ALT["medicine_id"]]),
                     actor=other,
                 ),
                 return_exceptions=True,
@@ -344,7 +350,7 @@ class TestClinicalMatrix:
             assert str(refreshed["committed_revision_id"]) == wins[0]["revision"]["id"]
             winner_rev = await mock_db.prescription_revisions.find_one({"_id": refreshed["committed_revision_id"]})
             trans = await mock_db.transcriptions.find_one({"patient_id": patient["_id"]})
-            assert trans["medication_instructions"] == winner_rev["medication_instructions"]
+            assert trans["prescribed_medicines"] == winner_rev["prescribed_medicines"]
         asyncio.run(run())
 
     def test_c12_pre_issue_undo_revokes_point(self, monkeypatch):
@@ -443,7 +449,7 @@ class TestClinicalMatrix:
                     full_transcription_confirmed=True,
                     prescribed_lines=["medicine"],
                     diagnosis_options=["Cataract"],
-                    medication_instructions="Moxifloxacin 1 drop QID",
+                    prescribed_medicine_ids=[MEDICINE["medicine_id"]],
                     bp="140/90",
                 ),
                 actor=CLINICAL,
@@ -474,7 +480,7 @@ class TestFulfilmentMatrix:
                 TranscriptionBody(
                     patient_id=str(patient["_id"]),
                     diagnosis_options=["Cataract"],
-                    medication_instructions="drops",
+                    prescribed_medicine_ids=[MEDICINE["medicine_id"]],
                 ),
                 actor=CLINICAL,
             )
@@ -538,7 +544,7 @@ class TestFulfilmentMatrix:
                     full_transcription_confirmed=True,
                     prescribed_lines=["medicine"],
                     diagnosis_options=["Cataract"],
-                    medication_instructions="Chloramphenicol",
+                    prescribed_medicine_ids=[MEDICINE_ALT["medicine_id"]],
                     bp="120/80",
                 ),
                 actor=CLINICAL,
@@ -561,6 +567,7 @@ class TestFulfilmentMatrix:
                     corr["revision"]["id"],
                     corr["registration"]["clinical_generation"],
                     "op-f03-issue-b",
+                    medicine_outcomes=[{"medicine_id": MEDICINE_ALT["medicine_id"], "given": True}],
                 ),
                 actor=CLINICAL,
             )
@@ -581,7 +588,7 @@ class TestFulfilmentMatrix:
                 full_transcription_confirmed=True,
                 prescribed_lines=["medicine"],
                 diagnosis_options=["Cataract"],
-                medication_instructions="Moxifloxacin 1 drop QID",
+                prescribed_medicine_ids=[MEDICINE["medicine_id"]],
                 bp="130/85",
             )
             issue_body = _issue_body(
@@ -609,7 +616,7 @@ class TestFulfilmentMatrix:
             done = await complete_prescription(
                 _complete_body(patient["_id"], "op-f05", prescribed_lines=["ot"],
                                ot_eye="right", ot_procedure="Cataract Surgery",
-                               medication_instructions=None),
+                               prescribed_medicine_ids=[]),
                 actor=CLINICAL,
             )
             ot_day = ObjectId()
@@ -668,7 +675,7 @@ class TestFulfilmentMatrix:
                 done = await complete_prescription(
                     _complete_body(p["_id"], f"op-f07-{i}", prescribed_lines=["ot"],
                                    ot_eye="left", ot_procedure="Cataract Surgery",
-                                   medication_instructions=None),
+                                   prescribed_medicine_ids=[]),
                     actor=CLINICAL,
                 )
                 bodies.append(_issue_body(
@@ -698,7 +705,8 @@ class TestFulfilmentMatrix:
                     patient["_id"], "op-f08",
                     prescribed_lines=["specs_fixed", "specs_made"],
                     specs_measurements=RX,
-                    medication_instructions=None,
+                    fixed_power_r=FIXED_POWER, fixed_power_l=FIXED_POWER,
+                    prescribed_medicine_ids=[],
                 ),
                 actor=CLINICAL,
             )

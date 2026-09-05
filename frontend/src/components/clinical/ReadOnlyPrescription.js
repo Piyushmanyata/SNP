@@ -1,6 +1,7 @@
 import React from "react";
 import { Card } from "../ui";
-import { hasMeasurements } from "./FulfilmentStation";
+import { hasFixedPower, hasMeasurements } from "./FulfilmentStation";
+import { formatPower } from "./FixedPowerPicker";
 
 function Row({ k, v }) {
   return (
@@ -29,7 +30,21 @@ export function ReadOnlyPrescription({ transcription, emphasizePowers }) {
         <Row k="OT eye" v={transcription.ot_eye} />
         <Row k="OT procedure" v={transcription.ot_procedure} />
         <Row k="OT notes" v={transcription.ot_notes} />
+        <Row
+          k="Medicines"
+          v={(transcription.prescribed_medicines || []).map((x) => x.name).join(", ")}
+        />
       </div>
+      {hasFixedPower(transcription) && (
+        <div className={`mt-4 ${emphasizePowers ? "text-lg" : "text-sm"}`} data-testid="readonly-fixed-power">
+          <p className="text-xs font-semibold text-slate-500 uppercase mb-1">Fixed power</p>
+          <p className="font-mono font-bold text-slate-900">
+            RE {formatPower(transcription.fixed_power_r)}
+            {" · "}
+            LE {formatPower(transcription.fixed_power_l)}
+          </p>
+        </div>
+      )}
       <div className={`mt-4 ${emphasizePowers ? "text-lg" : "text-sm"}`} data-testid="readonly-powers">
         <p className="text-xs font-semibold text-slate-500 uppercase mb-1">Powers</p>
         {hasMeasurements(transcription) ? (

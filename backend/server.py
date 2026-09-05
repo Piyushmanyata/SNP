@@ -18,6 +18,7 @@ import routes_staff
 import routes_camps
 import routes_registration
 import routes_desk
+import routes_catalogue
 import routes_clinical
 import routes_reports
 import routes_templates
@@ -80,6 +81,7 @@ app.include_router(routes_staff.router)
 app.include_router(routes_camps.router)
 app.include_router(routes_registration.router)
 app.include_router(routes_desk.router)
+app.include_router(routes_catalogue.router)
 app.include_router(routes_clinical.router)
 app.include_router(routes_reports.router)
 app.include_router(routes_templates.router)

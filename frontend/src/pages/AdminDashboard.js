@@ -7,8 +7,9 @@ import {
 } from "../components/ui";
 import {
   Tent, Users, CalendarDays, Trophy, Download, Scissors, Glasses, Power, Trash2,
-  Plus, PrinterCheck, ClipboardList, Stethoscope, FileText, BarChart3,
+  Plus, PrinterCheck, ClipboardList, Stethoscope, FileText, BarChart3, Pill,
 } from "lucide-react";
+import { formatPower } from "../components/clinical";
 import TemplateEditor from "../components/TemplateEditor";
 
 const CAMP_VENUE = "Hansa Garden, Rohini Road in Baghmara, Jasidih, Deoghar - 814142";
@@ -19,6 +20,7 @@ const TABS = [
   { id: "camps", label: "Camps & Days", icon: Tent },
   { id: "template", label: "Rx Template", icon: FileText },
   { id: "ot", label: "OT & Specs", icon: Scissors },
+  { id: "supplies", label: "Camp supplies", icon: Pill },
   { id: "board", label: "Leaderboards", icon: Trophy },
   { id: "exports", label: "Exports", icon: Download },
 ];
@@ -43,6 +45,7 @@ export default function AdminDashboard() {
       {tab === "camps" && <Camps />}
       {tab === "template" && <TemplateEditor />}
       {tab === "ot" && <div className="space-y-5"><OtSchedule /><SpecsCollectionDays /></div>}
+      {tab === "supplies" && <div className="space-y-5"><Medicines /><FixedPowers /></div>}
       {tab === "board" && <Leaderboards />}
       {tab === "exports" && <Exports />}
     </Layout>
@@ -313,6 +316,120 @@ function SpecsCollectionDays() {
           <Field label="Start"><Input type="time" value={form.start_time} onChange={(e) => setForm({ ...form, start_time: e.target.value })} className="w-28" data-testid="specs-start-input" /></Field>
           <Field label="End"><Input type="time" value={form.end_time} onChange={(e) => setForm({ ...form, end_time: e.target.value })} className="w-28" data-testid="specs-end-input" /></Field>
           <Button size="sm" onClick={add} disabled={!form.day_date || !form.venue || !form.start_time || !form.end_time} data-testid="add-specs-day-button"><Plus className="w-4 h-4" /> Add</Button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function useCatalogue(resource) {
+  const [items, setItems] = useState([]);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    api
+      .get(`/catalogue/${resource}?include_inactive=true`)
+      .then((r) => setItems(r.data[resource] || []))
+      .catch((e) => setErr(formatApiError(e)));
+  }, [resource]);
+  useEffect(() => { load(); }, [load]);
+
+  const add = useCallback(async (body) => {
+    setErr("");
+    setBusy(true);
+    try {
+      await api.post(`/catalogue/${resource}`, body);
+      load();
+      return true;
+    } catch (e) {
+      setErr(formatApiError(e));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }, [resource, load]);
+
+  const setActive = useCallback(async (id, active) => {
+    setErr("");
+    try {
+      await api.patch(`/catalogue/${resource}/${id}`, { active });
+      load();
+    } catch (e) {
+      setErr(formatApiError(e));
+    }
+  }, [resource, load]);
+
+  return { items, err, busy, add, setActive };
+}
+
+function CatalogueChips({ items, setActive, testid, label, icon: Icon }) {
+  return (
+    <div className="flex flex-wrap gap-2" data-testid={`${testid}-list`}>
+      {items.length === 0 && <p className="text-slate-400 text-sm">Nothing added yet.</p>}
+      {items.map((item) => (
+        <div
+          key={item.id}
+          className={`flex items-center gap-2 px-3 py-2 rounded-xl ${item.active ? "bg-slate-50" : "bg-slate-100 opacity-60"}`}
+          data-testid={`${testid}-${item.id}`}
+        >
+          <Icon className="w-4 h-4 text-emerald-600" />
+          <span className="text-sm font-medium text-slate-800">{label(item)}</span>
+          <Button size="sm" variant="ghost" onClick={() => setActive(item.id, !item.active)}
+            data-testid={`${testid}-${item.id}-toggle`}>
+            {item.active ? "Retire" : "Restore"}
+          </Button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Medicines() {
+  const [name, setName] = useState("");
+  const { items, err, busy, add, setActive } = useCatalogue("medicines");
+  return (
+    <div className="space-y-4">
+      {err && <Alert>{err}</Alert>}
+      <Card>
+        <h3 className="font-display font-bold text-slate-900 mb-1">Medicines</h3>
+        <p className="text-sm text-slate-600 mb-3">The clinical desk can only prescribe what is on this list. Retiring one hides it from operators without touching past prescriptions.</p>
+        <CatalogueChips items={items} setActive={setActive} testid="medicine" icon={Pill} label={(m) => m.name} />
+        <div className="flex flex-wrap gap-2 items-end pt-4 mt-3 border-t border-slate-100">
+          <Field label="Medicine name">
+            <Input value={name} onChange={(e) => setName(e.target.value)} data-testid="medicine-name-input" />
+          </Field>
+          <Button size="sm" disabled={busy || !name.trim()}
+            onClick={() => add({ name }).then((ok) => ok && setName(""))}
+            data-testid="add-medicine-button">
+            <Plus className="w-4 h-4" /> Add
+          </Button>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+function FixedPowers() {
+  const [value, setValue] = useState("");
+  const { items, err, busy, add, setActive } = useCatalogue("powers");
+  return (
+    <div className="space-y-4">
+      {err && <Alert>{err}</Alert>}
+      <Card>
+        <h3 className="font-display font-bold text-slate-900 mb-1">Fixed-power specs</h3>
+        <p className="text-sm text-slate-600 mb-3">Every ready-made power this camp carries, plus or minus. The clinical desk picks from these.</p>
+        <CatalogueChips items={items} setActive={setActive} testid="power" icon={Glasses} label={(p) => formatPower(p.value)} />
+        <div className="flex flex-wrap gap-2 items-end pt-4 mt-3 border-t border-slate-100">
+          <Field label="Power (dioptres)">
+            <Input value={value} inputMode="decimal" placeholder="+2.00" className="w-32"
+              onChange={(e) => setValue(e.target.value)} data-testid="power-value-input" />
+          </Field>
+          <Button size="sm" disabled={busy || !value.trim()}
+            onClick={() => add({ value }).then((ok) => ok && setValue(""))}
+            data-testid="add-power-button">
+            <Plus className="w-4 h-4" /> Add
+          </Button>
         </div>
       </Card>
     </div>

@@ -241,7 +241,7 @@ describe("CHALLENGE 1: FulfilmentStation & FulfilmentSection Patient Switch Stat
       );
     });
 
-    expect(container.querySelector('[data-testid="station-medicine-fulfilled"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="station-medicine-save"]')).not.toBeNull();
 
     const patient2Data = {
       transcription: { id: "tx-2" },

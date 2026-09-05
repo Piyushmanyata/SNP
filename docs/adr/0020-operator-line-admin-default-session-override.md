@@ -1,5 +1,11 @@
 # ADR 0020: Operator line as an admin default with a session override
 
+> **Amended by [ADR-0030](0030-step-by-step-transcription.md).** Operator line no
+> longer selects the initial prescription fields or autofocus: the transcription
+> wizard runs an identical sequence for every operator. The line now chooses only
+> which fulfilment station opens once the prescription is committed. Everything
+> below about how the line is stored, defaulted and overridden still holds.
+
 ## Context
 
 Once the clinical desk is line-scoped, something has to say which station an operator is on. There is one `clinical_desk_operator` role covering all five stations, and asking the question on every patient would add a tap at the busiest moment.
