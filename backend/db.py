@@ -36,6 +36,8 @@ TRANSCRIPTION_PATIENT_INDEX = {"keys": "patient_id", "unique": True}
 LEDGER_INDEX_NAME = "patient_id_1_message_type_1_event_date_1"
 LEDGER_PARTIAL_FILTER = {"patient_id": {"$exists": True}}
 HOUSEHOLD_LEDGER_INDEX_NAME = "number_1_reminder_type_1_event_date_1_send_date_1"
+SETUP_REQUEST_INDEX_NAME = "setup_request_id_1"
+SETUP_REQUEST_PARTIAL = {"setup_request_id": {"$type": "string"}}
 
 
 def should_drop_person_camp_index(index_info: dict) -> bool:
@@ -50,6 +52,11 @@ def should_drop_ledger_index(index_info: dict) -> bool:
 
 def should_drop_household_ledger_index(index_info: dict) -> bool:
     return HOUSEHOLD_LEDGER_INDEX_NAME in index_info
+
+
+def should_drop_setup_request_index(index_info: dict) -> bool:
+    old = index_info.get(SETUP_REQUEST_INDEX_NAME)
+    return bool(old) and old.get("partialFilterExpression") != SETUP_REQUEST_PARTIAL
 
 
 async def init_indexes() -> None:
@@ -103,7 +110,14 @@ async def init_indexes() -> None:
     await db.camps.create_index(
         "is_active", unique=True, partialFilterExpression={"is_active": True}
     )
-    await db.camps.create_index("setup_request_id", unique=True, sparse=True)
+    camp_indexes = await db.camps.index_information()
+    if should_drop_setup_request_index(camp_indexes):
+        await db.camps.drop_index(SETUP_REQUEST_INDEX_NAME)
+    await db.camps.create_index(
+        "setup_request_id",
+        unique=True,
+        partialFilterExpression=SETUP_REQUEST_PARTIAL,
+    )
     await db.camp_days.create_index(
         [("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True
     )

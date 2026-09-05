@@ -89,12 +89,14 @@ async def create_camp(body: CampBody, actor: dict = Depends(require_admin)) -> D
     if existing:
         c = existing
     else:
-        res = await db.camps.insert_one({
+        doc = {
             "name": body.name, "venue": body.venue, "camp_date": camp_date,
             "is_active": False, "print_override": None,
-            "setup_request_id": body.setup_request_id,
             "created_at": now_utc(),
-        })
+        }
+        if body.setup_request_id:
+            doc["setup_request_id"] = body.setup_request_id
+        res = await db.camps.insert_one(doc)
         c = await db.camps.find_one({"_id": res.inserted_id})
     if body.days:
         try:

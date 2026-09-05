@@ -854,17 +854,17 @@ class TestFixRegressions:
         assert pr.status_code == 200, pr.text
         printed_at = pr.json()["registration"]["printed_at"]
         assert printed_at
-        assert admin.post(f"{API}/desk/mark-seen/{pid}", timeout=30).status_code == 200
+        seen = admin.post(f"{API}/desk/mark-seen/{pid}", timeout=30)
+        assert seen.status_code == 409, seen.text
+        assert seen.json()["detail"]["code"] == "completion_required"
         u = admin.post(f"{API}/desk/undo-seen/{pid}", timeout=30)
-        assert u.status_code == 200, f"{u.status_code} {u.text[:300]}"
-        reg = u.json()["registration"]
+        assert u.status_code == 409, u.text
+        assert u.json()["detail"]["code"] == "completion_required"
+        g = admin.post(f"{API}/desk/lookup", json={"value": str(r.json()["registration"]["reg_no"])}, timeout=30)
+        reg = g.json()["registration"]
         assert reg["queue_status"] == "arrived"
-        assert reg["printed_at"] == printed_at, "presence (printed_at) must be preserved on undo"
+        assert reg["printed_at"] == printed_at
         assert reg.get("seen_at") in (None, "")
-        # verify persisted
-        g = admin.post(f"{API}/desk/lookup", json={"value": str(reg["reg_no"])}, timeout=30)
-        assert g.json()["registration"]["queue_status"] == "arrived"
-        assert g.json()["registration"]["printed_at"] == printed_at
         STATE["p_undo"] = reg
 
     # OT seat must be released when an OT deferral is re-recorded on another day
@@ -880,9 +880,13 @@ class TestFixRegressions:
         day_a, day_b = a.json()["ot_day"]["id"], b.json()["ot_day"]["id"]
 
         t2 = STATE["trans2_id"]
-        r = admin.post(f"{API}/clinical/fulfilment", json={
+        clin = _clinical(admin)
+        r = clin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": t2, "item_type": "ot", "status": "deferred",
-            "ot_schedule_day_id": day_a}, timeout=30)
+            "ot_schedule_day_id": day_a,
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev2_id"],
+            "reviewed_generation": STATE["gen2"], "operation_id": f"op-rerecord-ot-a-{TAG}",
+        }, timeout=30)
         assert r.status_code == 200, r.text
 
         def seats(day_id):
@@ -891,9 +895,12 @@ class TestFixRegressions:
 
         assert seats(day_a) == 1
         # re-record on day B -> day A seat must be released
-        r = admin.post(f"{API}/clinical/fulfilment", json={
+        r = clin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": t2, "item_type": "ot", "status": "deferred",
-            "ot_schedule_day_id": day_b}, timeout=30)
+            "ot_schedule_day_id": day_b,
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev2_id"],
+            "reviewed_generation": STATE["gen2"], "operation_id": f"op-rerecord-ot-b-{TAG}",
+        }, timeout=30)
         assert r.status_code == 200, r.text
         assert seats(day_b) == 1, "new day should hold the seat"
         assert seats(day_a) == 0, "previous OT day seat leaked (not released)"
@@ -909,9 +916,13 @@ class TestFixRegressions:
         day_a, day_b = a.json()["specs_day"]["id"], b.json()["specs_day"]["id"]
 
         t2 = STATE["trans2_id"]
-        r = admin.post(f"{API}/clinical/fulfilment", json={
+        clin = _clinical(admin)
+        r = clin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": t2, "item_type": "specs_made", "status": "deferred",
-            "specs_collection_day_id": day_a}, timeout=30)
+            "specs_collection_day_id": day_a,
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev2_id"],
+            "reviewed_generation": STATE["gen2"], "operation_id": f"op-rerecord-sp-a-{TAG}",
+        }, timeout=30)
         assert r.status_code == 200, r.text
 
         def seats(day_id):
@@ -919,19 +930,25 @@ class TestFixRegressions:
             return next(d for d in days if d["id"] == day_id).get("seats_taken", 0)
 
         assert seats(day_a) == 0
-        r = admin.post(f"{API}/clinical/fulfilment", json={
+        r = clin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": t2, "item_type": "specs_made", "status": "deferred",
-            "specs_collection_day_id": day_b}, timeout=30)
+            "specs_collection_day_id": day_b,
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev2_id"],
+            "reviewed_generation": STATE["gen2"], "operation_id": f"op-rerecord-sp-b-{TAG}",
+        }, timeout=30)
         assert r.status_code == 200, r.text
         assert seats(day_b) == 0
         assert seats(day_a) == 0, "previous Specs collection day seat leaked (not released)"
 
-        r = admin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": t2, "item_type": "specs_fixed", "status": "fulfilled"}, timeout=30)
+        r = clin.post(f"{API}/clinical/fulfilment", json={
+            "transcription_id": t2, "item_type": "specs_fixed", "status": "fulfilled",
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev2_id"],
+            "reviewed_generation": STATE["gen2"], "operation_id": f"op-rerecord-sp-fix-{TAG}",
+        }, timeout=30)
         assert r.status_code == 409, r.text
         assert "Spectacles to be made" in str(r.json())
         assert seats(day_b) == 0
-        looked = admin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p2"]["reg_no"])}, timeout=30)
+        looked = clin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p2"]["reg_no"])}, timeout=30)
         assert looked.status_code == 200, looked.text
         active_specs = [s for s in looked.json()["slips"] if s.get("active") and s["item_type"] == "specs_made"]
         assert len(active_specs) == 1
@@ -943,10 +960,14 @@ class TestFixRegressions:
         assert c.status_code == 200, c.text
         day_c = c.json()["specs_day"]["id"]
         t2 = STATE["trans2_id"]
+        clin = _clinical(admin)
 
-        r = admin.post(f"{API}/clinical/fulfilment", json={
+        r = clin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": t2, "item_type": "specs_made", "status": "deferred",
-            "specs_collection_day_id": day_c}, timeout=30)
+            "specs_collection_day_id": day_c,
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev2_id"],
+            "reviewed_generation": STATE["gen2"], "operation_id": f"op-excl-sp-c-{TAG}",
+        }, timeout=30)
         assert r.status_code == 200, r.text
 
         def seats():
@@ -954,14 +975,20 @@ class TestFixRegressions:
             return next(d for d in days if d["id"] == day_c).get("seats_taken", 0)
 
         assert seats() == 0
-        r = admin.post(f"{API}/clinical/fulfilment", json={
+        r = clin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": t2, "item_type": "specs_fixed", "status": "fulfilled",
-            "specs_collection_day_id": day_c}, timeout=30)
+            "specs_collection_day_id": day_c,
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev2_id"],
+            "reviewed_generation": STATE["gen2"], "operation_id": f"op-excl-sp-fix-{TAG}",
+        }, timeout=30)
         assert r.status_code == 409, r.text
         assert seats() == 0
-        r = admin.post(f"{API}/clinical/fulfilment", json={
+        r = clin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": STATE["trans_id"], "item_type": "specs_made", "status": "deferred",
-            "specs_collection_day_id": day_c}, timeout=30)
+            "specs_collection_day_id": day_c,
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev_id"],
+            "reviewed_generation": STATE["gen"], "operation_id": f"op-excl-p1-sp-{TAG}",
+        }, timeout=30)
         assert r.status_code == 200, r.text
         assert seats() == 0
 
