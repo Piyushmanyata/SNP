@@ -28,17 +28,21 @@ _Avoid_: reg station, station, desk (alone, when the clinical desks could be mea
 The 2D barcode scanner on a Registration desk that reads Aadhaar Secure QR and types the payload into the page as keystrokes. Primary capture device at the desk.
 _Avoid_: USB scanner (also used for 1D scanners that cannot read Secure QR), barcode gun
 
-**Desk account**:
-The login a Registration desk or a Fulfilment line desk uses for the day. One per desk, signed in once in the morning by a team lead, shared by every volunteer who sits there. Not a person. Team leads and admins sign in as themselves.
-_Avoid_: volunteer login, shared password, kiosk account
+**Volunteer**:
+An authenticated user account with a unique Name and 4-digit PIN assigned to a Team Lead or Admin. Operates registration or fulfilment desks directly.
+_Avoid_: Desk account, kiosk account, shared login
 
-**Volunteer roster**:
-The admin-kept list of volunteer names for a camp. A roster entry is a person, not a login; it has no password and no PIN.
-_Avoid_: staff list (that is the accounts), user list
+**Team**:
+The cohort of Volunteers supervised by a specific Team Lead. The Team Lead's leaderboard score is strictly the sum of points earned by their Team.
+_Avoid_: sub-camp, brigade, shift group
 
-**On-desk volunteer**:
-The roster name a volunteer picks when they sit at a desk. It rides on every registration and clinical posting made at that desk until they hand over or a team lead clears it. A desk with no On-desk volunteer refuses to post. Honesty-based: nothing verifies the pick. The leaderboard counts by this name.
-_Avoid_: current user, operator (that is a clinical account), logged-in volunteer
+**PIN**:
+The 4-digit personal identification number used with a unique Name to authenticate. Defaults to 1234 on creation with mandatory change on first login.
+_Avoid_: password, secret, OTP
+
+**Reset PIN**:
+The header action beside Logout that lets the signed-in user choose a new PIN after entering their current PIN. Logout ends the session before another person signs in.
+_Avoid_: Switch Volunteer, switch person, shared login
 
 **Desk camera**:
 The volunteer-held phone camera at a Registration desk. Fallback capture device for Aadhaar Secure QR when the USB imager cannot read the card. Primary capture at the door and for self-register.
@@ -89,23 +93,23 @@ The keystroke stream a USB imager emits for one card: the whole payload followed
 _Avoid_: USB wedge (the old name for the fallback textarea), paste mode, manual USB mode
 
 **OT Schedule Day**:
-An admin-created day, unique per camp and date, on which deferred OT patients are assigned. It has a venue and a finite seat limit.
+An admin-created hospital surgery date, unique per camp and date, with a finite seat limit. Surgery takes place at Vimla Ramkrishna Bajaj Eye Hospital only; camp staff schedule it and print the token. Past dates cannot accept bookings.
 _Avoid_: OT slot, surgery day, OT appointment
 
-**Doctor's Rx**:
-The desk where a patient's paper prescription is transcribed. The only place a transcription can be edited, and the only clinical posting that is not a Fulfilment line. Every line desk reads what it wrote.
-_Avoid_: transcription desk, doctor's desk, clinical desk (that is the whole area)
+**Prescription transcription**:
+The operator copies the doctor's paper prescription at any Fulfilment line, then issues supplies or schedules hospital treatment or collection at the same desk. Corrections after fulfilment require an audit reason.
+_Avoid_: Doctor's Rx line, separate transcription desk
 
 **Operator line**:
-Where a clinical operator is posted: Doctor's Rx, or one of the four Fulfilment lines. An admin sets it on the account and the operator may override it for their own session. It is a posting, not a permission — nothing is refused because of it.
+The one of four Fulfilment lines the operator chooses for their current session. It selects the initial fields and autofocus, not permissions. Admin assignment is unnecessary.
 _Avoid_: role, station, desk assignment
 
 **Fulfilment line**:
-One of the four things a patient can be sent to after Seen: medicine, Fixed-power specs, Spectacles to be made, OT. Each is a physical desk at the camp, its own item type, and its own record. A patient may go to more than one, except that the two specs lines are mutually exclusive. A line is recorded or it is absent, and absent means not needed.
+One of the four things a patient can be sent to after Seen: medicine, Fixed-power specs, Spectacles to be made, or Hospital surgery. Each has its own item type and record. The hospital line schedules surgery; operations do not occur at camp. A patient may use multiple lines, except that the two specs lines are mutually exclusive. An absent record means not needed.
 _Avoid_: station, queue, counter, three lines, not required (never a recorded outcome)
 
 **Fixed-power specs**:
-The clinical fulfilment outcome for ready-made spectacles handed over at camp. The power comes from Doctor's Rx; the desk reads it and cannot change it. No Token, no SMS, no collection day. The common case, about 70-80% of patients.
+The clinical fulfilment outcome for ready-made spectacles handed over at camp. The operator transcribes the prescribed powers at the same desk. No Token, SMS or collection window is required.
 _Avoid_: ready specs, stock specs, issued specs
 
 **Spectacles to be made**:
@@ -117,7 +121,7 @@ An admin-created day, unique per camp and date, on which patients deferred for S
 _Avoid_: specs slot, collection appointment, specs schedule
 
 **Token**:
-The paper printed when OT or Spectacles to be made is deferred. Hindi and English labels; name and venue as stored. The patient brings it to the OT Schedule Day or Specs collection day. A new deferral of the same type cancels the previous Token.
+The short A6 paper printed when hospital surgery or Spectacles to be made is scheduled. It contains the patient's name, registration number, date or collection window and venue. Surgery tokens include the hospital phone and a reminder to bring the prescription, token, Aadhaar card, voter ID and mobile number. Rescheduling cancels the previous Token.
 _Avoid_: slip, deferred slip, thermal slip, queue ticket, final token
 
 **Reference prescription**:
@@ -129,23 +133,27 @@ An image of the camp's sponsor, printed in the prescription footer under "Sponso
 _Avoid_: logo (the trust's own emblems are fixed masthead artwork, not sponsor logos), header image
 
 **Print window**:
-Admin-declared open/closed state on a camp day. Open: printing is enabled. Closed: printing is disabled. Not derived from the calendar. Today's camp day's Print window also chooses the Desk mode.
-_Avoid_: IST print gate, today-only print
+Server-derived printing availability for the active camp: automatic on the IST calendar camp day, or one admin-selected day, or off. Manual enable/disable expires at the next IST midnight. A stored per-day boolean is not the authority. Chooses Desk mode via the operating day.
+_Avoid_: paused camp, calendar-today-only print, client timer
 
 **Desk mode**:
-Which of two layouts the registration desk shows, chosen by today's camp day and its Print window. Open is camp-day mode: Scan at the door first, Pre-registration hidden. Closed, or no camp day today, is pre-registration mode: Pre-registration first, Scan at the door last.
+Camp-day mode when printing is open for the operating day: Scan at the door first, Pre-registration hidden. Pre-registration mode when printing is closed: Pre-registration first, Scan at the door last. Search stays in both.
 _Avoid_: camp mode, desk state, kiosk mode
 
+**Operating day**:
+The single camp day currently selected for door check-in and printing. Automatic mode uses today's IST date when that date is in the schedule; manual enable uses the admin-selected day even if it is not today.
+_Avoid_: calendar today, booked day (a patient may have booked a different day)
+
 **Manual entry**:
-A desk registration typed after two Failures, or after a Scan stall. Marked on the registration. Not an admin approval and not an audited reason. Self-register has no typed path.
-_Avoid_: manual exception, manual window, manual audit
+A desk registration typed after three Failures. Permission denial, stall, cancel, frames, network and busy do not count. Marked on the registration; camp-day identity rechecking is required. Self-register has no typed path.
+_Avoid_: permission fallback, two-failure unlock
 
 **Scan stall**:
-Twenty seconds of live scan with no Detect at all. Counts the same as two Failures, because a camera that never detects would otherwise trap the volunteer forever. Reveals torch, photo upload, and manual entry together.
+Twenty seconds of live scan with no Detect. Does not count as a Failure and does not unlock Manual entry.
 _Avoid_: scan timeout, camera failure, give up
 
 **Arrival**:
-The patient is physically at the camp on a camp day. Stamped by a desk Lock that matches their registration in this camp, or by the registration that creates a walk-in. Registration is a booking; Arrival is presence. Stamped once: a second Lock does not re-stamp it or move the patient again. A registration reaches Seen only through Arrival. Print Prescription is gated on Arrival, not on Registration. The desk offers no way to check a patient in from a name or number lookup.
+The patient is physically at the camp on a camp day. Stamped by a desk Lock that matches their registration in this camp, or by the registration that creates a walk-in. Registration is a booking; Arrival is presence. Stamped once: a second Lock does not re-stamp it or move the patient again. Print Prescription is gated on Arrival, not on Registration. Doctor seen is gated on clinical completion after print, not on Arrival alone. The desk offers no way to check a patient in from a name or number lookup.
 _Avoid_: check-in, presence, attendance, walk-in (a walk-in registers and arrives in one action)
 
 **Door walk-in**:
@@ -181,8 +189,16 @@ The read-only page a team lead watches during a camp day. Per Registration desk,
 _Avoid_: dashboard (that is the admin area), live feed, monitor, alerts (the board pushes nothing)
 
 **Transcription backlog**:
-Patients who have reached Seen today and have no transcription yet at Doctor's Rx. The number that says whether the specs desk is about to stall.
-_Avoid_: pending Rx, queue at Doctor's Rx (a physical queue is not the backlog)
+Arrived and printed patients who do not yet have a completed prescription. Doctor seen is committed with completion, not before it.
+_Avoid_: pending Rx after seen, queue at Doctor's Rx (a physical queue is not the backlog)
+
+**Doctor seen**:
+A clinical desk operator's attestation that consultation is complete, committed with whole-prescription completion after arrival and print. Drafts, reprints and volunteer mark-seen cannot confer it.
+_Avoid_: arrival, prescription printed, independent mark-seen
+
+**Paper review**:
+The issuing operator's explicit comparison of a fulfilment line with the physical paper, tied to the exact committed prescription revision and generation.
+_Avoid_: opening the prescription, automatic approval
 
 **Camp records export**:
 The single admin-only CSV for a camp, one row per patient including no-shows. Carries identity (name, age, gender, household phone, address, Aadhaar last-4, reg_no), the Manual entry mark, the registration / arrival / seen timestamps, diagnosis, BP and blood sugar, each eye's power, the status of each of the four Fulfilment lines with blank meaning the patient was never recorded at that desk, and the assigned clinical day and venue for each deferral. It is a wide file of patient data and is not downloadable by a volunteer.

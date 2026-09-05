@@ -1,21 +1,37 @@
 import logger from "../../lib/logger";
 
-export function cameraErrorMessage(err) {
+export function classifyCameraError(err) {
   const msg = String(err?.message || err || "");
   const name = String(err?.name || "");
   if (typeof window !== "undefined" && window.isSecureContext === false) {
-    return "Camera access requires HTTPS or localhost. Please use a secure connection, photo upload, or USB scanner.";
+    return {
+      code: "insecure",
+      message: "Camera access requires HTTPS or localhost. Use photo upload or a USB scanner.",
+    };
   }
   if (name === "NotAllowedError" || name === "PermissionDeniedError" || /permission|denied|allowed/i.test(msg)) {
-    return "Camera permission denied. Please allow camera access in your browser or use photo upload / USB scanner.";
+    return {
+      code: "permission_denied",
+      message: "Camera permission is off. Enable camera for this site in the browser settings, then tap Retry. USB or photo QR still works.",
+    };
   }
   if (name === "NotFoundError" || name === "DevicesNotFoundError" || /not found|no camera/i.test(msg)) {
-    return "No camera found on this device. Use photo upload or USB scanner instead.";
+    return {
+      code: "not_found",
+      message: "No camera found on this device. Use photo upload or USB scanner instead.",
+    };
   }
   if (name === "NotReadableError" || name === "TrackStartError" || /in use|busy|started/i.test(msg)) {
-    return "Camera is currently busy or in use by another app. Close other apps and retry.";
+    return {
+      code: "busy",
+      message: "Camera is currently busy or in use by another app. Close other apps and retry.",
+    };
   }
-  return "Unable to start camera. Use photo upload or USB scanner instead.";
+  return { code: "unknown", message: "Unable to start camera. Use photo upload or USB scanner instead." };
+}
+
+export function cameraErrorMessage(err) {
+  return classifyCameraError(err).message;
 }
 
 export async function listVideoInputs() {
@@ -67,6 +83,7 @@ export async function acquireCameraStream(deviceId) {
       break;
     } catch (e) {
       lastErr = e;
+      if (classifyCameraError(e).code === "permission_denied") break;
     }
   }
   if (!stream) {

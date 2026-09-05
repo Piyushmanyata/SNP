@@ -8,6 +8,7 @@ corrections, OT seats), staff management, reports/exports.
 import uuid
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from xml.etree.ElementTree import Element, tostring
 
 import pytest
 import requests
@@ -41,16 +42,16 @@ class TestAuth:
         assert r.status_code == 200, r.text
         data = r.json()
         assert data["user"]["role"] == "admin"
-        assert data["user"]["email"] == admin_credentials["email"]
+        assert data["user"]["name"].lower() == admin_credentials["name"].lower()
         assert isinstance(data["access_token"], str) and len(data["access_token"]) > 20
         assert "access_token" in r.cookies, f"cookies={r.cookies.get_dict()}"
         # httpOnly flag present on Set-Cookie header
         raw = r.headers.get("set-cookie", "")
         assert "httponly" in raw.lower()
 
-    def test_login_wrong_password(self, anon, admin_credentials):
+    def test_login_wrong_pin(self, anon, admin_credentials):
         r = anon.post(f"{API}/auth/login",
-                      json={"email": admin_credentials["email"], "password": "WrongPass@12345"},
+                      json={"name": admin_credentials["name"], "pin": "0000"},
                       timeout=30)
         assert r.status_code == 401, r.text
 
@@ -64,10 +65,10 @@ class TestAuth:
         assert r.json()["user"]["role"] == "admin"
 
     def test_brute_force_lockout(self, anon):
-        email = f"TEST_lock_{TAG}@snpcamps.org"
+        name = f"TEST_lock_{TAG}"
         codes = []
         for _ in range(6):
-            r = anon.post(f"{API}/auth/login", json={"email": email, "password": "Nope@123456789"},
+            r = anon.post(f"{API}/auth/login", json={"name": name, "pin": "0000"},
                           timeout=30)
             codes.append(r.status_code)
         assert codes[-1] == 429, f"expected lockout 429 after 5 fails, got {codes}"
@@ -107,7 +108,7 @@ class TestCamps:
         day = r.json()["day"]
         assert day["day_date"] == TODAY_IST
         assert day["is_today"] == True
-        assert day["printing_open"] == False
+        assert day["printing_open"] == True
         STATE["day_id"] = day["id"]
 
     def test_camp_endpoints_require_admin(self, anon):
@@ -118,7 +119,7 @@ class TestCamps:
 # ---------------- aadhaar mock ----------------
 class TestAadhaarMock:
     def test_decode_card(self, anon):
-        payload = f"AADHAAR|TEST Ravi Kumar|M|1970-05-04|1234|12 Test Street, Chennai"
+        payload = '<PrintLetterBarcodeData name="TEST Ravi Kumar" gender="M" dob="1970-05-04" uid="1234" street="12 Test Street, Chennai"/>'
         r = anon.post(f"{API}/aadhaar/decode", json={"payload": payload}, timeout=30)
         assert r.status_code == 200, r.text
         body = r.json()
@@ -230,8 +231,13 @@ class TestRegistration:
         r = anon.post(f"{API}/self-register", json={
             "full_name": f"TESTSELF {TAG}", "gender": d["gender"], "dob": d["dob"],
             "age": d["age"], "address": d["address"], "aadhaar_last4": "4321",
+            "phone": "9812345688",
             "aadhaar_scanned": True, "camp_day_id": STATE["day_id"],
             "registration_request_id": str(uuid.uuid4()),
+            "qr_payload": tostring(Element(
+                "PrintLetterBarcodeData", name=f"TESTSELF {TAG}", gender=d["gender"],
+                dob=d["dob"], uid="4321", street=d["address"],
+            ), encoding="unicode"),
         }, timeout=30)
         assert r.status_code == 200, r.text
         receipt = r.json()["receipt"]
@@ -262,7 +268,7 @@ class TestDeskPrintWindow:
     def test_mark_seen_blocked_before_arrival(self, admin):
         r = admin.post(f"{API}/desk/mark-seen/{STATE['p1']['id']}", timeout=30)
         assert r.status_code == 409, r.text
-        assert r.json()["detail"]["code"] == "NOT_ARRIVED"
+        assert r.json()["detail"]["code"] == "completion_required"
 
     def test_arrival_stamps_presence(self, admin):
         r = admin.post(f"{API}/desk/arrive/{STATE['p1']['id']}", timeout=30)
@@ -272,6 +278,9 @@ class TestDeskPrintWindow:
         assert reg["queue_status"] == "arrived"
 
     def test_print_blocked_when_window_closed(self, admin):
+        r = admin.patch(f"{API}/camps/days/{STATE['day_id']}/print-window",
+                        json={"mode": "disable"}, timeout=30)
+        assert r.status_code == 200, r.text
         r = admin.post(f"{API}/desk/print/{STATE['p1']['id']}", timeout=30)
         assert r.status_code == 409, r.text
         assert r.json()["detail"]["code"] == "PRINT_WINDOW_CLOSED"
@@ -279,7 +288,7 @@ class TestDeskPrintWindow:
     def test_mark_seen_refused_when_never_printed(self, admin):
         r = admin.post(f"{API}/desk/mark-seen/{STATE['p1']['id']}", timeout=30)
         assert r.status_code == 409, r.text
-        assert r.json()["detail"]["code"] == "never_printed"
+        assert r.json()["detail"]["code"] == "completion_required"
 
     def test_open_print_window(self, admin):
         r = admin.patch(f"{API}/camps/days/{STATE['day_id']}/print-window",
@@ -318,43 +327,78 @@ class TestDeskPrintWindow:
 
     def test_mark_seen_and_idempotency(self, admin):
         r = admin.post(f"{API}/desk/mark-seen/{STATE['p1']['id']}", timeout=30)
-        assert r.status_code == 200, r.text
-        body = r.json()
-        assert body["changed"] == True
-        assert body["registration"]["queue_status"] == "seen"
-        assert body["registration"]["seen_at"]
-
-        r2 = admin.post(f"{API}/desk/mark-seen/{STATE['p1']['id']}", timeout=30)
-        assert r2.status_code == 200
-        assert r2.json()["changed"] == False
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["code"] == "completion_required"
+        looked = admin.post(f"{API}/desk/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
+        assert looked.json()["registration"]["queue_status"] != "seen"
 
     def test_undo_seen_within_window(self, admin):
         r = admin.post(f"{API}/desk/undo-seen/{STATE['p1']['id']}", timeout=30)
-        assert r.status_code == 200, f"undo-seen failed: {r.status_code} {r.text[:300]}"
-        assert r.json()["registration"]["queue_status"] == "arrived"
-        # re-mark seen for downstream clinical tests
-        r = admin.post(f"{API}/desk/mark-seen/{STATE['p1']['id']}", timeout=30)
-        assert r.status_code == 200, r.text
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["code"] == "completion_required"
 
     def test_undo_seen_on_not_seen_patient(self, admin):
         r = admin.post(f"{API}/desk/undo-seen/{STATE['p2']['id']}", timeout=30)
         assert r.status_code == 409, r.text
 
 
+def _clinical(admin):
+    if "clinical_http" in STATE:
+        return STATE["clinical_http"]
+    name = f"TEST flow clinical {TAG}"
+    created = admin.post(f"{API}/staff", json={"name": name, "role": "clinical_desk_operator"}, timeout=30)
+    assert created.status_code == 200, created.text
+    s = requests.Session()
+    s.headers.update({"Content-Type": "application/json"})
+    logged = s.post(f"{API}/auth/login", json={"name": name, "pin": "1234"}, timeout=30)
+    assert logged.status_code == 200, logged.text
+    changed = s.post(f"{API}/auth/change-pin", json={"current_pin": "1234", "new_pin": "5678"}, timeout=30)
+    assert changed.status_code == 200, changed.text
+    logged = s.post(f"{API}/auth/login", json={"name": name, "pin": "5678"}, timeout=30)
+    assert logged.status_code == 200, logged.text
+    s.headers.update({"Authorization": f"Bearer {logged.json()['access_token']}"})
+    STATE["clinical_http"] = s
+    return s
+
+
+def _complete_rx(client, patient_id, operation_id, **extra):
+    payload = {
+        "patient_id": patient_id,
+        "full_transcription_confirmed": True,
+        "prescribed_lines": ["medicine", "specs_fixed", "specs_made", "ot"],
+        "operation_id": operation_id,
+        "diagnosis_options": ["Cataract", "Presbyopia"],
+        "medication_instructions": "Moxifloxacin 1 drop QID",
+        "bp": "120/80",
+        "blood_sugar": "110",
+        "ot_eye": "left",
+        "ot_procedure": "Cataract Surgery",
+        "specs_measurements": RX_MEASUREMENTS,
+    }
+    payload.update(extra)
+    return client.post(f"{API}/clinical/transcription/complete", json=payload, timeout=30)
+
+
 # ---------------- clinical ----------------
 class TestClinical:
-    def test_lookup_not_seen_refusal_no_phi(self, admin):
-        r = admin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p2"]["reg_no"])}, timeout=30)
+    def test_admin_cannot_transcribe(self, admin):
+        r = admin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
+        assert r.status_code == 403, r.text
+
+    def test_lookup_not_arrived_refusal_no_phi(self, admin):
+        clin = _clinical(admin)
+        r = clin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p2"]["reg_no"])}, timeout=30)
         assert r.status_code == 409, r.text
         detail = r.json()["detail"]
-        assert detail["code"] == "not_seen"
+        assert detail["code"] in ("not_arrived", "never_printed")
         assert STATE["p2"]["full_name"] not in r.text
 
-    def test_lookup_seen_ok(self, admin):
-        r = admin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
+    def test_lookup_printed_before_seen(self, admin):
+        clin = _clinical(admin)
+        r = clin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
         assert r.status_code == 200, r.text
         body = r.json()
-        assert body["registration"]["queue_status"] == "seen"
+        assert body["registration"]["queue_status"] != "seen"
         assert body["transcription"] is None
 
     def test_diagnosis_options(self, admin):
@@ -362,16 +406,19 @@ class TestClinical:
         assert r.status_code == 200
         assert "Cataract" in r.json()["options"]
 
-    def test_transcription_requires_seen(self, admin):
-        r = admin.post(f"{API}/clinical/transcription", json={
+    def test_transcription_requires_arrival(self, admin):
+        clin = _clinical(admin)
+        r = clin.post(f"{API}/clinical/transcription", json={
             "patient_id": STATE["p2"]["id"], "diagnosis_options": ["Cataract"],
         }, timeout=30)
         assert r.status_code == 409, r.text
 
     def test_create_transcription(self, admin):
-        r = admin.post(f"{API}/clinical/transcription", json={
+        clin = _clinical(admin)
+        r = clin.post(f"{API}/clinical/transcription", json={
             "patient_id": STATE["p1"]["id"], "diagnosis_options": ["Cataract", "Presbyopia"],
             "bp": "130/85", "blood_sugar": "110", "remarks": "TEST remarks",
+            "medication_instructions": "drops",
             "ot_eye": "right", "ot_procedure": "Cataract Surgery",
             "specs_measurements": RX_MEASUREMENTS,
         }, timeout=30)
@@ -382,19 +429,31 @@ class TestClinical:
         assert t["bp"] == "130/85"
         STATE["trans_id"] = t["id"]
 
-        # verify persisted via lookup
-        r = admin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
+        r = clin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
         assert r.json()["transcription"]["id"] == t["id"]
+        assert r.json()["registration"]["queue_status"] != "seen"
 
     def test_edit_transcription_before_lock(self, admin):
-        r = admin.post(f"{API}/clinical/transcription", json={
+        clin = _clinical(admin)
+        r = clin.post(f"{API}/clinical/transcription", json={
             "patient_id": STATE["p1"]["id"], "diagnosis_options": ["Cataract"],
             "bp": "120/80", "ot_eye": "left", "ot_procedure": "Cataract Surgery",
+            "medication_instructions": "Moxifloxacin 1 drop QID",
             "specs_measurements": RX_MEASUREMENTS,
         }, timeout=30)
         assert r.status_code == 200, r.text
         assert r.json()["transcription"]["bp"] == "120/80"
         assert r.json()["transcription"]["locked"] == False
+
+    def test_complete_prescription(self, admin):
+        clin = _clinical(admin)
+        r = _complete_rx(clin, STATE["p1"]["id"], f"op-live-{TAG}")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["registration"]["queue_status"] == "seen"
+        STATE["trans_id"] = body["transcription"]["id"]
+        STATE["rev_id"] = body["revision"]["id"]
+        STATE["gen"] = body["registration"]["clinical_generation"]
 
     def test_create_ot_day(self, admin):
         r = admin.post(f"{API}/clinical/ot-days", json={
@@ -409,20 +468,21 @@ class TestClinical:
     def test_create_list_upsert_specs_collection_days(self, admin):
         r = admin.post(f"{API}/clinical/specs-days", json={
             "camp_id": STATE["camp_id"], "day_date": "2026-12-05",
-            "venue": "TEST Optical", "seat_limit": 1,
+            "venue": "TEST Optical", "start_time": "09:00", "end_time": "17:00",
         }, timeout=30)
         assert r.status_code == 200, r.text
         d = r.json()["specs_day"]
-        assert d["seat_limit"] == 1 and d["seats_taken"] == 0 and d["seats_free"] == 1
+        assert "seat_limit" not in d and "seats_taken" not in d and "seats_free" not in d
+        assert d["start_time"] == "09:00" and d["end_time"] == "17:00"
         assert d["day_date"] == "2026-12-05"
         STATE["specs_day_id"] = d["id"]
 
         listed = admin.get(f"{API}/clinical/specs-days", timeout=30).json()["specs_days"]
-        assert any(x["id"] == d["id"] and x["seats_free"] == 1 for x in listed)
+        assert any(x["id"] == d["id"] and x["start_time"] == "09:00" for x in listed)
 
         r = admin.post(f"{API}/clinical/specs-days", json={
             "camp_id": STATE["camp_id"], "day_date": "2026-12-05",
-            "venue": "TEST Optical Hall", "seat_limit": 1,
+            "venue": "TEST Optical Hall", "start_time": "10:00", "end_time": "16:00",
         }, timeout=30)
         assert r.status_code == 200, r.text
         up = r.json()["specs_day"]
@@ -431,44 +491,59 @@ class TestClinical:
         STATE["specs_day_venue"] = "TEST Optical Hall"
 
     def test_medicine_fulfilment_locks_transcription(self, admin):
-        r = admin.post(f"{API}/clinical/fulfilment", json={
+        clin = _clinical(admin)
+        r = clin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": STATE["trans_id"], "item_type": "medicine", "status": "fulfilled",
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev_id"],
+            "reviewed_generation": STATE["gen"], "operation_id": f"op-med-{TAG}",
         }, timeout=30)
         assert r.status_code == 200, r.text
         assert r.json()["fulfilment"]["status"] == "fulfilled"
         assert r.json()["slip"] is None
 
-        r = admin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
+        r = clin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
         assert r.json()["transcription"]["locked"] == True
 
     def test_transcription_edit_blocked_after_lock(self, admin):
-        r = admin.post(f"{API}/clinical/transcription", json={
+        clin = _clinical(admin)
+        r = clin.post(f"{API}/clinical/transcription", json={
             "patient_id": STATE["p1"]["id"], "diagnosis_options": ["Glaucoma"],
         }, timeout=30)
         assert r.status_code == 409, r.text
 
     def test_invalid_fulfilment_status(self, admin):
-        r = admin.post(f"{API}/clinical/fulfilment", json={
+        clin = _clinical(admin)
+        r = clin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": STATE["trans_id"], "item_type": "medicine", "status": "deferred",
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev_id"],
+            "reviewed_generation": STATE["gen"], "operation_id": f"op-bad-{TAG}",
         }, timeout=30)
         assert r.status_code == 400, r.text
 
     def test_specs_deferral_requires_day_id(self, admin):
-        r = admin.post(f"{API}/clinical/fulfilment", json={
+        clin = _clinical(admin)
+        r = clin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": STATE["trans_id"], "item_type": "specs_made", "status": "deferred",
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev_id"],
+            "reviewed_generation": STATE["gen"], "operation_id": f"op-specs-miss-{TAG}",
         }, timeout=30)
         assert r.status_code == 400, r.text
 
-        r = admin.post(f"{API}/clinical/fulfilment", json={
+        r = clin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": STATE["trans_id"], "item_type": "specs_made", "status": "deferred",
             "collection_date": "2026-12-05", "collection_venue": "TEST Optical",
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev_id"],
+            "reviewed_generation": STATE["gen"], "operation_id": f"op-specs-miss2-{TAG}",
         }, timeout=30)
         assert r.status_code == 400, r.text
 
     def test_specs_deferral_consumes_seat_and_prints_token(self, admin):
-        r = admin.post(f"{API}/clinical/fulfilment", json={
+        clin = _clinical(admin)
+        r = clin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": STATE["trans_id"], "item_type": "specs_made", "status": "deferred",
             "specs_collection_day_id": STATE["specs_day_id"],
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev_id"],
+            "reviewed_generation": STATE["gen"], "operation_id": f"op-specs-{TAG}",
         }, timeout=30)
         assert r.status_code == 200, r.text
         slip = r.json()["slip"]
@@ -480,21 +555,24 @@ class TestClinical:
 
         days = admin.get(f"{API}/clinical/specs-days", timeout=30).json()["specs_days"]
         day = next(d for d in days if d["id"] == STATE["specs_day_id"])
-        assert day["seats_taken"] == 1
-        assert day["seats_free"] == 0
+        assert "seats_taken" not in day
+        assert slip["collection_start_time"] == "10:00"
 
-    def test_specs_seat_limit_below_assigned(self, admin):
+    def test_specs_window_can_be_updated_after_assignment(self, admin):
         r = admin.post(f"{API}/clinical/specs-days", json={
             "camp_id": STATE["camp_id"], "day_date": "2026-12-05",
-            "venue": "TEST Optical Hall", "seat_limit": 0,
+            "venue": "TEST Optical Hall", "start_time": "10:00", "end_time": "16:00",
         }, timeout=30)
-        assert r.status_code == 409, r.text
-        assert r.json()["detail"]["code"] == "SEAT_LIMIT_BELOW_ASSIGNED"
+        assert r.status_code == 200, r.text
+        assert r.json()["specs_day"]["start_time"] == "10:00"
 
     def test_ot_deferral_consumes_seat_and_prints_slip(self, admin):
-        r = admin.post(f"{API}/clinical/fulfilment", json={
+        clin = _clinical(admin)
+        r = clin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": STATE["trans_id"], "item_type": "ot", "status": "deferred",
             "ot_schedule_day_id": STATE["ot_day_id"],
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev_id"],
+            "reviewed_generation": STATE["gen"], "operation_id": f"op-ot-{TAG}",
         }, timeout=30)
         assert r.status_code == 200, r.text
         slip = r.json()["slip"]
@@ -507,7 +585,7 @@ class TestClinical:
         assert day["seats_taken"] == 1
         assert day["seats_free"] == 0
 
-        looked = admin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
+        looked = _clinical(admin).post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
         active = [s for s in looked.json()["slips"] if s.get("active")]
         assert {s["item_type"] for s in active} == {"ot", "specs_made"}
 
@@ -516,53 +594,66 @@ class TestClinical:
             "camp_id": STATE["camp_id"], "day_date": "2026-12-01",
             "venue": "TEST OT Hospital", "seat_limit": 0,
         }, timeout=30)
-        assert r.status_code == 409, r.text
-        assert r.json()["detail"]["code"] == "SEAT_LIMIT_BELOW_ASSIGNED"
+        assert r.status_code == 400, r.text
 
     def test_ot_day_full_rejects_further_deferral(self, admin):
-        # print + mark seen p2 then transcribe and try to defer to the full OT day
         assert admin.post(f"{API}/desk/arrive/{STATE['p2']['id']}", timeout=30).status_code == 200
         assert admin.post(f"{API}/desk/print/{STATE['p2']['id']}", timeout=30).status_code == 200
-        assert admin.post(f"{API}/desk/mark-seen/{STATE['p2']['id']}", timeout=30).status_code == 200
-        r = admin.post(f"{API}/clinical/transcription", json={
-            "patient_id": STATE["p2"]["id"], "diagnosis_options": ["Cataract"],
-            "specs_measurements": RX_MEASUREMENTS,
-        }, timeout=30)
+        clin = _clinical(admin)
+        r = _complete_rx(clin, STATE["p2"]["id"], f"op-p2-{TAG}")
         assert r.status_code == 200, r.text
         t2 = r.json()["transcription"]["id"]
         STATE["trans2_id"] = t2
-        r = admin.post(f"{API}/clinical/fulfilment", json={
+        STATE["rev2_id"] = r.json()["revision"]["id"]
+        STATE["gen2"] = r.json()["registration"]["clinical_generation"]
+        r = clin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": t2, "item_type": "ot", "status": "deferred",
             "ot_schedule_day_id": STATE["ot_day_id"],
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev2_id"],
+            "reviewed_generation": STATE["gen2"], "operation_id": f"op-p2-ot-{TAG}",
         }, timeout=30)
         assert r.status_code == 409, f"expected full-day refusal, got {r.status_code}: {r.text[:200]}"
 
-    def test_specs_day_full_rejects_further_deferral(self, admin):
-        r = admin.post(f"{API}/clinical/fulfilment", json={
+    def test_specs_window_accepts_further_deferral_without_capacity(self, admin):
+        r = _clinical(admin).post(f"{API}/clinical/fulfilment", json={
             "transcription_id": STATE["trans2_id"], "item_type": "specs_made", "status": "deferred",
             "specs_collection_day_id": STATE["specs_day_id"],
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev2_id"],
+            "reviewed_generation": STATE["gen2"], "operation_id": f"op-p2-specs-{TAG}",
         }, timeout=30)
-        assert r.status_code == 409, f"expected full-day refusal, got {r.status_code}: {r.text[:200]}"
+        assert r.status_code == 200, r.text
 
     def test_slip_fetch(self, admin):
-        r = admin.get(f"{API}/clinical/slip/{STATE['ot_slip_id']}", timeout=30)
+        r = _clinical(admin).get(f"{API}/clinical/slip/{STATE['ot_slip_id']}", timeout=30)
         assert r.status_code == 200, r.text
         assert r.json()["slip"]["item_type"] == "ot"
         assert r.json()["registration"]["reg_no"] == STATE["p1"]["reg_no"]
 
     def test_correction_append_only(self, admin):
-        r = admin.post(f"{API}/clinical/correction", json={
+        clin = _clinical(admin)
+        r = clin.post(f"{API}/clinical/correction", json={
             "transcription_id": STATE["trans_id"], "reason": "TEST typo in BP",
             "changes": {"bp": "140/90"},
+            "expected_generation": STATE["gen"],
+            "operation_id": f"op-corr-{TAG}",
+            "full_transcription_confirmed": True,
+            "prescribed_lines": ["medicine", "specs_fixed", "specs_made", "ot"],
+            "diagnosis_options": ["Cataract"],
+            "medication_instructions": "Moxifloxacin 1 drop QID",
+            "bp": "140/90",
+            "ot_eye": "left",
+            "ot_procedure": "Cataract Surgery",
+            "specs_measurements": RX_MEASUREMENTS,
         }, timeout=30)
         assert r.status_code == 200, r.text
-        r = admin.get(f"{API}/clinical/corrections/{STATE['trans_id']}", timeout=30)
+        STATE["rev_id"] = r.json()["revision"]["id"]
+        STATE["gen"] = r.json()["registration"]["clinical_generation"]
+        r = clin.get(f"{API}/clinical/corrections/{STATE['trans_id']}", timeout=30)
         assert r.status_code == 200
         corr = r.json()["corrections"]
         assert len(corr) == 1
         assert corr[0]["reason"] == "TEST typo in BP"
-        # change applied
-        r = admin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
+        r = clin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
         assert r.json()["transcription"]["bp"] == "140/90"
 
     def test_undo_seen_blocked_after_transcription(self, admin):
@@ -576,36 +667,37 @@ class TestClinical:
         person_id = r.json()["registration"].get("person_id")
         if not person_id:
             pytest.skip("no person_id on self-registered patient")
-        r = admin.get(f"{API}/clinical/history/{person_id}", timeout=30)
+        r = _clinical(admin).get(f"{API}/clinical/history/{person_id}", timeout=30)
         assert r.status_code == 200, r.text
         assert isinstance(r.json()["history"], list)
 
 
 # ---------------- staff ----------------
 class TestStaff:
-    def test_password_policy(self, admin):
+    def test_staff_requires_a_name(self, admin):
         r = admin.post(f"{API}/staff", json={
-            "email": f"TEST_weak_{TAG}@snpcamps.org", "password": "short1A!",
-            "name": "TEST Weak", "role": "volunteer",
+            "name": " ", "role": "volunteer",
         }, timeout=30)
         assert r.status_code == 400, r.text
 
     def test_create_volunteer_team_lead_clinical(self, admin):
         accounts = [
-            ("volunteer", f"TEST_vol_{TAG}@snpcamps.org", "VolunteerPass@1"),
-            ("team_lead", f"TEST_lead_{TAG}@snpcamps.org", "TeamLeadPass@1"),
-            ("clinical_desk_operator", f"TEST_clin_{TAG}@snpcamps.org", "ClinicalPass@1"),
+            ("volunteer", f"TEST volunteer {TAG}"),
+            ("team_lead", f"TEST lead {TAG}"),
+            ("clinical_desk_operator", f"TEST clinical {TAG}"),
         ]
-        for role, email, pwd in accounts:
-            r = admin.post(f"{API}/staff", json={"email": email, "password": pwd,
-                                                 "name": f"TEST {role}", "role": role}, timeout=30)
+        for role, name in accounts:
+            r = admin.post(f"{API}/staff", json={"name": name, "role": role}, timeout=30)
             assert r.status_code == 200, f"{role}: {r.text}"
             assert r.json()["staff"]["role"] == role
-            STATE[role] = {"email": email, "password": pwd, "id": r.json()["staff"]["id"]}
+            STATE[role] = {"name": name, "pin": "5678", "id": r.json()["staff"]["id"]}
+            session = requests.Session()
+            logged_in = session.post(f"{API}/auth/login", json={"name": name, "pin": "1234"}, timeout=30)
+            assert logged_in.status_code == 200, logged_in.text
+            changed = session.post(f"{API}/auth/change-pin", json={"current_pin": "1234", "new_pin": "5678"}, timeout=30)
+            assert changed.status_code == 200, changed.text
 
-        # duplicate email
-        r = admin.post(f"{API}/staff", json={"email": accounts[0][1], "password": accounts[0][2],
-                                             "name": "dup", "role": "volunteer"}, timeout=30)
+        r = admin.post(f"{API}/staff", json={"name": accounts[0][1], "role": "volunteer"}, timeout=30)
         assert r.status_code == 409, r.text
 
     def test_invalid_role(self, admin):
@@ -616,7 +708,7 @@ class TestStaff:
 
     def test_team_lead_can_only_create_volunteers(self, anon):
         lead = STATE["team_lead"]
-        r = anon.post(f"{API}/auth/login", json={"email": lead["email"], "password": lead["password"]},
+        r = anon.post(f"{API}/auth/login", json={"name": lead["name"], "pin": lead["pin"]},
                       timeout=30)
         assert r.status_code == 200, r.text
         tok = r.json()["access_token"]
@@ -626,15 +718,14 @@ class TestStaff:
                                          "password": "GoodPass@12345", "name": "x", "role": "admin"},
                    timeout=30)
         assert r.status_code == 403, r.text
-        r = s.post(f"{API}/staff", json={"email": f"TEST_vol2_{TAG}@x.org",
-                                         "password": "GoodPass@12345", "name": "TEST vol2",
+        r = s.post(f"{API}/staff", json={"name": f"TEST vol2 {TAG}",
                                          "role": "volunteer"}, timeout=30)
         assert r.status_code == 200, r.text
         assert r.json()["staff"]["team_lead_id"] == str(STATE["team_lead"]["id"])
 
     def test_clinical_operator_cannot_register_or_print(self, anon):
         c = STATE["clinical_desk_operator"]
-        r = anon.post(f"{API}/auth/login", json={"email": c["email"], "password": c["password"]}, timeout=30)
+        r = anon.post(f"{API}/auth/login", json={"name": c["name"], "pin": c["pin"]}, timeout=30)
         assert r.status_code == 200, r.text
         s = requests.Session()
         s.headers.update({"Authorization": f"Bearer {r.json()['access_token']}"})
@@ -645,7 +736,7 @@ class TestStaff:
 
     def test_volunteer_cannot_access_clinical(self, anon):
         v = STATE["volunteer"]
-        r = anon.post(f"{API}/auth/login", json={"email": v["email"], "password": v["password"]}, timeout=30)
+        r = anon.post(f"{API}/auth/login", json={"name": v["name"], "pin": v["pin"]}, timeout=30)
         assert r.status_code == 200, r.text
         s = requests.Session()
         s.headers.update({"Authorization": f"Bearer {r.json()['access_token']}"})
@@ -655,17 +746,17 @@ class TestStaff:
     def test_disable_then_enable_staff(self, admin, anon):
         v = STATE["volunteer"]
         assert admin.patch(f"{API}/staff/{v['id']}/disable", timeout=30).status_code == 200
-        r = anon.post(f"{API}/auth/login", json={"email": v["email"], "password": v["password"]}, timeout=30)
+        r = anon.post(f"{API}/auth/login", json={"name": v["name"], "pin": v["pin"]}, timeout=30)
         assert r.status_code == 403, f"disabled account still logs in: {r.status_code}"
         assert admin.patch(f"{API}/staff/{v['id']}/enable", timeout=30).status_code == 200
-        r = anon.post(f"{API}/auth/login", json={"email": v["email"], "password": v["password"]}, timeout=30)
+        r = anon.post(f"{API}/auth/login", json={"name": v["name"], "pin": v["pin"]}, timeout=30)
         assert r.status_code == 200, r.text
 
     def test_list_staff(self, admin):
         r = admin.get(f"{API}/staff", timeout=30)
         assert r.status_code == 200
-        emails = [u["email"] for u in r.json()["staff"]]
-        assert STATE["volunteer"]["email"].lower() in emails
+        names = [u["name"] for u in r.json()["staff"]]
+        assert STATE["volunteer"]["name"] in names
 
 
 # ---------------- reports ----------------
@@ -697,7 +788,7 @@ class TestReports:
             "diagnosis,bp,blood_sugar,"
             "r_sph,r_cyl,r_axis,l_sph,l_cyl,l_axis,add,"
             "medicine,fixed_power_specs,spectacles_to_be_made,ot,"
-            "ot_day,ot_venue,specs_day,specs_venue"
+            "ot_day,ot_venue,specs_day,specs_venue,specs_start,specs_end"
         ), header
         assert str(STATE["p1"]["reg_no"]) in r.text
 
@@ -706,7 +797,8 @@ class TestReports:
 
     def test_exports_require_admin(self, anon):
         c = STATE["clinical_desk_operator"]
-        r = anon.post(f"{API}/auth/login", json={"email": c["email"], "password": c["password"]}, timeout=30)
+        r = anon.post(f"{API}/auth/login", json={"name": c["name"], "pin": c["pin"]}, timeout=30)
+        assert r.status_code == 200, r.text
         s = requests.Session()
         s.headers.update({"Authorization": f"Bearer {r.json()['access_token']}"})
         assert s.get(f"{API}/exports/camp-records", timeout=30).status_code == 403
@@ -806,13 +898,13 @@ class TestFixRegressions:
         assert seats(day_b) == 1, "new day should hold the seat"
         assert seats(day_a) == 0, "previous OT day seat leaked (not released)"
 
-    def test_specs_seat_released_on_rerecord_and_fulfilment(self, admin):
+    def test_specs_rerecord_replaces_active_token_without_capacity(self, admin):
         a = admin.post(f"{API}/clinical/specs-days", json={
             "camp_id": STATE["camp_id"], "day_date": "2026-12-18",
-            "venue": "TEST Specs A", "seat_limit": 3}, timeout=30)
+            "venue": "TEST Specs A", "start_time": "09:00", "end_time": "17:00"}, timeout=30)
         b = admin.post(f"{API}/clinical/specs-days", json={
             "camp_id": STATE["camp_id"], "day_date": "2026-12-19",
-            "venue": "TEST Specs B", "seat_limit": 3}, timeout=30)
+            "venue": "TEST Specs B", "start_time": "09:00", "end_time": "17:00"}, timeout=30)
         assert a.status_code == 200 and b.status_code == 200, (a.text, b.text)
         day_a, day_b = a.json()["specs_day"]["id"], b.json()["specs_day"]["id"]
 
@@ -824,30 +916,30 @@ class TestFixRegressions:
 
         def seats(day_id):
             days = admin.get(f"{API}/clinical/specs-days", timeout=30).json()["specs_days"]
-            return next(d for d in days if d["id"] == day_id)["seats_taken"]
+            return next(d for d in days if d["id"] == day_id).get("seats_taken", 0)
 
-        assert seats(day_a) == 1
+        assert seats(day_a) == 0
         r = admin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": t2, "item_type": "specs_made", "status": "deferred",
             "specs_collection_day_id": day_b}, timeout=30)
         assert r.status_code == 200, r.text
-        assert seats(day_b) == 1, "new day should hold the seat"
+        assert seats(day_b) == 0
         assert seats(day_a) == 0, "previous Specs collection day seat leaked (not released)"
 
         r = admin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": t2, "item_type": "specs_fixed", "status": "fulfilled"}, timeout=30)
         assert r.status_code == 409, r.text
         assert "Spectacles to be made" in str(r.json())
-        assert seats(day_b) == 1
+        assert seats(day_b) == 0
         looked = admin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p2"]["reg_no"])}, timeout=30)
         assert looked.status_code == 200, looked.text
         active_specs = [s for s in looked.json()["slips"] if s.get("active") and s["item_type"] == "specs_made"]
         assert len(active_specs) == 1
 
-    def test_specs_fulfil_then_redefer_consumes_and_full_day_409(self, admin):
+    def test_specs_choice_is_exclusive_and_collection_has_no_capacity_limit(self, admin):
         c = admin.post(f"{API}/clinical/specs-days", json={
             "camp_id": STATE["camp_id"], "day_date": "2026-12-22",
-            "venue": "TEST Specs C", "seat_limit": 1}, timeout=30)
+            "venue": "TEST Specs C", "start_time": "09:00", "end_time": "17:00"}, timeout=30)
         assert c.status_code == 200, c.text
         day_c = c.json()["specs_day"]["id"]
         t2 = STATE["trans2_id"]
@@ -859,35 +951,32 @@ class TestFixRegressions:
 
         def seats():
             days = admin.get(f"{API}/clinical/specs-days", timeout=30).json()["specs_days"]
-            return next(d for d in days if d["id"] == day_c)["seats_taken"]
+            return next(d for d in days if d["id"] == day_c).get("seats_taken", 0)
 
-        assert seats() == 1
+        assert seats() == 0
         r = admin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": t2, "item_type": "specs_fixed", "status": "fulfilled",
             "specs_collection_day_id": day_c}, timeout=30)
         assert r.status_code == 409, r.text
-        assert seats() == 1
+        assert seats() == 0
         r = admin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": STATE["trans_id"], "item_type": "specs_made", "status": "deferred",
             "specs_collection_day_id": day_c}, timeout=30)
-        assert r.status_code == 409, f"expected full-day refusal, got {r.status_code}: {r.text[:200]}"
-        assert seats() == 1
+        assert r.status_code == 200, r.text
+        assert seats() == 0
 
-    # lockout is keyed on email and returns 429 (proxy-safe)
-    def test_lockout_returns_429_and_is_email_keyed(self, anon):
-        email = f"TEST_lock2_{TAG}@snpcamps.org"
+    def test_lockout_returns_429_and_is_name_keyed(self, anon):
+        name = f"TEST_lock2_{TAG}"
         codes = []
         for _ in range(7):
             codes.append(anon.post(f"{API}/auth/login",
-                                   json={"email": email, "password": "Nope@123456789"},
+                                   json={"name": name, "pin": "0000"},
                                    timeout=30).status_code)
         assert 500 not in codes, codes
         assert codes[:5] == [401] * 5, codes
         assert codes[5] == 429 and codes[6] == 429, codes
-        # a different email is unaffected
         other = anon.post(f"{API}/auth/login",
-                          json={"email": f"TEST_other_{TAG}@snpcamps.org",
-                                "password": "Nope@123456789"}, timeout=30)
+                          json={"name": f"TEST_other_{TAG}", "pin": "0000"}, timeout=30)
         assert other.status_code == 401, other.status_code
 
     def test_locked_admin_not_affected(self, admin_credentials, anon):

@@ -9,23 +9,26 @@ export function ClinicalLookupForm({
   error,
   banner,
   inputRef,
+  busy = false,
 }) {
   return (
     <Card className="mb-5">
       <form onSubmit={doLookup} className="flex gap-2">
         <Input
           ref={inputRef}
+          aria-label="Patient registration number or prescription QR"
+          disabled={busy}
           value={lookup}
           onChange={(e) => setLookup(e.target.value)}
           placeholder="Type Reg # or scan patient QR (USB wedge)"
           data-testid="clinical-lookup-input"
           autoComplete="off"
         />
-        <Button type="submit" variant="secondary" data-testid="clinical-lookup-button">
+        <Button type="submit" variant="secondary" disabled={busy} data-testid="clinical-lookup-button">
           <ScanLine className="w-5 h-5" /> Find
         </Button>
       </form>
-      <p className="text-xs text-slate-400 mt-2">
+      <p className="text-xs text-slate-700 mt-2">
         Only patients marked <b>Seen</b> are eligible.
       </p>
       {error && <Alert className="mt-3">{error}</Alert>}

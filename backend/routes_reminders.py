@@ -23,12 +23,18 @@ def _require_cron_secret(request: Request) -> None:
 async def _send_each(
     db: AsyncIOMotorDatabase,
     message_type: str,
-    targets: List[Tuple[dict, str]],
+    targets: List[Tuple],
     event_date: str,
 ) -> int:
     sent = 0
-    for patient, venue in targets:
-        if await sms.send_patient_sms(db, patient, message_type, event_date, venue):
+    for item in targets:
+        patient, venue, *window = item
+        start = window[0] if len(window) > 0 else None
+        end = window[1] if len(window) > 1 else None
+        if await sms.send_patient_sms(
+            db, patient, message_type, event_date, venue,
+            start_time=start, end_time=end,
+        ):
             sent += 1
     return sent
 
@@ -62,11 +68,14 @@ async def _token_targets(
         if not patient:
             continue
         venue = s.get("collection_venue") or ""
-        if s.get(day_field):
+        if item_type != "specs_made" and s.get(day_field):
             day = await day_collection.find_one({"_id": s[day_field]})
             if day:
                 venue = day["venue"]
-        targets.append((patient, venue))
+        targets.append((
+            patient, venue,
+            s.get("collection_start_time"), s.get("collection_end_time"),
+        ))
     return targets
 
 
@@ -79,7 +88,10 @@ async def send_d1_reminders() -> Dict[str, Any]:
     sent = await _send_each(db, "camp", await _camp_targets(db, tomorrow), tomorrow)
     sent += await _send_each(db, "ot", await _token_targets(db, "ot", tomorrow), tomorrow)
     sent += await _send_each(db, "specs", await _token_targets(db, "specs_made", tomorrow), tomorrow)
-    return {"ok": True, "sent": sent, "event_date": tomorrow, "send_date": today}
+    failed = await db.reminder_ledger.count_documents({
+        "event_date": tomorrow, "message_type": {"$in": ["camp", "ot", "specs"]}, "status": "failed",
+    })
+    return {"ok": failed == 0, "sent": sent, "failed": failed, "event_date": tomorrow, "send_date": today}
 
 
 @router.post("/cron/reminders")

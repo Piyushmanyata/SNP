@@ -25,6 +25,7 @@ export function createLiveScanEngine({
   onFailure,
   onHintFallbacks,
   onScanStall,
+  onError,
 } = {}) {
   let started = false;
   let decoder = "native";
@@ -139,6 +140,11 @@ export function createLiveScanEngine({
       softHold = false;
       if (onFailure) onFailure(result);
       return { failure: true };
+    } catch {
+      if (!started) return { skipped: true };
+      stop();
+      if (onError) onError("QR reader unavailable. Retry the camera, upload a photo, or use a USB scanner.");
+      return { error: true };
     } finally {
       inFlight = false;
     }
@@ -157,7 +163,7 @@ export function createLiveScanEngine({
     stalled = false;
     ignoredUntil.clear();
     decoder = hasNativeDetector ? "native" : "wasm";
-    if (decoder === "wasm") ensureWasm();
+    if (decoder === "wasm") ensureWasm().catch(() => {});
   }
 
   function stop() {

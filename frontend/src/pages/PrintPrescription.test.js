@@ -43,24 +43,24 @@ describe("PrintPrescription component", () => {
   test("prints the fixed trust letterhead even when the sponsor logos cannot be fetched", async () => {
     const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
 
-    api.post.mockResolvedValueOnce({
-      data: {
-        prescription: {
-          id: "rx-123",
-          camp_id: "camp-001",
-          camp_name: "SNP Camp Nadia",
-          venue: "Community Center",
-          reg_no: "1001",
-          patient_qr: "qr-1001",
-          full_name: "Aparna Sen",
-          age: 45,
-          gender: "Female",
-          date: "2026-08-27",
+    api.get
+      .mockResolvedValueOnce({
+        data: {
+          prescription: {
+            id: "rx-123",
+            camp_id: "camp-001",
+            camp_name: "SNP Camp Nadia",
+            venue: "Community Center",
+            reg_no: "1001",
+            patient_qr: "qr-1001",
+            full_name: "Aparna Sen",
+            age: 45,
+            gender: "Female",
+            date: "2026-08-27",
+          },
         },
-      },
-    });
-
-    api.get.mockRejectedValueOnce(new Error("Template service unavailable"));
+      })
+      .mockRejectedValueOnce(new Error("Template service unavailable"));
 
     await act(async () => {
       root.render(
@@ -93,16 +93,17 @@ describe("PrintPrescription component", () => {
   });
 
   test("renders every fixed block and asks the server only for logos", async () => {
-    api.post.mockResolvedValueOnce({
-      data: {
-        prescription: {
-          id: "rx-1", camp_id: "camp-001", camp_name: "SNP Camp Nadia",
-          venue: "Community Center", reg_no: "1001", patient_qr: "qr-1001",
-          full_name: "Aparna Sen", age: 45, gender: "Female", date: "2026-08-27",
+    api.get
+      .mockResolvedValueOnce({
+        data: {
+          prescription: {
+            id: "rx-1", camp_id: "camp-001", camp_name: "SNP Camp Nadia",
+            venue: "Community Center", reg_no: "1001", patient_qr: "qr-1001",
+            full_name: "Aparna Sen", age: 45, gender: "Female", date: "2026-08-27",
+          },
         },
-      },
-    });
-    api.get.mockResolvedValueOnce({ data: { logos: [] } });
+      })
+      .mockResolvedValueOnce({ data: { logos: [] } });
 
     await act(async () => {
       root.render(
@@ -148,7 +149,7 @@ describe("PrintPrescription component", () => {
   });
 
   test("handles prescription loading error", async () => {
-    api.post.mockRejectedValueOnce(new Error("Prescription not found"));
+    api.get.mockRejectedValueOnce(new Error("Prescription not found"));
 
     await act(async () => {
       root.render(

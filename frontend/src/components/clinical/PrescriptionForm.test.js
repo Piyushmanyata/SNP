@@ -60,6 +60,7 @@ describe("PrescriptionForm", () => {
           locked={false}
           busy={false}
           saveRx={() => {}}
+        completeRx={() => {}}
         />,
       );
     });
@@ -82,6 +83,7 @@ describe("PrescriptionForm", () => {
           locked={false}
           busy={false}
           saveRx={saveRx}
+          completeRx={() => {}}
         />,
       );
     });

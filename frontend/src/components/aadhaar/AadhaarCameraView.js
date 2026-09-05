@@ -23,7 +23,7 @@ export function AadhaarCameraView({
       >
         <video
           ref={videoRef}
-          className="w-full min-h-[260px] sm:min-h-[320px] object-contain bg-black"
+          className="w-full object-contain bg-black"
           autoPlay
           playsInline
           muted
@@ -41,6 +41,8 @@ export function AadhaarCameraView({
                   : "bg-slate-900/70 text-white hover:bg-slate-900"
               }`}
               title={torchOn ? "Turn off torch" : "Turn on torch"}
+              aria-label={torchOn ? "Turn off torch" : "Turn on torch"}
+              aria-pressed={torchOn}
               data-testid="aadhaar-torch-toggle"
             >
               {torchOn ? <Zap className="w-4 h-4 fill-current" /> : <ZapOff className="w-4 h-4" />}
@@ -52,6 +54,8 @@ export function AadhaarCameraView({
               onClick={switchCamera}
               className="p-2 rounded-lg bg-slate-900/70 hover:bg-slate-900 text-white backdrop-blur-md transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
               title="Switch Camera"
+              aria-label="Switch camera"
+              disabled={cameraState !== "scanning"}
               data-testid="aadhaar-switch-camera"
             >
               <SwitchCamera className="w-4 h-4" />
@@ -81,6 +85,11 @@ export function AadhaarCameraView({
           </div>
         )}
       </div>
+      {mode === "camera" && (
+        <p className="mb-3 text-sm text-slate-700">
+          Clean the lens. Keep the whole QR in the frame, avoid glare, and hold steady for a moment. Move back slightly if it looks blurred.
+        </p>
+      )}
     </>
   );
 }

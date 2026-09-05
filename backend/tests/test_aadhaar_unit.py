@@ -12,14 +12,11 @@ import zlib
 import os
 from aadhaar import (
     decode_aadhaar,
-    parse_secure_qr,
-    parse_xml_qr,
     _to_iso_dob,
     _calc_age,
     _normalize_gender,
     _parse_xml_attributes,
     _extract_xml_address,
-    _decode_demo_payload,
 )
 
 SAMPLE = [
@@ -51,15 +48,10 @@ def test_decode_patient_qr():
     assert decode_aadhaar("https://camps.snp.org/p/abcde") == {"outcome": "not-aadhaar", "message": "This is a patient QR, not an Aadhaar card."}
 
 
-def test_decode_demo_format():
+def test_decode_demo_format_is_rejected():
     res = decode_aadhaar("AADHAAR|Priya Sharma|F|1992-04-10|9876|45 Station Rd, Howrah")
-    assert res["outcome"] == "card"
-    assert res["source"] == "demo"
-    assert res["data"]["full_name"] == "Priya Sharma"
-    assert res["data"]["gender"] == "F"
-    assert res["data"]["dob"] == "1992-04-10"
-    assert res["data"]["aadhaar_last4"] == "9876"
-    assert res["data"]["address"] == "45 Station Rd, Howrah"
+    assert res["outcome"] == "garbage"
+    assert "data" not in res
 
 
 def test_decode_demo_malformed():
@@ -216,7 +208,7 @@ def test_decode_age_calculation():
     assert _calc_age(None) is None
     assert _calc_age("invalid") is None
 
-    res = decode_aadhaar("AADHAAR|Ravi Kumar|M|1990-01-01|5544|Delhi")
+    res = decode_aadhaar('<PrintLetterBarcodeData name="Ravi Kumar" gender="M" dob="1990-01-01" uid="5544" street="Delhi"/>')
     assert res["outcome"] == "card"
     assert res["data"]["age"] is not None
     assert res["data"]["age"] > 30
@@ -282,20 +274,4 @@ def test_extract_xml_address_helper():
     }
     addr = _extract_xml_address(attrs)
     assert addr == "42, Main St, City, State, 123456"
-
-
-def test_decode_demo_payload_helper():
-    res = _decode_demo_payload("AADHAAR|Jane Doe|F|1995-05-20|1122|Mumbai")
-    assert res["outcome"] == "card"
-    assert res["source"] == "demo"
-    assert res["data"]["full_name"] == "Jane Doe"
-    assert res["data"]["gender"] == "F"
-    assert res["data"]["dob"] == "1995-05-20"
-    assert res["data"]["aadhaar_last4"] == "1122"
-    assert res["data"]["address"] == "Mumbai"
-
-    incomplete = _decode_demo_payload("AADHAAR|Jane|F")
-    assert incomplete["outcome"] == "garbage"
-
-
 

@@ -30,6 +30,7 @@ test_reports/pytest/
 .env.*
 *.env
 !.env.example
+!.env.production.example
 !frontend/.env.example
 !backend/.env.example
 credentials.json

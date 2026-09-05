@@ -3,10 +3,8 @@ import { useNavigate } from "react-router-dom";
 import api, { formatApiError, errorPayload } from "../lib/api";
 import logger from "../lib/logger";
 import Layout from "../components/Layout";
-import RosterPicker from "../components/RosterPicker";
 import { useAuth } from "../context/AuthContext";
 import { OPERATOR_LINES, effectiveLine, lineLabel, writeSessionLine } from "../lib/operatorLines";
-import { clearRoster, needsRoster, readRoster } from "../lib/roster";
 import { useWedgeBurst } from "../components/aadhaar";
 import {
   ClinicalLookupForm,
@@ -16,8 +14,6 @@ import {
   CorrectionModal,
   HistoryModal,
   ReadOnlyPrescription,
-  hasMeasurements,
-  transcriptionImpliesLine,
 } from "../components/clinical";
 import { Button, Badge } from "../components/ui";
 
@@ -39,21 +35,19 @@ const emptyRx = {
   ot_eye: "",
   ot_procedure: "",
   ot_notes: "",
+  medication_instructions: "",
+  prescribed_lines: [],
+  none_prescribed: false,
+  full_transcription_confirmed: false,
 };
-
-function isRosterDenied(err) {
-  const code = errorPayload(err)?.code;
-  return code === "ROSTER_REQUIRED" || code === "ROSTER_INVALID";
-}
 
 export default function Clinical() {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const [roster, setRoster] = useState(readRoster);
   const [line, setLine] = useState(() => effectiveLine(user));
   const [picking, setPicking] = useState(() => !effectiveLine(user));
   const [lookup, setLookup] = useState("");
-  const [data, setData] = useState(null); // {registration, person, transcription, fulfilments, slips}
+  const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [banner, setBanner] = useState("");
   const [diagOpts, setDiagOpts] = useState([]);
@@ -61,16 +55,32 @@ export default function Clinical() {
   const [specsDays, setSpecsDays] = useState([]);
   const [rx, setRx] = useState(emptyRx);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [showCorrection, setShowCorrection] = useState(false);
   const [history, setHistory] = useState(null);
   const firstFieldRef = useRef(null);
   const lookupRef = useRef(null);
+  const lookupSequence = useRef(0);
+  const completeOpRef = useRef(null);
+  const patientId = data?.registration?.id;
+  const locked = Boolean(data?.transcription?.locked);
+
+  useEffect(() => {
+    if (!picking) {
+      if (patientId && !locked) firstFieldRef.current?.focus();
+      else if (!patientId) lookupRef.current?.focus();
+    }
+  }, [patientId, locked, line, picking, editing]);
+
+  useEffect(() => () => { lookupSequence.current += 1; }, []);
 
   useEffect(() => {
     const next = effectiveLine(user);
     setLine(next);
     setPicking(!next);
   }, [user]);
+
+  useEffect(() => { completeOpRef.current = null; }, [patientId]);
 
   const pickLine = useCallback((key) => {
     writeSessionLine(key);
@@ -105,14 +115,18 @@ export default function Clinical() {
   }, []);
 
   const lookupValue = useCallback(async (value) => {
+    if (busy || !value.trim()) return;
+    const request = ++lookupSequence.current;
     setError("");
     setBanner("");
     setHistory(null);
-    if (!value.trim()) return;
+    setData(null);
+    setEditing(false);
     try {
       const { data: resData } = await api.post("/clinical/lookup", {
         value: value.trim(),
       });
+      if (request !== lookupSequence.current) return;
       setData(resData);
       setRx(
         resData.transcription
@@ -125,16 +139,13 @@ export default function Clinical() {
             }
           : emptyRx
       );
-      if (line === "rx") {
-        setTimeout(() => firstFieldRef.current?.focus(), 0);
-      }
     } catch (err) {
-      if (isRosterDenied(err)) { clearRoster(); setRoster(null); return; }
+      if (request !== lookupSequence.current) return;
       const p = errorPayload(err);
       setData(null);
       setError(p?.message || formatApiError(err));
     }
-  }, [line]);
+  }, [busy]);
 
   const doLookup = useCallback((e) => {
     e?.preventDefault();
@@ -142,7 +153,7 @@ export default function Clinical() {
   }, [lookup, lookupValue]);
 
   useWedgeBurst({
-    enabled: !picking,
+    enabled: !picking && !busy,
     onBurst: (v) => {
       setLookup(v);
       lookupValue(v);
@@ -150,11 +161,13 @@ export default function Clinical() {
   });
 
   const reload = useCallback(async () => {
-    if (!lookup.trim()) return;
+    if (!data?.registration?.reg_no) return;
+    const request = ++lookupSequence.current;
     try {
       const { data: resData } = await api.post("/clinical/lookup", {
-        value: lookup.trim(),
+        value: String(data.registration.reg_no),
       });
+      if (request !== lookupSequence.current) return;
       setData(resData);
       setRx(
         resData.transcription
@@ -168,38 +181,59 @@ export default function Clinical() {
           : emptyRx
       );
     } catch (err) {
-      if (isRosterDenied(err)) { clearRoster(); setRoster(null); return; }
       logger.warn("Failed to reload clinical data:", err);
     }
-  }, [lookup]);
+  }, [data?.registration?.reg_no]);
 
   const saveRx = useCallback(async () => {
     if (!data?.registration?.id) return;
-    const regNo = data.registration.reg_no;
     setBusy(true);
     setError("");
     try {
-      await api.post("/clinical/transcription", {
+      const { data: result } = await api.post("/clinical/transcription", {
         patient_id: data.registration.id,
         ...rx,
       });
-      if (line === "rx") {
-        setBanner(`Saved #${regNo}`);
-        setData(null);
-        setRx(emptyRx);
-        setLookup("");
-        setTimeout(() => lookupRef.current?.focus(), 0);
-      } else {
-        setBanner("Transcription saved.");
-        await reload();
-      }
+      setData((current) => current?.registration?.id === patientId ? { ...current, transcription: result.transcription } : current);
+      setEditing(false);
+      setBanner("Draft saved. Completing the prescription marks the patient seen.");
     } catch (err) {
-      if (isRosterDenied(err)) { clearRoster(); setRoster(null); return; }
       setError(formatApiError(err));
     } finally {
       setBusy(false);
     }
-  }, [data?.registration?.id, data?.registration?.reg_no, rx, reload, line]);
+  }, [data?.registration?.id, patientId, rx]);
+
+  const completeRx = useCallback(async () => {
+    if (!data?.registration?.id) return;
+    setBusy(true);
+    setError("");
+    try {
+      if (!completeOpRef.current) {
+        completeOpRef.current = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`;
+      }
+      const { data: result } = await api.post("/clinical/transcription/complete", {
+        patient_id: data.registration.id,
+        expected_generation: data.clinical_generation ?? data.registration.clinical_generation ?? 0,
+        operation_id: completeOpRef.current,
+        ...rx,
+      });
+      completeOpRef.current = null;
+      setData((current) => current?.registration?.id === patientId ? {
+        ...current,
+        registration: result.registration,
+        transcription: result.transcription,
+        committed_revision: result.revision,
+        clinical_generation: result.registration.clinical_generation,
+      } : current);
+      setEditing(false);
+      setBanner("Prescription completed. Patient is marked seen.");
+    } catch (err) {
+      setError(formatApiError(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [data?.registration?.id, data?.registration?.clinical_generation, data?.clinical_generation, patientId, rx]);
 
   const toggleDiag = useCallback((opt) => {
     setRx((r) => ({
@@ -216,32 +250,25 @@ export default function Clinical() {
       const { data: h } = await api.get(`/clinical/history/${data.person.id}`);
       setHistory(h.history);
     } catch (err) {
-      if (isRosterDenied(err)) { clearRoster(); setRoster(null); return; }
       setError(formatApiError(err));
     }
   }, [data?.person?.id]);
 
-  const locked = data?.transcription?.locked;
-  const isRx = line === "rx";
-  const lineDesk = line && !isRx;
-
   const clearPatient = useCallback(() => {
+    lookupSequence.current += 1;
     setData(null);
     setLookup("");
     setHistory(null);
+    setRx(emptyRx);
+    setEditing(false);
   }, []);
-
-  const picker = (
-    <RosterPicker open={needsRoster(user) && !roster} onPicked={setRoster} />
-  );
-  const handOver = () => setRoster(null);
 
   if (picking || !line) {
     return (
-      <Layout title="Clinical Desk" onHandOver={handOver}>
-        {picker}
+      <Layout title="Clinical Desk">
         <div className="max-w-md mx-auto" data-testid="line-picker">
-          <p className="font-display font-bold text-slate-900 mb-3">Pick a station</p>
+          <p className="font-display font-bold text-slate-900 mb-2">Which line are you monitoring?</p>
+          <p className="text-sm text-slate-700 mb-4">Choose your line to start with its prescription fields. You can change lines at any time.</p>
           <div className="grid gap-2">
             {OPERATOR_LINES.map((l) => (
               <Button
@@ -261,11 +288,10 @@ export default function Clinical() {
   }
 
   return (
-    <Layout title="Clinical Desk" onHandOver={handOver}>
-      {picker}
+    <Layout title="Clinical Desk">
       <div className="flex items-center gap-2 mb-4" data-testid="line-chip">
         <Badge tone="emerald">{lineLabel(line)}</Badge>
-        <Button size="sm" variant="ghost" onClick={() => setPicking(true)} data-testid="line-change-button">
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => setPicking(true)} data-testid="line-change-button">
           Change
         </Button>
       </div>
@@ -277,6 +303,7 @@ export default function Clinical() {
         error={error}
         banner={banner}
         inputRef={lookupRef}
+        busy={busy}
       />
 
       {data && (
@@ -287,14 +314,9 @@ export default function Clinical() {
             openHistory={openHistory}
           />
 
-          {isRx && (
-            <>
-              {!hasMeasurements(rx) && (rx.diagnosis_options || []).length > 0 && (
-                <p className="text-sm text-amber-800 mb-3" data-testid="rx-missing-powers-warning">
-                  No powers recorded — specs desks will be blocked until a correction is filed.
-                </p>
-              )}
+          {!locked && (!data.transcription || editing) && (
               <PrescriptionForm
+                line={line}
                 rx={rx}
                 setRx={setRx}
                 diagOpts={diagOpts}
@@ -302,40 +324,39 @@ export default function Clinical() {
                 locked={locked}
                 busy={busy}
                 saveRx={saveRx}
+                completeRx={completeRx}
                 hasExistingTranscription={!!data.transcription}
                 setShowCorrection={setShowCorrection}
                 firstFieldRef={firstFieldRef}
               />
-            </>
           )}
+          {editing && <p className="text-sm text-amber-800 mb-3">Save the prescription before issuing medicines, spectacles or a surgery token.</p>}
 
-          {lineDesk && !data.transcription && (
-            <p className="text-sm text-slate-700 mb-3" data-testid="send-to-rx">
-              Send this patient to the Doctor&apos;s Rx desk.
-            </p>
-          )}
-
-          {lineDesk && data.transcription && (
+          {data.transcription && !editing && (
             <>
               <ReadOnlyPrescription
                 transcription={data.transcription}
                 emphasizePowers={line === "specs_fixed" || line === "specs_made"}
               />
-              {!transcriptionImpliesLine(data.transcription, line) && (
+              {locked ? <Button variant="outline" className="mb-3" disabled={busy} onClick={() => setShowCorrection(true)} data-testid="add-correction-button">Add correction</Button> : <Button variant="outline" className="mb-3" disabled={busy} onClick={() => setEditing(true)} data-testid="edit-transcription-button">Edit prescription</Button>}
+              {!(data.committed_revision?.prescribed_lines || []).includes(line) && (
                 <p className="text-sm text-amber-800 mb-3" data-testid="line-mismatch-warning">
                   This prescription does not imply {lineLabel(line)}. Record anyway.
                 </p>
               )}
-              <FulfilmentSection
-                line={line}
-                data={data}
-                otDays={otDays}
-                specsDays={specsDays}
-                onDone={clearPatient}
-                navigate={navigate}
-                setBanner={setBanner}
-                setError={setError}
-              />
+              {(data.committed_revision || data.transcription?.locked) && line !== "doctor_rx" && (
+                <FulfilmentSection
+                  line={line}
+                  data={data}
+                  otDays={otDays}
+                  specsDays={specsDays}
+                  onDone={clearPatient}
+                  navigate={navigate}
+                  setBanner={setBanner}
+                  setError={setError}
+                  onBusyChange={setBusy}
+                />
+              )}
             </>
           )}
         </>
@@ -344,7 +365,12 @@ export default function Clinical() {
       <CorrectionModal
         open={showCorrection}
         onClose={() => setShowCorrection(false)}
-        transcriptionId={data?.transcription?.id}
+        transcription={data?.transcription}
+        line={line}
+        diagOpts={diagOpts}
+        expectedGeneration={data?.clinical_generation ?? data?.registration?.clinical_generation ?? 0}
+        patientId={data?.registration?.id}
+        prescribedLines={data?.committed_revision?.prescribed_lines || []}
         onDone={() => {
           setShowCorrection(false);
           reload();

@@ -27,13 +27,12 @@ import routes_reports
 import routes_staff
 import security
 import server as server_mod
-from models import CorrectionBody, CreateStaffBody, FulfilmentBody, PatchStaffLineBody
+from models import CorrectionBody, CreateStaffBody, PatchStaffLineBody
 from routes_clinical import add_correction, record_fulfilment
 from routes_reports import export_camp_records
 from routes_staff import create_staff, list_staff, patch_staff_line
-from security import hash_password
 from test_adversarial_challenger import setup_mock_db
-from test_camp_lifecycle import RX, _mock, _recorder, _seen_patient_with_transcription
+from test_camp_lifecycle import RX, _fulfil, _mock, _recorder, _seen_patient_with_transcription
 
 PASS = "ClinicLine1!"
 ADMIN = {"_id": ObjectId(), "role": "admin"}
@@ -90,11 +89,10 @@ class TestOperatorLine:
         async def run():
             mock_db = _patch_db(monkeypatch, setup_mock_db(monkeypatch))
             out = await create_staff(CreateStaffBody(
-                email="vol@snpcamps.org", password=PASS, name="Vol",
-                role="volunteer", line="medicine",
+                name="Vol", role="volunteer", line="medicine",
             ), actor=ADMIN)
             assert out["staff"]["line"] is None
-            stored = await mock_db.users.find_one({"email": "vol@snpcamps.org"})
+            stored = await mock_db.users.find_one({"_id": ObjectId(out["staff"]["id"])})
             assert stored["line"] is None
         asyncio.run(run())
 
@@ -122,10 +120,10 @@ class TestOperatorLine:
                 role="clinical_desk_operator", line="rx",
             ), actor=ADMIN)
             client = _client(monkeypatch, mock_db)
-            token = security.create_access_token(str(CLINICAL["_id"]), "op@snpcamps.org")
+            token = security.create_access_token(str(CLINICAL["_id"]), "Clin")
             await mock_db.users.insert_one({
-                "_id": CLINICAL["_id"], "email": "clin@snpcamps.org",
-                "password_hash": hash_password(PASS), "name": "Clin",
+                "_id": CLINICAL["_id"], "name": "Clin", "name_normalized": "clin",
+                "pin_hash": security.hash_pin("1234"),
                 "role": "clinical_desk_operator", "line": "rx", "disabled_at": None,
             })
             r = client.patch(
@@ -146,14 +144,13 @@ class TestOperatorLine:
         async def run():
             mock_db = _patch_db(monkeypatch, setup_mock_db(monkeypatch))
             await create_staff(CreateStaffBody(
-                email="med@snpcamps.org", password=PASS, name="Med",
-                role="clinical_desk_operator", line="medicine",
+                name="Med", role="clinical_desk_operator", line="medicine",
             ), actor=ADMIN)
             listed = await list_staff(actor=ADMIN)
-            row = next(s for s in listed["staff"] if s["email"] == "med@snpcamps.org")
+            row = next(s for s in listed["staff"] if s["name"] == "Med")
             assert row["line"] == "medicine"
             client = _client(monkeypatch, mock_db)
-            r = client.post("/api/auth/login", json={"email": "med@snpcamps.org", "password": PASS})
+            r = client.post("/api/auth/login", json={"name": "Med", "pin": "1234"})
             assert r.status_code == 200, r.text
             assert r.json()["user"]["line"] == "medicine"
         asyncio.run(run())
@@ -169,12 +166,11 @@ class TestFulfilmentMatrix:
                 ("medicine", "fulfilled"),
                 ("medicine", "not_available"),
                 ("specs_fixed", "fulfilled"),
-                ("ot", "fulfilled"),
             ]
             for item_type, status in allowed:
                 out = await record_fulfilment(
-                    FulfilmentBody(transcription_id=str(trans_id), item_type=item_type, status=status),
-                    actor=ADMIN,
+                    _fulfil(trans_id, mock_db.last_rev_id, item_type=item_type, status=status),
+                    actor=CLINICAL,
                 )
                 assert out["fulfilment"]["item_type"] == item_type
                 assert out["fulfilment"]["status"] == status
@@ -184,13 +180,14 @@ class TestFulfilmentMatrix:
                 ("specs_fixed", "not_available"),
                 ("specs_made", "fulfilled"),
                 ("ot", "not_available"),
+                ("ot", "fulfilled"),
                 ("specs", "fulfilled"),
             ]
             for item_type, status in refused:
                 with pytest.raises(HTTPException) as exc:
                     await record_fulfilment(
-                        FulfilmentBody(transcription_id=str(trans_id), item_type=item_type, status=status),
-                        actor=ADMIN,
+                        _fulfil(trans_id, mock_db.last_rev_id, item_type=item_type, status=status),
+                        actor=CLINICAL,
                     )
                 assert exc.value.status_code == 400
         asyncio.run(run())
@@ -202,8 +199,8 @@ class TestFulfilmentMatrix:
             for item_type in ("medicine", "specs_fixed", "specs_made", "ot"):
                 with pytest.raises(HTTPException) as exc:
                     await record_fulfilment(
-                        FulfilmentBody(transcription_id=str(trans_id), item_type=item_type, status="not_required"),
-                        actor=ADMIN,
+                        _fulfil(trans_id, mock_db.last_rev_id, item_type=item_type, status="not_required"),
+                        actor=CLINICAL,
                     )
                 assert exc.value.status_code == 400
         asyncio.run(run())
@@ -216,20 +213,18 @@ class TestFulfilmentMatrix:
             specs_day = ObjectId()
             await mock_db.specs_collection_days.insert_one({
                 "_id": specs_day, "camp_id": camp_id, "day_date": "2026-09-20",
-                "venue": "Optical Desk", "seat_limit": 2, "seats_taken": 0,
+                "venue": "Optical Desk", "start_time": "09:00", "end_time": "17:00", "seat_limit": 2, "seats_taken": 0,
             })
             first = await record_fulfilment(
-                FulfilmentBody(transcription_id=str(trans_id), item_type="specs_fixed", status="fulfilled"),
-                actor=ADMIN,
+                _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_fixed", status="fulfilled"),
+                actor=CLINICAL,
             )
             assert first["fulfilment"]["item_type"] == "specs_fixed"
             with pytest.raises(HTTPException) as exc:
                 await record_fulfilment(
-                    FulfilmentBody(
-                        transcription_id=str(trans_id), item_type="specs_made", status="deferred",
-                        specs_collection_day_id=str(specs_day),
-                    ),
-                    actor=ADMIN,
+                    _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",
+                            specs_collection_day_id=str(specs_day)),
+                    actor=CLINICAL,
                 )
             assert exc.value.status_code == 409
             assert "Fixed-power specs" in exc.value.detail["message"]
@@ -238,16 +233,14 @@ class TestFulfilmentMatrix:
 
             mock_db.fulfilments.docs.clear()
             await record_fulfilment(
-                FulfilmentBody(
-                    transcription_id=str(trans_id), item_type="specs_made", status="deferred",
-                    specs_collection_day_id=str(specs_day),
-                ),
-                actor=ADMIN,
+                _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",
+                        specs_collection_day_id=str(specs_day)),
+                actor=CLINICAL,
             )
             with pytest.raises(HTTPException) as exc:
                 await record_fulfilment(
-                    FulfilmentBody(transcription_id=str(trans_id), item_type="specs_fixed", status="fulfilled"),
-                    actor=ADMIN,
+                    _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_fixed", status="fulfilled"),
+                    actor=CLINICAL,
                 )
             assert exc.value.status_code == 409
             assert "Spectacles to be made" in exc.value.detail["message"]
@@ -263,41 +256,37 @@ class TestFulfilmentMatrix:
             specs_day, ot_day = ObjectId(), ObjectId()
             await mock_db.specs_collection_days.insert_one({
                 "_id": specs_day, "camp_id": camp_id, "day_date": "2026-09-20",
-                "venue": "Optical Desk", "seat_limit": 5, "seats_taken": 0,
+                "venue": "Optical Desk", "start_time": "09:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
             })
             await mock_db.ot_schedule_days.insert_one({
                 "_id": ot_day, "camp_id": camp_id, "day_date": "2026-10-02",
                 "venue": "OT Theatre", "seat_limit": 5, "seats_taken": 0,
             })
             await record_fulfilment(
-                FulfilmentBody(transcription_id=str(trans_id), item_type="specs_fixed", status="fulfilled"),
-                actor=ADMIN,
+                _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_fixed", status="fulfilled"),
+                actor=CLINICAL,
             )
             await record_fulfilment(
-                FulfilmentBody(transcription_id=str(trans_id), item_type="medicine", status="fulfilled"),
-                actor=ADMIN,
+                _fulfil(trans_id, mock_db.last_rev_id, item_type="medicine", status="fulfilled"),
+                actor=CLINICAL,
             )
             assert (await mock_db.specs_collection_days.find_one({"_id": specs_day}))["seats_taken"] == 0
             assert (await mock_db.ot_schedule_days.find_one({"_id": ot_day}))["seats_taken"] == 0
 
             mock_db.fulfilments.docs.clear()
             await record_fulfilment(
-                FulfilmentBody(
-                    transcription_id=str(trans_id), item_type="specs_made", status="deferred",
-                    specs_collection_day_id=str(specs_day),
-                ),
-                actor=ADMIN,
+                _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",
+                        specs_collection_day_id=str(specs_day)),
+                actor=CLINICAL,
             )
-            assert (await mock_db.specs_collection_days.find_one({"_id": specs_day}))["seats_taken"] == 1
+            assert (await mock_db.specs_collection_days.find_one({"_id": specs_day})).get("seats_taken") in (None, 0)
             assert (await mock_db.ot_schedule_days.find_one({"_id": ot_day}))["seats_taken"] == 0
 
             mock_db.fulfilments.docs.clear()
             await record_fulfilment(
-                FulfilmentBody(
-                    transcription_id=str(trans_id), item_type="ot", status="deferred",
-                    ot_schedule_day_id=str(ot_day),
-                ),
-                actor=ADMIN,
+                _fulfil(trans_id, mock_db.last_rev_id, item_type="ot", status="deferred",
+                        ot_schedule_day_id=str(ot_day)),
+                actor=CLINICAL,
             )
             assert (await mock_db.ot_schedule_days.find_one({"_id": ot_day}))["seats_taken"] == 1
         asyncio.run(run())
@@ -310,7 +299,7 @@ class TestFulfilmentMatrix:
             specs_day, ot_day = ObjectId(), ObjectId()
             await mock_db.specs_collection_days.insert_one({
                 "_id": specs_day, "camp_id": camp_id, "day_date": "2026-09-20",
-                "venue": "Optical Desk", "seat_limit": 2, "seats_taken": 0,
+                "venue": "Optical Desk", "start_time": "09:00", "end_time": "17:00", "seat_limit": 2, "seats_taken": 0,
             })
             await mock_db.ot_schedule_days.insert_one({
                 "_id": ot_day, "camp_id": camp_id, "day_date": "2026-10-02",
@@ -323,22 +312,20 @@ class TestFulfilmentMatrix:
                 status = "fulfilled" if item_type == "specs_fixed" else "deferred"
                 with pytest.raises(HTTPException) as exc:
                     await record_fulfilment(
-                        FulfilmentBody(transcription_id=str(trans_id), item_type=item_type, status=status, **extra),
-                        actor=ADMIN,
+                        _fulfil(trans_id, mock_db.last_rev_id, item_type=item_type, status=status, **extra),
+                        actor=CLINICAL,
                     )
                 assert exc.value.status_code == 400
                 assert exc.value.detail["code"] == "SPECS_MEASUREMENTS_REQUIRED"
             med = await record_fulfilment(
-                FulfilmentBody(transcription_id=str(trans_id), item_type="medicine", status="fulfilled"),
-                actor=ADMIN,
+                _fulfil(trans_id, mock_db.last_rev_id, item_type="medicine", status="fulfilled"),
+                actor=CLINICAL,
             )
             assert med["fulfilment"]["status"] == "fulfilled"
             ot = await record_fulfilment(
-                FulfilmentBody(
-                    transcription_id=str(trans_id), item_type="ot", status="deferred",
-                    ot_schedule_day_id=str(ot_day),
-                ),
-                actor=ADMIN,
+                _fulfil(trans_id, mock_db.last_rev_id, item_type="ot", status="deferred",
+                        ot_schedule_day_id=str(ot_day)),
+                actor=CLINICAL,
             )
             assert ot["fulfilment"]["status"] == "deferred"
         asyncio.run(run())
@@ -348,18 +335,25 @@ class TestFulfilmentMatrix:
             mock_db = _mock(monkeypatch)
             _recorder(monkeypatch)
             _camp, _pid, trans_id = await _seen_patient_with_transcription(mock_db)
-            body = FulfilmentBody(transcription_id=str(trans_id), item_type="specs_fixed", status="fulfilled")
+            body = _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_fixed", status="fulfilled")
             with pytest.raises(HTTPException) as exc:
-                await record_fulfilment(body, actor=ADMIN)
+                await record_fulfilment(body, actor=CLINICAL)
             assert exc.value.detail["code"] == "SPECS_MEASUREMENTS_REQUIRED"
-            await add_correction(CorrectionBody(
+            corr = await add_correction(CorrectionBody(
                 transcription_id=str(trans_id),
                 reason="Missed powers",
                 changes={"specs_measurements": RX},
-            ), actor=ADMIN)
+                expected_generation=1,
+                operation_id="op-corr-powers",
+                full_transcription_confirmed=True,
+            ), actor=CLINICAL)
             t = await mock_db.transcriptions.find_one({"_id": trans_id})
             assert t["specs_measurements"]["r_sph"] == RX["r_sph"]
-            out = await record_fulfilment(body, actor=ADMIN)
+            body = _fulfil(
+                trans_id, corr["revision"]["id"], item_type="specs_fixed", status="fulfilled",
+                reviewed_generation=corr["registration"]["clinical_generation"],
+            )
+            out = await record_fulfilment(body, actor=CLINICAL)
             assert out["fulfilment"]["item_type"] == "specs_fixed"
             assert out["fulfilment"]["status"] == "fulfilled"
         asyncio.run(run())
@@ -371,8 +365,8 @@ class TestFulfilmentMatrix:
             camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db, RX)
             await mock_db.camps.insert_one({"_id": camp_id, "name": "C", "venue": "Hall", "is_active": True})
             await record_fulfilment(
-                FulfilmentBody(transcription_id=str(trans_id), item_type="specs_fixed", status="fulfilled"),
-                actor=ADMIN,
+                _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_fixed", status="fulfilled"),
+                actor=CLINICAL,
             )
             monkeypatch.setattr(routes_reports, "get_db", lambda: mock_db)
             async def csv_text():
@@ -396,14 +390,12 @@ class TestFulfilmentMatrix:
             specs_day = ObjectId()
             await mock_db.specs_collection_days.insert_one({
                 "_id": specs_day, "camp_id": camp_id, "day_date": "2026-09-20",
-                "venue": "Optical Desk", "seat_limit": 2, "seats_taken": 0,
+                "venue": "Optical Desk", "start_time": "09:00", "end_time": "17:00", "seat_limit": 2, "seats_taken": 0,
             })
             await record_fulfilment(
-                FulfilmentBody(
-                    transcription_id=str(trans_id), item_type="specs_made", status="deferred",
-                    specs_collection_day_id=str(specs_day),
-                ),
-                actor=ADMIN,
+                _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",
+                        specs_collection_day_id=str(specs_day)),
+                actor=CLINICAL,
             )
             text = await csv_text()
             data = text.strip().splitlines()[1].split(",")

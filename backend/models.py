@@ -1,16 +1,19 @@
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List, Dict, Any
 
 
 # ---- auth ----
 class LoginBody(BaseModel):
-    email: EmailStr
-    password: str
+    name: str
+    pin: str = Field(min_length=4, max_length=4)
+
+
+class ChangePinBody(BaseModel):
+    current_pin: str = Field(min_length=4, max_length=4)
+    new_pin: str = Field(min_length=4, max_length=4)
 
 
 class CreateStaffBody(BaseModel):
-    email: EmailStr
-    password: str
     name: str
     role: str  # admin | team_lead | volunteer | clinical_desk_operator
     phone: Optional[str] = None
@@ -24,10 +27,17 @@ class PatchStaffLineBody(BaseModel):
 
 
 # ---- camps ----
+class CampSetupDay(BaseModel):
+    day_date: str
+    seat_limit: int = Field(gt=0)
+
+
 class CampBody(BaseModel):
     name: str
     venue: str
-    camp_date: str
+    camp_date: Optional[str] = None
+    days: Optional[List[CampSetupDay]] = None
+    setup_request_id: Optional[str] = None
 
 
 class CampDayBody(BaseModel):
@@ -37,7 +47,9 @@ class CampDayBody(BaseModel):
 
 
 class PrintWindowBody(BaseModel):
-    printing_open: bool
+    printing_open: Optional[bool] = None
+    mode: Optional[str] = None
+    day_id: Optional[str] = None
 
 
 # ---- aadhaar mock ----
@@ -63,6 +75,7 @@ class RegisterBody(BaseModel):
     manual_exception: bool = False
     manual_reason: Optional[str] = None
     failed_scan_attempts: int = 0
+    qr_payload: Optional[str] = None
 
 
 class DuplicateCheckBody(BaseModel):
@@ -92,10 +105,28 @@ class TranscriptionBody(BaseModel):
     blood_sugar: Optional[str] = None
     bp: Optional[str] = None
     remarks: Optional[str] = None
+    medication_instructions: Optional[str] = None
     specs_measurements: Optional[Dict[str, Any]] = None
     ot_eye: Optional[str] = None
     ot_procedure: Optional[str] = None
     ot_notes: Optional[str] = None
+    expected_draft_version: int = 0
+    operation_id: Optional[str] = None
+
+
+class CompletePrescriptionBody(TranscriptionBody):
+    expected_generation: int = 0
+    full_transcription_confirmed: bool = False
+    none_prescribed: bool = False
+    prescribed_lines: List[str] = []
+    operation_id: str
+
+
+class UndoCompletionBody(BaseModel):
+    patient_id: str
+    expected_generation: int
+    reason: str
+    operation_id: str
 
 
 class FulfilmentBody(BaseModel):
@@ -106,12 +137,38 @@ class FulfilmentBody(BaseModel):
     collection_venue: Optional[str] = None
     ot_schedule_day_id: Optional[str] = None
     specs_collection_day_id: Optional[str] = None
+    paper_reviewed: bool = False
+    reviewed_revision_id: Optional[str] = None
+    reviewed_generation: Optional[int] = None
+    operation_id: Optional[str] = None
 
 
 class CorrectionBody(BaseModel):
-    transcription_id: str
+    transcription_id: Optional[str] = None
+    patient_id: Optional[str] = None
     reason: str
-    changes: Dict[str, Any]
+    changes: Dict[str, Any] = {}
+    expected_generation: int = 0
+    operation_id: Optional[str] = None
+    full_transcription_confirmed: bool = False
+    none_prescribed: bool = False
+    prescribed_lines: List[str] = []
+    diagnosis_options: List[str] = []
+    diagnosis_other: Optional[str] = None
+    blood_sugar: Optional[str] = None
+    bp: Optional[str] = None
+    remarks: Optional[str] = None
+    medication_instructions: Optional[str] = None
+    specs_measurements: Optional[Dict[str, Any]] = None
+    ot_eye: Optional[str] = None
+    ot_procedure: Optional[str] = None
+    ot_notes: Optional[str] = None
+
+
+class IdentityCheckBody(BaseModel):
+    patient_id: str
+    reason: str
+    evidence: Optional[str] = None
 
 
 class OtScheduleBody(BaseModel):
@@ -125,9 +182,5 @@ class SpecsScheduleBody(BaseModel):
     camp_id: str
     day_date: str
     venue: str
-    seat_limit: int
-
-
-class RosterBulkBody(BaseModel):
-    camp_id: str
-    names: List[str]
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None

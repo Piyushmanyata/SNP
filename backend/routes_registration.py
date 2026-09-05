@@ -1,5 +1,5 @@
-from typing import Annotated, Any, Dict, List, Optional, Tuple
-from fastapi import APIRouter, HTTPException, Depends, Request
+from typing import Any, Dict, List, Optional, Tuple
+from fastapi import APIRouter, HTTPException, Depends, Request, BackgroundTasks
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -11,7 +11,6 @@ from helpers import (
 )
 from serializers import ser_patient
 from security import require_staff, require_any
-from routes_roster import on_desk_volunteer
 from aadhaar import decode_aadhaar
 import sms
 from datetime import timedelta
@@ -22,7 +21,6 @@ router = APIRouter(prefix="/api", tags=["registration"])
 _rl: dict = {}
 
 
-# ---------- Aadhaar Secure QR decode (genuine offline parse; demo payload also supported) ----------
 @router.post("/aadhaar/decode")
 async def aadhaar_decode(body: AadhaarDecodeBody) -> Dict[str, Any]:
     result = decode_aadhaar(body.payload or "")
@@ -149,12 +147,23 @@ async def _assert_capacity(db: AsyncIOMotorDatabase, day: dict) -> None:
     limit = day.get("seat_limit") or 0
     if limit <= 0:
         return
-    n = await db.patients.count_documents({"booked_camp_day_id": day["_id"]})
-    if n >= limit:
+    updated = await db.camp_days.find_one_and_update(
+        {"_id": day["_id"], "$expr": {"$lt": ["$booked", "$seat_limit"]}},
+        {"$inc": {"booked": 1}},
+        return_document=True,
+    )
+    if not updated:
         raise HTTPException(status_code=409, detail={
             "code": "CAMP_DAY_FULL",
             "message": "This camp day is full.",
         })
+
+
+async def _release_capacity(db: AsyncIOMotorDatabase, day_id) -> None:
+    await db.camp_days.update_one(
+        {"_id": day_id, "booked": {"$gt": 0}},
+        {"$inc": {"booked": -1}},
+    )
 
 
 async def _overwrite_manual(
@@ -203,7 +212,7 @@ def _build_patient_document(
     age: int | None,
     actor_id: Optional[ObjectId | str],
     is_self: bool,
-    roster_id: Optional[str] = None,
+    registrar_team_lead_id: Optional[str] = None,
 ) -> dict:
     norm = normalize_name(body.full_name)
     is_manual = (body.manual_entry or body.manual_exception) and not body.aadhaar_scanned
@@ -235,8 +244,13 @@ def _build_patient_document(
         "seen_by": None,
         "checked_in_by": None,
         "created_by": str(actor_id) if actor_id else None,
-        "created_roster_id": roster_id,
         "is_self_registered": is_self,
+        "registration_source": "self" if is_self else "staff",
+        "registrar_team_lead_id": None if is_self else registrar_team_lead_id,
+        "clinical_generation": 0,
+        "committed_revision_id": None,
+        "issue_auth_op": None,
+        "identity_recheck_required": is_manual,
         "manual_entry": is_manual,
         "manual_exception": True if is_manual else None,
         "registration_request_id": body.registration_request_id,
@@ -303,7 +317,6 @@ async def _create_registration(
     actor_id: Optional[ObjectId | str],
     is_self: bool,
     request: Request,
-    roster_id: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], bool]:
     db = get_db()
     camp, day = await _validate_camp_and_day(db, body.camp_day_id)
@@ -314,6 +327,8 @@ async def _create_registration(
             return ser_patient(existing), False
 
     phone = normalize_phone(body.phone)
+    if is_self and (not phone or is_dummy_phone(phone)):
+        raise HTTPException(status_code=400, detail="A valid 10-digit mobile number is required")
     if phone and is_dummy_phone(phone):
         raise HTTPException(status_code=400, detail="Please enter a valid 10-digit mobile number")
 
@@ -333,23 +348,37 @@ async def _create_registration(
         return conflict_result
 
     await _assert_capacity(db, day)
-
-    reg_no = await next_seq("reg_no")
-    age = body.age if body.age is not None else (age_from_dob(body.dob) if body.dob else None)
-
-    doc = _build_patient_document(
-        camp_id=camp["_id"],
-        camp_day_id=day["_id"],
-        reg_no=reg_no,
-        body=body,
-        person_id=person["_id"] if person else None,
-        phone=phone,
-        age=age,
-        actor_id=actor_id,
-        is_self=is_self,
-        roster_id=roster_id,
-    )
-    return await _insert_patient_document(db, doc, body, person, camp["_id"])
+    try:
+        age = body.age if body.age is not None else (age_from_dob(body.dob) if body.dob else None)
+        reg_no = await next_seq("reg_no")
+        team_lead_id = None
+        if not is_self and actor_id:
+            uid = actor_id if isinstance(actor_id, ObjectId) else ObjectId(str(actor_id))
+            user = await db.users.find_one({"_id": uid})
+            if user:
+                if user.get("role") == "team_lead":
+                    team_lead_id = str(user["_id"])
+                else:
+                    team_lead_id = user.get("team_lead_id")
+        doc = _build_patient_document(
+            camp_id=camp["_id"],
+            camp_day_id=day["_id"],
+            reg_no=reg_no,
+            body=body,
+            person_id=person["_id"] if person else None,
+            phone=phone,
+            age=age,
+            actor_id=actor_id,
+            is_self=is_self,
+            registrar_team_lead_id=team_lead_id,
+        )
+        patient, created = await _insert_patient_document(db, doc, body, person, camp["_id"])
+        if not created:
+            await _release_capacity(db, day["_id"])
+        return patient, created
+    except Exception:
+        await _release_capacity(db, day["_id"])
+        raise
 
 
 async def _confirm_registration(patient: Dict[str, Any]) -> None:
@@ -367,7 +396,7 @@ async def desk_register(
     body: RegisterBody,
     request: Request,
     actor: dict = Depends(require_staff),
-    roster: Annotated[Optional[dict], Depends(on_desk_volunteer)] = None,
+    background_tasks: BackgroundTasks = None,
 ) -> Dict[str, Any]:
     if not body.full_name or not body.full_name.strip():
         raise HTTPException(status_code=400, detail="Full name is required")
@@ -378,15 +407,17 @@ async def desk_register(
         raise HTTPException(status_code=400, detail="A valid 10-digit household mobile number is required")
     patient, created = await _create_registration(
         body, actor["_id"], False, request,
-        roster_id=str(roster["_id"]) if roster else None,
     )
     if created:
-        await _confirm_registration(patient)
+        if background_tasks is not None:
+            background_tasks.add_task(_confirm_registration, patient)
+        else:
+            await _confirm_registration(patient)
     return {"registration": patient, "created": created}
 
 
 @router.post("/self-register")
-async def self_register(body: RegisterBody, request: Request) -> Dict[str, Any]:
+async def self_register(body: RegisterBody, request: Request, background_tasks: BackgroundTasks = None) -> Dict[str, Any]:
     ip = request.client.host if request.client else "unknown"
     now = now_utc()
     cutoff = now - timedelta(minutes=10)
@@ -398,12 +429,24 @@ async def self_register(body: RegisterBody, request: Request) -> Dict[str, Any]:
         raise HTTPException(status_code=429, detail="Too many attempts. Please try again later.")
     window.append(now)
 
-    if not body.aadhaar_scanned:
-        raise HTTPException(status_code=400, detail="Aadhaar scan required for self-registration")
+    decoded = decode_aadhaar(body.qr_payload or "")
+    if decoded.get("outcome") != "card" or not decoded.get("data"):
+        raise HTTPException(status_code=400, detail="Aadhaar QR could not be decoded")
+    card = decoded["data"]
+    body.full_name = card.get("full_name") or ""
+    body.gender = card.get("gender")
+    body.dob = card.get("dob")
+    body.age = card.get("age")
+    body.aadhaar_last4 = card.get("aadhaar_last4")
+    body.address = card.get("address")
+    body.aadhaar_scanned = True
     body.is_self_registered = True
     patient, created = await _create_registration(body, None, True, request)
     if created:
-        await _confirm_registration(patient)
+        if background_tasks is not None:
+            background_tasks.add_task(_confirm_registration, patient)
+        else:
+            await _confirm_registration(patient)
     db = get_db()
     camp = await db.camps.find_one({"is_active": True})
     day = await db.camp_days.find_one({"_id": ObjectId(body.camp_day_id)})

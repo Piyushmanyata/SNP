@@ -195,22 +195,6 @@ def parse_xml_qr(qr: str) -> dict:
     }
 
 
-def _decode_demo_payload(raw: str) -> dict:
-    parts = raw.split("|")
-    if len(parts) < 6:
-        return {"outcome": "garbage", "message": "Aadhaar QR data is incomplete."}
-    gender = _normalize_gender(parts[2])
-    dob_iso = _to_iso_dob(parts[3]) or parts[3].strip()
-    return {"outcome": "card", "source": "demo", "data": {
-        "full_name": parts[1].strip(),
-        "gender": gender,
-        "dob": dob_iso,
-        "age": _calc_age(dob_iso),
-        "aadhaar_last4": parts[4].strip()[-4:].zfill(4),
-        "address": "|".join(parts[5:]).strip(),
-    }}
-
-
 def _try_decode_xml(raw: str) -> dict | None:
     if raw.startswith("<") or "<PrintLetterBarcodeData" in raw:
         try:
@@ -236,9 +220,6 @@ def decode_aadhaar(raw: str) -> dict:
         return {"outcome": "not-aadhaar", "message": "No data captured."}
     if raw.startswith("snp:") or "/p/" in raw:
         return {"outcome": "not-aadhaar", "message": "This is a patient QR, not an Aadhaar card."}
-    if raw.upper().startswith("AADHAAR|"):
-        return _decode_demo_payload(raw)
-
     xml_result = _try_decode_xml(raw)
     if xml_result:
         return xml_result
@@ -248,4 +229,3 @@ def decode_aadhaar(raw: str) -> dict:
         return secure_result
 
     return {"outcome": "garbage", "message": "Could not read an Aadhaar Secure QR."}
-

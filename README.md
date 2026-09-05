@@ -1,168 +1,68 @@
-# SNP Camps — Medical Camp Management System
+# SNP Camps
 
-Free eye camp management desk and clinical workflow system, built on the **Emergent** stack (React + FastAPI + MongoDB).
+React frontend, FastAPI backend and MongoDB, hosted together with Docker on a Hostinger KVM. Production serves the frontend and API at one HTTPS origin.
 
----
+## Test locally with Docker
 
-## Architecture Overview
+Install Docker Desktop and run from this directory:
 
-```
-SNP/
-├── backend/                  # FastAPI async Python backend
-│   ├── server.py             # FastAPI entrypoint & router registry
-│   ├── db.py                 # Async Motor MongoDB connection pool
-│   ├── models.py             # Pydantic schemas & validation
-│   ├── security.py           # JWT token generation & password hashing (bcrypt)
-│   ├── helpers.py            # Aadhaar HMAC duplicate keys & helpers
-│   ├── aadhaar.py            # Aadhaar parser & mock decoder
-│   ├── serializers.py        # MongoDB document JSON serializers
-│   ├── routes_*.py           # Modular route handlers (auth, camps, desk, clinical, etc.)
-│   ├── tests/                # Pytest regression suite
-│   └── requirements.txt      # Python dependencies
-├── frontend/                 # React single-page application
-│   ├── public/               # Static HTML shell
-│   ├── src/
-│   │   ├── App.js            # App router & role-based guards
-│   │   ├── pages/            # Role pages (Desk, Clinical, Admin, Login, SelfRegister)
-│   │   ├── components/       # UI components (AadhaarScanner, Layout, TemplateEditor)
-│   │   ├── context/          # AuthContext & session state
-│   │   └── lib/              # Axios API client & utilities
-│   ├── tailwind.config.js    # Tailwind styling config
-│   └── package.json          # React dependencies and scripts
-├── .emergent/                # Emergent runtime & cron configurations
-└── memory/                   # PRD specifications and test credentials
+```sh
+docker compose --env-file .env.example up -d --build --wait
 ```
 
----
+Open http://localhost:3000. Sign in as **admin**, PIN **8642**, then choose a new PIN. These credentials are only for the local stack. MongoDB data persists in a Docker volume; stopping or rebuilding does not erase it. Both frontend and backend run production builds without development servers or source mounts.
 
-## Key Roles & Operational Flow
+For phone camera testing, use a trusted HTTPS address; see [local HTTPS setup](docs/dev-https.md). Plain HTTP on a LAN IP cannot use the camera. The local site binds to localhost by default.
 
-| Role | Permissions & Responsibilities |
-|---|---|
-| **Admin** | Full system access: Camps, Camp Days, Staff accounts, OT Schedule Days, Specs collection days, Clinical Templates, Audit Logs, and CSV Exports. |
-| **Team Lead** | Camp desk supervision; create and manage Volunteer accounts on their assigned team. |
-| **Volunteer** | Desk operations: register patients (Aadhaar scan or manual), print prescription form, mark patient as seen. |
-| **Clinical Desk Operator** | Clinical workflow: eligibility verification, prescription transcription, medication/spectacle fulfilment, OT and Specs collection assignment, A6 Token print. |
-| **Patient** | Public self-registration (`/self-register`) producing a patient QR code scanned by desk staff. |
+## Camp workflow
 
----
+1. Admin creates/activates the camp, opens camp days and the print window, and creates team leads and operators.
+2. A patient registers, then a desk volunteer scans their Aadhaar to record arrival. Manual fallback remains available to desk staff.
+3. Staff prints the prescription, the doctor examines the patient, and staff marks them Seen.
+4. A clinical operator chooses Medicine, Fixed-power specs, Spectacles to be made, or Hospital surgery. At that same desk they transcribe the paper prescription, then issue supplies or schedule collection/hospital treatment.
+5. Hospital surgery and later spectacle collection produce a short A6 token. Surgery is performed at the hospital only.
 
-## Camp Lifecycle
+Team Management and Analytics are beside each other in the admin overview (also available to team leads from the desk). Reset PIN sits beside Logout. Forgotten PINs can be reset by the user's lead or an admin.
 
-1. **Registration**: Volunteer scans patient's Aadhaar card or enters details. A `Person` duplicate key (HMAC SHA-256) checks for duplicate registrations across the active camp.
-2. **Presence & Print**: Volunteer clicks **Print Prescription** (A4 form with patient demographic QR and blank clinical examination area). This records `printed_at` presence.
-3. **Doctor Consultation**: Doctor examines patient and writes clinical notes on physical paper prescription form.
-4. **Mark Seen**: Volunteer marks patient as `seen` once examination begins.
-5. **Clinical Fulfilment**: Clinical operator transcribes prescriptions, fulfills medicines/spectacles, or schedules OT surgery.
+Camp default: Hansa Garden, Rohini Road in Baghmara, Jasidih, Deoghar 814142.
 
----
+Hospital default: Vimla Ramkrishna Bajaj Eye Hospital, Near Canara Bank, Bilasi Mod, Deoghar 814112 (Jharkhand). Phone: 9835317006.
 
-## Environment Variables
+## Hostinger KVM deployment
 
-Copy `.env.example` to `.env` or set environment variables:
+Use a Linux KVM with Docker Engine and the Compose plugin. Hostinger provides an [Ubuntu Docker template](https://www.hostinger.com/support/1583571-what-are-the-available-operating-systems-for-vps-at-hostinger/). Point your domain's DNS to the KVM, and allow TCP 80/443 through the firewall.
 
-```bash
-# Backend
-MONGO_URL=mongodb://localhost:27017
-DB_NAME=snp_camps
-AADHAAR_HASH_PEPPER=local-dev-aadhaar-pepper-not-for-production
-JWT_SECRET=local-dev-jwt-secret-not-for-production
-ADMIN_EMAIL=admin@snpcamps.org
-ADMIN_PASSWORD=AdminCamp@2026
-CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
-COOKIE_SECURE=false
-COOKIE_SAMESITE=lax
+Copy `.env.production.example` to `.env.production`. Set the domain, TLS email, a private 4-digit bootstrap PIN other than 1234, and four independent random secrets. Generate each secret using `openssl rand -hex 32`; use hex for MONGO_PASSWORD so the database URL needs no escaping. Keep this file private.
 
-# D-1 reminders: POST /api/cron/reminders at 10:00 Asia/Kolkata (header X-Cron-Secret)
-CRON_SECRET=
-CRON_REMINDERS_AT=10:00 Asia/Kolkata
-MSG91_AUTH_KEY=
-MSG91_TEMPLATE_CAMP=
-MSG91_TEMPLATE_OT=
-MSG91_TEMPLATE_SPECS=
-
-# Frontend
-REACT_APP_BACKEND_URL=http://localhost:8000
+```sh
+docker compose --env-file .env.production -f docker-compose.prod.yml config --quiet
+docker compose --env-file .env.production -f docker-compose.prod.yml up -d --build --wait
 ```
 
----
+Caddy obtains and renews TLS certificates. Only ports 80/443 are published; MongoDB and the API remain internal. The backend runs without root privileges. No Emergent account or hosting files are required.
 
-## Local Development
+Configure the MSG91 key and approved DLT template IDs before using real SMS. Without them, sending is reported as skipped. Review the exact Hindi text in `backend/sms.py` with the provider; surgery templates include आधार कार्ड, वोटर आईडी और मोबाइल नंबर. Real carrier delivery requires a live provider test.
 
-### Docker (recommended)
+The reminder container dispatches day-before reminders at 10:00 Asia/Kolkata and retries failures. Details: [reminder worker](backend/docs/reminder-worker.md).
 
-Start Docker Desktop, then from the repository root:
+## Backups and recovery
 
-```powershell
-docker compose up --build
+Production creates a compressed MongoDB dump every hour in the `backups` volume and keeps 14 days by default. A failed dump does not remove previous successful backups. Copy archives off the KVM using your backup provider or rclone; a backup on the same disk is not disaster recovery.
+
+To export the archive directory:
+
+```sh
+docker compose --env-file .env.production -f docker-compose.prod.yml cp backup:/backups ./backup-export
 ```
 
-| What | URL |
-|---|---|
-| Frontend | http://localhost:3000 |
-| Backend API | http://localhost:8000 |
-| Swagger | http://localhost:8000/docs |
-| Health | http://localhost:8000/api/health |
-| Same LAN (phone/laptop) | http://<PC-LAN-IP>:3000 — API host is derived from the page hostname, port 8000 |
+Restore an archive into an isolated MongoDB instance first using `mongorestore --gzip --archive=<file>`; confirm registrations, prescriptions and schedules before restoring a live database. Do not run `down -v` on the production project.
 
-MongoDB is not published; the backend reaches it as `mongodb://mongo:27017`. Data lives in the `mongo_data` Docker volume and survives `docker compose down`.
+## Verification
 
-Local admin login (see `memory/test_credentials.md`):
+Use Node 24 and Python 3.12. Frontend: `npm ci`, `npm run lint`, `npm test -- --runInBand`, `npm run build` from `frontend/`.
 
-- Email: `admin@snpcamps.org`
-- Password: `AdminCamp@2026`
+Backend: install `backend/requirements-dev.txt`, run `python -m compileall -q backend`, `python -m flake8 --select=F,E9 backend`, and `python -m pytest backend/tests -q`.
 
-Copy `.env.example` to `.env` to override secrets. Compose also works with no `.env` file.
+The complete backend suite includes live HTTP tests. Run it serially against a fresh isolated Docker project with `SNP_LIVE_API=http://localhost:3000`, `SNP_TEST_ADMIN_NAME=admin`, and `SNP_TEST_ADMIN_PIN=8642`. It changes the bootstrap PIN and creates synthetic camp records. Without a live endpoint, those integration tests are explicitly skipped.
 
-Stop with `Ctrl+C`, or `docker compose down`. Add `-v` only if you intend to delete MongoDB data.
-
-### Without Docker
-
-#### 1. Backend (FastAPI)
-
-```bash
-cd backend
-pip install -r requirements.txt
-uvicorn server:app --host 0.0.0.0 --port 8000 --reload
-```
-
-Backend API documentation is available at:
-- Swagger UI: `http://localhost:8000/docs`
-- Health Check: `http://localhost:8000/api/health`
-
-#### 2. Frontend (React)
-
-```bash
-cd frontend
-npm install
-npm start
-```
-
-Runs the application at `http://localhost:3000`.
-
----
-
-## Testing & Verification
-
-### Frontend Verification
-
-```bash
-cd frontend
-npm test
-npm run build
-```
-
-### Backend Verification
-
-```bash
-cd backend
-pytest tests/
-```
-
----
-
-## Deployment
-
-The application is configured for deployment on the Emergent platform using `.emergent/` runtime manifests and cron jobs.
-
-D-1 Camp / OT / Specs reminders are a single HTTP job: `POST /api/cron/reminders` with `X-Cron-Secret`, intended to run at **10:00 IST**. `.emergent/cron/webhook-crons` is platform-managed (DO NOT EDIT); schedule the webhook in the Emergent dashboard.
+See [audit evidence and limits](frontend/docs/production-audit.md), [clinical workflow](frontend/docs/clinical-workflow.md) and [scanner audit](frontend/docs/scanner-audit.md). Automated tests do not replace checking the real A6 printer, older phones and SMS carrier before the camp.

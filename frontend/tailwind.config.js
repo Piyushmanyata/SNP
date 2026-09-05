@@ -1,5 +1,5 @@
 module.exports = {
-  content: ["./src/**/*.{js,jsx}", "./public/index.html"],
+  content: ["./src/**/*.{js,jsx}", "./index.html"],
   theme: {
     extend: {
       colors: {
@@ -8,9 +8,9 @@ module.exports = {
         },
       },
       fontFamily: {
-        sans: ["Inter", "system-ui", "sans-serif"],
-        display: ["Plus Jakarta Sans", "Barlow", "sans-serif"],
-        mono: ["JetBrains Mono", "monospace"],
+      sans: ["system-ui", "sans-serif"],
+      display: ["system-ui", "sans-serif"],
+      mono: ["ui-monospace", "Consolas", "monospace"],
       },
     },
   },

@@ -101,7 +101,7 @@ describe("AadhaarScanner component", () => {
     expect(cameraBtn.textContent).toContain("Scan with camera");
   });
 
-  test("toggles manual USB / paste mode and generates demo payload", async () => {
+  test("offers USB / paste entry without a demo card", async () => {
     act(() => {
       root.render(<AadhaarScanner onScanned={jest.fn()} />);
     });
@@ -114,13 +114,8 @@ describe("AadhaarScanner component", () => {
     const textarea = container.querySelector('[data-testid="aadhaar-qr-input"]');
     const demoBtn = container.querySelector('[data-testid="generate-demo-aadhaar-button"]');
     expect(textarea).not.toBeNull();
-    expect(demoBtn).not.toBeNull();
-
-    act(() => {
-      demoBtn.click();
-    });
-
-    expect(textarea.value).toMatch(/^AADHAAR\|/);
+    expect(demoBtn).toBeNull();
+    expect(textarea.placeholder).not.toMatch(/demo/i);
   });
 
   test("decodes manual input and triggers onScanned callback", async () => {
@@ -216,6 +211,34 @@ describe("AadhaarScanner component", () => {
     );
   });
 
+  test("opens the rear camera even when the front camera is enumerated first", async () => {
+    navigator.mediaDevices.enumerateDevices.mockResolvedValue([
+      { kind: "videoinput", deviceId: "front", label: "Front" },
+      { kind: "videoinput", deviceId: "rear", label: "Rear" },
+    ]);
+    act(() => root.render(<AadhaarScanner />));
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+    expect(navigator.mediaDevices.getUserMedia.mock.calls[0][0].video).toEqual(
+      expect.objectContaining({ facingMode: { ideal: "environment" } })
+    );
+    expect(navigator.mediaDevices.getUserMedia.mock.calls[0][0].video.deviceId).toBeUndefined();
+  });
+
+  test("stopping during permission request releases the stream when permission arrives", async () => {
+    let grantPermission;
+    navigator.mediaDevices.getUserMedia.mockImplementation(() => new Promise((resolve) => {
+      grantPermission = resolve;
+    }));
+    act(() => root.render(<AadhaarScanner />));
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+    expect(container.textContent).toContain("Starting camera");
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-stop"]').click());
+    await act(async () => grantPermission(mediaStream));
+    expect(mediaTrack.stop).toHaveBeenCalled();
+    expect(nativeDetector.detectNativeImageData).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="aadhaar-camera-region"]').srcObject).toBeNull();
+  });
+
   test("handles camera permission denial gracefully with clear feedback and retry", async () => {
     const permError = new Error("NotAllowedError: Permission denied");
     permError.name = "NotAllowedError";
@@ -231,7 +254,7 @@ describe("AadhaarScanner component", () => {
       cameraBtn.click();
     });
 
-    expect(container.textContent).toContain("Camera permission denied");
+    expect(container.textContent).toContain("Camera permission is off");
     const retryBtn = container.querySelector('[data-testid="aadhaar-camera-retry"]');
     expect(retryBtn).not.toBeNull();
   });
@@ -427,6 +450,39 @@ describe("AadhaarScanner component", () => {
       })
     );
     expect(container.querySelector('[data-testid="aadhaar-camera-stop"]')).not.toBeNull();
+  });
+
+  test("keeps preview scanning fast and spaces high-resolution still captures three seconds apart", async () => {
+    let now = 10000;
+    let tick;
+    jest.spyOn(Date, "now").mockImplementation(() => now);
+    jest.spyOn(global, "setInterval").mockImplementation((callback) => {
+      tick = callback;
+      return 12345;
+    });
+    const takePhoto = jest.fn().mockResolvedValue(new Blob());
+    window.ImageCapture = jest.fn().mockImplementation(() => ({ takePhoto }));
+    const scanNextFrame = async () => tick();
+    try {
+      act(() => root.render(<AadhaarScanner />));
+      await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+      for (let i = 0; i < 8; i += 1) {
+        now += 125;
+        await act(scanNextFrame);
+      }
+      expect(takePhoto).not.toHaveBeenCalled();
+      expect(grab.grabFrame).toHaveBeenCalledTimes(9);
+      now += 3000;
+      await act(scanNextFrame);
+      expect(takePhoto).toHaveBeenCalledTimes(1);
+      for (let i = 0; i < 8; i += 1) {
+        now += 125;
+        await act(scanNextFrame);
+      }
+      expect(takePhoto).toHaveBeenCalledTimes(1);
+    } finally {
+      delete window.ImageCapture;
+    }
   });
 
   test("trims leading and trailing whitespace on manual decode button click", async () => {

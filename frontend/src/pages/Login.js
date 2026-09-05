@@ -8,8 +8,8 @@ import { Stethoscope } from "lucide-react";
 export default function Login() {
   const { login, user } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [pin, setPin] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [occupancy, setOccupancy] = useState(null);
@@ -34,14 +34,14 @@ export default function Login() {
     e.preventDefault();
     setBusy(true); setError("");
     try {
-      const u = await login(email.trim(), password);
+      const u = await login(name.trim(), pin.trim());
       navigate(roleHome(u.role), { replace: true });
     } catch (err) {
       setError(formatApiError(err));
     } finally {
       setBusy(false);
     }
-  }, [email, password, login, navigate]);
+  }, [name, pin, login, navigate]);
 
   return (
     <div className="min-h-screen grid lg:grid-cols-2">
@@ -68,13 +68,29 @@ export default function Login() {
           <p className="text-sm text-slate-500 mt-1 mb-6">Patients never sign in. Staff only.</p>
 
           <form onSubmit={submit} className="space-y-4" data-testid="login-form">
-            <Field label="Email">
-              <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@snpcamps.org" required autoComplete="username" data-testid="login-email-input" />
+            <Field label="Name">
+              <Input
+                type="text"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Your registered name"
+                required
+                autoFocus
+                autoComplete="username"
+                data-testid="login-name-input"
+              />
             </Field>
-            <Field label="Password">
-              <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••••••" required autoComplete="current-password" data-testid="login-password-input" />
+            <Field label="4-digit PIN">
+              <Input
+                type="password"
+                value={pin}
+                onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                placeholder="••••"
+                required
+                maxLength={4}
+                autoComplete="current-password"
+                data-testid="login-pin-input"
+              />
             </Field>
             <Alert>{error}</Alert>
             <Button type="submit" size="lg" className="w-full" disabled={busy} data-testid="login-submit-button">

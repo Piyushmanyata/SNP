@@ -23,7 +23,7 @@ jest.mock("../components/AadhaarScanner", () => ({
           age: 51,
           address: "12 Station Road",
           aadhaar_last4: "1234",
-        })
+        }, "AADHAAR|Sunita Devi|F|1975-06-14|123456781234|12 Station Road")
       }
     >
       scan
@@ -62,7 +62,23 @@ async function renderAndScan() {
   await act(async () => {
     container.querySelector('[data-testid="fake-scan"]').click();
   });
+  act(() => {
+    const input = container.querySelector('[data-testid="self-phone-input"]');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    setter.call(input, "9876500001");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
 }
+
+test("submit stays disabled without a mobile number", async () => {
+  await act(async () => {
+    root.render(<SelfRegister />);
+  });
+  await act(async () => {
+    container.querySelector('[data-testid="fake-scan"]').click();
+  });
+  expect(container.querySelector('[data-testid="self-register-submit"]').disabled).toBe(true);
+});
 
 function submit() {
   return act(async () => {

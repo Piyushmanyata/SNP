@@ -3,7 +3,6 @@ import ReactDOM from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import Desk from "./Desk";
 import api from "../lib/api";
-import { ROSTER_STORAGE_KEY } from "../lib/roster";
 
 const mockAuth = { user: { id: "u1", name: "Lead", role: "team_lead" } };
 
@@ -164,6 +163,19 @@ async function scanAtDoor() {
 }
 
 describe("Desk page", () => {
+  test("team leads can reach Team Management and Analytics from the desk overview", async () => {
+    await renderDesk();
+    expect(container.querySelector('[data-testid="desk-team-link"]').getAttribute("href")).toBe("/team");
+    expect(container.querySelector('[data-testid="desk-analytics-link"]').getAttribute("href")).toBe("/analytics");
+  });
+
+  test("volunteers do not see management navigation", async () => {
+    mockAuth.user.role = "volunteer";
+    await renderDesk();
+    expect(container.querySelector('[data-testid="desk-team-link"]')).toBeNull();
+    expect(container.querySelector('[data-testid="desk-analytics-link"]')).toBeNull();
+  });
+
   test("shows KPIs and never lists patients", async () => {
     await renderDesk();
 
@@ -362,14 +374,12 @@ describe("Desk page", () => {
     expect(container.textContent).toContain("SMS sent");
   });
 
-  test("marking Seen by typing a reg_no", async () => {
+  test("desk does not offer independent mark seen", async () => {
     api.post.mockImplementation((url) => {
       if (url === "/desk/lookup") {
         return Promise.resolve({ data: { registration: { ...ARRIVED, printed_at: "2026-09-01T05:00:00Z" } } });
       }
-      if (url === "/desk/mark-seen/p-1") {
-        return Promise.resolve({ data: { registration: { ...ARRIVED, queue_status: "seen", printed_at: "x" } } });
-      }
+
       return Promise.resolve({ data: {} });
     });
 
@@ -382,13 +392,11 @@ describe("Desk page", () => {
     });
     expect(container.querySelector('[data-testid="desk-found-patient"]')).not.toBeNull();
 
-    await act(async () => {
-      container.querySelector('[data-testid="mark-seen-button-101"]').click();
-    });
-    expect(api.post).toHaveBeenCalledWith("/desk/mark-seen/p-1");
+    expect(container.querySelector('[data-testid="mark-seen-button-101"]')).toBeNull();
+    expect(api.post).not.toHaveBeenCalledWith("/desk/mark-seen/p-1");
   });
 
-  test("marking Seen by searching a name", async () => {
+  test("name search does not offer mark seen", async () => {
     api.get.mockImplementation((url) => {
       if (url === "/kpis") return Promise.resolve({ data: { registered: 1, seen: 0, pending: 1 } });
       if (url === "/camps/active") {
@@ -412,10 +420,7 @@ describe("Desk page", () => {
     });
 
     expect(container.querySelector('[data-testid="desk-search-results"]')).not.toBeNull();
-    await act(async () => {
-      container.querySelector('[data-testid="mark-seen-button-101"]').click();
-    });
-    expect(api.post).toHaveBeenCalledWith("/desk/mark-seen/p-1");
+    expect(container.querySelector('[data-testid="mark-seen-button-101"]')).toBeNull();
   });
 
   test("a booking that has not arrived cannot be checked in from a lookup", async () => {
@@ -437,7 +442,7 @@ describe("Desk page", () => {
     expect(api.post).not.toHaveBeenCalledWith("/desk/arrive/p-1");
   });
 
-  test("two Failures reveal the typed form and there is no Register anyway", async () => {
+  test("three Failures reveal the typed form and there is no Register anyway", async () => {
     api.get.mockImplementation((url) => {
       if (url === "/kpis") return Promise.resolve({ data: { registered: 45, seen: 0, pending: 0 } });
       if (url === "/camps/active") {
@@ -464,12 +469,16 @@ describe("Desk page", () => {
     act(() => {
       modalScanner("mock-failure-trigger").click();
     });
+    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
+    act(() => {
+      modalScanner("mock-failure-trigger").click();
+    });
     expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).not.toBeNull();
     expect(document.body.querySelector('[data-testid="manual-entry-note"]')).not.toBeNull();
     expect(document.body.textContent).not.toContain("Register anyway");
   });
 
-  test("a Scan stall counts the same as two Failures", async () => {
+  test("a Scan stall does not unlock manual entry", async () => {
     api.get.mockImplementation((url) => {
       if (url === "/kpis") return Promise.resolve({ data: { registered: 45, seen: 0, pending: 0 } });
       if (url === "/camps/active") {
@@ -491,8 +500,7 @@ describe("Desk page", () => {
     act(() => {
       modalScanner("mock-stall-trigger").click();
     });
-    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).not.toBeNull();
-    expect(document.body.querySelector('[data-testid="manual-entry-note"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
   });
 
   test("a Lock before two Failures never reveals a typed path", async () => {
@@ -540,6 +548,7 @@ describe("Desk page", () => {
       container.querySelector('[data-testid="new-registration-button"]').click();
     });
     act(() => {
+      modalScanner("mock-failure-trigger").click();
       modalScanner("mock-failure-trigger").click();
       modalScanner("mock-failure-trigger").click();
     });
@@ -650,7 +659,7 @@ describe("Desk page", () => {
         return Promise.resolve({
           data: {
             camp: { id: "camp-1", name: "Howrah Eye Camp" },
-            days: [{ id: "day-2", day_date: "2026-08-28", is_today: false, printing_open: true }],
+            days: [{ id: "day-2", day_date: "2026-08-28", is_today: false, printing_open: false }],
           },
         });
       }
@@ -659,6 +668,128 @@ describe("Desk page", () => {
     await renderDesk();
     expect(container.querySelector('[data-testid="desk-card-prereg"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="kpi-seen-count"]')).toBeNull();
+  });
+
+  test("server printing_open on a non-today operating day is camp-day mode", async () => {
+    api.get.mockImplementation((url) => {
+      if (url === "/kpis") return Promise.resolve({ data: { registered: 3, seen: 1, pending: 2 } });
+      if (url === "/camps/active") {
+        return Promise.resolve({
+          data: {
+            camp: { id: "camp-1", name: "Howrah Eye Camp" },
+            days: [
+              { id: "day-1", day_date: "2026-08-27", is_today: true, printing_open: false },
+              { id: "day-2", day_date: "2026-08-28", is_today: false, printing_open: true },
+            ],
+            printing_open: true,
+            operating_day_id: "day-2",
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+    await renderDesk();
+    expect(container.querySelector('[data-testid="desk-card-prereg"]')).toBeNull();
+    expect(container.querySelector('[data-testid="kpi-seen-count"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="desk-card-scan"]')).not.toBeNull();
+  });
+
+  test("door walk-in books the operating day, not calendar today", async () => {
+    api.get.mockImplementation((url) => {
+      if (url === "/kpis") return Promise.resolve({ data: { registered: 3, seen: 1, pending: 2 } });
+      if (url === "/camps/active") {
+        return Promise.resolve({
+          data: {
+            camp: { id: "camp-1", name: "Howrah Eye Camp" },
+            days: [
+              { id: "day-1", day_date: "2026-08-27", is_today: true, printing_open: false },
+              { id: "day-2", day_date: "2026-08-28", is_today: false, printing_open: true },
+            ],
+            printing_open: true,
+            operating_day_id: "day-2",
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+    api.post.mockImplementation((url, body) => {
+      if (url === "/desk/scan") {
+        return Promise.resolve({
+          data: {
+            outcome: "no_match",
+            card: { full_name: "Aadhaar Scanned User", age: 42, gender: "M", address: "10 Downing St, Kolkata", aadhaar_last4: "8888", dob: "1984-05-12" },
+          },
+        });
+      }
+      if (url === "/register") {
+        return Promise.resolve({ data: { registration: { id: "p-9", reg_no: "109", full_name: body.full_name } } });
+      }
+      if (url === "/desk/arrive/p-9") {
+        return Promise.resolve({ data: { registration: { ...ARRIVED, id: "p-9", reg_no: "109" } } });
+      }
+      return Promise.resolve({ data: {} });
+    });
+    await renderDesk();
+    await scanAtDoor();
+    act(() => {
+      setInput(container.querySelector('[data-testid="door-phone-input"]'), "9876500001");
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="door-register-button"]').click();
+    });
+    expect(api.post).toHaveBeenCalledWith("/register", expect.objectContaining({
+      camp_day_id: "day-2",
+      aadhaar_scanned: true,
+    }));
+    expect(api.post).toHaveBeenCalledWith("/desk/arrive/p-9");
+  });
+
+  test("door manual books the operating day and checks in when printing is open", async () => {
+    api.get.mockImplementation((url) => {
+      if (url === "/kpis") return Promise.resolve({ data: { registered: 3, seen: 1, pending: 2 } });
+      if (url === "/camps/active") {
+        return Promise.resolve({
+          data: {
+            camp: { id: "camp-1", name: "Howrah Eye Camp" },
+            days: [
+              { id: "day-1", day_date: "2026-08-27", is_today: true, printing_open: false },
+              { id: "day-2", day_date: "2026-08-28", is_today: false, printing_open: true },
+            ],
+            printing_open: true,
+            operating_day_id: "day-2",
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+    api.post.mockImplementation((url, body) => {
+      if (url === "/register") {
+        return Promise.resolve({ data: { registration: { id: "p-8", reg_no: "108", full_name: body.full_name } } });
+      }
+      if (url === "/desk/arrive/p-8") {
+        return Promise.resolve({ data: { registration: { ...ARRIVED, id: "p-8", reg_no: "108" } } });
+      }
+      return Promise.resolve({ data: {} });
+    });
+    await renderDesk();
+    act(() => { deskScanner().parentNode.querySelector('[data-testid="mock-failure-trigger"]').click(); });
+    act(() => { deskScanner().parentNode.querySelector('[data-testid="mock-failure-trigger"]').click(); });
+    act(() => { deskScanner().parentNode.querySelector('[data-testid="mock-failure-trigger"]').click(); });
+    act(() => {
+      setInput(container.querySelector('[data-testid="reg-fullname-input"]'), "Manual Patient");
+      setInput(container.querySelector('[data-testid="reg-age-input"]'), "40");
+      setInput(container.querySelector('[data-testid="reg-phone-input"]'), "9876500002");
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="door-manual-submit"]').click();
+    });
+    expect(api.post).toHaveBeenCalledWith("/register", expect.objectContaining({
+      full_name: "Manual Patient",
+      camp_day_id: "day-2",
+      manual_entry: true,
+    }));
+    expect(api.post).toHaveBeenCalledWith("/desk/arrive/p-8");
+    expect(container.textContent).toContain("Registered and checked in #108");
   });
 
   test("camp-day mode hides Pre-registration and shows the full KPI strip", async () => {
@@ -670,8 +801,10 @@ describe("Desk page", () => {
     expect(container.querySelector('[data-testid="kpi-pending-count"]')).not.toBeNull();
   });
 
-  test("two Failures at the door reveal the typed form", async () => {
+  test("three Failures at the door reveal the typed form", async () => {
     await renderDesk();
+    expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
+    act(() => { deskScanner().parentNode.querySelector('[data-testid="mock-failure-trigger"]').click(); });
     expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
     act(() => { deskScanner().parentNode.querySelector('[data-testid="mock-failure-trigger"]').click(); });
     expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
@@ -732,24 +865,15 @@ describe("Desk page", () => {
     expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
     rejectCard();
     await fireBurst("Y".repeat(24));
+    expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
+    rejectCard();
+    await fireBurst("Z".repeat(24));
     expect(container.querySelector('[data-testid="door-manual-form"]')).not.toBeNull();
   });
 
-  test("a 428 re-opens the picker", async () => {
-    mockAuth.user = { id: "u1", name: "Desk 1", role: "volunteer" };
-    sessionStorage.setItem(ROSTER_STORAGE_KEY, JSON.stringify({ id: "r-1", name: "Ramesh Kumar" }));
-    api.post.mockRejectedValueOnce({
-      response: { data: { detail: { code: "ROSTER_REQUIRED", message: "Pick your name before posting." } } },
-    });
-    await renderDesk();
-    expect(document.querySelector('[data-testid="roster-search"]')).toBeNull();
-    await scanAtDoor();
-    expect(document.querySelector('[data-testid="roster-search"]')).not.toBeNull();
-  });
-
-  test("a Scan stall at the door reveals the typed form", async () => {
+  test("a Scan stall at the door does not reveal the typed form", async () => {
     await renderDesk();
     act(() => { deskScanner().parentNode.querySelector('[data-testid="mock-stall-trigger"]').click(); });
-    expect(container.querySelector('[data-testid="door-manual-form"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
   });
 });

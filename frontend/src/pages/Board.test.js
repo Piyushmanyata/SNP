@@ -23,17 +23,31 @@ jest.mock("../components/Layout", () => {
 });
 
 const PAYLOAD = {
-  arrived_today: 12,
-  seen_today: 8,
-  transcription_backlog: 3,
-  sms_failed_today: 1,
-  desks: [
-    { account_id: "d1", name: "Desk 1", last_15m: 4, last_60m: 10, quiet: false },
-    { account_id: "d2", name: "Desk 2", last_15m: 0, last_60m: 2, quiet: true },
+  as_of: "2026-09-01T10:00:00+00:00",
+  state: "current",
+  camp: { id: "c1", name: "Sikar Camp" },
+  day: { id: "d1", day_date: "2026-09-01" },
+  stages: {
+    arrived: 12,
+    awaiting_print: 2,
+    awaiting_seen: 1,
+    seen: 8,
+    transcription_backlog: 3,
+  },
+  fulfilment: {
+    medicine: { fulfilled: 4, not_available: 1 },
+    specs_fixed: { fulfilled: 0 },
+    specs_made: { deferred: 2 },
+    ot: { fulfilled: 1, deferred: 3 },
+  },
+  activity: [
+    { id: "d1", name: "Vol 1", last_arrival_at: "10:00", quiet: false },
+    { id: "d2", name: "Vol 2", last_arrival_at: "09:20", quiet: true },
   ],
-  lines: { medicine: 1, specs_fixed: 0, specs_made: 2, ot: 1 },
-  next_ot_day: { day_date: "2026-09-02", seats_left: 7 },
-  next_specs_day: null,
+  quiet_count: 1,
+  sms_failures: 1,
+  next_ot: { day_date: "2026-09-02", venue: "OT Hall", seats_left: 7 },
+  next_specs: { day_date: "2026-09-05", venue: "Optical", start_time: "09:00", end_time: "12:00" },
 };
 
 let container = null;
@@ -45,6 +59,7 @@ beforeEach(() => {
   root = ReactDOM.createRoot(container);
   jest.clearAllMocks();
   api.get.mockResolvedValue({ data: PAYLOAD });
+  Object.defineProperty(document, "hidden", { configurable: true, value: false });
 });
 
 afterEach(() => {
@@ -53,8 +68,7 @@ afterEach(() => {
 });
 
 describe("Camp-day board", () => {
-  test("quiet rows have data-quiet true and polls again after 15 s", async () => {
-    jest.useFakeTimers();
+  test("renders KPIs before the activity table with camp day and quiet text", async () => {
     await act(async () => {
       root.render(
         <MemoryRouter>
@@ -62,16 +76,93 @@ describe("Camp-day board", () => {
         </MemoryRouter>,
       );
     });
-    const quiet = container.querySelector('[data-quiet="true"]');
-    expect(quiet).not.toBeNull();
-    expect(quiet.textContent).toContain("Desk 2");
-    expect(container.querySelector('[data-testid="board-backlog"]').textContent).toContain("3");
-    expect(api.get).toHaveBeenCalledWith("/board");
+    const page = container.querySelector('[data-testid="board-page"]').textContent;
+    const kpis = container.querySelector('[data-testid="board-kpis"]');
+    const table = container.querySelector('[data-testid="board-activity"]');
+    expect(kpis).not.toBeNull();
+    expect(table).not.toBeNull();
+    expect(page.indexOf("Arrived")).toBeLessThan(page.indexOf("Registration activity"));
+    expect(container.querySelector('[data-testid="board-context"]').textContent).toContain("Sikar Camp");
+    expect(container.querySelector('[data-testid="board-context"]').textContent).toContain("2026-09-01");
+    expect(container.querySelector('[data-testid="board-next-ot"]').textContent).toContain("7 seats");
+    expect(container.querySelector('[data-testid="board-next-specs"]').textContent).toContain("09:00–12:00");
+    expect(container.querySelector('[data-testid="board-ot-scheduled"]').textContent).toContain("3");
+    expect(container.querySelector('[data-testid="board-ot-done"]')).toBeNull();
+    expect(page).not.toContain("OT done");
+    expect(container.querySelector('[data-testid="quiet-text-d2"]').textContent).toBe("Quiet");
+    expect(table.querySelector("caption")).not.toBeNull();
+    expect(table.querySelector("th[scope='col']")).not.toBeNull();
+  });
+
+  test("poll pauses while hidden, ignores stale, and resumes on visible", async () => {
+    jest.useFakeTimers();
+    let resolveFirst;
+    api.get.mockImplementation(() => new Promise((resolve) => {
+      resolveFirst = resolve;
+    }));
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <Board />
+        </MemoryRouter>,
+      );
+    });
     expect(api.get).toHaveBeenCalledTimes(1);
     await act(async () => {
       jest.advanceTimersByTime(15000);
     });
+    expect(api.get).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveFirst({ data: PAYLOAD });
+    });
+    Object.defineProperty(document, "hidden", { configurable: true, value: true });
+    api.get.mockResolvedValue({ data: PAYLOAD });
+    await act(async () => {
+      jest.advanceTimersByTime(15000);
+    });
+    expect(api.get).toHaveBeenCalledTimes(1);
+    Object.defineProperty(document, "hidden", { configurable: true, value: false });
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
     expect(api.get).toHaveBeenCalledTimes(2);
     jest.useRealTimers();
+  });
+
+  test("no-camp and stale states are explicit", async () => {
+    api.get.mockResolvedValueOnce({ data: { ...PAYLOAD, state: "no_camp", camp: null, day: null } });
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <Board />
+        </MemoryRouter>,
+      );
+    });
+    expect(container.querySelector('[data-testid="board-no-camp"]').textContent).toContain("No active camp");
+
+    api.get.mockRejectedValueOnce({ response: { data: { detail: "down" } } });
+    await act(async () => {
+      root.unmount();
+      root = ReactDOM.createRoot(container);
+      root.render(
+        <MemoryRouter>
+          <Board />
+        </MemoryRouter>,
+      );
+    });
+    api.get.mockResolvedValueOnce({ data: PAYLOAD });
+    await act(async () => {
+      root.unmount();
+      root = ReactDOM.createRoot(container);
+      root.render(
+        <MemoryRouter>
+          <Board />
+        </MemoryRouter>,
+      );
+    });
+    api.get.mockRejectedValueOnce(new Error("network"));
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
   });
 });

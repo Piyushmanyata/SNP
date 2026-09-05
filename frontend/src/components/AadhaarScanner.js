@@ -1,5 +1,4 @@
 import React, { useState, useRef, useCallback } from "react";
-import { Badge } from "./ui";
 import { ScanLine } from "lucide-react";
 import {
   useAadhaarCamera,
@@ -42,7 +41,7 @@ export default function AadhaarScanner({ onScanned, onFailure, onScanStall, disa
   );
 
   const handleHintFallbacks = useCallback(() => {
-    setError("Can't read the QR. Try a photo or USB scanner.");
+    setError("Hold the card steady in bright, even light. Move slightly farther away if the QR looks blurred.");
   }, [setError]);
 
   const handleScanStall = useCallback(() => {
@@ -83,13 +82,10 @@ export default function AadhaarScanner({ onScanned, onFailure, onScanStall, disa
     <div className="rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/50 p-4 sm:p-5">
       <div className="flex items-center gap-2 mb-3">
         <ScanLine className="w-5 h-5 text-emerald-600" />
-        <p className="font-display font-bold text-slate-900">Aadhaar Secure QR scan</p>
-        <Badge tone="emerald" className="ml-auto">
-          Offline decode
-        </Badge>
+        <p className="font-display font-bold text-slate-900">Scan Aadhaar QR</p>
       </div>
       <p className="text-xs text-slate-500 mb-3">
-        Scan the QR on the Aadhaar card / e-Aadhaar. Camera, USB scanner, or photo upload — decoded on-device, no UIDAI call, only last-4 stored.
+        Scan the QR on the card or e-Aadhaar to fill details. Only the last four Aadhaar digits are saved.
       </p>
 
       <AadhaarFallbackPanel
@@ -97,8 +93,15 @@ export default function AadhaarScanner({ onScanned, onFailure, onScanStall, disa
         torchAvailable={torchAvailable}
         torchOn={torchOn}
         toggleTorch={toggleTorch}
-        onUpload={() => fileRef.current?.click()}
-        onManual={() => setMode("manual")}
+        onUpload={async () => {
+          await stopCamera();
+          setMode("idle");
+          fileRef.current?.click();
+        }}
+        onManual={async () => {
+          await stopCamera();
+          setMode("manual");
+        }}
       />
 
       <AadhaarModeButtons

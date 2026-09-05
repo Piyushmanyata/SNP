@@ -6,12 +6,12 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 import helpers
 import msg91
 
-REGISTRATION_CONFIRMATION = "SNP नेत्र शिविर पंजीकरण हुआ। क्रमांक {reg_no}, दिनांक {date}, स्थान {venue}।"
-CAMP_REMINDER = "कल SNP नेत्र शिविर। क्रमांक {reg_no}, दिनांक {date}, स्थान {venue}। समय पर पहुँचें।"
-OT_TOKEN = "SNP ऑपरेशन नियत। क्रमांक {reg_no}, दिनांक {date}, स्थान {venue}। टोकन साथ लाएँ।"
-OT_REMINDER = "कल SNP ऑपरेशन। क्रमांक {reg_no}, दिनांक {date}, स्थान {venue}। टोकन साथ लाएँ।"
-SPECS_TOKEN = "SNP चश्मा वितरण नियत। क्रमांक {reg_no}, दिनांक {date}, स्थान {venue}। टोकन साथ लाएँ।"
-SPECS_REMINDER = "कल SNP से चश्मा लें। क्रमांक {reg_no}, दिनांक {date}, स्थान {venue}। टोकन साथ लाएँ।"
+REGISTRATION_CONFIRMATION = "SNP नेत्र शिविर में आपका पंजीकरण हो गया है। क्रमांक: {reg_no} दिनांक: {date} शिविर स्थल: {venue}। कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।"
+CAMP_REMINDER = "कल ({date}) को SNP नेत्र शिविर में आपका नेत्र परीक्षण है। कृपया समय पर {venue} पहुँचें। यह टोकन शिविर स्थल पर दिखाएँ। क्रमांक: {reg_no}। कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।"
+OT_TOKEN = "SNP नेत्र शिविर में आपका ऑपरेशन बजाज हॉस्पिटल में {date} को निर्धारित हुआ है। पर्चा, टोकन ({reg_no}), आधार कार्ड, वोटर आईडी और मोबाइल नंबर साथ लाएँ। स्थल: {venue}।"
+OT_REMINDER = "कल ({date}) को आपका नेत्र ऑपरेशन बजाज हॉस्पिटल में निर्धारित है। पर्चा, टोकन ({reg_no}), आधार कार्ड, वोटर आईडी और मोबाइल नंबर साथ लाएँ। स्थल: {venue}।"
+SPECS_TOKEN = "SNP द्वारा आपका चश्मा {date}{window} पर {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर आएँ।"
+SPECS_REMINDER = "कल SNP से चश्मा लें। क्रमांक {reg_no}, दिनांक {date}{window}, स्थान {venue}। टोकन साथ लाएँ।"
 
 MESSAGE_COPY = {
     "registration": REGISTRATION_CONFIRMATION,
@@ -45,7 +45,14 @@ async def _claim(
         "event_date": event_date,
     })
     if existing:
-        return None
+        if existing.get("status") != "failed":
+            return None
+        return await db.reminder_ledger.find_one_and_update(
+            {"_id": existing["_id"], "status": "failed"},
+            {"$set": {"status": "pending", "created_at": helpers.now_utc(),
+                      "copy": copy, "number": number, "venue": venue}},
+            return_document=True,
+        )
     doc = {
         "patient_id": patient_id,
         "message_type": message_type,
@@ -62,12 +69,20 @@ async def _claim(
     return doc
 
 
+def _window_text(start_time: Optional[str], end_time: Optional[str]) -> str:
+    if start_time and end_time:
+        return f", समय {start_time}–{end_time}"
+    return ""
+
+
 async def send_patient_sms(
     db: AsyncIOMotorDatabase,
     patient: dict,
     message_type: str,
     event_date: str,
     venue: str,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
 ) -> bool:
     """Best-effort per-patient DLT send, recorded once per patient/type/event date.
 
@@ -81,12 +96,15 @@ async def send_patient_sms(
         reg_no = patient.get("reg_no")
         if not number or reg_no is None:
             return False
-        copy = MESSAGE_COPY[message_type].format(reg_no=reg_no, date=event_date, venue=venue)
+        fields = {"reg_no": reg_no, "date": event_date, "venue": venue}
+        if "{window}" in MESSAGE_COPY[message_type]:
+            fields["window"] = _window_text(start_time, end_time)
+        copy = MESSAGE_COPY[message_type].format(**fields)
         row = await _claim(db, patient["_id"], message_type, event_date, number, venue, copy)
         if not row:
             return False
         provider_id = await asyncio.to_thread(
-            msg91.send_dlt_sms, message_type, number, reg_no, event_date, venue
+            msg91.send_dlt_sms, message_type, number, reg_no, event_date + fields.get("window", ""), venue
         )
         await db.reminder_ledger.update_one(
             {"_id": row["_id"]},

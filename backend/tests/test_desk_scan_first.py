@@ -2,6 +2,7 @@
 import uuid
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
+from xml.etree.ElementTree import Element, tostring
 
 from conftest import API
 
@@ -64,6 +65,11 @@ def _self(anon, camp_day_id, **fields):
         "registration_request_id": fields.pop("registration_request_id", str(uuid.uuid4())),
     }
     body.update(fields)
+    if body.get("aadhaar_scanned"):
+        body["qr_payload"] = tostring(Element(
+            "PrintLetterBarcodeData", name=body["full_name"], gender=body["gender"],
+            dob=body["dob"], uid=body["aadhaar_last4"], street=body.get("address", ""),
+        ), encoding="unicode")
     return anon.post(f"{API}/self-register", json=body, timeout=30)
 
 

@@ -1,87 +1,161 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import api, { formatApiError } from "../lib/api";
 import Layout from "../components/Layout";
-import { Card, ErrorCard, Stat } from "../components/ui";
-import { OPERATOR_LINES } from "../lib/operatorLines";
+import { Card, Stat } from "../components/ui";
+
+const POLL_MS = 15000;
 
 export default function Board() {
   const [data, setData] = useState(null);
+  const [status, setStatus] = useState("loading");
   const [err, setErr] = useState("");
-
-  const load = useCallback(() => {
-    api
-      .get("/board")
-      .then((r) => {
-        setData(r.data);
-        setErr("");
-      })
-      .catch((e) => setErr(formatApiError(e)));
-  }, []);
+  const inFlight = useRef(false);
+  const seq = useRef(0);
+  const mounted = useRef(true);
 
   useEffect(() => {
+    mounted.current = true;
+    async function load() {
+      if (inFlight.current || document.hidden) return;
+      inFlight.current = true;
+      const mine = ++seq.current;
+      try {
+        const r = await api.get("/board");
+        if (!mounted.current || mine !== seq.current) return;
+        setData(r.data);
+        setErr("");
+        setStatus(r.data?.state === "current" ? "current" : (r.data?.state || "current"));
+      } catch (e) {
+        if (!mounted.current || mine !== seq.current) return;
+        setErr(formatApiError(e));
+        setStatus((s) => (s === "loading" ? "loading" : "stale"));
+      } finally {
+        inFlight.current = false;
+      }
+    }
     load();
-    const id = setInterval(load, 15000);
-    return () => clearInterval(id);
-  }, [load]);
+    const id = setInterval(load, POLL_MS);
+    const onVis = () => {
+      if (!document.hidden) load();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      mounted.current = false;
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
+
+  const stages = data?.stages || {};
+  const fulfilment = data?.fulfilment || {};
+  const stale = status === "stale";
 
   return (
-    <Layout title="Camp-day board">
-      {err && <ErrorCard message={err} />}
-      {data && (
-        <div className="space-y-5">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Stat label="Arrived today" value={data.arrived_today} />
-            <Stat label="Seen today" value={data.seen_today} />
-            <Stat
-              label="Transcription backlog"
-              value={data.transcription_backlog}
-              tone={data.transcription_backlog > 0 ? "amber" : "slate"}
-              testid="board-backlog"
-            />
-            <Stat label="SMS failures today" value={data.sms_failed_today} />
-          </div>
-          <Card>
-            <h3 className="font-display font-bold text-slate-900 mb-3">Registration desks</h3>
-            <table className="w-full text-sm" data-testid="board-desks">
-              <thead>
-                <tr className="text-left text-slate-500">
-                  <th className="py-2">Desk</th>
-                  <th>Last 15 min</th>
-                  <th>Last 60 min</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(data.desks || []).map((d) => (
-                  <tr
-                    key={d.account_id}
-                    data-quiet={d.quiet ? "true" : "false"}
-                    className={d.quiet ? "bg-amber-50" : ""}
-                  >
-                    <td className="py-2 font-medium">{d.name}</td>
-                    <td>{d.last_15m}</td>
-                    <td>{d.last_60m}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {OPERATOR_LINES.filter((l) => l.key !== "rx").map((l) => (
-              <Stat key={l.key} label={l.label} value={data.lines?.[l.key] ?? 0} />
-            ))}
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Stat
-              label="Next OT day seats left"
-              value={data.next_ot_day ? data.next_ot_day.seats_left : "No day scheduled"}
-            />
-            <Stat
-              label="Next Specs day seats left"
-              value={data.next_specs_day ? data.next_specs_day.seats_left : "No day scheduled"}
-            />
-          </div>
-        </div>
-      )}
+    <Layout title="Analytics">
+      <div className="space-y-5" data-testid="board-page">
+        {status === "loading" && !data && (
+          <p data-testid="board-loading">Loading analytics…</p>
+        )}
+        {data?.state === "no_camp" && (
+          <p data-testid="board-no-camp">No active camp.</p>
+        )}
+        {data?.state === "no_day" && (
+          <p data-testid="board-no-day">No camp day for today.</p>
+        )}
+        {stale && (
+          <p data-testid="board-stale">
+            Showing last snapshot from {data?.as_of}. Refresh failed{err ? `: ${err}` : "."}
+          </p>
+        )}
+        {data && (
+          <>
+            <p className="text-sm text-slate-600" data-testid="board-context">
+              {data.camp?.name || "No camp"}
+              {data.day?.day_date ? ` · ${data.day.day_date}` : ""}
+              {data.as_of ? ` · as of ${data.as_of}` : ""}
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3" data-testid="board-kpis">
+              <Stat label="Arrived" value={stages.arrived ?? 0} testid="board-arrived" />
+              <Stat label="Awaiting Print" value={stages.awaiting_print ?? 0} testid="board-awaiting-print" />
+              <Stat label="Awaiting Seen" value={stages.awaiting_seen ?? 0} testid="board-awaiting-seen" />
+              <Stat label="Seen" value={stages.seen ?? 0} testid="board-seen" />
+              <Stat
+                label="Transcription backlog"
+                value={stages.transcription_backlog ?? 0}
+                tone={(stages.transcription_backlog ?? 0) > 0 ? "amber" : "slate"}
+                testid="board-backlog"
+              />
+              <Stat label="Quiet volunteers" value={data.quiet_count ?? 0} testid="board-quiet-count" />
+              <Stat label="SMS failures" value={data.sms_failures ?? 0} testid="board-sms-failures" />
+              <Stat
+                label="Medicine given"
+                value={fulfilment.medicine?.fulfilled ?? 0}
+                testid="board-medicine-given"
+              />
+              <Stat
+                label="Medicine out of stock"
+                value={fulfilment.medicine?.not_available ?? 0}
+                testid="board-medicine-oos"
+              />
+              <Stat
+                label="OT scheduled"
+                value={fulfilment.ot?.deferred ?? 0}
+                testid="board-ot-scheduled"
+              />
+              <Stat
+                label="Next OT"
+                value={
+                  data.next_ot
+                    ? `${data.next_ot.day_date} · ${data.next_ot.venue} · ${data.next_ot.seats_left} seats`
+                    : "No day scheduled"
+                }
+                testid="board-next-ot"
+              />
+              <Stat
+                label="Next Specs"
+                value={
+                  data.next_specs
+                    ? `${data.next_specs.day_date} · ${data.next_specs.venue} · ${data.next_specs.start_time}–${data.next_specs.end_time}`
+                    : "No day scheduled"
+                }
+                testid="board-next-specs"
+              />
+            </div>
+            <Card>
+              <h3 className="font-display font-bold text-slate-900 mb-3">Registration activity</h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[480px]" data-testid="board-activity">
+                  <caption className="sr-only">Registration activity by Volunteer</caption>
+                  <thead>
+                    <tr className="text-left text-slate-500">
+                      <th scope="col" className="py-2 min-h-[44px]">Volunteer</th>
+                      <th scope="col">Last arrival</th>
+                      <th scope="col">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(data.activity || []).map((row) => (
+                      <tr
+                        key={row.id}
+                        data-quiet={row.quiet ? "true" : "false"}
+                        className={row.quiet ? "bg-amber-50" : ""}
+                      >
+                        <td className="py-2 font-medium min-h-[44px]">{row.name}</td>
+                        <td>{row.last_arrival_at || "—"}</td>
+                        <td>
+                          <span data-testid={`quiet-text-${row.id}`}>
+                            {row.quiet ? "Quiet" : "Active"}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </>
+        )}
+      </div>
     </Layout>
   );
 }

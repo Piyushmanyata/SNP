@@ -66,8 +66,7 @@ describe("Token print page", () => {
 
     const surface = container.querySelector('[data-testid="a6-token"]');
     expect(surface).not.toBeNull();
-    expect(surface.style.width).toBe("105mm");
-    expect(surface.style.height).toBe("148mm");
+    expect(surface.style.maxWidth).toBe("95mm");
     expect(container.querySelector("style").textContent).toContain("105mm");
     expect(container.querySelector("style").textContent).toContain("148mm");
     expect(container.textContent).toContain("SNP Camp Nadia");
@@ -75,11 +74,11 @@ describe("Token print page", () => {
     expect(container.textContent).toContain("Surgery");
     expect(container.textContent).toContain("Aparna Sen");
     expect(container.textContent).toContain("#1001");
-    expect(container.textContent).toContain("v2");
+    expect(container.textContent).not.toContain("Version");
     expect(container.textContent).toContain("2026-12-01");
     expect(container.textContent).toContain("Base Hospital");
-    expect(container.textContent).toContain("यह टोकन साथ लाएँ");
-    expect(container.textContent).toContain("Bring this Token");
+    expect(container.textContent).toContain("आधार कार्ड, वोटर आईडी और मोबाइल नंबर");
+    expect(container.textContent).toContain("9835317006");
     expect(container.textContent).toContain("नाम / Name");
     expect(surface.querySelector("svg")).toBeNull();
     expect(container.querySelector('[data-testid="thermal-slip"]')).toBeNull();

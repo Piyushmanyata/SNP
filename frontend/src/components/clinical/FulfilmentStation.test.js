@@ -100,6 +100,10 @@ describe("Fulfilment lines", () => {
       data: { transcription: { id: "tx-1" }, registration: { id: "reg-1" }, fulfilments: [] },
     });
     expect(container.querySelector('[data-testid="station-medicine-needs-power"]')).toBeNull();
+    expect(container.querySelector('[data-testid="station-medicine-fulfilled"]').disabled).toBe(true);
+    act(() => {
+      container.querySelector('[data-testid="station-medicine-paper-review"]').click();
+    });
     expect(container.querySelector('[data-testid="station-medicine-fulfilled"]').disabled).toBe(false);
   });
 
@@ -110,35 +114,48 @@ describe("Fulfilment lines", () => {
     });
 
     await act(async () => {
+      container.querySelector('[data-testid="station-specs_fixed-paper-review"]').click();
       container.querySelector('[data-testid="station-specs_fixed-save"]').click();
     });
 
-    expect(api.post).toHaveBeenCalledWith("/clinical/fulfilment", {
-      transcription_id: "tx-9",
-      item_type: "specs_fixed",
-      status: "fulfilled",
-      ot_schedule_day_id: null,
-      specs_collection_day_id: null,
-    });
+    expect(api.post).toHaveBeenCalledWith(
+      "/clinical/fulfilment",
+      expect.objectContaining({
+        transcription_id: "tx-9",
+        item_type: "specs_fixed",
+        status: "fulfilled",
+        paper_reviewed: true,
+      }),
+    );
   });
 
-  test("the day picker pre-selects the earliest free day and disables full ones", async () => {
+  test("the specs picker shows date venue and window and omits incomplete days", async () => {
     await renderStation({
       line: "specs_made",
       data: { transcription: { id: "tx-1", specs_measurements: RX }, registration: { id: "r" }, fulfilments: [] },
       specsDays: [
-        { id: "sp-1", day_date: "2026-09-05", venue: "Optical", seats_free: 0 },
-        { id: "sp-2", day_date: "2026-09-06", venue: "Optical", seats_free: 4 },
-        { id: "sp-3", day_date: "2026-09-07", venue: "Optical", seats_free: 9 },
+        { id: "sp-legacy", day_date: "2026-09-05", venue: "Old Optical", window_required: true },
+        { id: "sp-2", day_date: "2026-09-06", venue: "Optical", start_time: "09:00", end_time: "12:00" },
+        { id: "sp-3", day_date: "2026-09-07", venue: "Hall B", start_time: "14:00", end_time: "16:00" },
       ],
     });
 
     const picker = container.querySelector('[data-testid="specs_collection_day_id-select"]');
     expect(picker.value).toBe("sp-2");
-    const options = [...picker.querySelectorAll("option")];
-    expect(options.find((o) => o.value === "sp-1").disabled).toBe(true);
-    expect(options.find((o) => o.value === "sp-1").textContent).toContain("full");
-    expect(options.find((o) => o.value === "sp-3").disabled).toBe(false);
+    expect(picker.textContent).toContain("09:00–12:00");
+    expect(picker.textContent).toContain("Optical");
+    expect(picker.textContent).not.toContain("Old Optical");
+    expect(picker.textContent).not.toContain("full");
+  });
+
+  test("empty specs schedule says no day is scheduled", async () => {
+    await renderStation({
+      line: "specs_made",
+      data: { transcription: { id: "tx-1", specs_measurements: RX }, registration: { id: "r" }, fulfilments: [] },
+      specsDays: [],
+    });
+    expect(container.querySelector('[data-testid="specs_collection_day_id-none-free"]').textContent)
+      .toContain("No day is scheduled");
   });
 
   test("every clinical day full names the admin action and blocks saving", async () => {
@@ -148,13 +165,30 @@ describe("Fulfilment lines", () => {
       otDays: [{ id: "ot-1", day_date: "2026-10-02", venue: "OT Theatre", seats_free: 0 }],
     });
 
-    await act(async () => {
-      container.querySelector('[data-testid="station-ot-deferred"]').click();
-    });
-
     expect(container.querySelector('[data-testid="ot_schedule_day_id-none-free"]').textContent)
       .toContain("Call the admin");
     expect(container.querySelector('[data-testid="station-ot-save"]').disabled).toBe(true);
+  });
+
+  test("surgery can only be scheduled at the hospital and prints its token", async () => {
+    const navigate = jest.fn();
+    api.post.mockResolvedValueOnce({ data: { slip: { id: "hospital-token" } } });
+    await renderStation({
+      line: "ot",
+      data: { transcription: { id: "tx-1" }, registration: { id: "r" }, fulfilments: [] },
+      otDays: [{ id: "ot-1", day_date: "2026-10-02", venue: "Bajaj Hospital", seats_free: 5 }],
+      navigate,
+    });
+    expect(container.textContent).not.toContain("Done at camp");
+    expect(container.textContent).toContain("hospital");
+    await act(async () => {
+      container.querySelector('[data-testid="station-ot-paper-review"]').click();
+      container.querySelector('[data-testid="station-ot-save"]').click();
+    });
+    expect(api.post).toHaveBeenCalledWith("/clinical/fulfilment", expect.objectContaining({
+      item_type: "ot", status: "deferred", ot_schedule_day_id: "ot-1",
+    }));
+    expect(navigate).toHaveBeenCalledWith("/print/slip/hospital-token");
   });
 
   test("a deferred specs_made record shows a reprint control", async () => {
@@ -166,11 +200,40 @@ describe("Fulfilment lines", () => {
         fulfilments: [{ item_type: "specs_made", status: "deferred", specs_collection_day_id: "sp-2" }],
         slips: [{ id: "slip-1", item_type: "specs_made", active: true }],
       },
-      specsDays: [{ id: "sp-2", day_date: "2026-09-06", venue: "Optical", seats_free: 4 }],
+      specsDays: [{ id: "sp-2", day_date: "2026-09-06", venue: "Optical", start_time: "09:00", end_time: "12:00" }],
     });
 
     expect(container.querySelector('[data-testid="station-specs_made-print-token"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="station-specs_made-save"]')).toBeNull();
+  });
+
+  test("a failed issue retry reuses the same operation id", async () => {
+    const uuid = jest.spyOn(crypto, "randomUUID").mockReturnValue("op-retry-1");
+    api.post.mockRejectedValueOnce(new Error("network"));
+    api.post.mockResolvedValueOnce({ data: { fulfilment: { id: "f-1" }, slip: null } });
+    await renderStation({
+      line: "medicine",
+      data: {
+        transcription: { id: "tx-1" },
+        registration: { id: "r" },
+        committed_revision: { id: "rev-1" },
+        clinical_generation: 1,
+        fulfilments: [],
+      },
+      setError: jest.fn(),
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="station-medicine-paper-review"]').click();
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="station-medicine-fulfilled"]').click();
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="station-medicine-fulfilled"]').click();
+    });
+    const ids = api.post.mock.calls.map((call) => call[1].operation_id);
+    expect(ids).toEqual(["op-retry-1", "op-retry-1"]);
+    uuid.mockRestore();
   });
 
   test("a station re-syncs when the patient changes", async () => {

@@ -3,6 +3,7 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from xml.etree.ElementTree import Element, tostring
 
 backend_dir = Path(__file__).resolve().parents[1]
 if str(backend_dir) not in sys.path:
@@ -27,7 +28,7 @@ CARD_ADDR = "12 Station Road Sikar"
 
 
 def payload(name=CARD_NAME, gender=CARD_GENDER, dob=CARD_DOB, uid=CARD_UID, address=CARD_ADDR):
-    return f"AADHAAR|{name}|{gender}|{dob}|{uid}|{address}"
+    return tostring(Element("PrintLetterBarcodeData", name=name, gender=gender, dob=dob, uid=uid, street=address), encoding="unicode")
 
 
 def card_dict(**over):

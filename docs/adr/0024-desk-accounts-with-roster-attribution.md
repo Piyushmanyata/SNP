@@ -1,5 +1,7 @@
 # ADR 0024: Desk accounts for auth, roster names for attribution
 
+> **Status: Superseded by ADR 0025**
+
 Amends ADR 0002 in scope: admin still creates every account, but volunteers no longer have one.
 
 ## Context
