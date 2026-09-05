@@ -34,11 +34,17 @@ def _fulfil(trans_id, rev_id, **kw):
     kw.setdefault("reviewed_revision_id", str(rev_id))
     kw.setdefault("reviewed_generation", 1)
     kw.setdefault("operation_id", str(ObjectId()))
+    if kw.get("item_type") == "medicine" and "medicine_outcomes" not in kw:
+        kw["medicine_outcomes"] = [
+            {"medicine_id": MEDICINE["medicine_id"], "given": kw.get("status") != "not_available"},
+        ]
     return FulfilmentBody(transcription_id=str(trans_id), **kw)
 from routes_clinical import complete_prescription, record_fulfilment
 from routes_desk import arrive, mark_seen, print_prescription, scan, scan_confirm
 from routes_registration import desk_register, name_search
-from test_adversarial_challenger import MockDB, setup_mock_db
+from test_adversarial_challenger import (
+    FIXED_POWER, MEDICINE, MEDICINE_ALT, MockDB, setup_mock_db,
+)
 
 TODAY = "2026-09-01"
 OTHER_DAY = "2026-09-03"
@@ -457,7 +463,7 @@ class TestRegistrationConfirmationSms:
 # Fulfilment lines
 # --------------------------------------------------------------------------
 
-async def _seen_patient_with_transcription(mock_db, measurements=None):
+async def _seen_patient_with_transcription(mock_db, measurements=None, fixed_power=None):
     patient_id = ObjectId()
     trans_id = ObjectId()
     rev_id = ObjectId()
@@ -474,11 +480,14 @@ async def _seen_patient_with_transcription(mock_db, measurements=None):
         "_id": rev_id, "patient_id": patient_id, "camp_id": camp_id,
         "prescribed_lines": ["medicine", "specs_fixed", "specs_made", "ot"],
         "none_prescribed": False, "specs_measurements": measurements,
-        "medication_instructions": "drops", "ot_eye": "R", "ot_procedure": "Cataract Surgery",
+        "prescribed_medicines": [MEDICINE], "ot_eye": "R", "ot_procedure": "Cataract Surgery",
+        "fixed_power_r": fixed_power, "fixed_power_l": fixed_power,
     })
     await mock_db.transcriptions.insert_one({
         "_id": trans_id, "patient_id": patient_id, "camp_id": camp_id,
         "locked": True, "specs_measurements": measurements,
+        "prescribed_medicines": [MEDICINE],
+        "fixed_power_r": fixed_power, "fixed_power_l": fixed_power,
     })
     mock_db.last_rev_id = rev_id
     return camp_id, patient_id, trans_id
@@ -493,19 +502,85 @@ class TestFulfilmentLines:
             with pytest.raises(HTTPException) as exc:
                 await record_fulfilment(body, actor=CLINICAL)
             assert exc.value.status_code == 400
-            assert exc.value.detail["code"] == "SPECS_MEASUREMENTS_REQUIRED"
+            assert exc.value.detail["code"] == "FIXED_POWER_REQUIRED"
         asyncio.run(run())
 
     def test_fixed_power_specs_records_without_token_or_sms(self, monkeypatch):
         async def run():
             mock_db = _mock(monkeypatch)
             sent = _recorder(monkeypatch)
-            _camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db, RX)
+            _camp_id, _pid, trans_id = await _seen_patient_with_transcription(
+                mock_db, RX, fixed_power=FIXED_POWER,
+            )
             body = _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_fixed", status="fulfilled")
             out = await record_fulfilment(body, actor=CLINICAL)
             assert out["fulfilment"]["status"] == "fulfilled"
+            assert out["fulfilment"]["issued_power_r"] == FIXED_POWER
             assert out["slip"] is None
             assert sent == []
+        asyncio.run(run())
+
+    def test_a_power_that_ran_out_is_substituted_and_both_powers_are_kept(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            _camp_id, _pid, trans_id = await _seen_patient_with_transcription(
+                mock_db, RX, fixed_power=FIXED_POWER,
+            )
+            out = await record_fulfilment(_fulfil(
+                trans_id, mock_db.last_rev_id, item_type="specs_fixed", status="fulfilled",
+                issued_power_r=2.25, issued_power_l=2.25,
+            ), actor=CLINICAL)
+            assert out["fulfilment"]["issued_power_r"] == 2.25
+            rev = await mock_db.prescription_revisions.find_one({"_id": mock_db.last_rev_id})
+            assert rev["fixed_power_r"] == FIXED_POWER
+        asyncio.run(run())
+
+    def test_a_substituted_power_the_camp_does_not_stock_is_refused(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            _camp_id, _pid, trans_id = await _seen_patient_with_transcription(
+                mock_db, RX, fixed_power=FIXED_POWER,
+            )
+            with pytest.raises(HTTPException) as exc:
+                await record_fulfilment(_fulfil(
+                    trans_id, mock_db.last_rev_id, item_type="specs_fixed", status="fulfilled",
+                    issued_power_r=9.75, issued_power_l=9.75,
+                ), actor=CLINICAL)
+            assert exc.value.detail["code"] == "unknown_power"
+        asyncio.run(run())
+
+    def test_medicine_outcomes_derive_the_line_status(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            second = MEDICINE_ALT
+            _camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db, RX)
+            await mock_db.prescription_revisions.update_one(
+                {"_id": mock_db.last_rev_id},
+                {"$set": {"prescribed_medicines": [MEDICINE, second]}},
+            )
+            out = await record_fulfilment(_fulfil(
+                trans_id, mock_db.last_rev_id, item_type="medicine", status="fulfilled",
+                medicine_outcomes=[
+                    {"medicine_id": MEDICINE["medicine_id"], "given": True},
+                    {"medicine_id": second["medicine_id"], "given": False},
+                ],
+            ), actor=CLINICAL)
+            assert out["fulfilment"]["status"] == "partially_fulfilled"
+            assert [o["name"] for o in out["fulfilment"]["medicine_outcomes"]] == [
+                MEDICINE["name"], MEDICINE_ALT["name"],
+            ]
+        asyncio.run(run())
+
+    def test_an_outcome_set_that_misses_a_prescribed_medicine_is_refused(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            _camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db, RX)
+            with pytest.raises(HTTPException) as exc:
+                await record_fulfilment(_fulfil(
+                    trans_id, mock_db.last_rev_id, item_type="medicine", status="fulfilled",
+                    medicine_outcomes=[],
+                ), actor=CLINICAL)
+            assert exc.value.detail["code"] == "MEDICINE_OUTCOMES_MISMATCH"
         asyncio.run(run())
 
     def test_a_patient_who_needs_no_glasses_needs_no_power(self, monkeypatch):

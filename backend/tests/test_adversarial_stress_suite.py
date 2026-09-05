@@ -62,6 +62,8 @@ import db as db_module
 # =====================================================================
 
 RX = {"r_sph": "-1.00", "l_sph": "-1.25", "add": "+2.00"}
+MEDICINE = {"medicine_id": str(ObjectId()), "name": "Moxifloxacin"}
+FIXED_POWER = 2.0
 
 class MockCursor:
     def __init__(self, docs):
@@ -238,6 +240,11 @@ def setup_stress_db(monkeypatch):
     monkeypatch.setattr(routes_desk, "get_db", lambda: mock_db)
     monkeypatch.setattr(routes_registration, "next_seq", mock_db.next_seq)
     monkeypatch.setattr(db_module, "next_seq", mock_db.next_seq)
+    mock_db.medicines.docs.append({
+        "_id": ObjectId(MEDICINE["medicine_id"]), "name": MEDICINE["name"],
+        "name_key": MEDICINE["name"].casefold(), "active": True,
+    })
+    mock_db.fixed_powers.docs.append({"_id": ObjectId(), "value": FIXED_POWER, "active": True})
     return mock_db
 
 
@@ -650,7 +657,7 @@ class TestFulfilmentStateMachineAndDeskStress:
             })
             await mock_db.prescription_revisions.insert_one({
                 "_id": rev_id, "patient_id": p_id, "prescribed_lines": ["medicine"],
-                "none_prescribed": False, "medication_instructions": "drops",
+                "none_prescribed": False, "prescribed_medicines": [MEDICINE],
             })
             await mock_db.transcriptions.insert_one({
                 "_id": t_id, "patient_id": p_id, "locked": False, "specs_measurements": RX,
@@ -660,6 +667,7 @@ class TestFulfilmentStateMachineAndDeskStress:
                 transcription_id=str(t_id), item_type="medicine", status="fulfilled",
                 paper_reviewed=True, reviewed_revision_id=str(rev_id),
                 reviewed_generation=1, operation_id=str(ObjectId()),
+                medicine_outcomes=[{"medicine_id": MEDICINE["medicine_id"], "given": True}],
             )
             await record_fulfilment(body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
 

@@ -15,8 +15,10 @@ CONTENT_FIELDS = (
     "blood_sugar",
     "bp",
     "remarks",
-    "medication_instructions",
+    "prescribed_medicines",
     "specs_measurements",
+    "fixed_power_r",
+    "fixed_power_l",
     "ot_eye",
     "ot_procedure",
     "ot_notes",
@@ -40,6 +42,8 @@ def extract_content(body: Any) -> dict:
         out[field] = getattr(body, field, None)
     if out["diagnosis_options"] is None:
         out["diagnosis_options"] = []
+    if out["prescribed_medicines"] is None:
+        out["prescribed_medicines"] = []
     return out
 
 
@@ -96,9 +100,13 @@ def validate_completion(body: Any) -> Tuple[dict, List[str], bool]:
             "fields": {"content": "The prescription is blank."},
         })
     errors: Dict[str, str] = {}
-    if "medicine" in lines and _blank(content.get("medication_instructions")):
-        errors["medication_instructions"] = "Copy the medicine instructions from the paper."
-    if "specs_fixed" in lines or "specs_made" in lines:
+    if "medicine" in lines and _blank(content.get("prescribed_medicines")):
+        errors["prescribed_medicines"] = "Select every medicine written on the paper."
+    if "specs_fixed" in lines and (
+        content.get("fixed_power_r") is None or content.get("fixed_power_l") is None
+    ):
+        errors["fixed_power"] = "Select the fixed power for both eyes."
+    if "specs_made" in lines:
         m = content.get("specs_measurements") or {}
         if not (str(m.get("r_sph") or "").strip() and str(m.get("l_sph") or "").strip()):
             errors["specs_measurements"] = "Record the prescribed power for both eyes."

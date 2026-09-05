@@ -97,6 +97,24 @@ class ScanConfirmBody(BaseModel):
     payload: str
 
 
+# ---- catalogue ----
+class MedicineBody(BaseModel):
+    name: str
+
+
+class FixedPowerBody(BaseModel):
+    value: float
+
+
+class CatalogueActiveBody(BaseModel):
+    active: bool
+
+
+class MedicineOutcome(BaseModel):
+    medicine_id: str
+    given: bool
+
+
 # ---- clinical ----
 class TranscriptionBody(BaseModel):
     patient_id: str
@@ -105,8 +123,11 @@ class TranscriptionBody(BaseModel):
     blood_sugar: Optional[str] = None
     bp: Optional[str] = None
     remarks: Optional[str] = None
-    medication_instructions: Optional[str] = None
+    prescribed_medicine_ids: List[str] = []
+    prescribed_medicines: List[Dict[str, Any]] = []
     specs_measurements: Optional[Dict[str, Any]] = None
+    fixed_power_r: Optional[float] = None
+    fixed_power_l: Optional[float] = None
     ot_eye: Optional[str] = None
     ot_procedure: Optional[str] = None
     ot_notes: Optional[str] = None
@@ -137,6 +158,9 @@ class FulfilmentBody(BaseModel):
     collection_venue: Optional[str] = None
     ot_schedule_day_id: Optional[str] = None
     specs_collection_day_id: Optional[str] = None
+    medicine_outcomes: List[MedicineOutcome] = []
+    issued_power_r: Optional[float] = None
+    issued_power_l: Optional[float] = None
     paper_reviewed: bool = False
     reviewed_revision_id: Optional[str] = None
     reviewed_generation: Optional[int] = None
@@ -158,8 +182,11 @@ class CorrectionBody(BaseModel):
     blood_sugar: Optional[str] = None
     bp: Optional[str] = None
     remarks: Optional[str] = None
-    medication_instructions: Optional[str] = None
+    prescribed_medicine_ids: List[str] = []
+    prescribed_medicines: List[Dict[str, Any]] = []
     specs_measurements: Optional[Dict[str, Any]] = None
+    fixed_power_r: Optional[float] = None
+    fixed_power_l: Optional[float] = None
     ot_eye: Optional[str] = None
     ot_procedure: Optional[str] = None
     ot_notes: Optional[str] = None

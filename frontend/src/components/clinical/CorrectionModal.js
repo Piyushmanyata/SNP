@@ -1,19 +1,46 @@
 import React, { useEffect, useRef, useState } from "react";
 import api, { formatApiError } from "../../lib/api";
-import { Modal, Field, Input, Alert } from "../ui";
-import { PrescriptionForm } from "./PrescriptionForm";
+import { Modal, Field, Input, Alert, Button } from "../ui";
+import { SpecsMeasurementsGrid } from "./SpecsMeasurementsGrid";
+import { MedicinePicker } from "./MedicinePicker";
+import { FixedPowerPicker } from "./FixedPowerPicker";
+import { DiagnosisFields, OtFields, VitalsFields } from "./PrescriptionFields";
 
-const PRESCRIPTION_FIELDS = ["diagnosis_options", "diagnosis_other", "blood_sugar", "bp", "remarks", "medication_instructions", "specs_measurements", "ot_eye", "ot_procedure", "ot_notes"];
+const PRESCRIPTION_FIELDS = [
+  "diagnosis_options", "diagnosis_other", "blood_sugar", "bp", "remarks",
+  "prescribed_medicines", "specs_measurements", "fixed_power_r", "fixed_power_l",
+  "ot_eye", "ot_procedure", "ot_notes",
+];
 const EMPTY_MEASUREMENTS = {
   r_sph: "", r_cyl: "", r_axis: "", l_sph: "", l_cyl: "", l_axis: "", add: "",
 };
 
-export function CorrectionForm({ transcription, line = "medicine", diagOpts = [], onDone, expectedGeneration = 0, patientId, prescribedLines = [] }) {
-  const [initial] = useState(() => ({
-    ...Object.fromEntries(PRESCRIPTION_FIELDS.map((field) => [field, transcription?.[field] ?? ""])),
-    diagnosis_options: transcription?.diagnosis_options || [],
-    specs_measurements: { ...EMPTY_MEASUREMENTS, ...transcription?.specs_measurements },
-  }));
+function initialValue(transcription, field) {
+  if (field === "diagnosis_options") return transcription?.diagnosis_options || [];
+  if (field === "prescribed_medicines") return transcription?.prescribed_medicines || [];
+  if (field === "specs_measurements") {
+    return { ...EMPTY_MEASUREMENTS, ...transcription?.specs_measurements };
+  }
+  if (field === "fixed_power_r" || field === "fixed_power_l") {
+    return transcription?.[field] ?? null;
+  }
+  return transcription?.[field] ?? "";
+}
+
+export function CorrectionForm({
+  transcription,
+  line = "medicine",
+  diagOpts = [],
+  medicines = [],
+  powers = [],
+  onDone,
+  expectedGeneration = 0,
+  patientId,
+  prescribedLines = [],
+}) {
+  const [initial] = useState(() =>
+    Object.fromEntries(PRESCRIPTION_FIELDS.map((f) => [f, initialValue(transcription, f)])),
+  );
   const [rx, setRx] = useState(initial);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -54,38 +81,95 @@ export function CorrectionForm({ transcription, line = "medicine", diagOpts = []
     }
   };
 
+  const options = [...new Set([...diagOpts, ...initial.diagnosis_options])];
+  const toggleDiag = (option) => setRx((current) => ({
+    ...current,
+    diagnosis_options: current.diagnosis_options.includes(option)
+      ? current.diagnosis_options.filter((value) => value !== option)
+      : [...current.diagnosis_options, option],
+  }));
+
   return (
-    <fieldset className="space-y-3" disabled={busy}>
-      <p className="text-sm text-slate-700">Complete or correct the doctor's prescription. Only changed fields are saved, with your reason in the audit history.</p>
+    <fieldset className="space-y-3" disabled={busy} data-testid="correction-form">
+      <p className="text-sm text-slate-700">
+        Complete or correct the doctor&apos;s prescription. Only changed fields are saved, with your
+        reason in the audit history.
+      </p>
       <Field label="Reason (audited)" required>
-        <Input value={reason} onChange={(e) => setReason(e.target.value)} disabled={busy} data-testid="correction-reason-input" />
+        <Input
+          value={reason}
+          ref={firstFieldRef}
+          onChange={(e) => setReason(e.target.value)}
+          disabled={busy}
+          data-testid="correction-reason-input"
+        />
       </Field>
       {error && <Alert>{error}</Alert>}
-      <PrescriptionForm
-        rx={rx}
-        setRx={setRx}
-        line={line}
-        diagOpts={[...new Set([...diagOpts, ...initial.diagnosis_options])]}
-        toggleDiag={(option) => setRx((current) => ({
-          ...current,
-          diagnosis_options: current.diagnosis_options.includes(option)
-            ? current.diagnosis_options.filter((value) => value !== option)
-            : [...current.diagnosis_options, option],
-        }))}
-        locked={false}
-        busy={busy || !canSubmit}
-        saveRx={submit}
-        hasExistingTranscription
-        firstFieldRef={firstFieldRef}
+
+      <DiagnosisFields rx={rx} setRx={setRx} diagOpts={options} toggleDiag={toggleDiag} />
+
+      <Field label="Medicines">
+        <MedicinePicker
+          medicines={medicines}
+          selectedIds={(rx.prescribed_medicines || []).map((m) => m.medicine_id)}
+          onChange={(ids) => setRx({
+            ...rx,
+            prescribed_medicines: ids.map((id) => ({
+              medicine_id: id,
+              name: medicines.find((m) => m.id === id)?.name || "",
+            })),
+          })}
+        />
+      </Field>
+
+      <Field label="Fixed power">
+        <FixedPowerPicker
+          powers={powers}
+          valueR={rx.fixed_power_r}
+          valueL={rx.fixed_power_l}
+          onChange={(r, l) => setRx({ ...rx, fixed_power_r: r, fixed_power_l: l })}
+        />
+      </Field>
+
+      <SpecsMeasurementsGrid
+        specsMeasurements={rx.specs_measurements}
+        onChange={(specs) => setRx({ ...rx, specs_measurements: specs })}
       />
+
+      <OtFields rx={rx} setRx={setRx} />
+      <VitalsFields rx={rx} setRx={setRx} />
+
+      <Button
+        type="button"
+        className="w-full"
+        disabled={busy || !canSubmit}
+        onClick={submit}
+        data-testid="save-transcription-button"
+      >
+        Save correction
+      </Button>
     </fieldset>
   );
 }
 
-export function CorrectionModal({ open, onClose, transcription, line, diagOpts, onDone, expectedGeneration, patientId, prescribedLines }) {
+export function CorrectionModal({
+  open, onClose, transcription, line, diagOpts, medicines, powers,
+  onDone, expectedGeneration, patientId, prescribedLines,
+}) {
   return (
     <Modal open={open} onClose={onClose} title="Complete or correct prescription" size="lg">
-      <CorrectionForm key={transcription?.id} transcription={transcription} line={line} diagOpts={diagOpts} onDone={onDone} expectedGeneration={expectedGeneration} patientId={patientId} prescribedLines={prescribedLines} />
+      <CorrectionForm
+        key={transcription?.id}
+        transcription={transcription}
+        line={line}
+        diagOpts={diagOpts}
+        medicines={medicines}
+        powers={powers}
+        onDone={onDone}
+        expectedGeneration={expectedGeneration}
+        patientId={patientId}
+        prescribedLines={prescribedLines}
+      />
     </Modal>
   );
 }

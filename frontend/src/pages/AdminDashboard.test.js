@@ -102,6 +102,21 @@ beforeEach(() => {
         },
       });
     }
+    if (url === "/catalogue/medicines?include_inactive=true") {
+      return Promise.resolve({
+        data: {
+          medicines: [
+            { id: "med-1", name: "Moxifloxacin", active: true },
+            { id: "med-2", name: "Atropine", active: false },
+          ],
+        },
+      });
+    }
+    if (url === "/catalogue/powers?include_inactive=true") {
+      return Promise.resolve({
+        data: { powers: [{ id: "p-1", value: 2, label: "+2.00", active: true }] },
+      });
+    }
     if (url === "/clinical/specs-days") {
       return Promise.resolve({
         data: {
@@ -325,5 +340,68 @@ describe("AdminDashboard component", () => {
         end_time: "11:30",
       })
     );
+  });
+
+  describe("Camp supplies", () => {
+    async function openSupplies() {
+      await act(async () => {
+        root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>);
+      });
+      await act(async () => {
+        container.querySelector('[data-testid="admin-tab-supplies"]').click();
+      });
+    }
+
+    function type(testid, value) {
+      act(() => {
+        const node = container.querySelector(`[data-testid="${testid}"]`);
+        Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")
+          .set.call(node, value);
+        node.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+    }
+
+    test("lists both catalogues including retired entries, and labels powers with a sign", async () => {
+      await openSupplies();
+      expect(container.textContent).toContain("Moxifloxacin");
+      expect(container.textContent).toContain("Atropine");
+      expect(container.querySelector('[data-testid="power-p-1"]').textContent).toContain("+2.00");
+      expect(container.querySelector('[data-testid="medicine-med-1-toggle"]').textContent)
+        .toContain("Retire");
+      expect(container.querySelector('[data-testid="medicine-med-2-toggle"]').textContent)
+        .toContain("Restore");
+    });
+
+    test("adding a medicine posts the name and clears the field", async () => {
+      api.post.mockResolvedValue({ data: { medicine: { id: "med-3" } } });
+      await openSupplies();
+      type("medicine-name-input", "Timolol");
+      await act(async () => {
+        container.querySelector('[data-testid="add-medicine-button"]').click();
+      });
+      expect(api.post).toHaveBeenCalledWith("/catalogue/medicines", { name: "Timolol" });
+      expect(container.querySelector('[data-testid="medicine-name-input"]').value).toBe("");
+    });
+
+    test("a failed add keeps what the admin typed", async () => {
+      api.post.mockRejectedValue(new Error("boom"));
+      await openSupplies();
+      type("power-value-input", "+2.25");
+      await act(async () => {
+        container.querySelector('[data-testid="add-power-button"]').click();
+      });
+      expect(api.post).toHaveBeenCalledWith("/catalogue/powers", { value: "+2.25" });
+      expect(container.querySelector('[data-testid="power-value-input"]').value).toBe("+2.25");
+    });
+
+    test("retiring an entry patches it inactive rather than deleting it", async () => {
+      api.patch.mockResolvedValue({ data: {} });
+      await openSupplies();
+      await act(async () => {
+        container.querySelector('[data-testid="medicine-med-1-toggle"]').click();
+      });
+      expect(api.patch).toHaveBeenCalledWith("/catalogue/medicines/med-1", { active: false });
+      expect(api.delete).not.toHaveBeenCalled();
+    });
   });
 });

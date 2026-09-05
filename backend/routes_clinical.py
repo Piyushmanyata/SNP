@@ -11,7 +11,9 @@ from models import (
     TranscriptionBody, FulfilmentBody, CorrectionBody, OtScheduleBody, SpecsScheduleBody,
     CompletePrescriptionBody, UndoCompletionBody,
 )
+from catalogue import resolve_medicines, stocked_power
 from clinical_state import (
+    CONTENT_FIELDS,
     PRESCRIBED_LINE_KEYS, assert_clinical_operator, arrival_ready, begin_issue_authorization, commit_completion,
     commit_correction, commit_undo, conflict, extract_content,
     generation_of, has_issue_history, payload_hash, prepare_revision, recover_operation,
@@ -67,7 +69,9 @@ def ser_trans(t: dict) -> Dict[str, Any]:
         "ot_eye": t.get("ot_eye"),
         "ot_procedure": t.get("ot_procedure"),
         "ot_notes": t.get("ot_notes"),
-        "medication_instructions": t.get("medication_instructions"),
+        "prescribed_medicines": t.get("prescribed_medicines") or [],
+        "fixed_power_r": t.get("fixed_power_r"),
+        "fixed_power_l": t.get("fixed_power_l"),
         "locked": t.get("locked", False),
         "draft_version": t.get("draft_version") or 0,
         "created_at": iso(t.get("created_at")),
@@ -86,6 +90,9 @@ def ser_fulfil(f: dict) -> Dict[str, Any]:
         "specs_collection_day_id": str(f["specs_collection_day_id"]) if f.get("specs_collection_day_id") else None,
         "collection_start_time": f.get("collection_start_time"),
         "collection_end_time": f.get("collection_end_time"),
+        "medicine_outcomes": f.get("medicine_outcomes") or [],
+        "issued_power_r": f.get("issued_power_r"),
+        "issued_power_l": f.get("issued_power_l"),
         "created_at": iso(f.get("created_at")),
     }
 
@@ -205,6 +212,13 @@ def _content_from_body(body) -> dict:
     return content
 
 
+async def _apply_catalogue(db, body) -> None:
+    """The catalogue is the authority: names and powers are resolved server-side, never trusted from the client."""
+    body.prescribed_medicines = await resolve_medicines(db, body.prescribed_medicine_ids)
+    body.fixed_power_r = await stocked_power(db, body.fixed_power_r)
+    body.fixed_power_l = await stocked_power(db, body.fixed_power_l)
+
+
 async def _require_printed_patient(db, patient_id: str) -> dict:
     p = await db.patients.find_one({"_id": ObjectId(patient_id)})
     if not p:
@@ -269,6 +283,7 @@ async def create_transcription(
     p = await _require_printed_patient(db, body.patient_id)
     if p.get("committed_revision_id"):
         raise conflict("already_completed", "Use a correction to change a completed prescription.")
+    await _apply_catalogue(db, body)
     content = _content_from_body(body)
     t = await _upsert_transcription(db, p, actor, content, locked=False)
     return {"transcription": ser_trans(t)}
@@ -280,9 +295,10 @@ async def complete_prescription(
     actor: dict = Depends(require_clinical),
 ) -> Dict[str, Any]:
     assert_clinical_operator(actor)
+    db = get_db()
+    await _apply_catalogue(db, body)
     content, lines, none = validate_completion(body)
     content["ot_eye"] = normalize_ot_eye(content.get("ot_eye"))
-    db = get_db()
     p = await _require_printed_patient(db, body.patient_id)
     digest = payload_hash("complete", {
         "patient_id": str(p["_id"]), "content": content, "lines": lines, "none": none,
@@ -366,13 +382,46 @@ async def undo_completion(
 
 def _validate_fulfilment_matrix(item_type: str, status: str) -> None:
     valid = {
-        "medicine": {"fulfilled", "not_available"},
+        "medicine": {"fulfilled", "not_available", "partially_fulfilled"},
         "specs_fixed": {"fulfilled"},
         "specs_made": {"deferred"},
         "ot": {"deferred"},
     }
     if item_type not in valid or status not in valid[item_type]:
         raise HTTPException(status_code=400, detail="Invalid fulfilment item/status")
+
+
+def match_medicine_outcomes(revision: dict, outcomes) -> list[dict]:
+    """Every prescribed medicine is accounted for exactly once, and names come from the revision."""
+    prescribed = {m["medicine_id"]: m["name"] for m in (revision.get("prescribed_medicines") or [])}
+    supplied = {o.medicine_id: bool(o.given) for o in (outcomes or [])}
+    if not prescribed or len(supplied) != len(outcomes or []) or set(supplied) != set(prescribed):
+        raise HTTPException(status_code=400, detail={
+            "code": "MEDICINE_OUTCOMES_MISMATCH",
+            "message": "Record given or not available for every prescribed medicine.",
+        })
+    return [{"medicine_id": mid, "name": name, "given": supplied[mid]} for mid, name in prescribed.items()]
+
+
+def derive_medicine_status(outcomes: list[dict]) -> str:
+    given = sum(1 for o in outcomes if o["given"])
+    if given == len(outcomes):
+        return "fulfilled"
+    if given == 0:
+        return "not_available"
+    return "partially_fulfilled"
+
+
+async def resolve_issued_powers(db, revision: dict, body: FulfilmentBody) -> tuple[float, float]:
+    """A power that ran out is substituted at the desk; the prescribed power on the revision never moves."""
+    right = body.issued_power_r if body.issued_power_r is not None else revision.get("fixed_power_r")
+    left = body.issued_power_l if body.issued_power_l is not None else revision.get("fixed_power_l")
+    if right is None or left is None:
+        raise HTTPException(status_code=400, detail={
+            "code": "FIXED_POWER_REQUIRED",
+            "message": "Select the fixed power for both eyes before issuing.",
+        })
+    return await stocked_power(db, right), await stocked_power(db, left)
 
 
 async def _consume_seat(collection: AsyncIOMotorCollection, day_id: str) -> Optional[dict]:
@@ -427,15 +476,21 @@ async def _refuse_full(collection: AsyncIOMotorCollection, day: dict, cfg: dict)
     raise HTTPException(status_code=409, detail=cfg["full_err"])
 
 
-def _assert_specs_measurements(item_type: str, status: str, transcription: dict) -> None:
-    if item_type not in ("specs_fixed", "specs_made"):
-        return
-    m = transcription.get("specs_measurements") or {}
-    if not (str(m.get("r_sph") or "").strip() and str(m.get("l_sph") or "").strip()):
-        raise HTTPException(status_code=400, detail={
-            "code": "SPECS_MEASUREMENTS_REQUIRED",
-            "message": "Record the prescribed power for both eyes before recording a spectacles line.",
-        })
+def _assert_specs_prescription(item_type: str, transcription: dict) -> None:
+    """Made specs are ground from the grid; fixed specs are picked from the camp's stocked powers."""
+    if item_type == "specs_made":
+        m = transcription.get("specs_measurements") or {}
+        if not (str(m.get("r_sph") or "").strip() and str(m.get("l_sph") or "").strip()):
+            raise HTTPException(status_code=400, detail={
+                "code": "SPECS_MEASUREMENTS_REQUIRED",
+                "message": "Record the prescribed power for both eyes before recording a spectacles line.",
+            })
+    elif item_type == "specs_fixed":
+        if transcription.get("fixed_power_r") is None or transcription.get("fixed_power_l") is None:
+            raise HTTPException(status_code=400, detail={
+                "code": "FIXED_POWER_REQUIRED",
+                "message": "Select the fixed power for both eyes before recording a spectacles line.",
+            })
 
 
 def _oid_or_400(raw: str) -> ObjectId:
@@ -558,11 +613,16 @@ def _build_fulfilment_doc(
     transcription_id: ObjectId | str,
     slip: dict | None,
     actor_id: str,
+    medicine_outcomes: list[dict] | None = None,
+    issued_powers: tuple[float, float] | None = None,
 ) -> dict:
     return {
         "transcription_id": transcription_id,
         "item_type": body.item_type,
         "status": body.status,
+        "medicine_outcomes": medicine_outcomes,
+        "issued_power_r": issued_powers[0] if issued_powers else None,
+        "issued_power_l": issued_powers[1] if issued_powers else None,
         "collection_date": (slip or {}).get("collection_date") or body.collection_date,
         "collection_venue": (slip or {}).get("collection_venue") or body.collection_venue,
         "ot_schedule_day_id": _deferred_day_id(body, "ot"),
@@ -619,6 +679,13 @@ async def record_fulfilment(
                     "transcription_id": t["_id"], "item_type": body.item_type, "active": True,
                 })
             return {"fulfilment": ser_fulfil(prior_op), "slip": ser_slip(slip) if slip else None}
+    medicine_outcomes = None
+    issued_powers = None
+    if body.item_type == "medicine":
+        medicine_outcomes = match_medicine_outcomes(revision, body.medicine_outcomes)
+        body.status = derive_medicine_status(medicine_outcomes)
+    elif body.item_type == "specs_fixed":
+        issued_powers = await resolve_issued_powers(db, revision, body)
     op_id = body.operation_id or str(ObjectId())
     await begin_issue_authorization(
         db, patient, actor, body.item_type,
@@ -626,7 +693,9 @@ async def record_fulfilment(
     )
     try:
         async with _clinical_write(db, body.transcription_id):
-            result = await _record_fulfilment(body, actor, background_tasks)
+            result = await _record_fulfilment(
+                body, actor, background_tasks, medicine_outcomes, issued_powers,
+            )
         fulfilment_id = result["fulfilment"]["id"]
         await db.fulfilments.update_one(
             {"_id": ObjectId(fulfilment_id)},
@@ -645,7 +714,13 @@ async def record_fulfilment(
         raise
 
 
-async def _record_fulfilment(body: FulfilmentBody, actor: dict, background_tasks: BackgroundTasks) -> Dict[str, Any]:
+async def _record_fulfilment(
+    body: FulfilmentBody,
+    actor: dict,
+    background_tasks: BackgroundTasks,
+    medicine_outcomes: list[dict] | None = None,
+    issued_powers: tuple[float, float] | None = None,
+) -> Dict[str, Any]:
     db = get_db()
     t = await db.transcriptions.find_one({"_id": ObjectId(body.transcription_id)})
     if not t:
@@ -658,7 +733,7 @@ async def _record_fulfilment(body: FulfilmentBody, actor: dict, background_tasks
         })
 
     _validate_fulfilment_matrix(body.item_type, body.status)
-    _assert_specs_measurements(body.item_type, body.status, t)
+    _assert_specs_prescription(body.item_type, t)
     other = SPECS_EXCLUSION.get(body.item_type)
     if other:
         other_type, other_label = other
@@ -675,7 +750,7 @@ async def _record_fulfilment(body: FulfilmentBody, actor: dict, background_tasks
     slip = await _process_deferral(db, t, body, prior)
 
     doc = _build_fulfilment_doc(
-        body, t["_id"], slip, str(actor["_id"]),
+        body, t["_id"], slip, str(actor["_id"]), medicine_outcomes, issued_powers,
     )
     doc["current"] = True
     old_ot = prior.get("ot_schedule_day_id") if prior and prior.get("status") == "deferred" else None
@@ -803,10 +878,7 @@ async def add_correction(
     if not p.get("committed_revision_id"):
         raise conflict("not_completed", "There is no current completion to correct.")
     current = await db.prescription_revisions.find_one({"_id": p["committed_revision_id"]}) or {}
-    merged = {field: current.get(field) for field in (
-        "diagnosis_options", "diagnosis_other", "blood_sugar", "bp", "remarks",
-        "medication_instructions", "specs_measurements", "ot_eye", "ot_procedure", "ot_notes",
-    )}
+    merged = {field: current.get(field) for field in CONTENT_FIELDS}
     for key, value in (body.changes or {}).items():
         if key in merged:
             merged[key] = value
@@ -814,6 +886,13 @@ async def add_correction(
         supplied = getattr(body, field, None)
         if supplied not in (None, [], {}):
             merged[field] = supplied
+    if body.prescribed_medicine_ids:
+        merged["prescribed_medicines"] = [{"medicine_id": mid} for mid in body.prescribed_medicine_ids]
+    merged["prescribed_medicines"] = await resolve_medicines(db, [
+        m.get("medicine_id") for m in (merged.get("prescribed_medicines") or []) if isinstance(m, dict)
+    ])
+    merged["fixed_power_r"] = await stocked_power(db, merged.get("fixed_power_r"))
+    merged["fixed_power_l"] = await stocked_power(db, merged.get("fixed_power_l"))
     lines = list(body.prescribed_lines or current.get("prescribed_lines") or [])
     none = body.none_prescribed or bool(current.get("none_prescribed") and not lines)
     confirmed = body.full_transcription_confirmed or bool(body.changes)
@@ -827,10 +906,7 @@ async def add_correction(
     view.none_prescribed = none
     content, lines, none = validate_completion(view)
     try:
-        TranscriptionBody(patient_id=str(p["_id"]), **{k: content.get(k) for k in (
-            "diagnosis_options", "diagnosis_other", "blood_sugar", "bp", "remarks",
-            "medication_instructions", "specs_measurements", "ot_eye", "ot_procedure", "ot_notes",
-        )})
+        TranscriptionBody(patient_id=str(p["_id"]), **{k: content.get(k) for k in CONTENT_FIELDS})
     except ValidationError:
         raise HTTPException(status_code=400, detail="Invalid prescription correction")
     content["ot_eye"] = normalize_ot_eye(content.get("ot_eye"))

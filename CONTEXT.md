@@ -97,11 +97,31 @@ An admin-created hospital surgery date, unique per camp and date, with a finite 
 _Avoid_: OT slot, surgery day, OT appointment
 
 **Prescription transcription**:
-The operator copies the doctor's paper prescription at any Fulfilment line, then issues supplies or schedules hospital treatment or collection at the same desk. Corrections after fulfilment require an audit reason.
-_Avoid_: Doctor's Rx line, separate transcription desk
+The operator copies the doctor's paper prescription at any Fulfilment line, then issues supplies or schedules hospital treatment or collection at the same desk. It runs as a wizard: one question per screen, the same sequence for every operator, with a step for each prescribed line only and a read-back before commit. Corrections after fulfilment require an audit reason and use their own form, not the wizard.
+_Avoid_: Doctor's Rx line, separate transcription desk, prescription form (it is no longer one screen)
+
+**Medicine catalogue**:
+The single global list of medicines the trust carries, maintained by an admin. The clinical desk can prescribe nothing else; a medicine the camp does not stock is recorded as not available at the desk. Retiring an entry hides it from operators without touching prescriptions already committed.
+_Avoid_: formulary, drug list, stock (nothing is counted)
+
+**Prescribed medicine**:
+One medicine on a prescription: a name and nothing else. The dose stays on the paper the patient keeps. The name is copied onto the revision when the prescription is committed, so later catalogue edits cannot rewrite it.
+_Avoid_: medication instructions, dosage, prescription line item
+
+**Fixed power catalogue**:
+The admin's list of ready-made spectacle powers the camp carries, in dioptres, minus and plus. It is the stock list: a power that is not on it cannot be prescribed or issued.
+_Avoid_: power range, lens stock, inventory
+
+**Issued power**:
+The fixed power actually handed over, recorded on the fulfilment. It equals the prescribed power unless that power had run out and the desk substituted a neighbouring one. The prescribed power on the revision never moves.
+_Avoid_: final power, corrected power, adjusted prescription
+
+**Partially fulfilled**:
+The medicine line's status when some prescribed medicines were given and others were not. Derived from the per-medicine outcomes, never chosen by the operator.
+_Avoid_: partial, incomplete, half fulfilled
 
 **Operator line**:
-The one of four Fulfilment lines the operator chooses for their current session. It selects the initial fields and autofocus, not permissions. Admin assignment is unnecessary.
+The one of four Fulfilment lines the operator chooses for their current session. It selects which fulfilment station opens once a prescription is committed, not permissions and not the transcription sequence — every operator walks the same wizard. Admin assignment is unnecessary.
 _Avoid_: role, station, desk assignment
 
 **Fulfilment line**:
@@ -109,7 +129,7 @@ One of the four things a patient can be sent to after Seen: medicine, Fixed-powe
 _Avoid_: station, queue, counter, three lines, not required (never a recorded outcome)
 
 **Fixed-power specs**:
-The clinical fulfilment outcome for ready-made spectacles handed over at camp. The operator transcribes the prescribed powers at the same desk. No Token, SMS or collection window is required.
+The clinical fulfilment outcome for ready-made spectacles handed over at camp. The operator picks the power from the Fixed power catalogue — one tap for both eyes, or one per eye when they differ — and no measurement grid is involved. If that power has run out, the desk may issue a neighbouring one, recorded as the Issued power. No Token, SMS or collection window is required.
 _Avoid_: ready specs, stock specs, issued specs
 
 **Spectacles to be made**:
@@ -201,7 +221,7 @@ The issuing operator's explicit comparison of a fulfilment line with the physica
 _Avoid_: opening the prescription, automatic approval
 
 **Camp records export**:
-The single admin-only CSV for a camp, one row per patient including no-shows. Carries identity (name, age, gender, household phone, address, Aadhaar last-4, reg_no), the Manual entry mark, the registration / arrival / seen timestamps, diagnosis, BP and blood sugar, each eye's power, the status of each of the four Fulfilment lines with blank meaning the patient was never recorded at that desk, and the assigned clinical day and venue for each deferral. It is a wide file of patient data and is not downloadable by a volunteer.
+The single admin-only CSV for a camp, one row per patient including no-shows. Carries identity (name, age, gender, household phone, address, Aadhaar last-4, reg_no), the Manual entry mark, the registration / arrival / seen timestamps, diagnosis, BP and blood sugar, each eye's power, the medicines prescribed and any not given, the prescribed and issued fixed powers, the status of each of the four Fulfilment lines with blank meaning the patient was never recorded at that desk, and the assigned clinical day and venue for each deferral. It is a wide file of patient data and is not downloadable by a volunteer.
 _Avoid_: camp records, clinical audit, the reports (there is exactly one export)
 
 Every SMS below is Devanagari, per patient, and carries that patient's reg_no. A household number covering three patients receives three messages. Each is its own DLT template.

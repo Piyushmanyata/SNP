@@ -170,11 +170,10 @@ describe("Clinical page component", () => {
     const rxForm = container.querySelector('[data-testid="clinical-prescription-form"]');
     expect(rxForm).not.toBeNull();
 
-    const specInput = container.querySelector('[data-testid="specs-r_sph"]');
-    expect(specInput.value).toBe("-1.5");
-
-    const otSelect = container.querySelector('[data-testid="ot-eye-select"]');
-    expect(otSelect.value).toBe("R");
+    expect(container.querySelector('[data-testid="wizard-progress"]').textContent).toContain("Step 1 of");
+    expect(container.querySelector('[data-testid="diagnosis-other-input"]').value).toBe("Early stage");
+    expect(container.querySelector('[data-testid="specs-r_sph"]')).toBeNull();
+    expect(container.querySelector('[data-testid="ot-eye-select"]')).toBeNull();
 
     const medicineStation = container.querySelector('[data-testid="station-medicine"]');
     expect(medicineStation).toBeNull();
@@ -213,8 +212,7 @@ describe("Clinical page component", () => {
     expect(container.querySelector('[data-testid="readonly-prescription"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="station-medicine"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="station-ot"]')).toBeNull();
-    expect(container.querySelector('[data-testid="station-medicine-fulfilled"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="station-medicine-not_available"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="station-medicine-save"]')).not.toBeNull();
   });
 
   test("the line picker appears when there is no line", async () => {
@@ -389,7 +387,7 @@ describe("Clinical page component", () => {
     await act(async () => container.querySelector('[data-testid="clinical-lookup-button"]').click());
     await act(async () => {
       container.querySelector('[data-testid="station-medicine-paper-review"]')?.click();
-      container.querySelector('[data-testid="station-medicine-fulfilled"]').click();
+      container.querySelector('[data-testid="station-medicine-save"]').click();
     });
     expect(container.querySelector('[data-testid="clinical-lookup-input"]').disabled).toBe(true);
     expect(container.querySelector('[data-testid="line-change-button"]').disabled).toBe(true);
@@ -397,9 +395,9 @@ describe("Clinical page component", () => {
     expect(container.querySelector('[data-testid="clinical-lookup-input"]').disabled).toBe(false);
   });
 
-  test.each([["specs_fixed", "specs-r_sph"], ["specs_made", "specs-r_sph"], ["ot", "ot-eye-select"]])(
-    "%s monitoring focuses the relevant prescription field",
-    async (line, field) => {
+  test.each([["medicine"], ["specs_fixed"], ["specs_made"], ["ot"]])(
+    "%s monitoring starts every operator on the same first step",
+    async (line) => {
       sessionStorage.setItem(LINE_STORAGE_KEY, line);
       api.post.mockResolvedValueOnce({ data: {
         registration: { id: "r1", reg_no: "1001", full_name: "Patient" }, person: { id: "p1" }, transcription: null, fulfilments: [], slips: [],
@@ -411,7 +409,9 @@ describe("Clinical page component", () => {
         node.dispatchEvent(new Event("input", { bubbles: true }));
       });
       await act(async () => container.querySelector('[data-testid="clinical-lookup-button"]').click());
-      expect(document.activeElement).toBe(container.querySelector(`[data-testid="${field}"]`));
+      expect(container.querySelector('[data-testid="wizard-progress"]').textContent).toContain("Step 1 of 3");
+      expect(container.querySelector('[data-testid="diagnosis-options"]')).not.toBeNull();
+      expect(document.activeElement).toBe(container.querySelector('[data-testid="diagnosis-opt-cataract"]'));
     },
   );
 
@@ -499,7 +499,7 @@ describe("Clinical page component", () => {
     expect(openOpt.textContent).toContain("09:00–12:00");
   });
 
-  test("saving a transcription keeps the patient ready to issue medicine without another lookup", async () => {
+  test("advancing a wizard step saves a draft so an interrupted transcription is not lost", async () => {
     jest.useFakeTimers();
     const mockLookupData = {
       registration: {
@@ -542,12 +542,16 @@ describe("Clinical page component", () => {
     expect(document.activeElement).toBe(container.querySelector('[data-testid="diagnosis-opt-cataract"]'));
 
     await act(async () => {
-      container.querySelector('[data-testid="save-transcription-button"]').click();
+      container.querySelector('[data-testid="wizard-next"]').click();
     });
     await act(async () => { jest.runAllTimers(); });
-    expect(container.textContent).toContain("Draft saved");
+    expect(api.post).toHaveBeenCalledWith(
+      "/clinical/transcription",
+      expect.objectContaining({ patient_id: "reg-101" }),
+    );
+    expect(container.querySelector('[data-testid="wizard-progress"]').textContent).toContain("Step 2 of");
+    expect(container.querySelector('[data-testid="prescribed-lines"]')).not.toBeNull();
     expect(container.textContent).toContain("#1001");
-    expect(api.post).toHaveBeenCalledTimes(2);
     expect(container.querySelector('[data-testid="station-medicine"]')).toBeNull();
     jest.useRealTimers();
   });

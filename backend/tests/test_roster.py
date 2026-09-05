@@ -34,7 +34,7 @@ from routes_desk import print_prescription, scan
 from routes_registration import desk_register
 from routes_reports import leaderboard
 from security import hash_pin
-from test_adversarial_challenger import setup_mock_db
+from test_adversarial_challenger import MEDICINE, setup_mock_db
 from test_camp_lifecycle import CARD, _Request, _mock, _seed_camp, _seen_patient_with_transcription
 
 VOLUNTEER = {"_id": ObjectId(), "role": "volunteer", "name": "Desk 1"}
@@ -216,6 +216,7 @@ class TestAuthenticatedAttribution:
                     reviewed_revision_id=str(mock_db.last_rev_id),
                     reviewed_generation=1,
                     operation_id=str(ObjectId()),
+                    medicine_outcomes=[{"medicine_id": MEDICINE["medicine_id"], "given": True}],
                 ),
                 actor=CLINICAL,
             )
