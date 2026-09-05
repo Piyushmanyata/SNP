@@ -39,7 +39,7 @@ from routes_staff import enable_staff
 from test_adversarial_challenger import setup_mock_db
 
 ACTOR = {"_id": ObjectId(), "role": "volunteer"}
-CARD = "AADHAAR|Sunita Devi|F|1975-06-14|123456781234|12 Station Road Sikar"
+CARD = '<PrintLetterBarcodeData name="Sunita Devi" gender="F" dob="1975-06-14" uid="123456781234" street="12 Station Road Sikar"/>'
 
 
 def _digits_for(raw: bytes) -> str:
@@ -151,7 +151,12 @@ class TestConflictsAreNotCrashes:
             mock_db = setup_mock_db(monkeypatch)
             monkeypatch.setattr(routes_desk, "get_db", lambda: mock_db)
             camp_id = ObjectId()
+            day_id = ObjectId()
             await mock_db.camps.insert_one({"_id": camp_id, "is_active": True, "venue": "V"})
+            await mock_db.camp_days.insert_one({
+                "_id": day_id, "camp_id": camp_id, "day_date": helpers.today_ist_str(),
+                "seat_limit": 50, "booked": 0,
+            })
             manual_id = ObjectId()
             await mock_db.patients.insert_one({
                 "_id": manual_id, "camp_id": camp_id, "camp_day_id": ObjectId(),
@@ -235,7 +240,9 @@ class TestPublicOccupancy:
                 })
             for day_id, n in ((today_id, 3), (later_id, 1)):
                 for _ in range(n):
-                    await mock_db.patients.insert_one({"camp_id": camp_id, "camp_day_id": day_id})
+                    await mock_db.patients.insert_one({
+                        "camp_id": camp_id, "camp_day_id": day_id, "booked_camp_day_id": day_id,
+                    })
 
             calls = {"n": 0}
             original_count = mock_db.patients.count_documents
@@ -276,7 +283,9 @@ class TestPublicOccupancy:
                 "_id": day_id, "camp_id": camp_id, "day_date": "2026-09-01", "seat_limit": 1,
             })
             for _ in range(3):
-                await mock_db.patients.insert_one({"camp_id": camp_id, "camp_day_id": day_id})
+                await mock_db.patients.insert_one({
+                    "camp_id": camp_id, "camp_day_id": day_id, "booked_camp_day_id": day_id,
+                })
 
             board = await routes_camps.active_camp_public()
             assert board["days"][0]["registered"] == 3
@@ -347,3 +356,15 @@ class TestSmsDoesNotBlockTheLoop:
             assert await asyncio.wait_for(task, timeout=5) is True
 
         asyncio.run(run())
+
+
+def test_csv_formula_cells_are_prefixed():
+    from routes_reports import csv_cell
+    assert csv_cell("=1+1") == "'=1+1"
+    assert csv_cell("+cmd") == "'+cmd"
+    assert csv_cell("-2") == "'-2"
+    assert csv_cell("@sum") == "'@sum"
+    assert csv_cell("\tfoo") == "'\tfoo"
+    assert csv_cell("\rfoo") == "'\rfoo"
+    assert csv_cell("Sunita") == "Sunita"
+    assert csv_cell(None) == ""

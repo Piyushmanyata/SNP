@@ -1,6 +1,7 @@
 services:
   mongo:
     image: mongo:7
+    restart: unless-stopped
     volumes:
       - mongo_data:/data/db
     healthcheck:
@@ -8,62 +9,47 @@ services:
       interval: 5s
       timeout: 5s
       retries: 20
-      start_period: 15s
 
   backend:
     build: ./backend
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./backend:/app
+    restart: unless-stopped
     environment:
       MONGO_URL: mongodb://mongo:27017
-      DB_NAME: ${DB_NAME:-snp_camps}
-      JWT_SECRET: ${JWT_SECRET:-local-dev-jwt-secret-not-for-production}
-      AADHAAR_HASH_PEPPER: ${AADHAAR_HASH_PEPPER:-local-dev-aadhaar-pepper-not-for-production}
-      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@snpcamps.org}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-AdminCamp@2026}
+      DB_NAME: ${DB_NAME:-snp_camps_local}
+      JWT_SECRET: ${JWT_SECRET:-local-docker-jwt-secret-change-before-production}
+      AADHAAR_HASH_PEPPER: ${AADHAAR_HASH_PEPPER:-local-docker-aadhaar-pepper-change-before-production}
+      ADMIN_BOOTSTRAP_PIN: ${ADMIN_BOOTSTRAP_PIN:-8642}
+      CRON_SECRET: ${CRON_SECRET:-local-docker-reminder-secret}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
-      COOKIE_SECURE: ${COOKIE_SECURE:-false}
-      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+      COOKIE_SECURE: "false"
+      COOKIE_SAMESITE: lax
     depends_on:
       mongo:
         condition: service_healthy
-    command: uvicorn server:app --host 0.0.0.0 --port 8000 --reload
     healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')",
-        ]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
       interval: 10s
       timeout: 5s
-      retries: 15
+      retries: 12
       start_period: 20s
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        REACT_APP_BACKEND_URL: ""
+    restart: unless-stopped
     ports:
-      - "3000:3000"
-    volumes:
-      - ./frontend:/app
-      - frontend_node_modules:/app/node_modules
-    environment:
-      REACT_APP_BACKEND_URL: ${REACT_APP_BACKEND_URL:-http://localhost:8000}
-      HOST: "0.0.0.0"
-      CHOKIDAR_USEPOLLING: "true"
-      WATCHPACK_POLLING: "true"
-      WDS_SOCKET_PORT: "3000"
-      DANGEROUSLY_DISABLE_HOST_CHECK: "true"
-    stdin_open: true
-    tty: true
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-3000}:80"
     depends_on:
       backend:
         condition: service_healthy
-    command: npm start
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
 volumes:
   mongo_data:
-  frontend_node_modules:

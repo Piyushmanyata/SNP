@@ -11,7 +11,8 @@ Separately, the same word "seats" covered two different physical things. A camp 
 - Every camp day has a seat limit greater than zero. Unlimited is removed.
 - Camp-day capacity refuses a new registration on that day once registrations reach the limit.
 - Camp-day capacity does not refuse an Arrival. A patient booked for one camp day who arrives on another is checked in on the day they came, and arrivals on a day may exceed its limit.
-- OT Schedule Day and Specs collection day seats stay a hard block. When every day of a type is full, the clinical desk cannot record the deferral and is told to call the admin, who adds a day.
+- OT Schedule Day seats stay a hard block. When every OT day is full, the clinical desk cannot record the deferral and is told to call the admin, who adds a day.
+- Specs collection day capacity is superseded by ADR 0026: a Specs collection day is a date, venue, and required time window with no seats.
 - Public occupancy shows registrations against the sum of the camp's day limits.
 
 ## Consequences

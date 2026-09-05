@@ -1,0 +1,18 @@
+# Camp-day accounts
+
+A **Desk account** is an ordinary `volunteer` or `clinical_desk_operator` staff account. It is created by an admin, named for the desk, and signed in once in the morning by a team lead. Volunteers never receive a password. Attribution of work is the **On-desk volunteer** pick from the **Volunteer roster**, not the Desk account login.
+
+## Before camp
+
+Create these staff accounts in Admin → Staff:
+
+- Ten **Registration desks**: `Desk 1` … `Desk 10`, role `volunteer`.
+- Doctor's Rx and each **Fulfilment line**: `Rx 1` … and the line accounts, role `clinical_desk_operator`, with the matching line set.
+
+Paste the volunteer names into Admin → Roster (one name per line) for the active camp.
+
+## Morning of camp
+
+Team leads sign each laptop in as its Desk account. The access token lasts twelve hours, so a laptop signed in at 07:00 needs a fresh login at 19:00.
+
+When a volunteer sits down they pick their name. Hand over clears the pick for the next person. Team leads and admins keep personal accounts and never see the picker.

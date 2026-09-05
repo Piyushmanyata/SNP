@@ -4,9 +4,8 @@ function isLoopback(host) {
   return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
 }
 
-export function backendOrigin() {
+export function backendOrigin(loc = window.location) {
   const env = process.env.REACT_APP_BACKEND_URL || "";
-  const loc = window.location;
   const pageHost = loc.hostname;
 
   let envHost = "";
@@ -17,17 +16,16 @@ export function backendOrigin() {
   }
 
   if (pageHost && !isLoopback(pageHost) && (!envHost || isLoopback(envHost))) {
-    const u = new URL(loc.origin);
-    u.port = "8000";
-    return u.origin;
+    return loc.origin;
   }
   if (env) return env;
-  return "http://localhost:8000";
+  return loc.origin;
 }
 
 const api = axios.create({
   baseURL: `${backendOrigin()}/api`,
   withCredentials: true,
+  timeout: 30000,
 });
 
 export function formatApiError(err) {

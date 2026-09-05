@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from db import get_db, init_indexes
-from security import hash_password
+from security import hash_pin
 from helpers import now_utc
 
 import routes_auth
@@ -26,15 +26,25 @@ import routes_reminders
 
 async def seed_admin() -> None:
     db = get_db()
-    email = os.environ["ADMIN_EMAIL"].lower().strip()
-    password = os.environ["ADMIN_PASSWORD"]
-    existing = await db.users.find_one({"email": email})
-    if existing is None:
-        await db.users.insert_one({
-            "email": email, "password_hash": hash_password(password),
-            "name": "Camp Administrator", "role": "admin", "phone": None,
-            "team_lead_id": None, "disabled_at": None, "created_at": now_utc(),
-        })
+    existing = await db.users.find_one({"name_normalized": "admin"})
+    if existing is not None:
+        return
+    pin = (os.environ.get("ADMIN_BOOTSTRAP_PIN") or "").strip()
+    if not pin or len(pin) != 4 or not pin.isdigit():
+        raise RuntimeError("ADMIN_BOOTSTRAP_PIN must be a 4-digit PIN")
+    if pin == "1234":
+        raise RuntimeError("ADMIN_BOOTSTRAP_PIN cannot be the repository-known PIN")
+    await db.users.insert_one({
+        "name": "admin",
+        "name_normalized": "admin",
+        "pin_hash": hash_pin(pin),
+        "role": "admin",
+        "must_change_pin": True,
+        "phone": None,
+        "team_lead_id": None,
+        "disabled_at": None,
+        "created_at": now_utc(),
+    })
 
 
 @asynccontextmanager
@@ -51,17 +61,6 @@ app = FastAPI(title="SNP Camps API", lifespan=lifespan)
 async def invalid_id_handler(request: Request, exc: InvalidId) -> JSONResponse:
     return JSONResponse(status_code=400, content={"detail": "Malformed identifier"})
 
-LAN_ORIGIN_REGEX = (
-    r"^https?://("
-    r"localhost|"
-    r"127\.0\.0\.1|"
-    r"\[::1\]|"
-    r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
-    r"192\.168\.\d{1,3}\.\d{1,3}|"
-    r"172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}"
-    r")(:\d+)?$"
-)
-
 def cors_origin_list(raw: str | None) -> list[str]:
     if not raw:
         return []
@@ -71,7 +70,6 @@ def cors_origin_list(raw: str | None) -> list[str]:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origin_list(os.environ.get("CORS_ORIGINS")),
-    allow_origin_regex=LAN_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

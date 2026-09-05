@@ -1,6 +1,6 @@
 import React from "react";
 import { Button, Badge, Alert, Input, Field } from "../ui";
-import { Printer, CheckCircle2 } from "lucide-react";
+import { Printer } from "lucide-react";
 
 const FIELD_LABELS = {
   full_name: "Name",
@@ -32,17 +32,6 @@ export function ArrivedCard({ registration, onPrint, onMarkSeen }) {
         <Button size="sm" onClick={() => onPrint(registration)} data-testid="scan-print-button">
           <Printer className="w-4 h-4" /> Print prescription
         </Button>
-        {registration.queue_status !== "seen" && (
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => onMarkSeen(registration)}
-            disabled={!registration.printed_at}
-            data-testid="scan-mark-seen-button"
-          >
-            <CheckCircle2 className="w-4 h-4" /> Seen
-          </Button>
-        )}
       </div>
     </div>
   );

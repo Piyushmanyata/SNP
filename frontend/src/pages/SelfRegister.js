@@ -18,8 +18,8 @@ export default function SelfRegister() {
   const [loadErr, setLoadErr] = useState("");
   const [reqId, setReqId] = useState("");
 
-  const onScanned = useCallback((card) => {
-    setScanned(card);
+  const onScanned = useCallback((card, raw) => {
+    setScanned({ ...card, qr_payload: raw || card.qr_payload });
     setReqId(v4());
   }, []);
 
@@ -36,21 +36,16 @@ export default function SelfRegister() {
   }, []);
 
   const submit = useCallback(async () => {
-    if (!scanned || !dayId || !reqId) return;
+    if (!scanned || !dayId || !reqId || !phone) return;
     setBusy(true); setError("");
     try {
       const { data } = await api.post("/self-register", {
-        full_name: scanned.full_name,
-        gender: scanned.gender,
-        dob: scanned.dob,
-        age: scanned.age,
-        address: scanned.address,
-        aadhaar_last4: scanned.aadhaar_last4,
-        aadhaar_scanned: true,
-        phone: phone || null,
+        qr_payload: scanned.qr_payload,
+        phone,
         camp_day_id: dayId,
         is_self_registered: true,
         registration_request_id: reqId,
+        full_name: scanned.full_name,
       });
       setReceipt(data.receipt);
     } catch (err) {
@@ -104,7 +99,7 @@ export default function SelfRegister() {
                 </div>
               )}
 
-              <Field label="Mobile (optional)" hint="Household contact — 10 digits">
+              <Field label="Mobile" required hint="Required 10-digit household contact">
                 <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="10-digit mobile" inputMode="numeric" data-testid="self-phone-input" />
               </Field>
 
@@ -115,7 +110,7 @@ export default function SelfRegister() {
               </Field>
 
               <Alert>{error}</Alert>
-              <Button size="lg" className="w-full" disabled={!scanned || !dayId || busy} onClick={submit} data-testid="self-register-submit">
+              <Button size="lg" className="w-full" disabled={!scanned || !dayId || !phone || busy} onClick={submit} data-testid="self-register-submit">
                 {busy ? "Registering…" : "Register"}
               </Button>
             </Card>
@@ -138,7 +133,7 @@ export default function SelfRegister() {
               <p><span className="text-slate-400">Venue:</span> {receipt.venue}</p>
               <p><span className="text-slate-400">Day:</span> {receipt.day_date}</p>
             </div>
-            <Button variant="outline" className="mt-6 w-full" onClick={() => { setReceipt(null); setScanned(null); setPhone(""); setReqId(""); }} data-testid="self-register-another">
+            <Button variant="outline" className="mt-6 w-full" onClick={() => { setReceipt(null); setScanned(null); setReqId(""); }} data-testid="self-register-another">
               Register another patient
             </Button>
           </Card>

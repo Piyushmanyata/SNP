@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import api, { formatApiError } from "../../lib/api";
 import { Button, Badge } from "../ui";
 import { Pill, Glasses, Scissors, Printer } from "lucide-react";
@@ -30,15 +30,12 @@ export const FULFILMENT_LINES = {
     actions: [{ status: "deferred", label: "Defer and print Token" }],
   },
   ot: {
-    label: "OT",
+    label: "Hospital surgery",
     icon: Scissors,
     itemType: "ot",
     dayField: "ot_schedule_day_id",
-    dayLabel: "OT Schedule Day",
-    actions: [
-      { status: "fulfilled", label: "Done at camp" },
-      { status: "deferred", label: "Schedule" },
-    ],
+    dayLabel: "Hospital surgery day",
+    actions: [{ status: "deferred", label: "Schedule at hospital and print token" }],
   },
 };
 
@@ -47,43 +44,56 @@ export function hasMeasurements(transcription) {
   return Boolean(String(m.r_sph || "").trim() && String(m.l_sph || "").trim());
 }
 
-export function transcriptionImpliesLine(transcription, lineKey) {
-  if (!transcription) return false;
-  if (lineKey === "medicine") {
-    return Boolean((transcription.diagnosis_options || []).length || transcription.diagnosis_other);
-  }
-  if (lineKey === "specs_fixed" || lineKey === "specs_made") return hasMeasurements(transcription);
-  if (lineKey === "ot") return Boolean(transcription.ot_eye || transcription.ot_procedure);
-  return false;
-}
-
 export function earliestFreeDay(days, currentId) {
   if (currentId) return currentId;
   const free = days.filter((d) => d.seats_free > 0);
   return free.length ? free[0].id : "";
 }
 
+export function selectableSpecsDays(days) {
+  return (days || []).filter((d) => d.start_time && d.end_time && !d.window_required);
+}
+
+export function earliestSpecsDay(days, currentId) {
+  if (currentId) return currentId;
+  const open = selectableSpecsDays(days);
+  return open.length ? open[0].id : "";
+}
+
 function DayPicker({ line, days, value, onChange }) {
-  const noneFree = days.every((d) => d.seats_free <= 0);
+  const specs = line.itemType === "specs_made";
+  const visible = specs ? selectableSpecsDays(days) : days;
+  const noneFree = specs
+    ? visible.length === 0
+    : days.every((d) => d.seats_free <= 0);
   return (
     <>
       <select
+        aria-label={line.dayLabel}
         className="w-full mt-2 min-h-[44px] px-3 rounded-xl border border-slate-300 text-sm"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         data-testid={`${line.dayField}-select`}
       >
         <option value="">Select {line.dayLabel}…</option>
-        {days.map((d) => (
-          <option key={d.id} value={d.id} disabled={d.seats_free <= 0 && d.id !== value}>
+        {visible.map((d) => (
+          <option
+            key={d.id}
+            value={d.id}
+            disabled={!specs && d.seats_free <= 0 && d.id !== value}
+          >
             {d.day_date} · {d.venue}
-            {d.seats_free <= 0 ? " (full)" : ` (${d.seats_free} free)`}
+            {specs
+              ? ` · ${d.start_time}–${d.end_time}`
+              : d.seats_free <= 0 ? " (full)" : ` (${d.seats_free} free)`}
           </option>
         ))}
       </select>
       {noneFree && (
         <p className="text-xs text-rose-700 mt-2" data-testid={`${line.dayField}-none-free`}>
-          Every {line.dayLabel} is full. Call the admin to add one.
+          {specs
+            ? "No day is scheduled."
+            : `Every ${line.dayLabel} is full. Call the admin to add one.`}
         </p>
       )}
     </>
@@ -99,6 +109,7 @@ export function FulfilmentStation({
   navigate,
   setBanner,
   setError,
+  onBusyChange,
 }) {
   const line = FULFILMENT_LINES[lineKey];
   const Icon = line.icon;
@@ -111,15 +122,23 @@ export function FulfilmentStation({
   const [status, setStatus] = useState(existing?.status || line.actions[0].status);
   const [dayId, setDayId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [paperReviewed, setPaperReviewed] = useState(false);
+  const issueOpRef = useRef(null);
 
   useEffect(() => {
     setStatus(existing?.status || line.actions[0].status);
-  }, [existing?.status, line]);
+    setPaperReviewed(false);
+    issueOpRef.current = null;
+  }, [existing?.status, line, data?.registration?.id, data?.committed_revision?.id]);
 
   useEffect(() => {
     if (!line.dayField) return;
-    setDayId(earliestFreeDay(days, existing?.[line.dayField] || ""));
-  }, [days, existing, line.dayField]);
+    setDayId(
+      line.itemType === "specs_made"
+        ? earliestSpecsDay(days, existing?.[line.dayField] || "")
+        : earliestFreeDay(days, existing?.[line.dayField] || ""),
+    );
+  }, [days, existing, line.dayField, line.itemType]);
 
   const needsDay = Boolean(line.dayField) && status === "deferred";
   const recordsPower = line.needsMeasurements;
@@ -129,6 +148,7 @@ export function FulfilmentStation({
     if (!data?.transcription?.id) return;
     const nextStatus = chosen || status;
     setBusy(true);
+    onBusyChange?.(true);
     setError("");
     try {
       const { data: res } = await api.post("/clinical/fulfilment", {
@@ -137,7 +157,12 @@ export function FulfilmentStation({
         status: nextStatus,
         ot_schedule_day_id: line.dayField === "ot_schedule_day_id" ? dayId || null : null,
         specs_collection_day_id: line.dayField === "specs_collection_day_id" ? dayId || null : null,
+        paper_reviewed: paperReviewed,
+        reviewed_revision_id: data.committed_revision?.id,
+        reviewed_generation: data.clinical_generation ?? data.registration?.clinical_generation,
+        operation_id: issueOpRef.current || (issueOpRef.current = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`),
       });
+      issueOpRef.current = null;
       setBanner(`${line.label}: ${nextStatus.replace(/_/g, " ")}`);
       if (res.slip) {
         navigate(`/print/slip/${res.slip.id}`);
@@ -148,8 +173,9 @@ export function FulfilmentStation({
       setError(formatApiError(err));
     } finally {
       setBusy(false);
+      onBusyChange?.(false);
     }
-  }, [data?.transcription?.id, line, status, dayId, navigate, onDone, setBanner, setError]);
+  }, [data?.transcription?.id, data?.committed_revision?.id, data?.clinical_generation, data?.registration?.clinical_generation, line, status, dayId, paperReviewed, navigate, onDone, setBanner, setError, onBusyChange]);
 
   if (existing) {
     return (
@@ -183,6 +209,19 @@ export function FulfilmentStation({
         <p className="font-semibold text-slate-900 text-sm">{line.label}</p>
       </div>
 
+      <label className="flex items-center gap-2 min-h-[44px] mb-3 text-sm">
+        <input
+          type="checkbox"
+          checked={paperReviewed}
+          onChange={(e) => setPaperReviewed(e.target.checked)}
+          data-testid={`station-${lineKey}-paper-review`}
+        />
+        <span>I compared the paper with this saved prescription</span>
+      </label>
+      <p className="text-sm font-semibold text-slate-900 mb-2" data-testid={`station-${lineKey}-patient`}>
+        #{data?.registration?.reg_no} {data?.registration?.full_name}
+      </p>
+
       {line.actions.length > 1 && (
         <div className="flex flex-col gap-2">
           {line.actions.map((a) => (
@@ -191,7 +230,7 @@ export function FulfilmentStation({
               size="sm"
               variant={status === a.status ? "primary" : "outline"}
               className="w-full"
-              disabled={busy || measurementsMissing || (a.status === "deferred" && line.dayField && !dayId && status === "deferred")}
+              disabled={!paperReviewed || busy || measurementsMissing || (a.status === "deferred" && line.dayField && !dayId && status === "deferred")}
               onClick={() => {
                 setStatus(a.status);
                 if (a.status !== "deferred" || !line.dayField) save(a.status);
@@ -213,7 +252,7 @@ export function FulfilmentStation({
           size="sm"
           className="w-full mt-2"
           onClick={() => save(line.actions[0].status)}
-          disabled={!status || busy || measurementsMissing || (needsDay && !dayId)}
+          disabled={!paperReviewed || !status || busy || measurementsMissing || (needsDay && !dayId)}
           data-testid={`station-${lineKey}-save`}
         >
           {line.actions[0].label}

@@ -7,15 +7,16 @@ import {
 } from "../components/ui";
 import {
   Tent, Users, CalendarDays, Trophy, Download, Scissors, Glasses, Power, Trash2,
-  Plus, PrinterCheck, ClipboardList, Stethoscope, FileText,
+  Plus, PrinterCheck, ClipboardList, Stethoscope, FileText, BarChart3,
 } from "lucide-react";
 import TemplateEditor from "../components/TemplateEditor";
-import { OPERATOR_LINES } from "../lib/operatorLines";
+
+const CAMP_VENUE = "Hansa Garden, Rohini Road in Baghmara, Jasidih, Deoghar - 814142";
+const HOSPITAL_VENUE = "Vimla Ramkrishna Bajaj Eye Hospital, Near Canara Bank, Bilasi Mod, Deoghar 814112 (Jharkhand)";
 
 const TABS = [
   { id: "overview", label: "Overview", icon: ClipboardList },
   { id: "camps", label: "Camps & Days", icon: Tent },
-  { id: "staff", label: "Staff", icon: Users },
   { id: "template", label: "Rx Template", icon: FileText },
   { id: "ot", label: "OT & Specs", icon: Scissors },
   { id: "board", label: "Leaderboards", icon: Trophy },
@@ -40,7 +41,6 @@ export default function AdminDashboard() {
       </div>
       {tab === "overview" && <Overview />}
       {tab === "camps" && <Camps />}
-      {tab === "staff" && <Staff />}
       {tab === "template" && <TemplateEditor />}
       {tab === "ot" && <div className="space-y-5"><OtSchedule /><SpecsCollectionDays /></div>}
       {tab === "board" && <Leaderboards />}
@@ -55,6 +55,7 @@ function Overview() {
   const [camp, setCamp] = useState(null);
   const [err, setErr] = useState("");
   const load = useCallback(() => {
+    setErr("");
     Promise.all([api.get("/kpis"), api.get("/camps/active")])
       .then(([k, a]) => { setKpi(k.data); setCamp(a.data.camp); })
       .catch((e) => setErr(formatApiError(e)));
@@ -80,6 +81,8 @@ function Overview() {
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Button size="lg" variant="outline" onClick={() => navigate("/desk")} data-testid="goto-desk-button"><Stethoscope className="w-5 h-5" /> Open Registration Desk</Button>
         <Button size="lg" variant="outline" onClick={() => navigate("/clinical")} data-testid="goto-clinical-button"><ClipboardList className="w-5 h-5" /> Open Clinical Desk</Button>
+        <Button size="lg" variant="outline" onClick={() => navigate("/team")} data-testid="goto-team-button"><Users className="w-5 h-5" /> Team management</Button>
+        <Button size="lg" variant="outline" onClick={() => navigate("/analytics")} data-testid="goto-analytics-button"><BarChart3 className="w-5 h-5" /> Analytics</Button>
       </div>
     </div>
   );
@@ -89,7 +92,7 @@ function Camps() {
   const [camps, setCamps] = useState([]);
   const [err, setErr] = useState("");
   const [showCamp, setShowCamp] = useState(false);
-  const [form, setForm] = useState({ name: "", venue: "", camp_date: "" });
+  const [form, setForm] = useState({ name: "SNP नेत्र शिविर", venue: CAMP_VENUE, camp_date: "" });
   const [expand, setExpand] = useState(null);
 
   const load = useCallback(() => {
@@ -101,7 +104,7 @@ function Camps() {
     try {
       await api.post("/camps", form);
       setShowCamp(false);
-      setForm({ name: "", venue: "", camp_date: "" });
+      setForm({ name: "SNP नेत्र शिविर", venue: CAMP_VENUE, camp_date: "" });
       load();
     } catch (e) {
       setErr(formatApiError(e));
@@ -209,130 +212,20 @@ function CampDays({ campId }) {
         </div>
       ))}
       <div className="flex flex-wrap gap-2 items-end pt-2">
-        <div><label className="text-[10px] font-mono text-slate-400 uppercase">Date</label><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} data-testid="new-day-date" /></div>
-        <div><label className="text-[10px] font-mono text-slate-400 uppercase">Seat limit</label><Input type="number" value={seat} onChange={(e) => setSeat(e.target.value)} className="w-28" data-testid="new-day-seat" /></div>
+        <Field label="Date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} data-testid="new-day-date" /></Field>
+        <Field label="Seat limit"><Input type="number" value={seat} onChange={(e) => setSeat(e.target.value)} className="w-28" data-testid="new-day-seat" /></Field>
         <Button size="sm" onClick={add} disabled={!date} data-testid="add-day-button"><Plus className="w-4 h-4" /> Add day</Button>
       </div>
     </div>
   );
 }
 
-function Staff() {
-  const [staff, setStaff] = useState([]);
-  const [leads, setLeads] = useState([]);
-  const [err, setErr] = useState("");
-  const [show, setShow] = useState(false);
-  const [form, setForm] = useState({ email: "", password: "", name: "", role: "volunteer", phone: "", team_lead_id: "", line: "" });
-
-  const load = useCallback(() => {
-    Promise.all([api.get("/staff"), api.get("/staff/team-leads")])
-      .then(([s, l]) => { setStaff(s.data.staff); setLeads(l.data.team_leads); })
-      .catch((e) => setErr(formatApiError(e)));
-  }, []);
-  useEffect(() => { load(); }, [load]);
-
-  const create = useCallback(async () => {
-    setErr("");
-    try {
-      await api.post("/staff", {
-        ...form,
-        team_lead_id: form.role === "volunteer" ? (form.team_lead_id || null) : null,
-        line: form.role === "clinical_desk_operator" ? (form.line || null) : null,
-      });
-      setShow(false);
-      setForm({ email: "", password: "", name: "", role: "volunteer", phone: "", team_lead_id: "", line: "" });
-      load();
-    } catch (e) { setErr(formatApiError(e)); }
-  }, [form, load]);
-  const disable = useCallback(async (id) => { try { await api.patch(`/staff/${id}/disable`); load(); } catch (e) { setErr(formatApiError(e)); } }, [load]);
-  const enable = useCallback(async (id) => { try { await api.patch(`/staff/${id}/enable`); load(); } catch (e) { setErr(formatApiError(e)); } }, [load]);
-  const setLine = useCallback(async (id, line) => {
-    try {
-      await api.patch(`/staff/${id}`, { line: line || null });
-      load();
-    } catch (e) { setErr(formatApiError(e)); }
-  }, [load]);
-
-  const roleLabel = { admin: "Admin", team_lead: "Team Lead", volunteer: "Volunteer", clinical_desk_operator: "Clinical Desk" };
-
-  return (
-    <div className="space-y-4">
-      {err && <Alert>{err}</Alert>}
-      <Button onClick={() => setShow(true)} data-testid="create-staff-button"><Plus className="w-4 h-4" /> Add Staff</Button>
-      <Card>
-        <div className="space-y-2" data-testid="staff-list">
-          {staff.map((s) => (
-            <div key={s.id} className="flex items-center gap-3 p-3 rounded-xl border border-slate-200" data-testid={`staff-row-${s.id}`}>
-              <div className="flex-1">
-                <p className="font-semibold text-slate-900">{s.name} {s.disabled_at && <Badge tone="rose">Disabled</Badge>}</p>
-                <p className="text-xs text-slate-400">{s.email}</p>
-              </div>
-              <Badge tone="slate">{roleLabel[s.role]}</Badge>
-              {s.role === "clinical_desk_operator" && (
-                <select
-                  className="min-h-[44px] px-2 rounded-xl border border-slate-300 text-sm"
-                  value={s.line || ""}
-                  onChange={(e) => setLine(s.id, e.target.value)}
-                  data-testid={`staff-line-${s.id}`}
-                >
-                  <option value="">No line</option>
-                  {OPERATOR_LINES.map((l) => (
-                    <option key={l.key} value={l.key}>{l.label}</option>
-                  ))}
-                </select>
-              )}
-
-              {s.role !== "admin" && (s.disabled_at
-                ? <Button size="sm" variant="outline" onClick={() => enable(s.id)} data-testid={`enable-staff-${s.id}`}>Enable</Button>
-                : <Button size="sm" variant="ghost" onClick={() => disable(s.id)} data-testid={`disable-staff-${s.id}`}><Power className="w-4 h-4 text-rose-500" /></Button>)}
-            </div>
-          ))}
-        </div>
-      </Card>
-
-      <Modal open={show} onClose={() => setShow(false)} title="Add Staff">
-        <div className="space-y-3">
-          <Field label="Name" required><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} data-testid="staff-name-input" /></Field>
-          <Field label="Email" required><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} data-testid="staff-email-input" /></Field>
-          <Field label="Password" required hint="≥12 chars, upper/lower/digit/symbol"><Input type="text" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} data-testid="staff-password-input" /></Field>
-          <Field label="Role" required>
-            <select className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })} data-testid="staff-role-select">
-              <option value="volunteer">Volunteer</option>
-              <option value="team_lead">Team Lead</option>
-              <option value="clinical_desk_operator">Clinical Desk Operator</option>
-              <option value="admin">Admin</option>
-            </select>
-          </Field>
-          {form.role === "clinical_desk_operator" && (
-            <Field label="Line">
-              <select className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300" value={form.line} onChange={(e) => setForm({ ...form, line: e.target.value })} data-testid="staff-line-select">
-                <option value="">Unset</option>
-                {OPERATOR_LINES.map((l) => <option key={l.key} value={l.key}>{l.label}</option>)}
-              </select>
-            </Field>
-          )}
-          {form.role === "volunteer" && (
-            <Field label="Team Lead (optional)">
-              <select className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300" value={form.team_lead_id} onChange={(e) => setForm({ ...form, team_lead_id: e.target.value })} data-testid="staff-teamlead-select">
-                <option value="">Unassigned</option>
-                {leads.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-              </select>
-            </Field>
-          )}
-          <Field label="Phone"><Input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} data-testid="staff-phone-input" /></Field>
-          {err && <Alert data-testid="staff-modal-error">{err}</Alert>}
-          <Button className="w-full" onClick={create} disabled={!form.name || !form.email || !form.password} data-testid="staff-create-submit">Create Staff</Button>
-        </div>
-      </Modal>
-    </div>
-  );
-}
 
 function OtSchedule() {
   const [days, setDays] = useState([]);
   const [camp, setCamp] = useState(null);
   const [err, setErr] = useState("");
-  const [form, setForm] = useState({ day_date: "", venue: "", seat_limit: 10 });
+  const [form, setForm] = useState({ day_date: "", venue: HOSPITAL_VENUE, seat_limit: 10 });
 
   const load = useCallback(() => {
     Promise.all([api.get("/clinical/ot-days"), api.get("/camps/active")])
@@ -344,7 +237,7 @@ function OtSchedule() {
   const add = useCallback(async () => {
     setErr("");
     if (!camp) { setErr("Activate a camp first."); return; }
-    try { await api.post("/clinical/ot-days", { camp_id: camp.id, ...form, seat_limit: Number(form.seat_limit) }); setForm({ day_date: "", venue: "", seat_limit: 10 }); load(); }
+    try { await api.post("/clinical/ot-days", { camp_id: camp.id, ...form, seat_limit: Number(form.seat_limit) }); setForm({ day_date: "", venue: HOSPITAL_VENUE, seat_limit: 10 }); load(); }
     catch (e) { setErr(formatApiError(e)); }
   }, [camp, form, load]);
 
@@ -353,6 +246,7 @@ function OtSchedule() {
       {err && <Alert>{err}</Alert>}
       <Card>
         <h3 className="font-display font-bold text-slate-900 mb-3">OT Schedule Days</h3>
+        <p className="text-sm text-slate-600 mb-3">Surgery takes place at the hospital. The camp only schedules the appointment.</p>
         <div className="space-y-2" data-testid="ot-days-list">
           {days.length === 0 && <p className="text-slate-400 text-sm">No OT days yet.</p>}
           {days.map((d) => (
@@ -365,9 +259,9 @@ function OtSchedule() {
           ))}
         </div>
         <div className="flex flex-wrap gap-2 items-end pt-4 mt-3 border-t border-slate-100">
-          <div><label className="text-[10px] font-mono text-slate-400 uppercase">Date</label><Input type="date" value={form.day_date} onChange={(e) => setForm({ ...form, day_date: e.target.value })} data-testid="ot-date-input" /></div>
-          <div><label className="text-[10px] font-mono text-slate-400 uppercase">Venue</label><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="ot-venue-input" /></div>
-          <div><label className="text-[10px] font-mono text-slate-400 uppercase">Seats</label><Input type="number" value={form.seat_limit} onChange={(e) => setForm({ ...form, seat_limit: e.target.value })} className="w-24" data-testid="ot-seat-input" /></div>
+          <Field label="Date"><Input type="date" value={form.day_date} onChange={(e) => setForm({ ...form, day_date: e.target.value })} data-testid="ot-date-input" /></Field>
+          <Field label="Hospital"><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="ot-venue-input" /></Field>
+          <Field label="Seats"><Input type="number" value={form.seat_limit} onChange={(e) => setForm({ ...form, seat_limit: e.target.value })} className="w-24" data-testid="ot-seat-input" /></Field>
           <Button size="sm" onClick={add} disabled={!form.day_date || !form.venue} data-testid="add-ot-day-button"><Plus className="w-4 h-4" /> Add</Button>
         </div>
       </Card>
@@ -379,7 +273,7 @@ function SpecsCollectionDays() {
   const [days, setDays] = useState([]);
   const [camp, setCamp] = useState(null);
   const [err, setErr] = useState("");
-  const [form, setForm] = useState({ day_date: "", venue: "", seat_limit: 10 });
+  const [form, setForm] = useState({ day_date: "", venue: "", start_time: "", end_time: "" });
 
   const load = useCallback(() => {
     Promise.all([api.get("/clinical/specs-days"), api.get("/camps/active")])
@@ -391,7 +285,7 @@ function SpecsCollectionDays() {
   const add = useCallback(async () => {
     setErr("");
     if (!camp) { setErr("Activate a camp first."); return; }
-    try { await api.post("/clinical/specs-days", { camp_id: camp.id, ...form, seat_limit: Number(form.seat_limit) }); setForm({ day_date: "", venue: "", seat_limit: 10 }); load(); }
+    try { await api.post("/clinical/specs-days", { camp_id: camp.id, ...form }); setForm({ day_date: "", venue: "", start_time: "", end_time: "" }); load(); }
     catch (e) { setErr(formatApiError(e)); }
   }, [camp, form, load]);
 
@@ -407,35 +301,41 @@ function SpecsCollectionDays() {
               <Glasses className="w-4 h-4 text-emerald-600" />
               <span className="font-medium text-slate-800 text-sm">{d.day_date}</span>
               <span className="text-xs text-slate-400">{d.venue}</span>
-              <Badge tone={d.seats_free > 0 ? "emerald" : "rose"} className="ml-auto">{d.seats_taken}/{d.seat_limit} seats</Badge>
+              <Badge tone={d.window_required ? "amber" : "emerald"} className="ml-auto">
+                {d.start_time && d.end_time ? `${d.start_time}–${d.end_time}` : "window required"}
+              </Badge>
             </div>
           ))}
         </div>
         <div className="flex flex-wrap gap-2 items-end pt-4 mt-3 border-t border-slate-100">
-          <div><label className="text-[10px] font-mono text-slate-400 uppercase">Date</label><Input type="date" value={form.day_date} onChange={(e) => setForm({ ...form, day_date: e.target.value })} data-testid="specs-date-input" /></div>
-          <div><label className="text-[10px] font-mono text-slate-400 uppercase">Venue</label><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="specs-venue-input" /></div>
-          <div><label className="text-[10px] font-mono text-slate-400 uppercase">Seats</label><Input type="number" value={form.seat_limit} onChange={(e) => setForm({ ...form, seat_limit: e.target.value })} className="w-24" data-testid="specs-seat-input" /></div>
-          <Button size="sm" onClick={add} disabled={!form.day_date || !form.venue} data-testid="add-specs-day-button"><Plus className="w-4 h-4" /> Add</Button>
+          <Field label="Date"><Input type="date" value={form.day_date} onChange={(e) => setForm({ ...form, day_date: e.target.value })} data-testid="specs-date-input" /></Field>
+          <Field label="Venue"><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="specs-venue-input" /></Field>
+          <Field label="Start"><Input type="time" value={form.start_time} onChange={(e) => setForm({ ...form, start_time: e.target.value })} className="w-28" data-testid="specs-start-input" /></Field>
+          <Field label="End"><Input type="time" value={form.end_time} onChange={(e) => setForm({ ...form, end_time: e.target.value })} className="w-28" data-testid="specs-end-input" /></Field>
+          <Button size="sm" onClick={add} disabled={!form.day_date || !form.venue || !form.start_time || !form.end_time} data-testid="add-specs-day-button"><Plus className="w-4 h-4" /> Add</Button>
         </div>
       </Card>
     </div>
   );
 }
 
-function Board({ title, rows, testid }) {
+function Board({ title, rows = [], testid }) {
+  const safeRows = rows || [];
   return (
     <Card>
       <h3 className="font-display font-bold text-slate-900 mb-3 flex items-center gap-2">
         <Trophy className="w-5 h-5 text-amber-500" /> {title}
       </h3>
       <div className="space-y-2" data-testid={testid}>
-        {rows.length === 0 && <p className="text-slate-400 text-sm">No points yet.</p>}
-        {rows.map((r, i) => (
+        {safeRows.length === 0 && <p className="text-slate-400 text-sm">No points yet.</p>}
+        {safeRows.map((r, i) => (
           <div key={`${r.name}-${i}`} className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-50">
             <span className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold ${i === 0 ? "bg-amber-400 text-white" : "bg-slate-200 text-slate-600"}`}>
               {i + 1}
             </span>
             <span className="flex-1 font-medium text-slate-800">{r.name}</span>
+            {r.registrations !== undefined && <Badge tone="slate">{r.registrations} registrations</Badge>}
+            {r.arrivals !== undefined && <Badge tone="slate">{r.arrivals} arrivals</Badge>}
             <Badge tone="emerald">{r.points} pts</Badge>
           </div>
         ))}
@@ -455,7 +355,7 @@ function Leaderboards() {
   if (!data) return null;
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <Board title="Volunteers" rows={data.volunteers} testid="leaderboard-volunteers-table" />
       <Board title="Team Leads" rows={data.team_leads} testid="leaderboard-team-leads-table" />
     </div>

@@ -73,6 +73,20 @@ describe("ZXING_READER_OPTIONS", () => {
 });
 
 describe("createLiveScanEngine", () => {
+  test("a failed QR reader stops scanning and offers recovery without unhandled rejection", async () => {
+    const onError = jest.fn();
+    const { engine } = makeEngine({
+      hasNativeDetector: false,
+      loadWasm: jest.fn().mockRejectedValue(new Error("Worker unavailable")),
+      onError,
+    });
+    engine.start();
+    await expect(engine.tick(frame)).resolves.toEqual({ error: true });
+    expect(engine.getState().started).toBe(false);
+    expect(onError).toHaveBeenCalledTimes(1);
+    await expect(engine.tick(frame)).resolves.toEqual({ skipped: true });
+  });
+
   test("does not load WASM while native is present and locking",
     async () => {
       const { engine, loadWasm, detectNative, decode, onLock } = makeEngine();

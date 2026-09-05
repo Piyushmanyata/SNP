@@ -48,7 +48,7 @@ The application stack consists of:
 | M2 | Arrival and scan resolution | `backend/routes_desk.py`, `backend/routes_registration.py`, `backend/serializers.py`, `frontend/src/pages/Desk.js`, `frontend/src/components/desk/` | none | DONE |
 | M3 | Capacity, occupancy and the four lines | `backend/routes_camps.py`, `backend/routes_clinical.py`, `frontend/src/pages/Login.js`, `frontend/src/components/clinical/` | M2 | DONE |
 | M4 | Reporting, prescription lockdown, live scan | `backend/routes_reports.py`, `backend/routes_templates.py`, `frontend/src/pages/PrintPrescription.js`, `frontend/src/components/aadhaar/` | M3 | DONE |
-| M5 | Production deployment | `docker-compose.prod.yml`, `Caddyfile`, `frontend/Dockerfile.prod`, `frontend/nginx.conf` | M4 | DONE |
+| M5 | Production deployment | `docker-compose.prod.yml`, `Caddyfile`, `frontend/Dockerfile`, `frontend/nginx.conf`, `backend/reminder_worker.py` | M4 | DONE |
 
 ## Interface Contracts
 

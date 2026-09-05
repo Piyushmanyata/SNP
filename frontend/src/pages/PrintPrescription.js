@@ -21,7 +21,7 @@ export default function PrintPrescription() {
     let cancelled = false;
     (async () => {
       try {
-        const r = await api.post(`/desk/print/${id}`);
+        const r = await api.get(`/desk/print/${id}`);
         if (cancelled) return;
         setRx(r.data.prescription);
         try {
@@ -52,7 +52,7 @@ export default function PrintPrescription() {
     </div>
   );
 
-  return <PrescriptionSheet rx={rx} logos={logos} navigate={navigate} />;
+  return <PrescriptionSheet rx={rx} logos={logos} navigate={navigate} patientId={id} />;
 }
 
 function SexBox({ mark, label }) {
@@ -66,7 +66,7 @@ function SexBox({ mark, label }) {
   );
 }
 
-export function PrescriptionSheet({ rx, logos = [], navigate, preview }) {
+export function PrescriptionSheet({ rx, logos = [], navigate, preview, patientId }) {
   const sex = String(rx.gender || rx.gender_label || "").toUpperCase();
   const male = sex.startsWith("M");
   const female = sex.startsWith("F");
@@ -75,7 +75,21 @@ export function PrescriptionSheet({ rx, logos = [], navigate, preview }) {
       {!preview && (
         <div className="no-print max-w-[210mm] mx-auto px-4 mb-4 flex gap-2">
           <Button variant="outline" onClick={() => navigate("/desk")}><ArrowLeft className="w-4 h-4" /> Desk</Button>
-          <Button onClick={() => window.print()} data-testid="print-a4-prescription-button"><Printer className="w-4 h-4" /> Print A4</Button>
+          <Button
+            onClick={async () => {
+              if (patientId) {
+                try {
+                  await api.post(`/desk/print/${patientId}`);
+                } catch (e) {
+                  logger.warn("Print Prescription stamp failed:", e);
+                }
+              }
+              window.print();
+            }}
+            data-testid="print-a4-prescription-button"
+          >
+            <Printer className="w-4 h-4" /> Print Prescription
+          </Button>
         </div>
       )}
 

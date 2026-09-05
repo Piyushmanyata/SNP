@@ -17,6 +17,10 @@ import api from "./lib/api";
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
+jest.mock("./context/AuthContext", () => ({
+  useAuth: () => ({ user: { id: "lead-1", role: "team_lead" } }),
+}));
+
 jest.mock("./lib/api", () => {
   const actual = jest.requireActual("./lib/api");
   return {
@@ -165,7 +169,8 @@ describe("CHALLENGE 1: FulfilmentStation & FulfilmentSection Patient Switch Stat
     };
 
     const otDays = [
-      { id: "day-1", day_date: "2026-09-02", venue: "OT Room A", seats_free: 5 }
+      { id: "day-1", day_date: "2026-09-02", venue: "Bajaj Hospital", seats_free: 5 },
+      { id: "day-2", day_date: "2026-09-03", venue: "Bajaj Hospital", seats_free: 5 },
     ];
 
     await act(async () => {
@@ -182,16 +187,18 @@ describe("CHALLENGE 1: FulfilmentStation & FulfilmentSection Patient Switch Stat
       );
     });
 
-    expect(container.querySelector('[data-testid="station-ot-fulfilled"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="station-ot-fulfilled"]')).toBeNull();
     await act(async () => {
-      container.querySelector('[data-testid="station-ot-deferred"]').click();
+      const picker = container.querySelector('[data-testid="ot_schedule_day_id-select"]');
+      picker.value = "day-2";
+      picker.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    expect(container.querySelector('[data-testid="ot_schedule_day_id-select"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="ot_schedule_day_id-select"]').value).toBe("day-2");
 
     const patient2Data = {
       transcription: { id: "tx-2" },
       registration: { id: "reg-2" },
-      fulfilments: [{ item_type: "ot", status: "fulfilled" }],
+      fulfilments: [{ item_type: "ot", status: "deferred", ot_schedule_day_id: "day-1" }],
     };
 
     await act(async () => {
@@ -208,7 +215,8 @@ describe("CHALLENGE 1: FulfilmentStation & FulfilmentSection Patient Switch Stat
       );
     });
 
-    expect(container.querySelector('[data-testid="station-ot-recorded"]').textContent).toContain("fulfilled");
+    expect(container.querySelector('[data-testid="station-ot-recorded"]').textContent).toContain("deferred");
+    expect(container.querySelector('[data-testid="ot_schedule_day_id-select"]')).toBeNull();
   });
 
   test("1.3: FulfilmentSection properly keys FulfilmentStation so patient switches cleanly reset station state even if both have empty fulfilments", async () => {
@@ -267,7 +275,7 @@ describe("CHALLENGE 1: FulfilmentStation & FulfilmentSection Patient Switch Stat
     };
 
     const specsDays = [
-      { id: "sp-day-1", day_date: "2026-09-05", venue: "Specs Counter", seats_free: 10 }
+      { id: "sp-day-1", day_date: "2026-09-05", venue: "Specs Counter", start_time: "09:00", end_time: "17:00" }
     ];
 
     const onDoneMock = jest.fn();
@@ -300,16 +308,17 @@ describe("CHALLENGE 1: FulfilmentStation & FulfilmentSection Patient Switch Stat
 
     const saveBtn = container.querySelector('[data-testid="station-specs_made-save"]');
     await act(async () => {
+      container.querySelector('[data-testid="station-specs_made-paper-review"]').click();
       saveBtn.click();
     });
 
-    expect(api.post).toHaveBeenCalledWith("/clinical/fulfilment", {
+    expect(api.post).toHaveBeenCalledWith("/clinical/fulfilment", expect.objectContaining({
       transcription_id: "tx-specs-99",
       item_type: "specs_made",
       status: "deferred",
-      ot_schedule_day_id: null,
       specs_collection_day_id: "sp-day-1",
-    });
+      paper_reviewed: true,
+    }));
     expect(onDoneMock).toHaveBeenCalled();
   });
 });
@@ -352,6 +361,7 @@ describe("CHALLENGE 2: Desk.js Form Persistence vs Modal Lifecycle", () => {
     act(() => {
       [...document.body.querySelectorAll('[data-testid="mock-failure-trigger"]')].pop().click();
       [...document.body.querySelectorAll('[data-testid="mock-failure-trigger"]')].pop().click();
+      [...document.body.querySelectorAll('[data-testid="mock-failure-trigger"]')].pop().click();
     });
 
     const nameInput = document.body.querySelector('[data-testid="reg-fullname-input"]');
@@ -382,6 +392,7 @@ describe("CHALLENGE 2: Desk.js Form Persistence vs Modal Lifecycle", () => {
 
     // Trigger failure twice again to check if form fields are empty strings
     act(() => {
+      [...document.body.querySelectorAll('[data-testid="mock-failure-trigger"]')].pop().click();
       [...document.body.querySelectorAll('[data-testid="mock-failure-trigger"]')].pop().click();
       [...document.body.querySelectorAll('[data-testid="mock-failure-trigger"]')].pop().click();
     });
@@ -516,6 +527,7 @@ describe("CHALLENGE 2: Desk.js Form Persistence vs Modal Lifecycle", () => {
     act(() => {
       [...document.body.querySelectorAll('[data-testid="mock-failure-trigger"]')].pop().click();
       [...document.body.querySelectorAll('[data-testid="mock-failure-trigger"]')].pop().click();
+      [...document.body.querySelectorAll('[data-testid="mock-failure-trigger"]')].pop().click();
     });
 
     const nameInput = document.body.querySelector('[data-testid="reg-fullname-input"]');
@@ -619,7 +631,7 @@ describe("CHALLENGE 3: Camera Fallback and Torch Toggling in useAadhaarCamera", 
   });
 
   test("3.6: cameraErrorMessage formats standard WebRTC camera errors correctly", () => {
-    expect(cameraErrorMessage({ name: "NotAllowedError" })).toContain("Camera permission denied");
+    expect(cameraErrorMessage({ name: "NotAllowedError" })).toContain("Camera permission is off");
     expect(cameraErrorMessage({ name: "NotFoundError" })).toContain("No camera found");
     expect(cameraErrorMessage({ name: "NotReadableError" })).toContain("Camera is currently busy");
     expect(cameraErrorMessage(new Error("random error"))).toContain("Unable to start camera");

@@ -53,7 +53,7 @@ export function AadhaarFallbackPanel({
           className="min-h-[44px]"
           data-testid="fallback-manual-button"
         >
-          <Keyboard className="w-4 h-4" /> Type details
+          <Keyboard className="w-4 h-4" /> USB / paste
         </Button>
       </div>
     </div>

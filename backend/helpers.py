@@ -27,12 +27,45 @@ def iso(dt: datetime | None) -> str | None:
     return as_utc(dt).isoformat() if dt else None
 
 
+def now_ist() -> datetime:
+    return datetime.now(IST)
+
+
 def today_ist_str() -> str:
-    return datetime.now(IST).strftime("%Y-%m-%d")
+    return now_ist().strftime("%Y-%m-%d")
+
+
+def next_ist_midnight(now: datetime | None = None):
+    ist = as_utc(now or now_utc()).astimezone(IST)
+    nxt = ist.date() + timedelta(days=1)
+    return datetime(nxt.year, nxt.month, nxt.day, tzinfo=IST).astimezone(timezone.utc)
+
+
+HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+def parse_hhmm(value: str | None) -> str:
+    raw = (value or "").strip()
+    if not HHMM_RE.fullmatch(raw):
+        raise ValueError("Times must be HH:MM")
+    return raw
+
+
+def ist_local_instant(day_date: str, hhmm: str) -> datetime:
+    hour, minute = map(int, hhmm.split(":"))
+    return datetime.strptime(day_date, "%Y-%m-%d").replace(
+        hour=hour, minute=minute, second=0, microsecond=0, tzinfo=IST,
+    )
 
 
 def tomorrow_ist_str() -> str:
     return (date.fromisoformat(today_ist_str()) + timedelta(days=1)).isoformat()
+
+
+def ist_day_bounds(day_str: str) -> tuple[datetime, datetime]:
+    start_ist = datetime.strptime(day_str, "%Y-%m-%d").replace(tzinfo=IST)
+    end_ist = start_ist + timedelta(days=1)
+    return start_ist.astimezone(timezone.utc), end_ist.astimezone(timezone.utc)
 
 
 # ---- normalization ----

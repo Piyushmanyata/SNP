@@ -1,15 +1,15 @@
+import asyncio
 from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
 from db import get_db
 from models import CreateStaffBody, PatchStaffLineBody
-from helpers import now_utc
+from helpers import now_utc, normalize_name
 from security import (
-    hash_password,
-    validate_password_policy,
+    hash_pin,
     serialize_user,
     require_admin,
-    require_staff,
+    require_lead,
     get_current_user,
 )
 
@@ -36,6 +36,14 @@ async def create_staff(body: CreateStaffBody, actor: dict = Depends(get_current_
     if body.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail="Invalid role")
 
+    name = (body.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name is required")
+
+    norm = normalize_name(name)
+    if not norm:
+        raise HTTPException(status_code=400, detail="Valid name is required")
+
     # permission model
     if actor["role"] == "admin":
         pass
@@ -45,22 +53,26 @@ async def create_staff(body: CreateStaffBody, actor: dict = Depends(get_current_
     else:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
-    err = validate_password_policy(body.password)
-    if err:
-        raise HTTPException(status_code=400, detail=err)
-
-    email = body.email.lower().strip()
-    if await db.users.find_one({"email": email}):
-        raise HTTPException(status_code=409, detail="Email already exists")
+    if await db.users.find_one({"name_normalized": norm}):
+        raise HTTPException(status_code=409, detail="Name already exists")
 
     team_lead_id = body.team_lead_id
     if actor["role"] == "team_lead":
         team_lead_id = str(actor["_id"])
+    elif body.role == "volunteer" and team_lead_id:
+        try:
+            tl_oid = ObjectId(team_lead_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid team lead id")
+        lead = await db.users.find_one({"_id": tl_oid, "role": "team_lead", "disabled_at": None})
+        if not lead:
+            raise HTTPException(status_code=400, detail="Team lead not found or inactive")
 
     doc = {
-        "email": email,
-        "password_hash": hash_password(body.password),
-        "name": body.name,
+        "name": name,
+        "name_normalized": norm,
+        "pin_hash": await asyncio.to_thread(hash_pin, "1234"),
+        "must_change_pin": True,
         "role": body.role,
         "phone": body.phone,
         "team_lead_id": team_lead_id if body.role == "volunteer" else None,
@@ -75,11 +87,11 @@ async def create_staff(body: CreateStaffBody, actor: dict = Depends(get_current_
 
 
 @router.get("")
-async def list_staff(actor: dict = Depends(require_staff)) -> Dict[str, Any]:
+async def list_staff(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
     db = get_db()
     query = {}
     if actor["role"] == "team_lead":
-        query = {"$or": [{"team_lead_id": str(actor["_id"])}, {"_id": actor["_id"]}]}
+        query = {"role": "volunteer", "team_lead_id": str(actor["_id"])}
     users = await db.users.find(query).sort("created_at", -1).to_list(500)
     return {"staff": [serialize_user(u) for u in users]}
 
@@ -89,6 +101,29 @@ async def team_leads(actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     users = await db.users.find({"role": "team_lead", "disabled_at": None}).to_list(200)
     return {"team_leads": [serialize_user(u) for u in users]}
+
+
+@router.post("/{staff_id}/reset-pin")
+async def reset_staff_pin(staff_id: str, actor: dict = Depends(get_current_user)) -> Dict[str, Any]:
+    db = get_db()
+    user = await db.users.find_one({"_id": ObjectId(staff_id)})
+    if not user:
+        raise HTTPException(status_code=404, detail="Staff not found")
+
+    if actor["role"] == "admin":
+        pass
+    elif actor["role"] == "team_lead":
+        if user.get("role") != "volunteer" or user.get("team_lead_id") != str(actor["_id"]):
+            raise HTTPException(status_code=403, detail="Cannot reset PIN for this volunteer")
+    else:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    await db.users.update_one(
+        {"_id": user["_id"]},
+        {"$set": {"pin_hash": await asyncio.to_thread(hash_pin, "1234"), "must_change_pin": True},
+         "$inc": {"session_version": 1}},
+    )
+    return {"ok": True, "message": "PIN reset to 1234"}
 
 
 @router.patch("/{staff_id}")
@@ -104,22 +139,40 @@ async def patch_staff_line(staff_id: str, body: PatchStaffLineBody, actor: dict 
 
 
 @router.patch("/{staff_id}/disable")
-async def disable_staff(staff_id: str, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
+async def disable_staff(staff_id: str, actor: dict = Depends(get_current_user)) -> Dict[str, Any]:
     db = get_db()
-    res = await db.users.update_one(
-        {"_id": ObjectId(staff_id)}, {"$set": {"disabled_at": now_utc()}}
-    )
-    if res.matched_count == 0:
+    user = await db.users.find_one({"_id": ObjectId(staff_id)})
+    if not user:
         raise HTTPException(status_code=404, detail="Staff not found")
+    if actor["role"] == "admin":
+        pass
+    elif actor["role"] == "team_lead":
+        if user.get("role") != "volunteer" or user.get("team_lead_id") != str(actor["_id"]):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+    else:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    await db.users.update_one(
+        {"_id": user["_id"]}, {"$set": {"disabled_at": now_utc()}}
+    )
     return {"ok": True}
 
 
 @router.patch("/{staff_id}/enable")
-async def enable_staff(staff_id: str, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
+async def enable_staff(staff_id: str, actor: dict = Depends(get_current_user)) -> Dict[str, Any]:
     db = get_db()
-    res = await db.users.update_one(
-        {"_id": ObjectId(staff_id)}, {"$set": {"disabled_at": None}}
-    )
-    if res.matched_count == 0:
+    user = await db.users.find_one({"_id": ObjectId(staff_id)})
+    if not user:
         raise HTTPException(status_code=404, detail="Staff not found")
+    if actor["role"] == "admin":
+        pass
+    elif actor["role"] == "team_lead":
+        if user.get("role") != "volunteer" or user.get("team_lead_id") != str(actor["_id"]):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+    else:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    await db.users.update_one(
+        {"_id": user["_id"]}, {"$set": {"disabled_at": None}}
+    )
     return {"ok": True}

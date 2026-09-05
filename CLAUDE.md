@@ -1,12 +1,12 @@
 @AGENTS.md
 
-## SNP Camps — Emergent Application
+## SNP Camps — Hostinger KVM Application
 
 Authoritative stack:
-- `frontend/`: React + Tailwind CSS (CRA)
+- `frontend/`: React + Tailwind CSS (Vite)
 - `backend/`: FastAPI + Motor async MongoDB
 - `memory/`: PRD and test credentials
-- `.emergent/`: Deployment and cron configurations
+- `docker-compose.prod.yml`: full-stack deployment, TLS, backups and reminder worker
 
 Do not introduce Next.js, Supabase, or Vercel dependencies.
 

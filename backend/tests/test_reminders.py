@@ -122,22 +122,46 @@ def _post(client, secret=SECRET):
 
 class TestMessageCopy:
     def test_six_approved_devanagari_strings(self):
-        assert REGISTRATION_CONFIRMATION == "SNP नेत्र शिविर पंजीकरण हुआ। क्रमांक {reg_no}, दिनांक {date}, स्थान {venue}।"
-        assert CAMP_REMINDER == "कल SNP नेत्र शिविर। क्रमांक {reg_no}, दिनांक {date}, स्थान {venue}। समय पर पहुँचें।"
-        assert OT_TOKEN == "SNP ऑपरेशन नियत। क्रमांक {reg_no}, दिनांक {date}, स्थान {venue}। टोकन साथ लाएँ।"
-        assert OT_REMINDER == "कल SNP ऑपरेशन। क्रमांक {reg_no}, दिनांक {date}, स्थान {venue}। टोकन साथ लाएँ।"
-        assert SPECS_TOKEN == "SNP चश्मा वितरण नियत। क्रमांक {reg_no}, दिनांक {date}, स्थान {venue}। टोकन साथ लाएँ।"
-        assert SPECS_REMINDER == "कल SNP से चश्मा लें। क्रमांक {reg_no}, दिनांक {date}, स्थान {venue}। टोकन साथ लाएँ।"
+        assert REGISTRATION_CONFIRMATION == "SNP नेत्र शिविर में आपका पंजीकरण हो गया है। क्रमांक: {reg_no} दिनांक: {date} शिविर स्थल: {venue}। कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।"
+        assert CAMP_REMINDER == "कल ({date}) को SNP नेत्र शिविर में आपका नेत्र परीक्षण है। कृपया समय पर {venue} पहुँचें। यह टोकन शिविर स्थल पर दिखाएँ। क्रमांक: {reg_no}। कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।"
+        assert OT_TOKEN == "SNP नेत्र शिविर में आपका ऑपरेशन बजाज हॉस्पिटल में {date} को निर्धारित हुआ है। पर्चा, टोकन ({reg_no}), आधार कार्ड, वोटर आईडी और मोबाइल नंबर साथ लाएँ। स्थल: {venue}।"
+        assert OT_REMINDER == "कल ({date}) को आपका नेत्र ऑपरेशन बजाज हॉस्पिटल में निर्धारित है। पर्चा, टोकन ({reg_no}), आधार कार्ड, वोटर आईडी और मोबाइल नंबर साथ लाएँ। स्थल: {venue}।"
+        assert SPECS_TOKEN == "SNP द्वारा आपका चश्मा {date}{window} पर {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर आएँ।"
+        assert SPECS_REMINDER == "कल SNP से चश्मा लें। क्रमांक {reg_no}, दिनांक {date}{window}, स्थान {venue}। टोकन साथ लाएँ।"
 
-    def test_every_message_fits_two_ucs2_segments(self):
+    def test_complete_surgery_copy_keeps_all_required_documents(self):
         rendered = [
-            copy.format(reg_no=999999, date="2026-09-02", venue="Sikar Bhawan Kolkata")
+            copy.format(reg_no=999999, date="2026-09-02", venue="Sikar Bhawan Kolkata", window=", समय 09:00–17:00")
             for copy in sms.MESSAGE_COPY.values()
         ]
-        assert all(len(text) <= 134 for text in rendered), [len(t) for t in rendered]
+        assert all(len(text) <= 335 for text in rendered), [len(t) for t in rendered]
+        assert "आधार कार्ड, वोटर आईडी और मोबाइल नंबर" in rendered[2]
+        assert "आधार कार्ड, वोटर आईडी और मोबाइल नंबर" in rendered[3]
 
 
 class TestReminderCronHttp:
+    def test_failed_provider_call_is_reported_and_retried_without_duplicate_success(self, monkeypatch):
+        mock_db = setup_mock_db(monkeypatch)
+        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
+        captured = _calls(monkeypatch)
+        client = _client(monkeypatch, mock_db)
+        provider = msg91.send_dlt_sms
+
+        def fail(*args, **kwargs):
+            raise RuntimeError("provider unavailable")
+
+        monkeypatch.setattr(msg91, "send_dlt_sms", fail)
+        first = _post(client).json()
+        assert first["ok"] is False
+        assert first["failed"] == 1
+        monkeypatch.setattr(msg91, "send_dlt_sms", provider)
+        retry = _post(client).json()
+        assert retry["ok"] is True
+        assert retry["sent"] == 1
+        assert len(mock_db.reminder_ledger.docs) == 1
+        assert _post(client).json()["sent"] == 0
+        assert len(captured) == 1
+
     def test_wrong_secret_refused(self, monkeypatch):
         mock_db = setup_mock_db(monkeypatch)
         client = _client(monkeypatch, mock_db)
@@ -281,11 +305,12 @@ class TestReminderCronHttp:
             })
             await mock_db.specs_collection_days.insert_one({
                 "_id": specs_day, "day_date": TOMORROW, "venue": "Optical Desk",
-                "seat_limit": 10, "seats_taken": 1, "camp_id": ObjectId(),
+                "start_time": "14:00", "end_time": "16:00", "camp_id": ObjectId(),
             })
             await mock_db.deferred_slips.insert_one({
                 "patient_id": pid, "item_type": "specs_made", "active": True, "cancelled": False,
-                "collection_date": TOMORROW, "collection_venue": "stale",
+                "collection_date": TOMORROW, "collection_venue": "Token Hall",
+                "collection_start_time": "10:00", "collection_end_time": "12:00",
                 "specs_collection_day_id": specs_day, "version": 1,
             })
         asyncio.run(seed())
@@ -295,8 +320,8 @@ class TestReminderCronHttp:
         assert r.status_code == 200, r.text
         assert captured == [{
             "type": "specs", "mobile": HOUSEHOLD, "reg_no": 42,
-            "date": TOMORROW, "venue": "Optical Desk",
+            "date": TOMORROW + ", समय 10:00–12:00", "venue": "Token Hall",
         }]
         assert mock_db.reminder_ledger.docs[0]["copy"] == SPECS_REMINDER.format(
-            reg_no=42, date=TOMORROW, venue="Optical Desk"
+            reg_no=42, date=TOMORROW, venue="Token Hall", window=", समय 10:00–12:00"
         )

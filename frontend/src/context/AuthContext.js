@@ -10,6 +10,12 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const path = window.location.pathname || "";
+    if (path === "/login" || path === "/self-register") {
+      setUser(false);
+      setLoading(false);
+      return;
+    }
     api
       .get("/auth/me")
       .then((r) => setUser(r.data.user))
@@ -17,9 +23,15 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const login = useCallback(async (email, password) => {
+  const login = useCallback(async (name, pin) => {
     clearSessionLine();
-    const r = await api.post("/auth/login", { email, password });
+    const r = await api.post("/auth/login", { name, pin });
+    setUser(r.data.user);
+    return r.data.user;
+  }, []);
+
+  const changePin = useCallback(async (current_pin, new_pin) => {
+    const r = await api.post("/auth/change-pin", { current_pin, new_pin });
     setUser(r.data.user);
     return r.data.user;
   }, []);
@@ -35,8 +47,8 @@ export function AuthProvider({ children }) {
   }, []);
 
   const value = useMemo(
-    () => ({ user, setUser, login, logout, loading }),
-    [user, login, logout, loading]
+    () => ({ user, setUser, login, logout, changePin, loading }),
+    [user, login, logout, changePin, loading]
   );
 
   return (

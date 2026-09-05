@@ -38,7 +38,9 @@ export function useAadhaarCamera({
   const loopRef = useRef(null);
   const mountedRef = useRef(true);
   const isStartingRef = useRef(false);
+  const sessionRef = useRef(0);
   const stillCaptureRef = useRef(null);
+  const nextStillAtRef = useRef(0);
 
   const stopLoop = useCallback(() => {
     if (loopRef.current) {
@@ -51,6 +53,7 @@ export function useAadhaarCamera({
   }, []);
 
   const stopCamera = useCallback(async () => {
+    sessionRef.current += 1;
     stopLoop();
     stillCaptureRef.current = null;
     const stream = streamRef.current;
@@ -87,7 +90,8 @@ export function useAadhaarCamera({
 
   const frameFor = useCallback(async (region) => {
     const video = videoRef.current;
-    if (region === "full" && stillCaptureRef.current) {
+    if (region === "full" && stillCaptureRef.current && Date.now() >= nextStillAtRef.current) {
+      nextStillAtRef.current = Date.now() + 3000;
       try {
         const blob = await stillCaptureRef.current.takePhoto();
         const bitmap = await createImageBitmap(blob);
@@ -124,6 +128,13 @@ export function useAadhaarCamera({
       onScanStall: () => {
         if (onScanStall) onScanStall();
       },
+      onError: async (message) => {
+        await stopCamera();
+        if (mountedRef.current) {
+          setCameraState("error");
+          if (onError) onError(message);
+        }
+      },
     });
     engineRef.current = engine;
     engine.start();
@@ -131,43 +142,33 @@ export function useAadhaarCamera({
     loopRef.current = setInterval(() => {
       engine.tick(video);
     }, MAX_DETECT_INTERVAL_MS);
-  }, [decode, frameFor, onHintFallbacks, onLock, onScanStall, stopCamera]);
+  }, [decode, frameFor, onHintFallbacks, onLock, onScanStall, onError, stopCamera]);
 
   const startCamera = useCallback(
     async (cameraIndexToUse) => {
       if (isStartingRef.current) return;
       isStartingRef.current = true;
-      setCameraState("starting");
       await stopCamera();
+      const session = sessionRef.current;
+      setCameraState("starting");
 
       try {
-        let available = camerasRef.current;
-        if (!available || available.length === 0) {
-          try {
-            available = await listVideoInputs();
-            if (mountedRef.current) {
-              setCameras(available);
-              camerasRef.current = available;
-            }
-          } catch (e) {
-            logger.warn("Failed to enumerate cameras:", e);
-            available = [];
-          }
-        }
-
-        const idx = typeof cameraIndexToUse === "number" ? cameraIndexToUse : currentCameraIndexRef.current;
-        const deviceId = available[idx]?.deviceId;
+        const deviceId = typeof cameraIndexToUse === "number"
+          ? camerasRef.current[cameraIndexToUse]?.deviceId
+          : undefined;
 
         const stream = await acquireCameraStream(deviceId);
-        if (!mountedRef.current) {
+        if (!mountedRef.current || session !== sessionRef.current) {
           stream.getTracks().forEach((t) => t.stop());
           return;
         }
 
         streamRef.current = stream;
         await attachStreamToVideo(videoRef.current, stream);
+        if (!mountedRef.current || session !== sessionRef.current) return;
 
         stillCaptureRef.current = createStillCapture(stream);
+        nextStillAtRef.current = Date.now() + 3000;
 
         if (checkTorchCapability(stream)) {
           setTorchAvailable(true);
@@ -175,17 +176,25 @@ export function useAadhaarCamera({
 
         try {
           const refreshed = await listVideoInputs();
-          if (mountedRef.current && refreshed.length) {
+          if (mountedRef.current && session === sessionRef.current && refreshed.length) {
             setCameras(refreshed);
             camerasRef.current = refreshed;
+            const activeDevice = stream.getVideoTracks()[0]?.getSettings?.().deviceId;
+            const activeIndex = refreshed.findIndex((camera) => camera.deviceId === activeDevice);
+            if (activeIndex >= 0) {
+              setCurrentCameraIndex(activeIndex);
+              currentCameraIndexRef.current = activeIndex;
+            }
           }
         } catch (e) {
           logger.warn("Failed to refresh camera list after start:", e);
         }
 
+        if (!mountedRef.current || session !== sessionRef.current) return;
         setCameraState("scanning");
         startLoop();
       } catch (err) {
+        if (!mountedRef.current || session !== sessionRef.current) return;
         await stopCamera();
         if (mountedRef.current) {
           setCameraState("error");
@@ -228,5 +237,3 @@ export function useAadhaarCamera({
     videoRef,
   };
 }
-
-

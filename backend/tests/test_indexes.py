@@ -13,10 +13,13 @@ from db import (
     LEDGER_PARTIAL_FILTER,
     PERSON_CAMP_INDEX,
     PERSON_CAMP_INDEX_NAME,
+    SETUP_REQUEST_INDEX_NAME,
+    SETUP_REQUEST_PARTIAL,
     TRANSCRIPTION_PATIENT_INDEX,
     should_drop_household_ledger_index,
     should_drop_ledger_index,
     should_drop_person_camp_index,
+    should_drop_setup_request_index,
 )
 
 
@@ -56,3 +59,13 @@ def test_the_household_ledger_index_is_dropped_so_a_shared_phone_can_take_two_se
     assert should_drop_household_ledger_index({HOUSEHOLD_LEDGER_INDEX_NAME: {"unique": True}})
     assert not should_drop_household_ledger_index({LEDGER_INDEX_NAME: {"unique": True}})
     assert not should_drop_household_ledger_index({})
+
+
+def test_null_setup_request_ids_do_not_share_a_unique_index_slot():
+    assert SETUP_REQUEST_INDEX_NAME == "setup_request_id_1"
+    assert SETUP_REQUEST_PARTIAL == {"setup_request_id": {"$type": "string"}}
+    assert should_drop_setup_request_index({SETUP_REQUEST_INDEX_NAME: {"unique": True, "sparse": True}})
+    assert not should_drop_setup_request_index({
+        SETUP_REQUEST_INDEX_NAME: {"unique": True, "partialFilterExpression": SETUP_REQUEST_PARTIAL},
+    })
+    assert not should_drop_setup_request_index({})

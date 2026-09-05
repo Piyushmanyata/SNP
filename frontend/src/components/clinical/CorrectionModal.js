@@ -1,30 +1,51 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import api, { formatApiError } from "../../lib/api";
-import { Modal, Field, Input, Alert, Button } from "../ui";
-import { SpecsMeasurementsGrid } from "./SpecsMeasurementsGrid";
+import { Modal, Field, Input, Alert } from "../ui";
+import { PrescriptionForm } from "./PrescriptionForm";
 
+const PRESCRIPTION_FIELDS = ["diagnosis_options", "diagnosis_other", "blood_sugar", "bp", "remarks", "medication_instructions", "specs_measurements", "ot_eye", "ot_procedure", "ot_notes"];
 const EMPTY_MEASUREMENTS = {
   r_sph: "", r_cyl: "", r_axis: "", l_sph: "", l_cyl: "", l_axis: "", add: "",
 };
 
-export function CorrectionForm({ transcriptionId, onDone }) {
+export function CorrectionForm({ transcription, line = "medicine", diagOpts = [], onDone, expectedGeneration = 0, patientId, prescribedLines = [] }) {
+  const [initial] = useState(() => ({
+    ...Object.fromEntries(PRESCRIPTION_FIELDS.map((field) => [field, transcription?.[field] ?? ""])),
+    diagnosis_options: transcription?.diagnosis_options || [],
+    specs_measurements: { ...EMPTY_MEASUREMENTS, ...transcription?.specs_measurements },
+  }));
+  const [rx, setRx] = useState(initial);
   const [reason, setReason] = useState("");
-  const [field, setField] = useState("remarks");
-  const [value, setValue] = useState("");
-  const [measurements, setMeasurements] = useState(EMPTY_MEASUREMENTS);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const firstFieldRef = useRef(null);
+  const opRef = useRef(null);
+  const changes = Object.fromEntries(PRESCRIPTION_FIELDS
+    .filter((field) => JSON.stringify(rx[field]) !== JSON.stringify(initial[field]))
+    .map((field) => [field, rx[field]]));
+  const canSubmit = Boolean(reason.trim()) && Object.keys(changes).length > 0;
+
+  useEffect(() => { firstFieldRef.current?.focus(); }, []);
 
   const submit = async () => {
+    if (busy || !canSubmit) return;
     setBusy(true);
     setError("");
     try {
-      const changeValue = field === "specs_measurements" ? measurements : value;
+      if (!opRef.current) {
+        opRef.current = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`;
+      }
+      const lines = [...new Set([...(prescribedLines || []), line].filter((key) => key && key !== "doctor_rx"))];
       await api.post("/clinical/correction", {
-        transcription_id: transcriptionId,
-        reason,
-        changes: { [field]: changeValue },
+        transcription_id: transcription.id,
+        patient_id: patientId,
+        reason: reason.trim(),
+        changes,
+        expected_generation: expectedGeneration,
+        prescribed_lines: lines,
+        operation_id: opRef.current,
       });
+      opRef.current = null;
       onDone();
     } catch (err) {
       setError(formatApiError(err));
@@ -34,61 +55,37 @@ export function CorrectionForm({ transcriptionId, onDone }) {
   };
 
   return (
-    <div className="space-y-3">
-      <Field label="Field">
-        <select
-          className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300"
-          value={field}
-          onChange={(e) => setField(e.target.value)}
-          data-testid="correction-field-select"
-        >
-          {["remarks", "diagnosis_other", "bp", "blood_sugar", "ot_procedure", "specs_measurements"].map(
-            (f) => (
-              <option key={f} value={f}>
-                {f}
-              </option>
-            )
-          )}
-        </select>
-      </Field>
-      {field === "specs_measurements" ? (
-        <SpecsMeasurementsGrid
-          specsMeasurements={measurements}
-          onChange={setMeasurements}
-        />
-      ) : (
-        <Field label="New value">
-          <Input
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            data-testid="correction-value-input"
-          />
-        </Field>
-      )}
+    <fieldset className="space-y-3" disabled={busy}>
+      <p className="text-sm text-slate-700">Complete or correct the doctor's prescription. Only changed fields are saved, with your reason in the audit history.</p>
       <Field label="Reason (audited)" required>
-        <Input
-          value={reason}
-          onChange={(e) => setReason(e.target.value)}
-          data-testid="correction-reason-input"
-        />
+        <Input value={reason} onChange={(e) => setReason(e.target.value)} disabled={busy} data-testid="correction-reason-input" />
       </Field>
       {error && <Alert>{error}</Alert>}
-      <Button
-        className="w-full"
-        onClick={submit}
-        disabled={busy || !reason}
-        data-testid="correction-submit-button"
-      >
-        Add Correction
-      </Button>
-    </div>
+      <PrescriptionForm
+        rx={rx}
+        setRx={setRx}
+        line={line}
+        diagOpts={[...new Set([...diagOpts, ...initial.diagnosis_options])]}
+        toggleDiag={(option) => setRx((current) => ({
+          ...current,
+          diagnosis_options: current.diagnosis_options.includes(option)
+            ? current.diagnosis_options.filter((value) => value !== option)
+            : [...current.diagnosis_options, option],
+        }))}
+        locked={false}
+        busy={busy || !canSubmit}
+        saveRx={submit}
+        hasExistingTranscription
+        firstFieldRef={firstFieldRef}
+      />
+    </fieldset>
   );
 }
 
-export function CorrectionModal({ open, onClose, transcriptionId, onDone }) {
+export function CorrectionModal({ open, onClose, transcription, line, diagOpts, onDone, expectedGeneration, patientId, prescribedLines }) {
   return (
-    <Modal open={open} onClose={onClose} title="Prescription Correction">
-      <CorrectionForm transcriptionId={transcriptionId} onDone={onDone} />
+    <Modal open={open} onClose={onClose} title="Complete or correct prescription" size="lg">
+      <CorrectionForm key={transcription?.id} transcription={transcription} line={line} diagOpts={diagOpts} onDone={onDone} expectedGeneration={expectedGeneration} patientId={patientId} prescribedLines={prescribedLines} />
     </Modal>
   );
 }

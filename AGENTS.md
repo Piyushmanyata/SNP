@@ -202,7 +202,7 @@ Short. Numbers first. No filler, no preamble, no recap of steps already shown.
 State assumptions in one line. Ask only when the answer changes what you build.
 
 
-# Agent Governance Rules — SNP Camps (Emergent Stack)
+# Agent Governance Rules — SNP Camps (Hostinger KVM Stack)
 
 ## Architecture Overview
 
@@ -210,7 +210,7 @@ The authoritative application stack consists of:
 - `frontend/`: React single-page application (React 18 + Tailwind CSS + Lucide)
 - `backend/`: FastAPI async Python application with Motor MongoDB driver
 - `memory/`: PRD specifications and test credentials
-- `.emergent/`: Emergent deployment, runtime and cron configurations
+- `docker-compose.prod.yml`: Hostinger KVM deployment, reminder worker, TLS and backups
 
 The root Next.js + Supabase application is legacy and has been retired.
 
@@ -220,4 +220,3 @@ The root Next.js + Supabase application is legacy and has been retired.
 - Backend uses MongoDB async driver (Motor). Invariants are maintained via unique indexes and atomic conditional operations.
 - Desk actions: Registration -> Print Prescription (`printed_at` presence) -> Mark Seen -> Clinical Fulfilment.
 - Accessibility: High contrast, 44x44 minimum touch targets, responsive field-ready layout.
-

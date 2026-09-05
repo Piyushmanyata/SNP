@@ -75,4 +75,25 @@ describe("Modal", () => {
     });
     expect(document.body.style.overflow).not.toBe("hidden");
   });
+
+  test("keyboard focus stays inside the dialog and returns to its opener", () => {
+    const opener = document.createElement("button");
+    document.body.appendChild(opener);
+    opener.focus();
+    act(() => root.render(<Modal open title="PIN"><input aria-label="PIN" /><button>Save</button></Modal>));
+    const input = document.querySelector('input[aria-label="PIN"]');
+    const save = document.querySelector('[role="dialog"] button:last-child');
+    expect(document.activeElement).toBe(input);
+    save.focus();
+    act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", cancelable: true })));
+    expect(document.activeElement).toBe(input);
+    act(() => root.render(<Modal open={false} title="PIN" />));
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
+  });
+
+  test("a mandatory dialog has no inactive close button", () => {
+    act(() => root.render(<Modal open title="Set PIN">Required</Modal>));
+    expect(document.querySelector('[data-testid="modal-close-button"]')).toBeNull();
+  });
 });

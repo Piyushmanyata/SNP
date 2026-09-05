@@ -6,7 +6,9 @@ outbound DLT send replaced by a recorder.
 import asyncio
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 backend_dir = Path(__file__).resolve().parents[1]
 if str(backend_dir) not in sys.path:
@@ -24,17 +26,27 @@ import helpers
 import msg91
 import routes_desk
 import sms
-from models import FulfilmentBody, RegisterBody, ScanBody, ScanConfirmBody
-from routes_clinical import record_fulfilment
+from models import CompletePrescriptionBody, FulfilmentBody, RegisterBody, ScanBody, ScanConfirmBody
+
+
+def _fulfil(trans_id, rev_id, **kw):
+    kw.setdefault("paper_reviewed", True)
+    kw.setdefault("reviewed_revision_id", str(rev_id))
+    kw.setdefault("reviewed_generation", 1)
+    kw.setdefault("operation_id", str(ObjectId()))
+    return FulfilmentBody(transcription_id=str(trans_id), **kw)
+from routes_clinical import complete_prescription, record_fulfilment
 from routes_desk import arrive, mark_seen, print_prescription, scan, scan_confirm
 from routes_registration import desk_register, name_search
 from test_adversarial_challenger import MockDB, setup_mock_db
 
 TODAY = "2026-09-01"
 OTHER_DAY = "2026-09-03"
+FROZEN_IST = datetime(2026, 9, 1, 12, 0, tzinfo=ZoneInfo("Asia/Kolkata"))
 ACTOR = {"_id": ObjectId(), "role": "volunteer"}
-CARD = "AADHAAR|Sunita Devi|F|1975-06-14|123456781234|12 Station Road Sikar"
-OTHER_CARD = "AADHAAR|Ram Prasad|M|1968-01-09|999988887777|4 Mill Lane Sikar"
+CLINICAL = {"_id": ObjectId(), "role": "clinical_desk_operator"}
+CARD = '<PrintLetterBarcodeData name="Sunita Devi" gender="F" dob="1975-06-14" uid="123456781234" street="12 Station Road Sikar"/>'
+OTHER_CARD = '<PrintLetterBarcodeData name="Ram Prasad" gender="M" dob="1968-01-09" uid="999988887777" street="4 Mill Lane Sikar"/>'
 RX = {"r_sph": "-1.00", "l_sph": "-1.25", "add": "+2.00"}
 
 
@@ -46,8 +58,12 @@ def _mock(monkeypatch):
     mock_db = setup_mock_db(monkeypatch)
     monkeypatch.setattr(routes_desk, "get_db", lambda: mock_db)
     monkeypatch.setattr(sms, "get_db", lambda: mock_db, raising=False)
+    monkeypatch.setattr(helpers, "now_utc", lambda: FROZEN_IST.astimezone(timezone.utc))
+    monkeypatch.setattr(helpers, "now_ist", lambda: FROZEN_IST)
     monkeypatch.setattr(helpers, "today_ist_str", lambda: TODAY)
-    monkeypatch.setattr(routes_desk, "today_ist_str", lambda: TODAY)
+    import routes_camps
+    monkeypatch.setattr(routes_camps, "now_utc", lambda: FROZEN_IST.astimezone(timezone.utc), raising=False)
+    monkeypatch.setattr(routes_camps, "today_ist_str", lambda: TODAY, raising=False)
     return mock_db
 
 
@@ -75,7 +91,7 @@ async def _seed_camp(mock_db, days=(TODAY,)):
         day_id = ObjectId()
         await mock_db.camp_days.insert_one({
             "_id": day_id, "camp_id": camp_id, "day_date": date,
-            "seat_limit": 50, "printing_open": True,
+            "seat_limit": 50, "booked": 0, "printing_open": True,
         })
         day_ids.append(day_id)
     return camp_id, day_ids
@@ -113,13 +129,25 @@ class TestArrival:
         async def run():
             mock_db = _mock(monkeypatch)
             _camp_id, (day_id,) = await _seed_camp(mock_db)
-            reg = await _register(day_id, manual_entry=True)
+            reg = await _register(day_id)
             arrived = (await arrive(reg["id"], actor=ACTOR))["registration"]
             assert arrived["queue_status"] == "arrived"
             assert arrived["arrived_at"]
             await print_prescription(reg["id"], actor=ACTOR)
-            seen = (await mark_seen(reg["id"], actor=ACTOR))["registration"]
-            assert seen["queue_status"] == "seen"
+            with pytest.raises(HTTPException) as exc:
+                await mark_seen(reg["id"], actor=ACTOR)
+            assert exc.value.detail["code"] == "completion_required"
+            done = await complete_prescription(
+                CompletePrescriptionBody(
+                    patient_id=reg["id"],
+                    full_transcription_confirmed=True,
+                    none_prescribed=True,
+                    operation_id="op-lifecycle-complete",
+                    remarks="observe",
+                ),
+                actor=CLINICAL,
+            )
+            assert done["registration"]["queue_status"] == "seen"
         asyncio.run(run())
 
     def test_seen_is_unreachable_without_arrival(self, monkeypatch):
@@ -132,7 +160,7 @@ class TestArrival:
             )
             with pytest.raises(HTTPException) as exc:
                 await mark_seen(reg["id"], actor=ACTOR)
-            assert exc.value.detail["code"] == "NOT_ARRIVED"
+            assert exc.value.detail["code"] == "completion_required"
         asyncio.run(run())
 
     def test_arrival_is_stamped_once(self, monkeypatch):
@@ -197,14 +225,15 @@ class TestScanResolution:
             mock_db = _mock(monkeypatch)
             _camp_id, (day_id,) = await _seed_camp(mock_db)
             reg = await _register(
-                day_id, full_name="Sunita Devi", age=48, aadhaar_last4="1234",
-                dob="1975-06-14", manual_entry=True,
+                day_id, full_name="Ramesh Kumar", age=48, aadhaar_last4="1234",
+                dob="1975-06-14", gender="M", manual_entry=True,
             )
             out = await scan(ScanBody(payload=CARD), actor=ACTOR)
             assert out["outcome"] == "mismatch_review"
             assert out["registration"]["reg_no"] == reg["reg_no"]
             assert out["card"]["full_name"] == "Sunita Devi"
-            assert {d["field"] for d in out["diff"]} >= {"age", "gender", "address"}
+            assert {d["field"] for d in out["diff"]} >= {"full_name", "age", "gender"}
+            assert "address" not in {d["field"] for d in out["diff"]}
             stored = await mock_db.patients.find_one({"_id": ObjectId(reg["id"])})
             assert stored["age"] == 48
             assert stored["arrived_at"] is None
@@ -431,17 +460,27 @@ class TestRegistrationConfirmationSms:
 async def _seen_patient_with_transcription(mock_db, measurements=None):
     patient_id = ObjectId()
     trans_id = ObjectId()
+    rev_id = ObjectId()
     camp_id = ObjectId()
     await mock_db.patients.insert_one({
         "_id": patient_id, "camp_id": camp_id, "camp_day_id": ObjectId(), "reg_no": 501,
+        "full_name": "Sunita Devi",
         "phone": "9876500001", "phone_normalized": "9876500001",
         "queue_status": "seen", "arrived_at": helpers.now_utc(),
         "printed_at": helpers.now_utc(), "seen_at": helpers.now_utc(),
+        "committed_revision_id": rev_id, "clinical_generation": 1, "issue_auth_op": None,
+    })
+    await mock_db.prescription_revisions.insert_one({
+        "_id": rev_id, "patient_id": patient_id, "camp_id": camp_id,
+        "prescribed_lines": ["medicine", "specs_fixed", "specs_made", "ot"],
+        "none_prescribed": False, "specs_measurements": measurements,
+        "medication_instructions": "drops", "ot_eye": "R", "ot_procedure": "Cataract Surgery",
     })
     await mock_db.transcriptions.insert_one({
         "_id": trans_id, "patient_id": patient_id, "camp_id": camp_id,
-        "locked": False, "specs_measurements": measurements,
+        "locked": True, "specs_measurements": measurements,
     })
+    mock_db.last_rev_id = rev_id
     return camp_id, patient_id, trans_id
 
 
@@ -450,10 +489,9 @@ class TestFulfilmentLines:
         async def run():
             mock_db = _mock(monkeypatch)
             _camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db)
-            body = FulfilmentBody(transcription_id=str(trans_id), item_type="specs_fixed",
-                                  status="fulfilled")
+            body = _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_fixed", status="fulfilled")
             with pytest.raises(HTTPException) as exc:
-                await record_fulfilment(body, actor=ACTOR)
+                await record_fulfilment(body, actor=CLINICAL)
             assert exc.value.status_code == 400
             assert exc.value.detail["code"] == "SPECS_MEASUREMENTS_REQUIRED"
         asyncio.run(run())
@@ -463,9 +501,8 @@ class TestFulfilmentLines:
             mock_db = _mock(monkeypatch)
             sent = _recorder(monkeypatch)
             _camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db, RX)
-            body = FulfilmentBody(transcription_id=str(trans_id), item_type="specs_fixed",
-                                  status="fulfilled")
-            out = await record_fulfilment(body, actor=ACTOR)
+            body = _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_fixed", status="fulfilled")
+            out = await record_fulfilment(body, actor=CLINICAL)
             assert out["fulfilment"]["status"] == "fulfilled"
             assert out["slip"] is None
             assert sent == []
@@ -475,10 +512,9 @@ class TestFulfilmentLines:
         async def run():
             mock_db = _mock(monkeypatch)
             _camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db)
-            body = FulfilmentBody(transcription_id=str(trans_id), item_type="specs_fixed",
-                                  status="not_required")
+            body = _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_fixed", status="not_required")
             with pytest.raises(HTTPException) as exc:
-                await record_fulfilment(body, actor=ACTOR)
+                await record_fulfilment(body, actor=CLINICAL)
             assert exc.value.status_code == 400
         asyncio.run(run())
 
@@ -486,9 +522,8 @@ class TestFulfilmentLines:
         async def run():
             mock_db = _mock(monkeypatch)
             _camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db)
-            body = FulfilmentBody(transcription_id=str(trans_id), item_type="medicine",
-                                  status="fulfilled")
-            out = await record_fulfilment(body, actor=ACTOR)
+            body = _fulfil(trans_id, mock_db.last_rev_id, item_type="medicine", status="fulfilled")
+            out = await record_fulfilment(body, actor=CLINICAL)
             assert out["fulfilment"]["status"] == "fulfilled"
         asyncio.run(run())
 
@@ -500,14 +535,14 @@ class TestFulfilmentLines:
             specs_day = ObjectId()
             await mock_db.specs_collection_days.insert_one({
                 "_id": specs_day, "camp_id": camp_id, "day_date": "2026-09-20",
-                "venue": "Optical Desk", "seat_limit": 2, "seats_taken": 0,
+                "venue": "Optical Desk", "start_time": "09:00", "end_time": "17:00", "seat_limit": 2, "seats_taken": 0,
             })
-            body = FulfilmentBody(transcription_id=str(trans_id), item_type="specs_made",
-                                  status="deferred", specs_collection_day_id=str(specs_day))
-            out = await record_fulfilment(body, actor=ACTOR)
+            body = _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_made",
+                           status="deferred", specs_collection_day_id=str(specs_day))
+            out = await record_fulfilment(body, actor=CLINICAL)
             assert out["slip"]["collection_date"] == "2026-09-20"
             assert sent == [{"type": "specs_token", "mobile": "9876500001", "reg_no": 501,
-                             "date": "2026-09-20", "venue": "Optical Desk"}]
+                             "date": "2026-09-20, समय 09:00–17:00", "venue": "Optical Desk"}]
         asyncio.run(run())
 
     def test_deferring_ot_sends_the_ot_token_sms(self, monkeypatch):
@@ -520,9 +555,9 @@ class TestFulfilmentLines:
                 "_id": ot_day, "camp_id": camp_id, "day_date": "2026-10-02",
                 "venue": "OT Theatre", "seat_limit": 1, "seats_taken": 0,
             })
-            body = FulfilmentBody(transcription_id=str(trans_id), item_type="ot",
-                                  status="deferred", ot_schedule_day_id=str(ot_day))
-            await record_fulfilment(body, actor=ACTOR)
+            body = _fulfil(trans_id, mock_db.last_rev_id, item_type="ot",
+                           status="deferred", ot_schedule_day_id=str(ot_day))
+            await record_fulfilment(body, actor=CLINICAL)
             assert sent == [{"type": "ot_token", "mobile": "9876500001", "reg_no": 501,
                              "date": "2026-10-02", "venue": "OT Theatre"}]
         asyncio.run(run())
@@ -536,10 +571,10 @@ class TestFulfilmentLines:
                 "_id": full_day, "camp_id": camp_id, "day_date": "2026-10-02",
                 "venue": "OT Theatre", "seat_limit": 1, "seats_taken": 1,
             })
-            body = FulfilmentBody(transcription_id=str(trans_id), item_type="ot",
-                                  status="deferred", ot_schedule_day_id=str(full_day))
+            body = _fulfil(trans_id, mock_db.last_rev_id, item_type="ot",
+                           status="deferred", ot_schedule_day_id=str(full_day))
             with pytest.raises(HTTPException) as exc:
-                await record_fulfilment(body, actor=ACTOR)
+                await record_fulfilment(body, actor=CLINICAL)
             assert exc.value.detail["code"] == "NO_CLINICAL_DAY_AVAILABLE"
             assert "Call the admin" in exc.value.detail["message"]
         asyncio.run(run())
@@ -557,10 +592,10 @@ class TestFulfilmentLines:
                 "_id": free_day, "camp_id": camp_id, "day_date": "2026-10-09",
                 "venue": "OT Theatre", "seat_limit": 1, "seats_taken": 0,
             })
-            body = FulfilmentBody(transcription_id=str(trans_id), item_type="ot",
-                                  status="deferred", ot_schedule_day_id=str(full_day))
+            body = _fulfil(trans_id, mock_db.last_rev_id, item_type="ot",
+                           status="deferred", ot_schedule_day_id=str(full_day))
             with pytest.raises(HTTPException) as exc:
-                await record_fulfilment(body, actor=ACTOR)
+                await record_fulfilment(body, actor=CLINICAL)
             assert exc.value.detail == "OT day is full or not found"
         asyncio.run(run())
 

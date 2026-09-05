@@ -106,7 +106,7 @@ beforeEach(() => {
       return Promise.resolve({
         data: {
           specs_days: [
-            { id: "sp-1", day_date: "2026-09-12", venue: "Base Optical", seat_limit: 12, seats_taken: 3, seats_free: 9 },
+            { id: "sp-1", day_date: "2026-09-12", venue: "Base Optical", start_time: "10:00", end_time: "12:00" },
           ],
         },
       });
@@ -114,8 +114,7 @@ beforeEach(() => {
     if (url === "/leaderboard") {
       return Promise.resolve({
         data: {
-          volunteers: [{ user_id: "u-2", name: "Vol 1", points: 80 }],
-          team_leads: [{ user_id: "tl-1", name: "Lead One", points: 200 }],
+          volunteers: [{ name: "Vol 1", registrations: 50, arrivals: 30, points: 80 }],
         },
       });
     }
@@ -151,7 +150,35 @@ describe("AdminDashboard component", () => {
     expect(gotoClinical).not.toBeNull();
   });
 
-  test("switches tabs smoothly (Camps, Staff, Template, OT & Specs, Leaderboard, Exports)", async () => {
+  test("has no Staff or Roster tab or content and links to Team once", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <AdminDashboard />
+        </MemoryRouter>
+      );
+    });
+
+    expect(container.querySelector('[data-testid="admin-tab-staff"]')).toBeNull();
+    expect(container.querySelector('[data-testid="admin-tab-roster"]')).toBeNull();
+    expect(container.querySelector('[data-testid="create-staff-button"]')).toBeNull();
+    expect(container.querySelector('[data-testid="roster-names-input"]')).toBeNull();
+    const teamLinks = container.querySelectorAll('[data-testid="goto-team-button"]');
+    expect(teamLinks).toHaveLength(1);
+    expect(teamLinks[0].textContent).toMatch(/Team/i);
+    expect(teamLinks[0].nextElementSibling.dataset.testid).toBe("goto-analytics-button");
+    expect(teamLinks[0].nextElementSibling.textContent).toContain("Analytics");
+  });
+
+  test("overview recovers after a failed request is retried", async () => {
+    api.get.mockRejectedValueOnce(new Error("Network unavailable"));
+    await act(async () => root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>));
+    expect(container.querySelector('[data-testid="error-retry-button"]')).not.toBeNull();
+    await act(async () => container.querySelector('[data-testid="error-retry-button"]').click());
+    expect(container.querySelector('[data-testid="kpi-registered-count"]').textContent).toContain("120");
+  });
+
+  test("switches tabs smoothly (Camps, Template, OT & Specs, Leaderboard, Exports)", async () => {
     await act(async () => {
       root.render(
         <MemoryRouter>
@@ -168,16 +195,6 @@ describe("AdminDashboard component", () => {
 
     expect(container.querySelector('[data-testid="create-camp-button"]')).not.toBeNull();
     expect(container.textContent).toContain("Inactive Camp");
-
-    // Switch to Staff tab
-    const staffTab = container.querySelector('[data-testid="admin-tab-staff"]');
-    await act(async () => {
-      staffTab.click();
-    });
-
-    expect(container.querySelector('[data-testid="create-staff-button"]')).not.toBeNull();
-    expect(container.textContent).toContain("Admin Lead");
-    expect(container.textContent).toContain("Vol 1");
 
     // Switch to Rx Template tab
     const tplTab = container.querySelector('[data-testid="admin-tab-template"]');
@@ -198,6 +215,7 @@ describe("AdminDashboard component", () => {
     expect(container.textContent).toContain("5/20 seats");
     expect(container.querySelector('[data-testid="specs-days-list"]')).not.toBeNull();
     expect(container.textContent).toContain("Base Optical");
+    expect(container.textContent).toContain("10:00–12:00");
     expect(container.textContent).toContain("Specs collection days");
 
     // Switch to Leaderboards tab
@@ -257,80 +275,6 @@ describe("AdminDashboard component", () => {
     );
   });
 
-  test("manages staff: opens modal, creates volunteer with team lead", async () => {
-    api.post.mockResolvedValueOnce({ data: { message: "Staff created" } });
-
-    await act(async () => {
-      root.render(
-        <MemoryRouter>
-          <AdminDashboard />
-        </MemoryRouter>
-      );
-    });
-
-    await act(async () => {
-      container.querySelector('[data-testid="admin-tab-staff"]').click();
-    });
-
-    const addStaffBtn = container.querySelector('[data-testid="create-staff-button"]');
-    act(() => {
-      addStaffBtn.click();
-    });
-
-    const nameInput = document.body.querySelector('[data-testid="staff-name-input"]');
-    const emailInput = document.body.querySelector('[data-testid="staff-email-input"]');
-    const passInput = document.body.querySelector('[data-testid="staff-password-input"]');
-
-    act(() => {
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-      setter.call(nameInput, "New Volunteer");
-      nameInput.dispatchEvent(new Event("input", { bubbles: true }));
-      setter.call(emailInput, "newvol@snp.org");
-      emailInput.dispatchEvent(new Event("input", { bubbles: true }));
-      setter.call(passInput, "Secret@123456");
-      passInput.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-
-    const createBtn = document.body.querySelector('[data-testid="staff-create-submit"]');
-    await act(async () => {
-      createBtn.click();
-    });
-
-    expect(api.post).toHaveBeenCalledWith(
-      "/staff",
-      expect.objectContaining({
-        name: "New Volunteer",
-        email: "newvol@snp.org",
-        role: "volunteer",
-      })
-    );
-  });
-
-  test("handles disable/enable staff action", async () => {
-    api.patch.mockResolvedValueOnce({ data: { message: "Disabled" } });
-
-    await act(async () => {
-      root.render(
-        <MemoryRouter>
-          <AdminDashboard />
-        </MemoryRouter>
-      );
-    });
-
-    await act(async () => {
-      container.querySelector('[data-testid="admin-tab-staff"]').click();
-    });
-
-    const disableBtn = container.querySelector('[data-testid="disable-staff-u-2"]');
-    expect(disableBtn).not.toBeNull();
-
-    await act(async () => {
-      disableBtn.click();
-    });
-
-    expect(api.patch).toHaveBeenCalledWith("/staff/u-2/disable");
-  });
-
   test("OT & Specs tab lists Specs collection days and posts create", async () => {
     api.post.mockResolvedValueOnce({ data: { specs_day: { id: "sp-2" } } });
 
@@ -347,17 +291,24 @@ describe("AdminDashboard component", () => {
     });
 
     expect(container.textContent).toContain("Base Optical");
-    expect(container.textContent).toContain("3/12 seats");
+    expect(container.textContent).toContain("10:00–12:00");
+    expect(container.querySelector('[data-testid="specs-seat-input"]')).toBeNull();
     expect(container.querySelector('[data-testid="specs-days-list"]')).not.toBeNull();
 
     const dateInput = container.querySelector('[data-testid="specs-date-input"]');
     const venueInput = container.querySelector('[data-testid="specs-venue-input"]');
+    const startInput = container.querySelector('[data-testid="specs-start-input"]');
+    const endInput = container.querySelector('[data-testid="specs-end-input"]');
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
     act(() => {
       setter.call(dateInput, "2026-09-20");
       dateInput.dispatchEvent(new Event("input", { bubbles: true }));
       setter.call(venueInput, "New Optical");
       venueInput.dispatchEvent(new Event("input", { bubbles: true }));
+      setter.call(startInput, "09:00");
+      startInput.dispatchEvent(new Event("input", { bubbles: true }));
+      setter.call(endInput, "11:30");
+      endInput.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
     await act(async () => {
@@ -370,6 +321,8 @@ describe("AdminDashboard component", () => {
         camp_id: "c-1",
         day_date: "2026-09-20",
         venue: "New Optical",
+        start_time: "09:00",
+        end_time: "11:30",
       })
     );
   });

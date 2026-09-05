@@ -1,15 +1,17 @@
-import React from "react";
+import React, { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth, roleHome } from "./context/AuthContext";
-import { ADMIN_ROLES, DESK_ROLES, CLINICAL_ROLES } from "./constants/roles";
+import { ADMIN_ROLES, DESK_ROLES, CLINICAL_ROLES, LEAD_ROLES } from "./constants/roles";
 import { Spinner } from "./components/ui";
 import Login from "./pages/Login";
-import SelfRegister from "./pages/SelfRegister";
-import AdminDashboard from "./pages/AdminDashboard";
-import Desk from "./pages/Desk";
-import Clinical from "./pages/Clinical";
-import PrintPrescription from "./pages/PrintPrescription";
-import PrintSlip from "./pages/PrintSlip";
+const SelfRegister = lazy(() => import("./pages/SelfRegister"));
+const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
+const Desk = lazy(() => import("./pages/Desk"));
+const Clinical = lazy(() => import("./pages/Clinical"));
+const PrintPrescription = lazy(() => import("./pages/PrintPrescription"));
+const PrintSlip = lazy(() => import("./pages/PrintSlip"));
+const Board = lazy(() => import("./pages/Board"));
+const Team = lazy(() => import("./pages/Team"));
 
 function FullLoader() {
   return (
@@ -38,6 +40,7 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <Suspense fallback={<FullLoader />}>
         <Routes>
           <Route path="/" element={<HomeRedirect />} />
           <Route path="/login" element={<Login />} />
@@ -47,8 +50,12 @@ export default function App() {
           <Route path="/clinical" element={<Protected roles={CLINICAL_ROLES}><Clinical /></Protected>} />
           <Route path="/print/prescription/:id" element={<Protected roles={DESK_ROLES}><PrintPrescription /></Protected>} />
           <Route path="/print/slip/:id" element={<Protected roles={CLINICAL_ROLES}><PrintSlip /></Protected>} />
+          <Route path="/analytics" element={<Protected roles={LEAD_ROLES}><Board /></Protected>} />
+          <Route path="/board" element={<Navigate to="/analytics" replace />} />
+          <Route path="/team" element={<Protected roles={LEAD_ROLES}><Team /></Protected>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </Suspense>
       </BrowserRouter>
     </AuthProvider>
   );

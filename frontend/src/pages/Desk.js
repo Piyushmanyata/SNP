@@ -1,15 +1,17 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import api, { formatApiError, errorPayload } from "../lib/api";
 import Layout from "../components/Layout";
+import { useAuth } from "../context/AuthContext";
 import AadhaarScanner from "../components/AadhaarScanner";
+import { useWedgeBurst } from "../components/aadhaar";
 import { ScanOutcome } from "../components/desk/ScanOutcome";
 import { v4 } from "../lib/uuid";
 import {
   Button, Card, Input, Field, Alert, Modal, Stat, StatusBadge, Badge, ErrorCard,
 } from "../components/ui";
 import {
-  UserPlus, Search, Printer, CheckCircle2, Undo2, ScanLine,
+  UserPlus, Search, Printer, ScanLine,
 } from "lucide-react";
 
 const EMPTY_REG_FORM = Object.freeze({
@@ -24,6 +26,7 @@ const EMPTY_REG_FORM = Object.freeze({
 
 export default function Desk() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [kpi, setKpi] = useState(null);
   const [loadErr, setLoadErr] = useState("");
   const [days, setDays] = useState([]);
@@ -42,6 +45,13 @@ export default function Desk() {
   const [doorPhone, setDoorPhone] = useState("");
   const [doorForm, setDoorForm] = useState(EMPTY_REG_FORM);
   const [doorReqId, setDoorReqId] = useState(v4());
+  const [scanning, setScanning] = useState(false);
+  const lastBurstRef = useRef({ payload: "", at: 0 });
+  const [printingOpen, setPrintingOpen] = useState(false);
+  const [operatingDayId, setOperatingDayId] = useState("");
+  const todayDay = days.find((d) => d.is_today);
+  const campDayMode = printingOpen;
+  const noCamp = !camp;
 
   const load = useCallback(async () => {
     setLoadErr("");
@@ -50,6 +60,15 @@ export default function Desk() {
       setKpi(k.data);
       setCamp(a.data.camp);
       setDays(a.data.days || []);
+      const today = (a.data.days || []).find((d) => d.is_today);
+      const open = a.data.printing_open != null
+        ? Boolean(a.data.printing_open)
+        : Boolean(today?.printing_open);
+      setPrintingOpen(open);
+      setOperatingDayId(
+        a.data.operating_day_id
+        || (open ? (today?.id || (a.data.days || []).find((d) => d.printing_open)?.id || "") : ""),
+      );
     } catch (e) {
       setLoadErr(formatApiError(e));
     }
@@ -57,33 +76,58 @@ export default function Desk() {
 
   useEffect(() => { load(); }, [load]);
 
+  const onDoorFailure = useCallback((outcome) => {
+    if (outcome === "garbage" || outcome === "not-aadhaar") {
+      setDoorFailures((n) => n + 1);
+    }
+  }, []);
+
+
+  const fillDoorForm = useCallback((card) => {
+    if (!card) return;
+    setDoorForm({
+      full_name: card.full_name || "",
+      age: card.age ?? "",
+      phone: doorPhone,
+      gender: card.gender || "",
+      address: card.address || "",
+      aadhaar_last4: card.aadhaar_last4 || "",
+      dob: card.dob || "",
+    });
+  }, [doorPhone]);
+
   const onScanned = useCallback(async (_card, payload) => {
     setBanner(""); setError(""); setSearchResults(null); setFound(null);
-    setDoorFailures(0);
-    if (_card) {
-      setDoorForm({
-        full_name: _card.full_name || "",
-        age: _card.age ?? "",
-        phone: doorPhone,
-        gender: _card.gender || "",
-        address: _card.address || "",
-        aadhaar_last4: _card.aadhaar_last4 || "",
-        dob: _card.dob || "",
-      });
-    }
+    fillDoorForm(_card);
     setScanPayload(payload);
+    setScanning(true);
     try {
       const { data } = await api.post("/desk/scan", { payload });
       setScanResult(data);
+      if (data.card) fillDoorForm(data.card);
       if (data.outcome === "arrived") {
-        setBanner(`Checked in #${data.registration.reg_no} — ${data.registration.full_name}`);
+        setDoorFailures(0);
+        const extra = data.overwritten ? " (card details updated)" : "";
+        setBanner(`Checked in #${data.registration.reg_no} — ${data.registration.full_name}${extra}`);
         await load();
       }
     } catch (err) {
+      if (errorPayload(err)?.code === "NOT_A_CARD") onDoorFailure("garbage");
       setScanResult(null);
       setError(formatApiError(err));
+    } finally {
+      setScanning(false);
     }
-  }, [load, doorPhone]);
+  }, [load, fillDoorForm, onDoorFailure]);
+
+  useWedgeBurst({
+    enabled: campDayMode && !showReg && !noCamp,
+    onBurst: (payload) => {
+      if (payload === lastBurstRef.current.payload && Date.now() - lastBurstRef.current.at < 3000) return;
+      lastBurstRef.current = { payload, at: Date.now() };
+      onScanned(null, payload);
+    },
+  });
 
   const confirmMismatch = useCallback(async () => {
     if (!scanResult?.registration) return;
@@ -124,40 +168,16 @@ export default function Desk() {
     try {
       const { data } = await api.get(`/patients/search?q=${encodeURIComponent(searchVal.trim())}`);
       setSearchResults(data.results);
-    } catch (err) { setError(formatApiError(err)); }
-  }, [searchVal]);
-
-  const act = useCallback(async (path, reg) => {
-    setBanner(""); setError("");
-    try {
-      const { data } = await api.post(`${path}/${reg.id}`);
-      setFound(data.registration);
-      if (scanResult?.registration?.id === reg.id) {
-        setScanResult({ ...scanResult, registration: data.registration });
-      }
-      await load();
-      return data.registration;
     } catch (err) {
       setError(formatApiError(err));
-      return null;
     }
-  }, [load, scanResult]);
+  }, [searchVal]);
 
-  const markSeen = useCallback((reg) => act("/desk/mark-seen", reg), [act]);
-  const undoSeen = useCallback((reg) => act("/desk/undo-seen", reg), [act]);
   const print = useCallback((reg) => navigate(`/print/prescription/${reg.id}`), [navigate]);
 
   const openPreReg = useCallback(() => { setShowReg(true); }, []);
 
-  const todayDay = days.find((d) => d.is_today);
-  const campDayMode = Boolean(todayDay?.printing_open);
-
-  const onDoorFailure = useCallback((outcome) => {
-    if (outcome === "garbage" || outcome === "not-aadhaar") {
-      setDoorFailures((n) => n + 1);
-    }
-  }, []);
-  const onDoorStall = useCallback(() => setDoorFailures(2), []);
+  const onDoorStall = useCallback(() => {}, []);
 
   const submitRegister = useCallback(async ({ form, scanned, dayId, reqId, walkIn: asWalkIn }) => {
     const { data } = await api.post("/register", {
@@ -183,8 +203,8 @@ export default function Desk() {
 
   const submitDoorWalkIn = useCallback(async () => {
     if (!scanResult?.card) return;
-    if (!todayDay) {
-      setError("No camp day today. Use Pre-registration.");
+    if (!operatingDayId) {
+      setError("No operating camp day. Use Pre-registration.");
       return;
     }
     setBusy(true); setError("");
@@ -201,7 +221,7 @@ export default function Desk() {
           dob: card.dob,
         },
         scanned: true,
-        dayId: todayDay.id,
+        dayId: operatingDayId,
         reqId: v4(),
         walkIn: true,
       });
@@ -218,23 +238,24 @@ export default function Desk() {
         setError(formatApiError(err));
       }
     } finally { setBusy(false); }
-  }, [scanResult, todayDay, doorPhone, submitRegister, load]);
+  }, [scanResult, operatingDayId, doorPhone, submitRegister, load]);
 
   const submitDoorManual = useCallback(async () => {
-    const dayId = todayDay?.id || days[0]?.id;
+    const dayId = operatingDayId || todayDay?.id || days[0]?.id;
     if (!dayId) return;
     setBusy(true); setError("");
     try {
+      const asWalkIn = Boolean(printingOpen);
       const reg = await submitRegister({
         form: doorForm,
         scanned: false,
         dayId,
         reqId: doorReqId,
-        walkIn: Boolean(todayDay?.printing_open),
+        walkIn: asWalkIn,
       });
       setFound(reg);
       setBanner(
-        todayDay?.printing_open
+        asWalkIn
           ? `Registered and checked in #${reg.reg_no} — ${reg.full_name}`
           : `Registered #${reg.reg_no} — ${reg.full_name}. SMS sent.`
       );
@@ -250,14 +271,18 @@ export default function Desk() {
         setError(formatApiError(err));
       }
     } finally { setBusy(false); }
-  }, [todayDay, days, doorForm, doorReqId, submitRegister, load]);
+  }, [operatingDayId, printingOpen, todayDay, days, doorForm, doorReqId, submitRegister, load]);
 
   if (loadErr) return <Layout title="Desk"><ErrorCard message={loadErr} onRetry={load} /></Layout>;
 
-  const noCamp = !camp;
-
   return (
     <Layout title="Registration Desk">
+      {user?.role === "team_lead" && (
+        <div className="flex flex-wrap gap-3 mb-5">
+          <Link to="/team" className="min-h-[44px] flex items-center px-4 rounded-xl border border-slate-300 font-semibold text-slate-900" data-testid="desk-team-link">Team Management</Link>
+          <Link to="/analytics" className="min-h-[44px] flex items-center px-4 rounded-xl border border-slate-300 font-semibold text-slate-900" data-testid="desk-analytics-link">Analytics</Link>
+        </div>
+      )}
       {noCamp && <Alert tone="amber" className="mb-4">No active camp. Ask an admin to activate one.</Alert>}
 
       <div className={`grid gap-3 mb-5 ${campDayMode ? "grid-cols-3" : "grid-cols-1"}`}>
@@ -288,7 +313,6 @@ export default function Desk() {
         scanResult={scanResult}
         busy={busy}
         print={print}
-        markSeen={markSeen}
         confirmMismatch={confirmMismatch}
         doorPhone={doorPhone}
         setDoorPhone={setDoorPhone}
@@ -297,6 +321,7 @@ export default function Desk() {
         doorForm={doorForm}
         setDoorForm={setDoorForm}
         submitDoorManual={submitDoorManual}
+        scanning={scanning}
       />}
 
       <Card className="mb-5" data-desk-card="find" data-testid="desk-card-find">
@@ -314,7 +339,7 @@ export default function Desk() {
 
         {found && (
           <div className="mt-4" data-testid="desk-found-patient">
-            <PatientRow p={found} onPrint={print} onMarkSeen={markSeen} onUndo={undoSeen} />
+            <PatientRow p={found} onPrint={print} />
           </div>
         )}
 
@@ -326,7 +351,7 @@ export default function Desk() {
             </div>
             <div className="space-y-2" data-testid="desk-search-results">
               {searchResults.map((p) => (
-                <PatientRow key={p.id} p={p} onPrint={print} onMarkSeen={markSeen} onUndo={undoSeen} />
+                <PatientRow key={p.id} p={p} onPrint={print} />
               ))}
             </div>
           </div>
@@ -346,7 +371,6 @@ export default function Desk() {
             scanResult={scanResult}
             busy={busy}
             print={print}
-            markSeen={markSeen}
             confirmMismatch={confirmMismatch}
             doorPhone={doorPhone}
             setDoorPhone={setDoorPhone}
@@ -375,10 +399,13 @@ export default function Desk() {
 
 function DoorScanCard({
   noCamp, onScanned, onDoorFailure, onDoorStall, error, banner, scanResult, busy,
-  print, markSeen, confirmMismatch, doorPhone, setDoorPhone, submitDoorWalkIn,
-  doorFailures, doorForm, setDoorForm, submitDoorManual, collapsed,
+  print, confirmMismatch, doorPhone, setDoorPhone, submitDoorWalkIn,
+  doorFailures, doorForm, setDoorForm, submitDoorManual, collapsed, scanning,
 }) {
-  const showManual = doorFailures >= 2;
+  const showManual = doorFailures >= 3;
+  const scanner = (
+    <AadhaarScanner onScanned={onScanned} onFailure={onDoorFailure} onScanStall={onDoorStall} disabled={noCamp} />
+  );
   return (
     <Card className={collapsed ? "mt-2" : "mb-5"} data-desk-card={collapsed ? undefined : "scan"} data-testid="desk-card-scan">
       {!collapsed && (
@@ -387,7 +414,11 @@ function DoorScanCard({
           <h3 className="font-display font-bold text-slate-900">Scan at the door</h3>
         </div>
       )}
-      <AadhaarScanner onScanned={onScanned} onFailure={onDoorFailure} onScanStall={onDoorStall} disabled={noCamp} />
+      {collapsed ? scanner : (
+        <div data-testid="wedge-panel">
+          <Badge>{scanning ? "Decoding…" : "Ready for USB scan"}</Badge>
+        </div>
+      )}
       {error && <Alert className="mt-3">{error}</Alert>}
       {banner && <Alert tone="emerald" className="mt-3">{banner}</Alert>}
       <div className="mt-3">
@@ -395,13 +426,18 @@ function DoorScanCard({
           result={scanResult}
           busy={busy}
           onPrint={print}
-          onMarkSeen={markSeen}
           onConfirm={confirmMismatch}
           phone={doorPhone}
           setPhone={setDoorPhone}
           onWalkIn={submitDoorWalkIn}
         />
       </div>
+      {!collapsed && (
+        <details className="mt-3" data-testid="camera-fallback">
+          <summary>Use phone camera</summary>
+          {scanner}
+        </details>
+      )}
       {showManual && (
         <div className="mt-4 space-y-3" data-testid="door-manual-form">
           <p className="text-sm font-semibold text-amber-800" data-testid="manual-entry-note">Manual entry</p>
@@ -429,7 +465,7 @@ function DoorScanCard({
   );
 }
 
-export function PatientRow({ p, onPrint, onMarkSeen, onUndo }) {
+export function PatientRow({ p, onPrint }) {
   return (
     <div
       id={`row-${p.id}`}
@@ -456,15 +492,7 @@ export function PatientRow({ p, onPrint, onMarkSeen, onUndo }) {
             <Button size="sm" variant="outline" onClick={() => onPrint(p)} data-testid={`print-button-${p.reg_no}`}>
               <Printer className="w-4 h-4" /> Print
             </Button>
-            {p.queue_status !== "seen" ? (
-              <Button size="sm" onClick={() => onMarkSeen(p)} disabled={!p.printed_at} data-testid={`mark-seen-button-${p.reg_no}`}>
-                <CheckCircle2 className="w-4 h-4" /> Seen
-              </Button>
-            ) : (
-              <Button size="sm" variant="ghost" onClick={() => onUndo(p)} data-testid={`undo-seen-button-${p.reg_no}`}>
-                <Undo2 className="w-4 h-4" /> Undo
-              </Button>
-            )}
+
           </>
         )}
       </div>
@@ -517,9 +545,22 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
     }
   }, []);
 
-  const onScanStall = useCallback(() => setFailures(2), []);
+  useWedgeBurst({
+    enabled: open,
+    onBurst: async (payload) => {
+      try {
+        const { data } = await api.post("/aadhaar/decode", { payload });
+        if (data.outcome === "card") onScan(data.data);
+        else onFailure(data.outcome);
+      } catch {
+        onFailure("garbage");
+      }
+    },
+  });
 
-  const showForm = scanned || failures >= 2;
+  const onScanStall = useCallback(() => {}, []);
+
+  const showForm = scanned || failures >= 3;
 
   const submit = useCallback(async () => {
     setBusy(true); setError("");

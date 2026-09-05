@@ -41,9 +41,9 @@ SAMPLE = ["2", "567820190301120000", "Ramesh Kumar", "15-08-1975", "M", "S/O Sur
 
 # ---------------- Aadhaar decode ----------------
 class TestAadhaarDecode:
-    def test_demo_payload(self, anon):
+    def test_legacy_xml_payload(self, anon):
         r = anon.post(f"{API}/aadhaar/decode",
-                      json={"payload": "AADHAAR|Ramesh Kumar|M|1975-08-15|5678|MG Road"}, timeout=30)
+                      json={"payload": '<PrintLetterBarcodeData name="Ramesh Kumar" gender="M" dob="1975-08-15" uid="5678" street="MG Road"/>'}, timeout=30)
         assert r.status_code == 200, r.text
         j = r.json()
         assert j["outcome"] == "card", j
@@ -163,7 +163,7 @@ class TestPrescriptionTemplateLockdown:
         r = admin.get(f"{API}/templates/logos?camp_id={camp}", timeout=30)
         assert r.status_code == 200, r.text
         assert set(r.json().keys()) == {"logos"}
-        assert len(r.json()["logos"]) >= 2
+        assert len(r.json()["logos"]) == 1
 
     def test_reading_logos_requires_auth_and_saving_requires_admin(self, camp):
         fresh = requests.Session()  # session-scoped anon may carry cookies from earlier tests

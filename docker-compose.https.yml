@@ -1,0 +1,15 @@
+services:
+  backend:
+    environment:
+      CORS_ORIGINS: ${DEV_HTTPS_ORIGIN:?set DEV_HTTPS_ORIGIN to your https://<machine>.<tailnet>.ts.net URL}
+      COOKIE_SECURE: "true"
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./Caddyfile.dev:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - frontend
+      - backend
