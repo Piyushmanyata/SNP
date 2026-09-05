@@ -61,6 +61,7 @@ def _self(anon, camp_day_id, **fields):
     body = {
         "full_name": fields.pop("full_name", f"TEST SELF {TAG}"),
         "age": fields.pop("age", 33),
+        "phone": fields.pop("phone", "9876500999"),
         "camp_day_id": camp_day_id,
         "registration_request_id": fields.pop("registration_request_id", str(uuid.uuid4())),
     }
@@ -93,19 +94,19 @@ class TestPrintWindowNoCalendar:
         r = _reg(admin, day["id"], full_name=f"TEST PrintClosed {TAG}", phone="9876500102")
         assert r.status_code == 200, r.text
         pid = r.json()["registration"]["id"]
-        _arrive(admin, pid)
-        p = admin.post(f"{API}/desk/print/{pid}", timeout=30)
-        assert p.status_code == 409, p.text
-        assert p.json()["detail"]["code"] == "PRINT_WINDOW_CLOSED"
+        arrived = admin.post(f"{API}/desk/arrive/{pid}", timeout=30)
+        assert arrived.status_code == 409, arrived.text
+        assert arrived.json()["detail"]["code"] == "PRINT_WINDOW_CLOSED"
 
-    def test_print_409_when_window_closed_on_past_day(self, admin):
+    def test_print_409_after_arrival_then_window_closed(self, admin):
         camp_id = _camp(admin, "printpast")
-        day = _day(admin, camp_id, PAST, seat_limit=20)
-        _open_print(admin, day["id"], False)
+        day = _day(admin, camp_id, TODAY_IST, seat_limit=20)
+        _open_print(admin, day["id"], True)
         r = _reg(admin, day["id"], full_name=f"TEST PrintPast {TAG}", phone="9876500103")
         assert r.status_code == 200, r.text
         pid = r.json()["registration"]["id"]
         _arrive(admin, pid)
+        _open_print(admin, day["id"], False)
         p = admin.post(f"{API}/desk/print/{pid}", timeout=30)
         assert p.status_code == 409, p.text
         assert p.json()["detail"]["code"] == "PRINT_WINDOW_CLOSED"
@@ -194,10 +195,13 @@ class TestDuplicateInCamp:
     def test_name_age_without_phone_does_not_hard_block_on_self_register(self, admin, anon):
         camp_id = _camp(admin, "dupnameage")
         day = _day(admin, camp_id, TODAY_IST)
+        missing = _self(anon, day["id"], full_name=f"TEST Common {TAG}", age=40, gender="M",
+                        dob="1986-01-01", aadhaar_last4="1001", aadhaar_scanned=True, phone="")
+        assert missing.status_code == 400, missing.text
         a = _self(anon, day["id"], full_name=f"TEST Common {TAG}", age=40, gender="M",
-                  dob="1986-01-01", aadhaar_last4="1001", aadhaar_scanned=True)
+                  dob="1986-01-01", aadhaar_last4="1001", aadhaar_scanned=True, phone="9876501111")
         b = _self(anon, day["id"], full_name=f"TEST Common {TAG}", age=40, gender="F",
-                  dob="1986-06-06", aadhaar_last4="1002", aadhaar_scanned=True)
+                  dob="1986-06-06", aadhaar_last4="1002", aadhaar_scanned=True, phone="9876501112")
         assert a.status_code == 200, a.text
         assert b.status_code == 200, b.text
 
@@ -343,7 +347,7 @@ class TestCampDayCapacity:
         assert b.status_code == 409, b.text
         assert b.json()["detail"]["code"] == "CAMP_DAY_FULL"
         s = _self(anon, day["id"], full_name=f"TEST CapSelf {TAG}", age=30, gender="M",
-                  dob="1996-03-03", aadhaar_last4="4401", aadhaar_scanned=True)
+                  dob="1996-03-03", aadhaar_last4="4401", aadhaar_scanned=True, phone="9876500403")
         assert s.status_code == 409, s.text
         assert s.json()["detail"]["code"] == "CAMP_DAY_FULL"
 
