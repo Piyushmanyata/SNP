@@ -163,6 +163,33 @@ async function scanAtDoor() {
 }
 
 describe("Desk page", () => {
+  test("a new scan immediately removes the previous mismatch confirmation", async () => {
+    api.post.mockResolvedValueOnce({ data: { outcome: "mismatch_review", registration: ARRIVED, diff: [] } });
+    let resolveScan;
+    api.post.mockImplementationOnce(() => new Promise((resolve) => { resolveScan = resolve; }));
+    await renderDesk();
+    await scanAtDoor();
+    expect(container.querySelector('[data-testid="mismatch-confirm-button"]')).not.toBeNull();
+    await scanAtDoor();
+    expect(container.querySelector('[data-testid="mismatch-confirm-button"]')).toBeNull();
+    await act(async () => resolveScan({ data: { outcome: "no_match", card: { full_name: "Next patient" } } }));
+  });
+
+  test("an older scan cannot overwrite the newest card or finish its loading state", async () => {
+    let resolveFirst;
+    let resolveSecond;
+    api.post.mockImplementationOnce(() => new Promise((resolve) => { resolveFirst = resolve; }));
+    api.post.mockImplementationOnce(() => new Promise((resolve) => { resolveSecond = resolve; }));
+    await renderDesk();
+    await scanAtDoor();
+    await scanAtDoor();
+    await act(async () => resolveFirst({ data: { outcome: "no_match", card: { full_name: "Previous patient" } } }));
+    expect(container.textContent).not.toContain("Previous patient");
+    expect(container.textContent).toContain("Decoding…");
+    await act(async () => resolveSecond({ data: { outcome: "no_match", card: { full_name: "Latest patient" } } }));
+    expect(container.textContent).toContain("Latest patient");
+  });
+
   test("team leads can reach Team Management and Analytics from the desk overview", async () => {
     await renderDesk();
     expect(container.querySelector('[data-testid="desk-team-link"]').getAttribute("href")).toBe("/team");

@@ -1,5 +1,9 @@
-from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional, List, Dict, Any
+from datetime import date
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from typing import Annotated, Optional, List, Dict, Any
+
+
+DateString = Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$"), AfterValidator(lambda value: date.fromisoformat(value).isoformat())]
 
 
 # ---- auth ----
@@ -28,21 +32,21 @@ class PatchStaffLineBody(BaseModel):
 
 # ---- camps ----
 class CampSetupDay(BaseModel):
-    day_date: str
+    day_date: DateString
     seat_limit: int = Field(gt=0)
 
 
 class CampBody(BaseModel):
     name: str
     venue: str
-    camp_date: Optional[str] = None
+    camp_date: Optional[DateString] = None
     days: Optional[List[CampSetupDay]] = None
     setup_request_id: Optional[str] = None
 
 
 class CampDayBody(BaseModel):
     camp_id: str
-    day_date: str
+    day_date: DateString
     seat_limit: int = Field(gt=0)
 
 

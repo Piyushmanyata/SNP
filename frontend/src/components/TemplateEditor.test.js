@@ -65,6 +65,34 @@ async function render() {
 }
 
 describe("TemplateEditor", () => {
+  test("camp switches hide stale logos and ignore old camp responses", async () => {
+    const originalGet = api.get.getMockImplementation();
+    let resolveFirst;
+    let resolveSecond;
+    api.get.mockImplementation((url) => {
+      if (url === "/templates/logos?camp_id=camp-1") return new Promise((resolve) => { resolveFirst = resolve; });
+      if (url === "/templates/logos?camp_id=camp-2") return new Promise((resolve) => { resolveSecond = resolve; });
+      return originalGet(url);
+    });
+    await render();
+    await act(async () => {
+      const select = container.querySelector('[data-testid="tpl-camp-select"]');
+      select.value = "camp-2";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => resolveSecond({ data: { logos: [{ ...LOGO, name: "Current camp logo" }] } }));
+    await act(async () => resolveFirst({ data: { logos: [LOGO] } }));
+    expect(container.textContent).toContain("Current camp logo");
+    expect(container.textContent).not.toContain("sponsor_logo.png");
+    await act(async () => {
+      const select = container.querySelector('[data-testid="tpl-camp-select"]');
+      select.value = "camp-1";
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(container.querySelector('[data-testid="tpl-save-logos-button"]')).toBeNull();
+    await act(async () => resolveFirst({ data: { logos: [LOGO] } }));
+  });
+
   test("loads the active camp's sponsor logos", async () => {
     await render();
     expect(api.get).toHaveBeenCalledWith("/camps");

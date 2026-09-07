@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import api, { formatApiError } from "../lib/api";
@@ -19,6 +19,8 @@ export default function PrintPrescription() {
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setError("");
     (async () => {
       try {
         const r = await api.get(`/desk/print/${id}`);
@@ -67,6 +69,14 @@ function SexBox({ mark, label }) {
 }
 
 export function PrescriptionSheet({ rx, logos = [], navigate, preview, patientId }) {
+  const [printing, setPrinting] = useState(false);
+  const [printError, setPrintError] = useState("");
+  const printSession = useRef(0);
+  useEffect(() => {
+    setPrinting(false);
+    setPrintError("");
+    return () => { printSession.current += 1; };
+  }, [patientId]);
   const sex = String(rx.gender || rx.gender_label || "").toUpperCase();
   const male = sex.startsWith("M");
   const female = sex.startsWith("F");
@@ -74,17 +84,23 @@ export function PrescriptionSheet({ rx, logos = [], navigate, preview, patientId
     <div className={preview ? "" : "bg-slate-100 min-h-screen py-6"}>
       {!preview && (
         <div className="no-print max-w-[210mm] mx-auto px-4 mb-4 flex gap-2">
-          <Button variant="outline" onClick={() => navigate("/desk")}><ArrowLeft className="w-4 h-4" /> Desk</Button>
+          <Button variant="outline" disabled={printing} onClick={() => navigate("/desk")}><ArrowLeft className="w-4 h-4" /> Desk</Button>
           <Button
+            disabled={printing}
             onClick={async () => {
-              if (patientId) {
-                try {
+              const session = printSession.current;
+              setPrinting(true);
+              setPrintError("");
+              try {
+                if (patientId) {
                   await api.post(`/desk/print/${patientId}`);
-                } catch (e) {
-                  logger.warn("Print Prescription stamp failed:", e);
                 }
+                if (session === printSession.current) window.print();
+              } catch (e) {
+                if (session === printSession.current) setPrintError(`Could not record printing. Please retry. ${formatApiError(e)}`);
+              } finally {
+                if (session === printSession.current) setPrinting(false);
               }
-              window.print();
             }}
             data-testid="print-a4-prescription-button"
           >
@@ -92,6 +108,7 @@ export function PrescriptionSheet({ rx, logos = [], navigate, preview, patientId
           </Button>
         </div>
       )}
+      {printError && <Alert className="no-print max-w-[210mm] mx-auto mb-4">{printError}</Alert>}
 
       <div
         className="print-a4 bg-white mx-auto shadow-lg text-slate-900"

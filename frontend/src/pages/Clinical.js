@@ -251,10 +251,13 @@ export default function Clinical() {
 
   const openHistory = useCallback(async () => {
     if (!data?.person?.id) return;
+    const request = lookupSequence.current;
     try {
       const { data: h } = await api.get(`/clinical/history/${data.person.id}`);
+      if (request !== lookupSequence.current) return;
       setHistory(h.history);
     } catch (err) {
+      if (request !== lookupSequence.current) return;
       setError(formatApiError(err));
     }
   }, [data?.person?.id]);

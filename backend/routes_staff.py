@@ -2,6 +2,7 @@ import asyncio
 from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 from db import get_db
 from models import CreateStaffBody, PatchStaffLineBody
 from helpers import now_utc, normalize_name
@@ -81,7 +82,10 @@ async def create_staff(body: CreateStaffBody, actor: dict = Depends(get_current_
         "created_at": now_utc(),
         "created_by": str(actor["_id"]),
     }
-    res = await db.users.insert_one(doc)
+    try:
+        res = await db.users.insert_one(doc)
+    except DuplicateKeyError:
+        raise HTTPException(status_code=409, detail="Name already exists")
     doc["_id"] = res.inserted_id
     return {"staff": serialize_user(doc)}
 
@@ -153,7 +157,7 @@ async def disable_staff(staff_id: str, actor: dict = Depends(get_current_user)) 
         raise HTTPException(status_code=403, detail="Insufficient permissions")
 
     await db.users.update_one(
-        {"_id": user["_id"]}, {"$set": {"disabled_at": now_utc()}}
+        {"_id": user["_id"]}, {"$set": {"disabled_at": now_utc()}, "$inc": {"session_version": 1}}
     )
     return {"ok": True}
 

@@ -257,12 +257,23 @@ async def _upsert_transcription(db, patient: dict, actor: dict, content: dict, *
             if not existing:
                 raise
     version = (existing.get("draft_version") or 0) + 1
+    query = {"_id": existing["_id"]}
+    if not locked:
+        query.update({
+            "locked": {"$ne": True},
+            "draft_version": existing.get("draft_version"),
+            "$or": [
+                {"clinical_write_token": None}, {"clinical_write_until": {"$lte": now_utc()}},
+            ],
+        })
     t = await db.transcriptions.find_one_and_update(
-        {"_id": existing["_id"]},
+        query,
         {"$set": {**fields, "draft_version": version}},
         return_document=True,
     )
-    return t or existing
+    if not t:
+        raise conflict("stale_draft", "The prescription changed; reload before saving the draft.")
+    return t
 
 
 def _clinical_result(patient: dict, revision: dict, transcription: dict | None) -> dict:
@@ -670,15 +681,6 @@ async def record_fulfilment(
         raise HTTPException(status_code=400, detail="Invalid fulfilment item/status")
     if revision.get("none_prescribed") or body.item_type not in (revision.get("prescribed_lines") or []):
         raise conflict("line_not_prescribed", "This line is not prescribed on the completed prescription.")
-    if body.operation_id:
-        prior_op = await db.fulfilments.find_one({"operation_id": body.operation_id})
-        if prior_op:
-            slip = None
-            if prior_op.get("status") == "deferred":
-                slip = await db.deferred_slips.find_one({
-                    "transcription_id": t["_id"], "item_type": body.item_type, "active": True,
-                })
-            return {"fulfilment": ser_fulfil(prior_op), "slip": ser_slip(slip) if slip else None}
     medicine_outcomes = None
     issued_powers = None
     if body.item_type == "medicine":
@@ -686,32 +688,51 @@ async def record_fulfilment(
         body.status = derive_medicine_status(medicine_outcomes)
     elif body.item_type == "specs_fixed":
         issued_powers = await resolve_issued_powers(db, revision, body)
+    digest = payload_hash("issue", body.model_dump(exclude={"operation_id"}))
     op_id = body.operation_id or str(ObjectId())
-    await begin_issue_authorization(
-        db, patient, actor, body.item_type,
-        patient["committed_revision_id"], generation_of(patient), op_id,
-    )
-    try:
-        async with _clinical_write(db, body.transcription_id):
-            result = await _record_fulfilment(
-                body, actor, background_tasks, medicine_outcomes, issued_powers,
+    body.operation_id = op_id
+    operation = await save_operation(db, {
+        "operation_id": op_id, "kind": "issue", "payload_hash": digest,
+        "patient_id": patient["_id"], "status": "pending", "created_at": now_utc(),
+    })
+    if operation.get("status") == "committed" and operation.get("result"):
+        if patient.get("issue_auth_op") == op_id:
+            async with _clinical_write(db, body.transcription_id):
+                await release_issue_authorization(db, patient["_id"], op_id)
+        return operation["result"]
+    async with _clinical_write(db, body.transcription_id):
+        current_patient = await db.patients.find_one({"_id": patient["_id"]})
+        if current_patient.get("issue_auth_op") != op_id:
+            await begin_issue_authorization(
+                db, current_patient, actor, body.item_type,
+                patient["committed_revision_id"], generation_of(patient), op_id,
             )
-        fulfilment_id = result["fulfilment"]["id"]
-        await db.fulfilments.update_one(
-            {"_id": ObjectId(fulfilment_id)},
-            {"$set": {
-                "operation_id": op_id,
-                "reviewed_revision_id": patient["committed_revision_id"],
-                "reviewed_generation": generation_of(patient),
-            }},
-        )
-        await release_issue_authorization(db, patient["_id"], op_id)
-        return result
-    except Exception:
-        exists = await db.fulfilments.find_one({"operation_id": op_id})
-        if not exists:
+        try:
+            operation = await recover_operation(db, op_id, "issue", digest)
+            if operation and operation.get("status") == "committed" and operation.get("result"):
+                result = operation["result"]
+            else:
+                prior_op = await db.fulfilments.find_one({"operation_id": op_id})
+                if prior_op:
+                    if (
+                        prior_op.get("transcription_id") != t["_id"]
+                        or prior_op.get("item_type") != body.item_type
+                        or prior_op.get("payload_hash") != digest
+                    ):
+                        raise conflict("operation_conflict", "This operation id was used for a different request.")
+                    slip = await db.deferred_slips.find_one({"_id": prior_op["slip_id"]}) if prior_op.get("slip_id") else None
+                    result = await _finish_fulfilment(db, t, patient, prior_op, slip, background_tasks)
+                else:
+                    result = await _record_fulfilment(
+                        body, actor, background_tasks, medicine_outcomes, issued_powers,
+                    )
             await release_issue_authorization(db, patient["_id"], op_id)
-        raise
+            return result
+        except Exception:
+            exists = await db.fulfilments.find_one({"operation_id": op_id})
+            if not exists:
+                await release_issue_authorization(db, patient["_id"], op_id)
+            raise
 
 
 async def _record_fulfilment(
@@ -753,8 +774,16 @@ async def _record_fulfilment(
         body, t["_id"], slip, str(actor["_id"]), medicine_outcomes, issued_powers,
     )
     doc["current"] = True
+    doc.update({
+        "operation_id": body.operation_id,
+        "payload_hash": payload_hash("issue", body.model_dump(exclude={"operation_id"})),
+        "reviewed_revision_id": patient["committed_revision_id"],
+        "reviewed_generation": generation_of(patient),
+    })
     old_ot = prior.get("ot_schedule_day_id") if prior and prior.get("status") == "deferred" else None
     new_ot = doc.get("ot_schedule_day_id")
+    doc["previous_ot_schedule_day_id"] = old_ot
+    doc["slip_id"] = slip["_id"] if slip else None
     try:
         doc = await persist_fulfilment(db, prior, doc)
     except Exception:
@@ -773,21 +802,28 @@ async def _record_fulfilment(
                 {"$inc": {"seats_taken": -1}},
             )
         raise
-    if body.status != "deferred":
+    return await _finish_fulfilment(db, t, patient, doc, slip, background_tasks)
+
+
+async def _finish_fulfilment(db, t: dict, patient: dict, doc: dict, slip: dict | None, background_tasks) -> dict:
+    if doc["status"] != "deferred":
         await db.deferred_slips.update_many(
-            {"transcription_id": t["_id"], "item_type": body.item_type, "active": True},
+            {"transcription_id": t["_id"], "item_type": doc["item_type"], "active": True},
             {"$set": {"active": False, "cancelled": True, "cancelled_at": now_utc()}},
         )
-    if body.item_type == "ot" and old_ot and old_ot != new_ot:
+    old_ot = doc.get("previous_ot_schedule_day_id")
+    new_ot = doc.get("ot_schedule_day_id")
+    if doc["item_type"] == "ot" and old_ot and old_ot != new_ot:
+        release_key = "released_issues." + payload_hash("release", {"operation_id": doc["operation_id"]})
         await db.ot_schedule_days.update_one(
-            {"_id": old_ot, "seats_taken": {"$gt": 0}},
-            {"$inc": {"seats_taken": -1}},
+            {"_id": old_ot, "seats_taken": {"$gt": 0}, release_key: {"$ne": True}},
+            {"$inc": {"seats_taken": -1}, "$set": {release_key: True}},
         )
 
     await _ensure_transcription_locked(db, t)
     if slip:
         args = (
-            db, patient, DEFERRAL_CONFIG[body.item_type]["message_type"],
+            db, patient, DEFERRAL_CONFIG[doc["item_type"]]["message_type"],
             slip["collection_date"], slip["collection_venue"],
             slip.get("collection_start_time"), slip.get("collection_end_time"),
         )
@@ -795,7 +831,12 @@ async def _record_fulfilment(
             background_tasks.add_task(sms.send_patient_sms, *args)
         else:
             await sms.send_patient_sms(*args)
-    return {"fulfilment": ser_fulfil(doc), "slip": ser_slip(slip) if slip else None}
+    result = {"fulfilment": ser_fulfil(doc), "slip": ser_slip(slip) if slip else None}
+    await save_operation(db, {
+        "operation_id": doc["operation_id"], "kind": "issue", "payload_hash": doc["payload_hash"],
+        "patient_id": patient["_id"], "status": "committed", "result": result,
+    })
+    return result
 
 
 async def _make_slip(
@@ -883,18 +924,17 @@ async def add_correction(
         if key in merged:
             merged[key] = value
     for field in merged:
-        supplied = getattr(body, field, None)
-        if supplied not in (None, [], {}):
-            merged[field] = supplied
-    if body.prescribed_medicine_ids:
+        if field in body.model_fields_set:
+            merged[field] = getattr(body, field)
+    if "prescribed_medicine_ids" in body.model_fields_set:
         merged["prescribed_medicines"] = [{"medicine_id": mid} for mid in body.prescribed_medicine_ids]
     merged["prescribed_medicines"] = await resolve_medicines(db, [
         m.get("medicine_id") for m in (merged.get("prescribed_medicines") or []) if isinstance(m, dict)
     ])
     merged["fixed_power_r"] = await stocked_power(db, merged.get("fixed_power_r"))
     merged["fixed_power_l"] = await stocked_power(db, merged.get("fixed_power_l"))
-    lines = list(body.prescribed_lines or current.get("prescribed_lines") or [])
-    none = body.none_prescribed or bool(current.get("none_prescribed") and not lines)
+    lines = list(body.prescribed_lines if "prescribed_lines" in body.model_fields_set else current.get("prescribed_lines") or [])
+    none = body.none_prescribed if "none_prescribed" in body.model_fields_set else bool(current.get("none_prescribed") and not lines)
     confirmed = body.full_transcription_confirmed or bool(body.changes)
     class _View:
         pass
@@ -911,7 +951,10 @@ async def add_correction(
         raise HTTPException(status_code=400, detail="Invalid prescription correction")
     content["ot_eye"] = normalize_ot_eye(content.get("ot_eye"))
     op_id = body.operation_id or str(ObjectId())
-    digest = payload_hash("correct", {"patient_id": str(p["_id"]), "content": content, "reason": body.reason})
+    digest = payload_hash("correct", {
+        "patient_id": str(p["_id"]), "content": content, "reason": body.reason,
+        "lines": lines, "none": none,
+    })
     existing_op = await recover_operation(db, op_id, "correct", digest)
     if existing_op and existing_op.get("status") == "committed" and existing_op.get("result"):
         return existing_op["result"]

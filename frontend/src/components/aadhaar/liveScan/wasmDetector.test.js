@@ -68,13 +68,28 @@ test("a timed-out detect leaves no pending job behind for a late reply", async (
   ).not.toThrow();
 });
 
-test("one bad frame does not end WASM scanning for the rest of the session", async () => {
+test("a fatal worker error restarts the reader on the next frame", async () => {
   await detector.loadZxingWorker();
   const failed = detector.detectWasmImageData(IMAGE);
   const worker = instances[0];
-  worker.onerror(new Error("one bad frame"));
+  worker.onerror(new Error("importScripts failed"));
   await expect(failed).resolves.toBeNull();
 
+  const next = detector.detectWasmImageData(IMAGE);
+  await Promise.resolve();
+  expect(instances).toHaveLength(2);
+  expect(worker.terminated).toBe(true);
+  const replacement = instances[1];
+  replacement.onmessage({ data: { id: replacement.posted[0].id, text: "1234567890" } });
+  await expect(next).resolves.toBe("1234567890");
+});
+
+test("an undecodable frame keeps the healthy worker for the next frame", async () => {
+  await detector.loadZxingWorker();
+  const first = detector.detectWasmImageData(IMAGE);
+  const worker = instances[0];
+  worker.onmessage({ data: { id: worker.posted[0].id, text: null } });
+  await expect(first).resolves.toBeNull();
   const next = detector.detectWasmImageData(IMAGE);
   expect(instances).toHaveLength(1);
   expect(worker.terminated).toBe(false);

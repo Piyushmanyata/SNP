@@ -315,7 +315,7 @@ class TestAadhaarOverwrite:
                      aadhaar_scanned=True, phone="9876500312")
         assert lock.status_code == 409, lock.text
         assert lock.json()["detail"]["code"] == "DUPLICATE_IN_CAMP"
-        assert lock.json()["detail"]["registration"]["reg_no"] == orig["reg_no"]
+        assert "registration" not in lock.json()["detail"]
         row = admin.post(f"{API}/desk/lookup", json={"value": str(orig["reg_no"])},
                          timeout=30).json()["registration"]
         assert row["full_name"] == f"TEST Desk Manual {TAG}"

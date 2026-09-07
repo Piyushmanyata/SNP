@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import api, { formatApiError } from "../lib/api";
 import { Button, Card, Alert } from "./ui";
 import { v4 } from "../lib/uuid";
@@ -14,6 +14,8 @@ export default function TemplateEditor() {
   const [err, setErr] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
+  const selectedCamp = useRef(campId);
+  selectedCamp.current = campId;
 
   useEffect(() => {
     api
@@ -26,19 +28,18 @@ export default function TemplateEditor() {
       .catch((e) => setErr(formatApiError(e)));
   }, []);
 
-  const load = useCallback(() => {
+  useEffect(() => {
     if (!campId) return;
+    let active = true;
+    setLogos(null);
     setErr("");
     setMsg("");
     api
       .get(`/templates/logos?camp_id=${campId}`)
-      .then((r) => setLogos((r.data.logos || []).map((l) => ({ ...l }))))
-      .catch((e) => setErr(formatApiError(e)));
+      .then((r) => { if (active) setLogos((r.data.logos || []).map((l) => ({ ...l }))); })
+      .catch((e) => { if (active) setErr(formatApiError(e)); });
+    return () => { active = false; };
   }, [campId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
 
   const camp = camps.find((c) => c.id === campId);
   const sampleRx = useMemo(() => buildSampleRx(camp), [camp]);
@@ -51,13 +52,14 @@ export default function TemplateEditor() {
     }
     const reader = new FileReader();
     reader.onload = () => {
+      if (selectedCamp.current !== campId) return;
       setLogos((current) => [
         ...(current || []),
         { id: v4(), name: file.name, data_url: reader.result, order: (current || []).length },
       ]);
     };
     reader.readAsDataURL(file);
-  }, []);
+  }, [campId]);
 
   const moveLogo = useCallback((i, dir) => {
     setLogos((current) => (current ? swapItems(current, i, dir) : current));
@@ -101,6 +103,7 @@ export default function TemplateEditor() {
           id="tpl-camp"
           className="mt-1 w-full sm:w-80 min-h-[44px] px-3 rounded-xl border border-slate-300"
           value={campId}
+          disabled={busy}
           onChange={(e) => setCampId(e.target.value)}
           data-testid="tpl-camp-select"
         >
@@ -118,7 +121,7 @@ export default function TemplateEditor() {
 
       {logos && (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          <div className="space-y-4">
+          <fieldset className="space-y-4" disabled={busy}>
             <TemplateLogosEditor
               logos={logos}
               onAddLogo={addLogo}
@@ -128,7 +131,7 @@ export default function TemplateEditor() {
             <Button onClick={save} disabled={busy} data-testid="tpl-save-logos-button">
               <Save className="w-4 h-4" /> {busy ? "Saving…" : "Save logos"}
             </Button>
-          </div>
+          </fieldset>
           <TemplatePreview sampleRx={sampleRx} logos={logos} />
         </div>
       )}

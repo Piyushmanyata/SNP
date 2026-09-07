@@ -1,6 +1,6 @@
 import React, { act } from "react";
 import ReactDOM from "react-dom/client";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import PrintPrescription, { PrescriptionSheet } from "./PrintPrescription";
 import api from "../lib/api";
 
@@ -40,6 +40,59 @@ afterEach(() => {
 });
 
 describe("PrintPrescription component", () => {
+  test.each(["unmount", "patient change"])("a print stamp completing after %s cannot print the current document", async (transition) => {
+    const print = jest.spyOn(window, "print").mockImplementation(() => {});
+    let resolveStamp;
+    api.post.mockImplementationOnce(() => new Promise((resolve) => { resolveStamp = resolve; }));
+    await act(async () => root.render(<PrescriptionSheet rx={{ patient_qr: "qr1" }} patientId="p1" navigate={jest.fn()} />));
+    try {
+      await act(async () => container.querySelector('[data-testid="print-a4-prescription-button"]').click());
+      await act(async () => root.render(transition === "unmount"
+        ? <p>Another page</p>
+        : <PrescriptionSheet rx={{ patient_qr: "qr2" }} patientId="p2" navigate={jest.fn()} />));
+      await act(async () => resolveStamp({ data: {} }));
+      expect(print).not.toHaveBeenCalled();
+    } finally {
+      print.mockRestore();
+    }
+  });
+
+  test("a failed print stamp prevents printing and allows an explicit retry", async () => {
+    const print = jest.spyOn(window, "print").mockImplementation(() => {});
+    api.post.mockRejectedValueOnce(new Error("Network Error")).mockResolvedValueOnce({ data: {} });
+    await act(async () => root.render(<PrescriptionSheet rx={{ patient_qr: "qr1" }} patientId="p1" navigate={jest.fn()} />));
+    try {
+      await act(async () => container.querySelector('[data-testid="print-a4-prescription-button"]').click());
+      expect(print).not.toHaveBeenCalled();
+      expect(container.textContent).toContain("Network Error");
+      await act(async () => container.querySelector('[data-testid="print-a4-prescription-button"]').click());
+      expect(print).toHaveBeenCalledTimes(1);
+    } finally {
+      print.mockRestore();
+    }
+  });
+
+  test("changing patients hides the previous printable sheet until the new prescription loads", async () => {
+    let resolveNext;
+    api.get.mockImplementation((url) => {
+      if (url === "/desk/print/p1") return Promise.resolve({ data: { prescription: { full_name: "Previous patient", patient_qr: "qr1" } } });
+      if (url === "/desk/print/p2") return new Promise((resolve) => { resolveNext = resolve; });
+      return Promise.resolve({ data: { logos: [] } });
+    });
+    await act(async () => root.render(
+      <MemoryRouter initialEntries={["/print/rx/p1"]}>
+        <Link to="/print/rx/p2">Next patient</Link>
+        <Routes><Route path="/print/rx/:id" element={<PrintPrescription />} /></Routes>
+      </MemoryRouter>,
+    ));
+    expect(container.textContent).toContain("Previous patient");
+    await act(async () => container.querySelector("a").click());
+    expect(container.querySelector('[data-testid="print-a4-prescription-button"]')).toBeNull();
+    expect(container.textContent).not.toContain("Previous patient");
+    await act(async () => resolveNext({ data: { prescription: { full_name: "Current patient", patient_qr: "qr2" } } }));
+    expect(container.textContent).toContain("Current patient");
+  });
+
   test("prints the fixed trust letterhead even when the sponsor logos cannot be fetched", async () => {
     const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
 

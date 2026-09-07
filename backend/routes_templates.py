@@ -24,8 +24,12 @@ def default_logos() -> List[Dict[str, Any]]:
 
 
 def _validate_logos(logos: Optional[List[dict]]) -> List[Dict[str, Any]]:
+    if logos is not None and not isinstance(logos, list):
+        raise HTTPException(status_code=400, detail="Logos must be a list.")
     out = []
     for lg in (logos or [])[:6]:
+        if not isinstance(lg, dict) or not isinstance(lg.get("data_url", ""), str):
+            raise HTTPException(status_code=400, detail="Invalid image data.")
         data_url = lg.get("data_url", "")
         if not data_url.startswith("data:"):
             continue
@@ -34,7 +38,7 @@ def _validate_logos(logos: Optional[List[dict]]) -> List[Dict[str, Any]]:
             mime = header.split(";")[0].replace("data:", "")
             if mime not in ALLOWED_MIME:
                 raise HTTPException(status_code=400, detail=f"Unsupported image type: {mime}. Use PNG/JPEG/WebP.")
-            raw = base64.b64decode(b64, validate=False)
+            raw = base64.b64decode(b64, validate=True)
             if len(raw) > MAX_LOGO_BYTES:
                 raise HTTPException(status_code=400, detail="Each logo must be 2 MB or smaller.")
         except HTTPException:

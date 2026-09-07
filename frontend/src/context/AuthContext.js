@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from "react";
 import api from "../lib/api";
-import logger from "../lib/logger";
 import { clearSessionLine } from "../lib/operatorLines";
 
 const AuthContext = createContext(null);
@@ -37,11 +36,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = useCallback(async () => {
-    try {
-      await api.post("/auth/logout");
-    } catch (e) {
-      logger.warn("Logout request failed:", e);
-    }
+    await api.post("/auth/logout");
     clearSessionLine();
     setUser(false);
   }, []);

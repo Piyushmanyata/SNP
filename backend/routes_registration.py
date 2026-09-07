@@ -63,7 +63,13 @@ async def _resolve_person(data: dict) -> Tuple[Dict[str, Any], bool]:
         "merged_into": None,
         "created_at": now_utc(),
     }
-    res = await db.persons.insert_one(doc)
+    try:
+        res = await db.persons.insert_one(doc)
+    except DuplicateKeyError:
+        person = await db.persons.find_one({"aadhaar_key": key})
+        if person:
+            return person, False
+        raise
     doc["_id"] = res.inserted_id
     return doc, True
 
@@ -253,7 +259,7 @@ def _build_patient_document(
         "identity_recheck_required": is_manual,
         "manual_entry": is_manual,
         "manual_exception": True if is_manual else None,
-        "registration_request_id": body.registration_request_id,
+        **({"registration_request_id": body.registration_request_id} if body.registration_request_id else {}),
         "reminder_sms_sent_at": None,
         "created_at": now_utc(),
     }
@@ -289,6 +295,22 @@ async def _resolve_registration_conflict(
     return None
 
 
+def _replay_registration(existing: dict, body: RegisterBody, camp_id: ObjectId | str) -> Tuple[Dict[str, Any], bool]:
+    matches = (
+        str(existing.get("camp_id")) == str(camp_id)
+        and str(existing.get("booked_camp_day_id") or existing.get("camp_day_id")) == body.camp_day_id
+        and normalize_name(existing.get("full_name") or "") == normalize_name(body.full_name)
+    )
+    if body.aadhaar_scanned:
+        matches = matches and all(existing.get(field) == getattr(body, field) for field in ("aadhaar_last4", "dob"))
+    if not matches:
+        raise HTTPException(status_code=409, detail={
+            "code": "REGISTRATION_REQUEST_CONFLICT",
+            "message": "This request ID was already used for a different registration. Start a new registration.",
+        })
+    return ser_patient(existing), False
+
+
 async def _insert_patient_document(
     db: AsyncIOMotorDatabase,
     doc: dict,
@@ -304,7 +326,7 @@ async def _insert_patient_document(
         if body.registration_request_id:
             existing = await db.patients.find_one({"registration_request_id": body.registration_request_id})
             if existing:
-                return ser_patient(existing), False
+                return _replay_registration(existing, body, camp_id)
         if person:
             existing = await db.patients.find_one({"person_id": person["_id"], "camp_id": camp_id})
             if existing:
@@ -324,7 +346,7 @@ async def _create_registration(
     if body.registration_request_id:
         existing = await db.patients.find_one({"registration_request_id": body.registration_request_id})
         if existing:
-            return ser_patient(existing), False
+            return _replay_registration(existing, body, camp["_id"])
 
     phone = normalize_phone(body.phone)
     if is_self and (not phone or is_dummy_phone(phone)):
@@ -441,7 +463,14 @@ async def self_register(body: RegisterBody, request: Request, background_tasks: 
     body.address = card.get("address")
     body.aadhaar_scanned = True
     body.is_self_registered = True
-    patient, created = await _create_registration(body, None, True, request)
+    try:
+        patient, created = await _create_registration(body, None, True, request)
+    except HTTPException as exc:
+        if isinstance(exc.detail, dict):
+            raise HTTPException(status_code=exc.status_code, detail={
+                key: value for key, value in exc.detail.items() if key in {"code", "message"}
+            }) from exc
+        raise
     if created:
         if background_tasks is not None:
             background_tasks.add_task(_confirm_registration, patient)

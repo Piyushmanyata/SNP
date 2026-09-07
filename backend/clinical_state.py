@@ -164,6 +164,10 @@ async def recover_operation(db, operation_id: str, kind: str, digest: str) -> Op
 async def save_operation(db, doc: dict) -> dict:
     existing = await db.clinical_operations.find_one({"operation_id": doc["operation_id"]})
     if existing:
+        if existing.get("kind") != doc["kind"] or existing.get("payload_hash") != doc["payload_hash"]:
+            raise conflict("operation_conflict", "This operation id was used for a different request.")
+        if doc.get("status") == "pending":
+            return existing
         await db.clinical_operations.update_one(
             {"_id": existing["_id"]},
             {"$set": {k: v for k, v in doc.items() if k != "operation_id"}},
@@ -178,6 +182,8 @@ async def save_operation(db, doc: dict) -> dict:
         found = await db.clinical_operations.find_one({"operation_id": doc["operation_id"]})
         if not found:
             raise
+        if found.get("kind") != doc["kind"] or found.get("payload_hash") != doc["payload_hash"]:
+            raise conflict("operation_conflict", "This operation id was used for a different request.")
         return found
 
 
@@ -193,31 +199,33 @@ async def prepare_revision(
     reason: Optional[str],
     predecessor_id,
 ) -> dict:
-    existing = await db.prescription_revisions.find_one({"operation_id": operation_id})
-    if existing:
-        return existing
-    doc = {
+    request = {
         "patient_id": patient["_id"],
         "camp_id": patient.get("camp_id"),
-        "operation_id": operation_id,
         "kind": kind,
         "predecessor_id": predecessor_id,
-        "author_id": str(actor["_id"]),
         "reason": reason,
         "prescribed_lines": prescribed_lines,
         "none_prescribed": none_prescribed,
-        "created_at": now_utc(),
         **content,
     }
-    try:
-        res = await db.prescription_revisions.insert_one(doc)
-        doc["_id"] = res.inserted_id
-        return doc
-    except DuplicateKeyError:
-        found = await db.prescription_revisions.find_one({"operation_id": operation_id})
-        if not found:
-            raise
-        return found
+    existing = await db.prescription_revisions.find_one({"operation_id": operation_id})
+    if not existing:
+        doc = {
+            **request, "operation_id": operation_id,
+            "author_id": str(actor["_id"]), "created_at": now_utc(),
+        }
+        try:
+            res = await db.prescription_revisions.insert_one(doc)
+            doc["_id"] = res.inserted_id
+            return doc
+        except DuplicateKeyError:
+            existing = await db.prescription_revisions.find_one({"operation_id": operation_id})
+            if not existing:
+                raise
+    if any(existing.get(key) != value for key, value in request.items()):
+        raise conflict("operation_conflict", "This operation id was used for a different request.")
+    return existing
 
 
 def _commit_filter(patient_id, expected: int, *, empty_commit: bool, require_commit: bool) -> dict:
@@ -309,8 +317,6 @@ async def begin_issue_authorization(
         "status": "pending",
         "started_at": now_utc(),
     }
-    if patient.get("issue_auth_op") == operation_id:
-        return patient
     if patient.get("issue_auth_op"):
         raise conflict("issue_pending", "Another issue is already in progress for this patient.")
     updated = await db.patients.find_one_and_update(

@@ -47,6 +47,7 @@ export default function Desk() {
   const [doorReqId, setDoorReqId] = useState(v4());
   const [scanning, setScanning] = useState(false);
   const lastBurstRef = useRef({ payload: "", at: 0 });
+  const scanSequence = useRef(0);
   const [printingOpen, setPrintingOpen] = useState(false);
   const [operatingDayId, setOperatingDayId] = useState("");
   const todayDay = days.find((d) => d.is_today);
@@ -75,6 +76,7 @@ export default function Desk() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+  useEffect(() => () => { scanSequence.current += 1; }, []);
 
   const onDoorFailure = useCallback((outcome) => {
     if (outcome === "garbage" || outcome === "not-aadhaar") {
@@ -97,12 +99,16 @@ export default function Desk() {
   }, [doorPhone]);
 
   const onScanned = useCallback(async (_card, payload) => {
+    if (busy) return;
+    const request = ++scanSequence.current;
     setBanner(""); setError(""); setSearchResults(null); setFound(null);
+    setScanResult(null);
     fillDoorForm(_card);
     setScanPayload(payload);
     setScanning(true);
     try {
       const { data } = await api.post("/desk/scan", { payload });
+      if (request !== scanSequence.current) return;
       setScanResult(data);
       if (data.card) fillDoorForm(data.card);
       if (data.outcome === "arrived") {
@@ -112,16 +118,17 @@ export default function Desk() {
         await load();
       }
     } catch (err) {
+      if (request !== scanSequence.current) return;
       if (errorPayload(err)?.code === "NOT_A_CARD") onDoorFailure("garbage");
       setScanResult(null);
       setError(formatApiError(err));
     } finally {
-      setScanning(false);
+      if (request === scanSequence.current) setScanning(false);
     }
-  }, [load, fillDoorForm, onDoorFailure]);
+  }, [load, fillDoorForm, onDoorFailure, busy]);
 
   useWedgeBurst({
-    enabled: campDayMode && !showReg && !noCamp,
+    enabled: campDayMode && !showReg && !noCamp && !busy,
     onBurst: (payload) => {
       if (payload === lastBurstRef.current.payload && Date.now() - lastBurstRef.current.at < 3000) return;
       lastBurstRef.current = { payload, at: Date.now() };
@@ -130,7 +137,7 @@ export default function Desk() {
   });
 
   const confirmMismatch = useCallback(async () => {
-    if (!scanResult?.registration) return;
+    if (!scanResult?.registration || busy || scanning) return;
     setBusy(true); setError("");
     try {
       const { data } = await api.post("/desk/scan/confirm", {
@@ -145,7 +152,7 @@ export default function Desk() {
     } finally {
       setBusy(false);
     }
-  }, [scanResult, scanPayload, load]);
+  }, [scanResult, scanPayload, load, busy, scanning]);
 
   const doLookup = useCallback(async (e) => {
     e?.preventDefault();
@@ -404,7 +411,7 @@ function DoorScanCard({
 }) {
   const showManual = doorFailures >= 3;
   const scanner = (
-    <AadhaarScanner onScanned={onScanned} onFailure={onDoorFailure} onScanStall={onDoorStall} disabled={noCamp} />
+    <AadhaarScanner onScanned={onScanned} onFailure={onDoorFailure} onScanStall={onDoorStall} disabled={noCamp || busy} />
   );
   return (
     <Card className={collapsed ? "mt-2" : "mb-5"} data-desk-card={collapsed ? undefined : "scan"} data-testid="desk-card-scan">
@@ -424,7 +431,7 @@ function DoorScanCard({
       <div className="mt-3">
         <ScanOutcome
           result={scanResult}
-          busy={busy}
+          busy={busy || scanning}
           onPrint={print}
           onConfirm={confirmMismatch}
           phone={doorPhone}
@@ -454,7 +461,7 @@ function DoorScanCard({
           </div>
           <Button
             onClick={submitDoorManual}
-            disabled={busy || !doorForm.full_name || !doorForm.age || !/^\d{10}$/.test(doorForm.phone || "")}
+            disabled={busy || scanning || !doorForm.full_name || !doorForm.age || !/^\d{10}$/.test(doorForm.phone || "")}
             data-testid="door-manual-submit"
           >
             Register

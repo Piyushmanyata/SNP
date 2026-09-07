@@ -368,6 +368,30 @@ describe("Clinical page component", () => {
     expect(container.textContent).not.toContain("Previous patient");
   });
 
+  test("history from a previous patient cannot open after a new lookup", async () => {
+    const patient = (id) => ({ data: {
+      registration: { id, reg_no: id, full_name: `Patient ${id}` }, person: { id }, transcription: null, fulfilments: [], slips: [],
+    } });
+    api.post.mockResolvedValueOnce(patient("1001")).mockResolvedValueOnce(patient("1002"));
+    await act(async () => root.render(<MemoryRouter><Clinical /></MemoryRouter>));
+    const input = container.querySelector('[data-testid="clinical-lookup-input"]');
+    const lookup = async (id) => {
+      act(() => {
+        Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, id);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await act(async () => container.querySelector('[data-testid="clinical-lookup-button"]').click());
+    };
+    await lookup("1001");
+    let resolveHistory;
+    api.get.mockImplementationOnce(() => new Promise((resolve) => { resolveHistory = resolve; }));
+    await act(async () => container.querySelector('[data-testid="clinical-history-button"]').click());
+    await lookup("1002");
+    await act(async () => resolveHistory({ data: { history: [] } }));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(container.textContent).toContain("Patient 1002");
+  });
+
   test("patient and line controls stay disabled while issuing medicine", async () => {
     let resolveIssue;
     api.post.mockResolvedValueOnce({ data: {

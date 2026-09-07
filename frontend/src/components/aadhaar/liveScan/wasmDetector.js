@@ -21,6 +21,12 @@ function settle(id, text) {
 
 function releaseWaiters(reason) {
   logger.warn("zxing worker error:", reason);
+  if (worker) {
+    worker.onmessage = null;
+    worker.onerror = null;
+    worker.terminate();
+    worker = null;
+  }
   for (const id of [...pending.keys()]) settle(id, null);
 }
 
@@ -39,7 +45,8 @@ export function loadZxingWorker() {
 }
 
 export function detectWasmImageData(imageData) {
-  if (!worker || !imageData) return Promise.resolve(null);
+  if (!imageData) return Promise.resolve(null);
+  if (!worker) return loadZxingWorker().then(() => detectWasmImageData(imageData));
   const id = (seq += 1);
   return new Promise((resolve) => {
     const timer = setTimeout(() => settle(id, null), WASM_DETECT_TIMEOUT_MS);

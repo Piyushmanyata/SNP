@@ -2,7 +2,8 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { LogOut, Stethoscope } from "lucide-react";
-import { Badge } from "./ui";
+import { Alert, Badge } from "./ui";
+import { formatApiError } from "../lib/api";
 import PinChangeModal from "./PinChangeModal";
 
 const ROLE_LABELS = {
@@ -16,6 +17,8 @@ export default function Layout({ children, title }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [changingPin, setChangingPin] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
 
   return (
     <div className="min-h-screen">
@@ -46,7 +49,19 @@ export default function Layout({ children, title }) {
                 Reset PIN
               </button>
               <button
-                onClick={async () => { await logout(); navigate("/login"); }}
+                disabled={loggingOut}
+                onClick={async () => {
+                  setLoggingOut(true);
+                  setLogoutError("");
+                  try {
+                    await logout();
+                    navigate("/login");
+                  } catch (error) {
+                    setLogoutError(`Logout failed. You are still signed in. Please retry. ${formatApiError(error)}`);
+                  } finally {
+                    setLoggingOut(false);
+                  }
+                }}
                 className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-slate-300 hover:text-white hover:bg-slate-800"
                 data-testid="logout-button"
                 title="Logout"
@@ -58,7 +73,10 @@ export default function Layout({ children, title }) {
           )}
         </div>
       </header>
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 animate-fade-up">{children}</main>
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 animate-fade-up">
+        {logoutError && <Alert className="mb-4">{logoutError}</Alert>}
+        {children}
+      </main>
     </div>
   );
 }
