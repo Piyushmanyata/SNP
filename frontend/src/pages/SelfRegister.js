@@ -3,6 +3,7 @@ import { QRCodeSVG } from "qrcode.react";
 import api, { formatApiError } from "../lib/api";
 import { Button, Card, Input, Field, Alert } from "../components/ui";
 import AadhaarScanner from "../components/AadhaarScanner";
+import { AadhaarReviewForm } from "../components/aadhaar/AadhaarReviewForm";
 import { Stethoscope, CheckCircle2, Lock } from "lucide-react";
 import { v4 } from "../lib/uuid";
 
@@ -17,21 +18,29 @@ export default function SelfRegister() {
   const [receipt, setReceipt] = useState(null);
   const [loadErr, setLoadErr] = useState("");
   const [reqId, setReqId] = useState("");
+  const [readFailed, setReadFailed] = useState(false);
+  const [manualEntry, setManualEntry] = useState(false);
 
   const onScanned = useCallback((card, raw) => {
     setScanned({ ...card, qr_payload: raw || card.qr_payload });
     setReqId(v4());
+    setManualEntry(false);
   }, []);
 
   const onTranscribed = useCallback((details) => {
     setScanned({ ...details, qr_payload: null });
     setReqId(v4());
+    setManualEntry(false);
   }, []);
 
   const onCaptureStart = useCallback(() => {
     setScanned(null);
     setReqId("");
+    setReadFailed(false);
+    setManualEntry(false);
   }, []);
+
+  const onFailure = useCallback(() => setReadFailed(true), []);
 
   useEffect(() => {
     api.get("/camps/active/public")
@@ -101,7 +110,14 @@ export default function SelfRegister() {
             </Card>
 
             <Card className="space-y-4">
-              <AadhaarScanner onScanned={onScanned} onTranscribed={onTranscribed} onCaptureStart={onCaptureStart} disabled={busy} />
+              <AadhaarScanner onScanned={onScanned} onTranscribed={onTranscribed} onCaptureStart={onCaptureStart} onFailure={onFailure} disabled={busy} />
+
+              {readFailed && !manualEntry && !scanned?.qr_payload && (
+                <Button variant="outline" className="w-full" disabled={busy} onClick={() => setManualEntry(true)} data-testid="self-enter-details">
+                  {scanned ? "Edit these details" : "Enter details manually"}
+                </Button>
+              )}
+              {manualEntry && <AadhaarReviewForm initial={scanned || undefined} disabled={busy} onConfirm={onTranscribed} />}
 
               {scanned && (
                 <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-1.5" data-testid="self-scanned-preview">
@@ -151,7 +167,7 @@ export default function SelfRegister() {
               <p><span className="text-slate-400">Venue:</span> {receipt.venue}</p>
               <p><span className="text-slate-400">Day:</span> {receipt.day_date}</p>
             </div>
-            <Button variant="outline" className="mt-6 w-full" onClick={() => { setReceipt(null); setScanned(null); setReqId(""); }} data-testid="self-register-another">
+            <Button variant="outline" className="mt-6 w-full" onClick={() => { setReceipt(null); setScanned(null); setReqId(""); setReadFailed(false); setManualEntry(false); }} data-testid="self-register-another">
               Register another patient
             </Button>
           </Card>

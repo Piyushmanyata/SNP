@@ -423,7 +423,7 @@ function DoorScanCard({
 }) {
   const showManual = manualMode || doorFailures >= 3;
   const scanner = (
-    <AadhaarScanner onScanned={onScanned} onFailure={onDoorFailure} onScanStall={onDoorStall} disabled={noCamp || busy || scanning || manualMode} allowManualEntry={false}
+    <AadhaarScanner onScanned={onScanned} onFailure={onDoorFailure} onScanStall={onDoorStall} disabled={noCamp || busy || scanning || manualMode}
       onCaptureStart={clearScan}
       onTranscribed={(details) => {
         clearScan();
@@ -653,7 +653,7 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
             This registers the patient and checks them in, in one action.
           </p>
         )}
-        <AadhaarScanner onScanned={onScan} onFailure={onFailure} onScanStall={onScanStall} disabled={busy || manualMode} allowManualEntry={false}
+        <AadhaarScanner onScanned={onScan} onFailure={onFailure} onScanStall={onScanStall} disabled={busy || manualMode}
           onCaptureStart={() => { scanRequest.current += 1; setScanned(false); setFailures(0); setForm((prev) => ({ ...EMPTY_REG_FORM, phone: prev.phone })); }}
           onTranscribed={(details) => {
             setForm((prev) => ({ ...EMPTY_REG_FORM, ...details, phone: prev.phone }));

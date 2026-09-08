@@ -55,7 +55,7 @@ def transcription(image) -> dict:
                 value = datetime.strptime(dob[1].replace('-', '/'), '%d/%m/%Y').date()
                 if date(1900, 1, 1) <= value <= date.today():
                     data['dob'] = value.isoformat()
-                    data.pop('age', None)
+                    data['age'] = age_from_dob(data['dob'])
             except ValueError:
                 pass
         elif birth_year and 'dob' not in data:

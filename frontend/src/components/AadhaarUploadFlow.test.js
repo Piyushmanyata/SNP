@@ -55,21 +55,26 @@ test("encrypted PDF retries transiently and requires review before returning det
   expect(onScanned).not.toHaveBeenCalled();
 });
 
-test("switching to manual entry aborts upload and ignores a late result", async () => {
+test("the scanner offers no manual entry until a read has been attempted", async () => {
+  const onTranscribed = jest.fn();
+  act(() => root.render(<AadhaarScanner onScanned={jest.fn()} onTranscribed={onTranscribed} />));
+  expect(container.querySelector('[data-testid="aadhaar-enter-details"]')).toBeNull();
+  expect(container.querySelector('[data-testid="aadhaar-review-form"]')).toBeNull();
+  api.post.mockResolvedValueOnce({ data: { outcome: "review", data: {} } });
+  await selectPdf();
+  expect(container.querySelector('[data-testid="aadhaar-review-form"]')).not.toBeNull();
+});
+
+test("cancelling a read aborts the upload and ignores a late result", async () => {
   let resolveUpload;
   api.post.mockImplementation(() => new Promise((resolve) => { resolveUpload = resolve; }));
   const onScanned = jest.fn();
   act(() => root.render(<AadhaarScanner onScanned={onScanned} onTranscribed={jest.fn()} />));
   await selectPdf();
   const signal = api.post.mock.calls[0][2].signal;
-  await act(async () => container.querySelector('[data-testid="aadhaar-enter-details"]').click());
+  await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "Cancel reading").click());
   expect(signal.aborted).toBe(true);
-  const name = container.querySelector('[data-testid="aadhaar-review-full_name"]');
-  act(() => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(name, "Manually entered");
-    name.dispatchEvent(new Event("input", { bubbles: true }));
-  });
   await act(async () => resolveUpload({ data: { outcome: "card", data: { full_name: "Old file" }, payload: "old-qr" } }));
-  expect(name.value).toBe("Manually entered");
   expect(onScanned).not.toHaveBeenCalled();
+  expect(container.querySelector('[data-testid="aadhaar-review-form"]')).toBeNull();
 });

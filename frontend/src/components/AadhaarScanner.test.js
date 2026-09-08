@@ -302,8 +302,9 @@ describe("AadhaarScanner component", () => {
     navigator.mediaDevices.getUserMedia.mockRejectedValue(permError);
     navigator.mediaDevices.enumerateDevices.mockRejectedValue(new Error("Permission denied"));
 
+    const onFailure = jest.fn();
     act(() => {
-      root.render(<AadhaarScanner onScanned={jest.fn()} />);
+      root.render(<AadhaarScanner onScanned={jest.fn()} onFailure={onFailure} />);
     });
 
     const cameraBtn = container.querySelector('[data-testid="aadhaar-camera-button"]');
@@ -314,6 +315,7 @@ describe("AadhaarScanner component", () => {
     expect(container.textContent).toContain("Camera permission is off");
     const retryBtn = container.querySelector('[data-testid="aadhaar-camera-retry"]');
     expect(retryBtn).not.toBeNull();
+    expect(onFailure).toHaveBeenCalled();
   });
 
   test("handles disabled state properly", () => {
