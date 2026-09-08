@@ -1,10 +1,22 @@
 import React, { useState } from "react";
 import { Button, Field, Input, Select } from "../ui";
 
+export function ageFromDob(dob) {
+  const match = /^\s*(\d{4})(?:-(\d{2})-(\d{2}))?\s*$/.exec(dob || "");
+  if (!match) return "";
+  const [year, month, day] = [Number(match[1]), Number(match[2] || 1), Number(match[3] || 1)];
+  const birth = new Date(year, month - 1, day);
+  if (birth.getFullYear() !== year || birth.getMonth() !== month - 1 || birth.getDate() !== day) return "";
+  const now = new Date();
+  const before = now.getMonth() < birth.getMonth() || (now.getMonth() === birth.getMonth() && now.getDate() < birth.getDate());
+  const age = now.getFullYear() - year - (before ? 1 : 0);
+  return age >= 0 && age <= 130 ? String(age) : "";
+}
+
 export function AadhaarReviewForm({ initial = {}, onConfirm, disabled }) {
   const [fields, setFields] = useState(() => ({
     full_name: initial.full_name || "",
-    age: initial.age == null ? "" : String(initial.age),
+    age: initial.age == null ? ageFromDob(initial.dob) : String(initial.age),
     dob: initial.dob || "",
     gender: initial.gender || "",
     address: initial.address || "",
@@ -12,7 +24,8 @@ export function AadhaarReviewForm({ initial = {}, onConfirm, disabled }) {
   }));
   const [reviewed, setReviewed] = useState(false);
   const update = (name, value) => {
-    setFields((previous) => ({ ...previous, [name]: value }));
+    const derivedAge = name === "dob" && ageFromDob(value);
+    setFields((previous) => ({ ...previous, [name]: value, ...(derivedAge ? { age: derivedAge } : {}) }));
     setReviewed(false);
   };
   const validAge = /^\d{1,3}$/.test(fields.age) && Number(fields.age) <= 130;
@@ -30,7 +43,7 @@ export function AadhaarReviewForm({ initial = {}, onConfirm, disabled }) {
           <Input type="number" min="0" max="130" value={fields.age} disabled={disabled} onChange={(e) => update("age", e.target.value)} data-testid="aadhaar-review-age" />
         </Field>
         <Field label="Date / year of birth" hint="Leave blank if unknown">
-          <Input value={fields.dob} maxLength={10} placeholder="YYYY-MM-DD or YYYY" disabled={disabled} onChange={(e) => update("dob", e.target.value)} />
+          <Input value={fields.dob} maxLength={10} placeholder="YYYY-MM-DD or YYYY" disabled={disabled} onChange={(e) => update("dob", e.target.value)} data-testid="aadhaar-review-dob" />
         </Field>
         <Field label="Gender">
           <Select value={fields.gender} disabled={disabled} onChange={(e) => update("gender", e.target.value)}>

@@ -11,7 +11,7 @@ jest.mock("../lib/api", () => ({
 
 jest.mock("../components/AadhaarScanner", () => ({
   __esModule: true,
-  default: ({ onScanned, onTranscribed }) => (
+  default: ({ onScanned, onTranscribed, onFailure }) => (
     <>
     <button
       type="button"
@@ -30,6 +30,7 @@ jest.mock("../components/AadhaarScanner", () => ({
       scan
     </button>
     <button type="button" data-testid="fake-review" onClick={() => onTranscribed({ full_name: "Reviewed Patient", age: "44", gender: "F", aadhaar_last4: "1234", address: "Sikar" })}>Use reviewed details</button>
+    <button type="button" data-testid="fake-failure" onClick={() => onFailure("garbage")}>fail</button>
     </>
   ),
 }));
@@ -97,6 +98,36 @@ test("public reviewed details register without a QR and require desk review", as
     full_name: "Reviewed Patient", age: 44, qr_payload: null, manual_entry: true, aadhaar_scanned: false,
   }));
   expect(container.textContent).toContain("identity check");
+});
+
+test("manual entry is offered only once a read has failed", async () => {
+  await act(async () => root.render(<SelfRegister />));
+  expect(container.querySelector('[data-testid="self-enter-details"]')).toBeNull();
+  await act(async () => container.querySelector('[data-testid="fake-failure"]').click());
+  await act(async () => container.querySelector('[data-testid="self-enter-details"]').click());
+  const setValue = (input, value) => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+  act(() => setValue(container.querySelector('[data-testid="aadhaar-review-full_name"]'), "Walk In Patient"));
+  act(() => setValue(container.querySelector('[data-testid="aadhaar-review-dob"]'), "1986-01-01"));
+  expect(container.querySelector('[data-testid="aadhaar-review-age"]').value).toBe(String(new Date().getFullYear() - 1986));
+  act(() => container.querySelector('[data-testid="aadhaar-review-check"]').click());
+  act(() => container.querySelector('[data-testid="aadhaar-review-confirm"]').click());
+  expect(container.querySelector('[data-testid="self-scanned-preview"]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="aadhaar-review-form"]')).toBeNull();
+
+  const edit = container.querySelector('[data-testid="self-enter-details"]');
+  expect(edit.textContent).toBe("Edit these details");
+  await act(async () => edit.click());
+  expect(container.querySelector('[data-testid="aadhaar-review-full_name"]').value).toBe("Walk In Patient");
+});
+
+test("a locked card scan offers no manual override", async () => {
+  await act(async () => root.render(<SelfRegister />));
+  await act(async () => container.querySelector('[data-testid="fake-failure"]').click());
+  await act(async () => container.querySelector('[data-testid="fake-scan"]').click());
+  expect(container.querySelector('[data-testid="self-enter-details"]')).toBeNull();
 });
 
 function submit() {

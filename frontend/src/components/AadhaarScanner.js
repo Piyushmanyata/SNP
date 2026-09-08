@@ -12,7 +12,7 @@ import {
   AadhaarFallbackPanel,
 } from "./aadhaar";
 
-export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStart, onFailure, onScanStall, disabled, allowManualEntry = true }) {
+export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStart, onFailure, onScanStall, disabled }) {
   const [mode, setMode] = useState("idle");
   const [fallbacksRevealed, setFallbacksRevealed] = useState(false);
   const fileRef = useRef(null);
@@ -49,8 +49,9 @@ export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStar
     (errorMsg) => {
       setError(errorMsg);
       setMode("idle");
+      onFailure?.("error");
     },
-    [setError]
+    [setError, onFailure]
   );
 
   const handleHintFallbacks = useCallback(() => {
@@ -59,8 +60,9 @@ export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStar
 
   const handleScanStall = useCallback(() => {
     setFallbacksRevealed(true);
+    onFailure?.("error");
     if (onScanStall) onScanStall();
-  }, [onScanStall]);
+  }, [onFailure, onScanStall]);
 
   const {
     cameraState,
@@ -168,12 +170,6 @@ export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStar
         fileRef={fileRef}
       />
 
-      {onTranscribed && allowManualEntry && (
-        <Button type="button" variant="outline" disabled={disabled} onClick={async () => {
-          await stopCamera();
-          changeMode("entry");
-        }} data-testid="aadhaar-enter-details">Enter details manually</Button>
-      )}
       {busy && (
         <Button type="button" variant="ghost" onClick={async () => { await stopCamera(); setMode("idle"); }}>Cancel reading</Button>
       )}
@@ -191,8 +187,8 @@ export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStar
         </div>
       )}
 
-      {!busy && (mode === "entry" || reviewData) && (
-        <AadhaarReviewForm key={mode === "entry" ? "entry" : "review"} initial={mode === "entry" ? undefined : reviewData} disabled={disabled} onConfirm={(details) => {
+      {!busy && reviewData && (
+        <AadhaarReviewForm initial={reviewData} disabled={disabled} onConfirm={(details) => {
           cancelDecode();
           selectedFile.current = null;
           setMode("idle");

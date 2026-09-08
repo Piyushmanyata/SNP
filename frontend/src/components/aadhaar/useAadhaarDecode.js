@@ -94,7 +94,7 @@ export function useAadhaarDecode({ onScanned, onFailure } = {}) {
       setReviewData(data.data);
     } else {
       setError(data.message || "Unable to read Aadhaar details. Try another photo or enter details manually.");
-      if (data.outcome === "garbage" || data.outcome === "not-aadhaar") onFailure?.(data.outcome);
+      onFailure?.(data.outcome);
     }
   }, [onScanned, onFailure]);
 
@@ -108,12 +108,15 @@ export function useAadhaarDecode({ onScanned, onFailure } = {}) {
       accept(data, text);
       return data;
     } catch (err) {
-      if (current(request)) setError(formatApiError(err));
+      if (current(request)) {
+        setError(formatApiError(err));
+        onFailure?.("error");
+      }
       return null;
     } finally {
       if (current(request)) setBusy(false);
     }
-  }, [accept, begin, current]);
+  }, [accept, begin, current, onFailure]);
 
   const scanFile = useCallback(async (file, password = "") => {
     if (!file || !mountedRef.current) return;
@@ -123,6 +126,7 @@ export function useAadhaarDecode({ onScanned, onFailure } = {}) {
       let text = null;
       if (file.size > 12 * 1024 * 1024) {
         setError("Choose an Aadhaar photo or PDF smaller than 12 MB, or enter details manually.");
+        onFailure?.("error");
         return;
       }
       try {
@@ -186,13 +190,14 @@ export function useAadhaarDecode({ onScanned, onFailure } = {}) {
       } else {
         setError(detail?.message || "Could not read this Aadhaar file. Check your connection, try another photo, or enter details manually.");
       }
+      onFailure?.("error");
     } finally {
       if (current(request)) {
         uploadRef.current = null;
         setBusy(false);
       }
     }
-  }, [accept, begin, current]);
+  }, [accept, begin, current, onFailure]);
 
   return {
     payload,

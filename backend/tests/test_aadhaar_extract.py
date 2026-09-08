@@ -55,6 +55,7 @@ def test_extract_decodes_a_real_qr_image_before_ocr():
 
 def test_extract_returns_reviewed_suggestions_without_raw_identity_or_lock(monkeypatch):
     import aadhaar_document
+    from helpers import age_from_dob
 
     text = 'Name: Test Patient\nDOB: 14/06/1975\nMALE\nXXXX XXXX 4321\nAddress: Test Street, Test Town 123456'
     tsv = 'level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n'
@@ -74,7 +75,7 @@ def test_extract_returns_reviewed_suggestions_without_raw_identity_or_lock(monke
     assert response.status_code == 200, response.text
     assert response.json()['outcome'] == 'review'
     assert response.json()['data'] == {
-        'full_name': 'Test Patient', 'dob': '1975-06-14', 'gender': 'M',
+        'full_name': 'Test Patient', 'dob': '1975-06-14', 'age': age_from_dob('1975-06-14'), 'gender': 'M',
         'aadhaar_last4': '4321', 'address': 'Test Street, Test Town 123456',
     }
     assert 'payload' not in response.json()
