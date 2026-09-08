@@ -1,6 +1,6 @@
 import React, { act } from "react";
 import ReactDOM from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import Layout from "./Layout";
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
@@ -39,6 +39,25 @@ async function renderLayout() {
 }
 
 describe("Layout header chrome", () => {
+  test("SNP Camps is an accessible link back to the home route", async () => {
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/team"]}>
+          <Routes>
+            <Route path="/team" element={<Layout title="Team">Staff management</Layout>} />
+            <Route path="/" element={<p>Main page</p>} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    });
+    const home = container.querySelector('a[aria-label="SNP Camps home"]');
+    expect(home).not.toBeNull();
+    expect(home.textContent).toContain("SNP Camps");
+    expect(home.getAttribute("href")).toBe("/");
+    await act(async () => { home.click(); });
+    expect(container.textContent).toBe("Main page");
+  });
+
   test("shows identity and PIN reset beside logout without duplicate switching", async () => {
     await renderLayout();
     expect(container.textContent).toContain("Ramesh Kumar");

@@ -185,7 +185,7 @@ describe("Desk page", () => {
     await scanAtDoor();
     await act(async () => resolveFirst({ data: { outcome: "no_match", card: { full_name: "Previous patient" } } }));
     expect(container.textContent).not.toContain("Previous patient");
-    expect(container.textContent).toContain("Decoding…");
+    expect(container.textContent).toContain("Decoding Aadhaar");
     await act(async () => resolveSecond({ data: { outcome: "no_match", card: { full_name: "Latest patient" } } }));
     expect(container.textContent).toContain("Latest patient");
   });
@@ -845,6 +845,49 @@ describe("Desk page", () => {
     expect(container.querySelector('[data-testid="wedge-panel"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="camera-fallback"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="camera-fallback"] [data-testid="mock-aadhaar-scanner"]')).not.toBeNull();
+  });
+
+  test("desk manual registration is available before any scan failure", async () => {
+    await renderDesk();
+    const button = container.querySelector('[data-testid="door-manual-toggle"]');
+    expect(button).not.toBeNull();
+    act(() => button.click());
+    expect(container.querySelector('[data-testid="door-manual-form"]')).not.toBeNull();
+  });
+
+  test("switching the registration modal to manual ignores a pending USB decode", async () => {
+    api.get.mockImplementation((url) => url === "/camps/active" ? Promise.resolve({ data: { camp: { id: "camp-1" }, days: [{ id: "day-1", printing_open: false }], printing_open: false } }) : Promise.resolve({ data: {} }));
+    let resolveDecode;
+    api.post.mockImplementation(() => new Promise((resolve) => { resolveDecode = resolve; }));
+    await renderDesk();
+    act(() => container.querySelector('[data-testid="new-registration-button"]').click());
+    await fireBurst(CARD_PAYLOAD);
+    act(() => document.querySelector('[data-testid="reg-manual-toggle"]').click());
+    act(() => setInput(document.querySelector('[data-testid="reg-fullname-input"]'), "Manual Name"));
+    await act(async () => resolveDecode({ data: { outcome: "card", data: { full_name: "Late scan", age: 42 } } }));
+    expect(document.querySelector('[data-testid="reg-fullname-input"]').value).toBe("Manual Name");
+    expect(document.querySelector('[data-testid="reg-fullname-input"]').readOnly).toBe(false);
+  });
+
+  test("desk shows receiving before Enter and decoding until the response", async () => {
+    let resolveScan;
+    api.post.mockImplementation((url) => url === "/desk/scan" ? new Promise((resolve) => { resolveScan = resolve; }) : Promise.resolve({ data: {} }));
+    await renderDesk();
+    let time = 1000;
+    const spy = jest.spyOn(performance, "now").mockImplementation(() => time);
+    act(() => {
+      for (const key of "1234567890".repeat(4)) {
+        time += 10;
+        document.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+      }
+    });
+    expect(container.querySelector('[data-testid="wedge-panel"]').textContent).toContain("Receiving Aadhaar");
+    expect(api.post).not.toHaveBeenCalled();
+    act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+    expect(container.querySelector('[data-testid="wedge-panel"]').textContent).toContain("Decoding Aadhaar");
+    await act(async () => resolveScan({ data: { outcome: "arrived", registration: ARRIVED } }));
+    expect(container.querySelector('[data-testid="wedge-panel"]').textContent).toContain("Ready for USB scan");
+    spy.mockRestore();
   });
 
   async function fireBurst(text) {

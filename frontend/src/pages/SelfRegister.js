@@ -23,6 +23,16 @@ export default function SelfRegister() {
     setReqId(v4());
   }, []);
 
+  const onTranscribed = useCallback((details) => {
+    setScanned({ ...details, qr_payload: null });
+    setReqId(v4());
+  }, []);
+
+  const onCaptureStart = useCallback(() => {
+    setScanned(null);
+    setReqId("");
+  }, []);
+
   useEffect(() => {
     api.get("/camps/active/public")
       .then((r) => {
@@ -40,12 +50,19 @@ export default function SelfRegister() {
     setBusy(true); setError("");
     try {
       const { data } = await api.post("/self-register", {
-        qr_payload: scanned.qr_payload,
+        qr_payload: scanned.qr_payload || null,
         phone,
         camp_day_id: dayId,
         is_self_registered: true,
         registration_request_id: reqId,
         full_name: scanned.full_name,
+        age: scanned.age === "" || scanned.age == null ? null : Number(scanned.age),
+        dob: scanned.dob || null,
+        gender: scanned.gender || null,
+        address: scanned.address || null,
+        aadhaar_last4: scanned.aadhaar_last4 || null,
+        aadhaar_scanned: Boolean(scanned.qr_payload),
+        manual_entry: !scanned.qr_payload,
       });
       setReceipt(data.receipt);
     } catch (err) {
@@ -63,7 +80,7 @@ export default function SelfRegister() {
             <Stethoscope className="w-5 h-5" />
           </div>
           <div>
-            <p className="font-display font-extrabold text-lg leading-none">SNP Camps</p>
+            <a href="/" className="font-display font-extrabold text-lg min-h-[44px] inline-flex items-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400">SNP Camps</a>
             <p className="text-[11px] text-slate-400 mt-1">Patient Self-Registration</p>
           </div>
         </div>
@@ -84,12 +101,12 @@ export default function SelfRegister() {
             </Card>
 
             <Card className="space-y-4">
-              <AadhaarScanner onScanned={onScanned} />
+              <AadhaarScanner onScanned={onScanned} onTranscribed={onTranscribed} onCaptureStart={onCaptureStart} disabled={busy} />
 
               {scanned && (
                 <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-1.5" data-testid="self-scanned-preview">
                   <div className="flex items-center gap-1.5 text-emerald-600 text-xs font-semibold mb-1">
-                    <Lock className="w-3.5 h-3.5" /> Identity from card (locked)
+                    {scanned.qr_payload && <Lock className="w-3.5 h-3.5" />} {scanned.qr_payload ? "Details from card QR" : "Reviewed details · desk identity check required"}
                   </div>
                   <Row k="Name" v={scanned.full_name} />
                   <Row k="Gender" v={scanned.gender} />
@@ -110,7 +127,7 @@ export default function SelfRegister() {
               </Field>
 
               <Alert>{error}</Alert>
-              <Button size="lg" className="w-full" disabled={!scanned || !dayId || !phone || busy} onClick={submit} data-testid="self-register-submit">
+              <Button size="lg" className="w-full" disabled={!scanned || !dayId || !/^\d{10}$/.test(phone) || busy} onClick={submit} data-testid="self-register-submit">
                 {busy ? "Registering…" : "Register"}
               </Button>
             </Card>
@@ -122,6 +139,7 @@ export default function SelfRegister() {
             <CheckCircle2 className="w-14 h-14 text-emerald-500 mx-auto" />
             <h2 className="font-display font-extrabold text-2xl text-slate-900 mt-3">You're registered!</h2>
             <p className="text-slate-500 text-sm mt-1">Show this screen (or your number) at the desk.</p>
+            {!scanned?.qr_payload && <p className="text-sm text-amber-800 mt-2">Bring your Aadhaar card or available identity details for an identity check before your prescription is printed.</p>}
             <div className="my-5 flex justify-center">
               <div className="p-3 bg-white border border-slate-200 rounded-xl">
                 <QRCodeSVG value={`snp:${receipt.patient_qr}`} size={160} />

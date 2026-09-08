@@ -8,7 +8,7 @@ import { useWedgeBurst } from "../components/aadhaar";
 import { ScanOutcome } from "../components/desk/ScanOutcome";
 import { v4 } from "../lib/uuid";
 import {
-  Button, Card, Input, Field, Alert, Modal, Stat, StatusBadge, Badge, ErrorCard,
+  Button, Card, Input, Field, Alert, Modal, Stat, StatusBadge, Badge, ErrorCard, Spinner,
 } from "../components/ui";
 import {
   UserPlus, Search, Printer, ScanLine,
@@ -46,6 +46,7 @@ export default function Desk() {
   const [doorForm, setDoorForm] = useState(EMPTY_REG_FORM);
   const [doorReqId, setDoorReqId] = useState(v4());
   const [scanning, setScanning] = useState(false);
+  const [manualMode, setManualMode] = useState(false);
   const lastBurstRef = useRef({ payload: "", at: 0 });
   const scanSequence = useRef(0);
   const [printingOpen, setPrintingOpen] = useState(false);
@@ -101,6 +102,7 @@ export default function Desk() {
   const onScanned = useCallback(async (_card, payload) => {
     if (busy) return;
     const request = ++scanSequence.current;
+    setManualMode(false);
     setBanner(""); setError(""); setSearchResults(null); setFound(null);
     setScanResult(null);
     fillDoorForm(_card);
@@ -127,8 +129,9 @@ export default function Desk() {
     }
   }, [load, fillDoorForm, onDoorFailure, busy]);
 
-  useWedgeBurst({
-    enabled: campDayMode && !showReg && !noCamp && !busy,
+  const { receiving } = useWedgeBurst({
+    enabled: campDayMode && !showReg && !noCamp && !busy && !scanning && !manualMode,
+    onInterrupted: () => setError("Scan interrupted. Scan the card again and wait for the scanner to finish."),
     onBurst: (payload) => {
       if (payload === lastBurstRef.current.payload && Date.now() - lastBurstRef.current.at < 3000) return;
       lastBurstRef.current = { payload, at: Date.now() };
@@ -329,6 +332,10 @@ export default function Desk() {
         setDoorForm={setDoorForm}
         submitDoorManual={submitDoorManual}
         scanning={scanning}
+        receiving={receiving}
+        manualMode={manualMode}
+        setManualMode={setManualMode}
+        clearScan={() => setScanResult(null)}
       />}
 
       <Card className="mb-5" data-desk-card="find" data-testid="desk-card-find">
@@ -386,6 +393,10 @@ export default function Desk() {
             doorForm={doorForm}
             setDoorForm={setDoorForm}
             submitDoorManual={submitDoorManual}
+            scanning={scanning}
+            manualMode={manualMode}
+            setManualMode={setManualMode}
+            clearScan={() => setScanResult(null)}
             collapsed
           />
         </details>
@@ -408,10 +419,17 @@ function DoorScanCard({
   noCamp, onScanned, onDoorFailure, onDoorStall, error, banner, scanResult, busy,
   print, confirmMismatch, doorPhone, setDoorPhone, submitDoorWalkIn,
   doorFailures, doorForm, setDoorForm, submitDoorManual, collapsed, scanning,
+  receiving, manualMode, setManualMode, clearScan,
 }) {
-  const showManual = doorFailures >= 3;
+  const showManual = manualMode || doorFailures >= 3;
   const scanner = (
-    <AadhaarScanner onScanned={onScanned} onFailure={onDoorFailure} onScanStall={onDoorStall} disabled={noCamp || busy} />
+    <AadhaarScanner onScanned={onScanned} onFailure={onDoorFailure} onScanStall={onDoorStall} disabled={noCamp || busy || scanning || manualMode} allowManualEntry={false}
+      onCaptureStart={clearScan}
+      onTranscribed={(details) => {
+        clearScan();
+        setDoorForm({ ...EMPTY_REG_FORM, ...details, phone: doorPhone });
+        setManualMode(true);
+      }} />
   );
   return (
     <Card className={collapsed ? "mt-2" : "mb-5"} data-desk-card={collapsed ? undefined : "scan"} data-testid="desk-card-scan">
@@ -422,8 +440,9 @@ function DoorScanCard({
         </div>
       )}
       {collapsed ? scanner : (
-        <div data-testid="wedge-panel">
-          <Badge>{scanning ? "Decoding…" : "Ready for USB scan"}</Badge>
+        <div data-testid="wedge-panel" role="status" aria-live="polite" aria-atomic="true" className="flex items-center gap-2 min-h-[44px] text-slate-900 font-semibold">
+          {(receiving || scanning) && <Spinner className="w-5 h-5 text-emerald-700" />}
+          <span>{scanning ? "Decoding Aadhaar and finding patient…" : receiving ? "Receiving Aadhaar… Keep the card in place." : manualMode ? "Manual entry · USB capture paused" : "Ready for USB scan"}</span>
         </div>
       )}
       {error && <Alert className="mt-3">{error}</Alert>}
@@ -441,12 +460,16 @@ function DoorScanCard({
       </div>
       {!collapsed && (
         <details className="mt-3" data-testid="camera-fallback">
-          <summary>Use phone camera</summary>
+          <summary className="min-h-[44px] flex items-center cursor-pointer font-semibold">Use phone camera or upload photo / PDF</summary>
           {scanner}
         </details>
       )}
+      <Button type="button" variant="outline" className="mt-3" disabled={noCamp || busy || scanning} data-testid="door-manual-toggle" onClick={() => {
+        clearScan();
+        setManualMode(!manualMode);
+      }}>{manualMode ? "Use scanner" : "Enter details manually"}</Button>
       {showManual && (
-        <div className="mt-4 space-y-3" data-testid="door-manual-form">
+        <div className="mt-4 space-y-3" data-testid="door-manual-form" onChange={() => setManualMode(true)}>
           <p className="text-sm font-semibold text-amber-800" data-testid="manual-entry-note">Manual entry</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Full name" required>
@@ -510,7 +533,9 @@ export function PatientRow({ p, onPrint }) {
 export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, onRegistered }) {
   const [form, setForm] = useState(EMPTY_REG_FORM);
   const [scanned, setScanned] = useState(false);
+  const [manualMode, setManualMode] = useState(false);
   const [dayId, setDayId] = useState("");
+  const scanRequest = useRef(0);
   const [failures, setFailures] = useState(0);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -518,9 +543,15 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
   const prevOpenRef = useRef(false);
 
   useEffect(() => {
+    scanRequest.current += 1;
+    return () => { scanRequest.current += 1; };
+  }, [open, manualMode]);
+
+  useEffect(() => {
     if (open && !prevOpenRef.current) {
       setForm(EMPTY_REG_FORM);
       setScanned(false);
+      setManualMode(false);
       setFailures(0);
       setError("");
       setReqId(v4());
@@ -544,6 +575,8 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
       dob: data.dob,
     }));
     setScanned(true);
+    setManualMode(false);
+    setReqId(v4());
   }, []);
 
   const onFailure = useCallback((outcome) => {
@@ -553,21 +586,23 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
   }, []);
 
   useWedgeBurst({
-    enabled: open,
+    enabled: open && !manualMode && !busy,
     onBurst: async (payload) => {
+      const request = ++scanRequest.current;
       try {
         const { data } = await api.post("/aadhaar/decode", { payload });
+        if (request !== scanRequest.current) return;
         if (data.outcome === "card") onScan(data.data);
         else onFailure(data.outcome);
       } catch {
-        onFailure("garbage");
+        if (request === scanRequest.current) onFailure("garbage");
       }
     },
   });
 
   const onScanStall = useCallback(() => {}, []);
 
-  const showForm = scanned || failures >= 3;
+  const showForm = scanned || manualMode || failures >= 3;
 
   const submit = useCallback(async () => {
     setBusy(true); setError("");
@@ -618,14 +653,25 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
             This registers the patient and checks them in, in one action.
           </p>
         )}
-        <AadhaarScanner onScanned={onScan} onFailure={onFailure} onScanStall={onScanStall} />
+        <AadhaarScanner onScanned={onScan} onFailure={onFailure} onScanStall={onScanStall} disabled={busy || manualMode} allowManualEntry={false}
+          onCaptureStart={() => { scanRequest.current += 1; setScanned(false); setFailures(0); setForm((prev) => ({ ...EMPTY_REG_FORM, phone: prev.phone })); }}
+          onTranscribed={(details) => {
+            setForm((prev) => ({ ...EMPTY_REG_FORM, ...details, phone: prev.phone }));
+            setScanned(false);
+            setManualMode(true);
+            setReqId(v4());
+          }} />
+        <Button type="button" variant="outline" disabled={busy} data-testid="reg-manual-toggle" onClick={() => {
+          setScanned(false);
+          setManualMode(!manualMode);
+        }}>{manualMode ? "Use scanner" : "Enter details manually"}</Button>
 
         {showForm && (
           <>
             {!scanned && (
               <p className="text-sm font-semibold text-amber-800" data-testid="manual-entry-note">Manual entry</p>
             )}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" onChange={() => { if (!scanned) setManualMode(true); }}>
               <Field label="Full name" required>
                 <Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} readOnly={scanned && Boolean(form.full_name)} className={scanned && form.full_name ? "bg-slate-100" : ""} data-testid="reg-fullname-input" />
               </Field>
@@ -650,7 +696,7 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
               </Field>
             </div>
             <Field label="Address">
-              <Input value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} readOnly={scanned && Boolean(form.address)} className={scanned && form.address ? "bg-slate-100" : ""} data-testid="reg-address-input" />
+              <Input value={form.address} onChange={(e) => { setForm({ ...form, address: e.target.value }); if (!scanned) setManualMode(true); }} readOnly={scanned && Boolean(form.address)} className={scanned && form.address ? "bg-slate-100" : ""} data-testid="reg-address-input" />
             </Field>
           </>
         )}

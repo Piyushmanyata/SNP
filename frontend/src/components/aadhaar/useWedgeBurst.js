@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export function scrubActiveInput(text) {
   const el = document.activeElement;
@@ -12,40 +12,62 @@ export function scrubActiveInput(text) {
   el.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-export function useWedgeBurst({ enabled, minLength = 20, onBurst }) {
+export function useWedgeBurst({ enabled, minLength = 20, onBurst, onInterrupted }) {
   const onBurstRef = useRef(onBurst);
   onBurstRef.current = onBurst;
-  const state = useRef({ buf: "", lastAt: 0, gaps: [] });
+  const onInterruptedRef = useRef(onInterrupted);
+  onInterruptedRef.current = onInterrupted;
+  const [receiving, setReceiving] = useState(false);
 
   useEffect(() => {
     if (!enabled) return undefined;
+    let buf = "";
+    let firstAt = 0;
+    let lastAt = 0;
+    let idleTimer;
+    const isBurst = () => buf.length >= minLength && buf.length > 1
+      && (lastAt - firstAt) / (buf.length - 1) <= 50;
+    const reset = (interrupted = false) => {
+      clearTimeout(idleTimer);
+      const notify = interrupted && isBurst();
+      buf = "";
+      setReceiving(false);
+      if (notify) onInterruptedRef.current?.();
+    };
     const onKeyDown = (event) => {
       const now = performance.now();
-      const s = state.current;
+      if (now - lastAt >= 500) reset(true);
+      if (event.ctrlKey || event.altKey || event.metaKey || event.repeat || event.isComposing) {
+        reset(true);
+        return;
+      }
       if (event.key.length === 1) {
-        if (now - s.lastAt > 500) {
-          s.buf = "";
-          s.gaps = [];
-        }
-        if (s.buf.length > 0) s.gaps.push(now - s.lastAt);
-        s.buf += event.key;
-        s.lastAt = now;
+        if (!buf.length) firstAt = now;
+        buf += event.key;
+        lastAt = now;
+        setReceiving(isBurst());
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => reset(true), 500);
         return;
       }
       if (event.key === "Enter" || event.key === "Tab") {
-        const candidate = s.buf;
-        const g = s.gaps;
-        s.buf = "";
-        s.gaps = [];
-        const avg = g.length ? g.reduce((a, b) => a + b, 0) / g.length : Infinity;
-        if (!(candidate.length >= minLength && g.length > 0 && avg <= 50)) return;
+        const candidate = buf;
+        const accepted = isBurst();
+        reset();
+        if (!accepted) return;
         event.preventDefault();
         event.stopPropagation();
         scrubActiveInput(candidate);
         onBurstRef.current?.(candidate);
+        return;
       }
+      if (event.key !== "Shift") reset(true);
     };
     document.addEventListener("keydown", onKeyDown, true);
-    return () => document.removeEventListener("keydown", onKeyDown, true);
+    return () => {
+      reset();
+      document.removeEventListener("keydown", onKeyDown, true);
+    };
   }, [enabled, minLength]);
+  return { receiving: Boolean(enabled && receiving) };
 }

@@ -1,0 +1,73 @@
+{
+  "provider": "MSG91",
+  "api": "https://control.msg91.com/api/v5/flow",
+  "sender_country": "IN",
+  "language": "Hindi (Unicode)",
+  "variables": {
+    "reg_no": "Patient registration / token number",
+    "date": "Event date as sent by backend; for specs templates the time window is already appended (e.g. \"12/03/2026, समय 10:00–13:00\")",
+    "venue": "Camp, hospital or distribution venue name"
+  },
+  "templates": [
+    {
+      "key": "registration",
+      "env_var": "MSG91_TEMPLATE_REGISTRATION",
+      "purpose": "Sent at desk registration",
+      "variables": ["reg_no", "date", "venue"],
+      "body": "SNP नेत्र शिविर में आपका पंजीकरण हो गया है। क्रमांक: {reg_no} दिनांक: {date} शिविर स्थल: {venue}। कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।",
+      "dlt_body": "SNP नेत्र शिविर में आपका पंजीकरण हो गया है। क्रमांक: ##reg_no## दिनांक: ##date## शिविर स्थल: ##venue##। कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।"
+    },
+    {
+      "key": "camp",
+      "env_var": "MSG91_TEMPLATE_CAMP",
+      "purpose": "Day-before camp reminder",
+      "variables": ["reg_no", "date", "venue"],
+      "body": "कल ({date}) को SNP नेत्र शिविर में आपका नेत्र परीक्षण है। कृपया समय पर {venue} पहुँचें। यह टोकन शिविर स्थल पर दिखाएँ। क्रमांक: {reg_no}। कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।",
+      "dlt_body": "कल (##date##) को SNP नेत्र शिविर में आपका नेत्र परीक्षण है। कृपया समय पर ##venue## पहुँचें। यह टोकन शिविर स्थल पर दिखाएँ। क्रमांक: ##reg_no##। कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।"
+    },
+    {
+      "key": "ot_token",
+      "env_var": "MSG91_TEMPLATE_OT_TOKEN",
+      "purpose": "Surgery scheduled confirmation",
+      "variables": ["reg_no", "date", "venue"],
+      "body": "SNP नेत्र शिविर में आपका ऑपरेशन बजाज हॉस्पिटल में {date} को निर्धारित हुआ है। पर्चा, टोकन ({reg_no}), आधार कार्ड, वोटर आईडी और मोबाइल नंबर साथ लाएँ। स्थल: {venue}।",
+      "dlt_body": "SNP नेत्र शिविर में आपका ऑपरेशन बजाज हॉस्पिटल में ##date## को निर्धारित हुआ है। पर्चा, टोकन (##reg_no##), आधार कार्ड, वोटर आईडी और मोबाइल नंबर साथ लाएँ। स्थल: ##venue##।"
+    },
+    {
+      "key": "ot",
+      "env_var": "MSG91_TEMPLATE_OT",
+      "purpose": "Day-before surgery reminder",
+      "variables": ["reg_no", "date", "venue"],
+      "body": "कल ({date}) को आपका नेत्र ऑपरेशन बजाज हॉस्पिटल में निर्धारित है। पर्चा, टोकन ({reg_no}), आधार कार्ड, वोटर आईडी और मोबाइल नंबर साथ लाएँ। स्थल: {venue}।",
+      "dlt_body": "कल (##date##) को आपका नेत्र ऑपरेशन बजाज हॉस्पिटल में निर्धारित है। पर्चा, टोकन (##reg_no##), आधार कार्ड, वोटर आईडी और मोबाइल नंबर साथ लाएँ। स्थल: ##venue##।"
+    },
+    {
+      "key": "specs_token",
+      "env_var": "MSG91_TEMPLATE_SPECS_TOKEN",
+      "purpose": "Spectacle collection scheduled",
+      "variables": ["reg_no", "date", "venue"],
+      "body": "SNP द्वारा आपका चश्मा {date} पर {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर आएँ।",
+      "dlt_body": "SNP द्वारा आपका चश्मा ##date## पर ##venue## में दिया जाएगा। कृपया चश्मे का टोकन (##reg_no##) लेकर आएँ।"
+    },
+    {
+      "key": "specs",
+      "env_var": "MSG91_TEMPLATE_SPECS",
+      "purpose": "Day-before spectacle collection reminder",
+      "variables": ["reg_no", "date", "venue"],
+      "body": "कल SNP से चश्मा लें। क्रमांक {reg_no}, दिनांक {date}, स्थान {venue}। टोकन साथ लाएँ।",
+      "dlt_body": "कल SNP से चश्मा लें। क्रमांक ##reg_no##, दिनांक ##date##, स्थान ##venue##। टोकन साथ लाएँ।"
+    }
+  ],
+  "request_example": {
+    "template_id": "<MSG91 flow id for the chosen key>",
+    "short_url": "0",
+    "recipients": [
+      {
+        "mobiles": "919999999999",
+        "reg_no": "142",
+        "date": "12/03/2026",
+        "venue": "बजाज हॉस्पिटल"
+      }
+    ]
+  }
+}

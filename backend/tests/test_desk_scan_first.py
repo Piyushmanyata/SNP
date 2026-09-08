@@ -411,13 +411,16 @@ class TestPublicOccupancy:
         assert dead["id"] != pub["camp"]["id"]
 
 
-class TestSelfRegisterLockRequired:
-    def test_self_register_without_lock_400(self, admin, anon):
+class TestSelfRegisterReviewedManual:
+    def test_self_register_without_lock_requires_desk_review(self, admin, anon):
         camp_id = _camp(admin, "selflock")
         day = _day(admin, camp_id, TODAY_IST)
         r = _self(anon, day["id"], full_name=f"TEST NoLock {TAG}", age=30,
                   aadhaar_scanned=False, phone="9876500601")
-        assert r.status_code == 400, r.text
+        assert r.status_code == 200, r.text
+        assert r.json()["registration"]["identity_recheck_required"] is True
+        assert r.json()["registration"]["manual_entry"] is True
+        assert r.json()["registration"]["aadhaar_scanned"] is False
 
 
 class TestPrescriptionLockdown:

@@ -1,5 +1,3 @@
-import logger from "../../../lib/logger";
-
 export const WASM_DETECT_TIMEOUT_MS = 4000;
 
 let worker = null;
@@ -19,8 +17,7 @@ function settle(id, text) {
   job.resolve(text);
 }
 
-function releaseWaiters(reason) {
-  logger.warn("zxing worker error:", reason);
+function releaseWaiters() {
   if (worker) {
     worker.onmessage = null;
     worker.onerror = null;
@@ -49,8 +46,12 @@ export function detectWasmImageData(imageData) {
   if (!worker) return loadZxingWorker().then(() => detectWasmImageData(imageData));
   const id = (seq += 1);
   return new Promise((resolve) => {
-    const timer = setTimeout(() => settle(id, null), WASM_DETECT_TIMEOUT_MS);
+    const timer = setTimeout(releaseWaiters, WASM_DETECT_TIMEOUT_MS);
     pending.set(id, { resolve, timer });
-    worker.postMessage({ id, imageData });
+    try {
+      worker.postMessage({ id, imageData }, [imageData.data.buffer]);
+    } catch {
+      releaseWaiters();
+    }
   });
 }

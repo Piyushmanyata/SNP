@@ -14,13 +14,13 @@ export function AadhaarScannerStatus({
   return (
     <>
       {busy && mode !== "manual" && (
-        <div className="flex items-center gap-2 text-xs text-slate-600 mt-2">
+        <div role="status" aria-live="polite" className="flex items-center gap-2 text-sm text-slate-700 mt-2">
           <Spinner className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Decoding Aadhaar QR payload…</span>
+          <span>Reading Aadhaar… Please wait.</span>
         </div>
       )}
 
-      {outcome && outcome !== "card" && (
+      {outcome && outcome !== "card" && outcome !== "review" && (
         <Alert tone="amber" className="mt-3">
           {error}
         </Alert>
