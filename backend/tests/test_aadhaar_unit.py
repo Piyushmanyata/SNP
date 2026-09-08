@@ -10,6 +10,7 @@ import io
 import gzip
 import zlib
 import os
+import pytest
 from aadhaar import (
     decode_aadhaar,
     _to_iso_dob,
@@ -96,6 +97,96 @@ def test_decode_secure_qr_zlib():
     assert res["outcome"] == "card"
     assert res["source"] == "secure_qr"
     assert res["data"]["full_name"] == "Ramesh Kumar"
+
+
+@pytest.mark.parametrize("version", ["V2", "V3", "V4", "V5"])
+@pytest.mark.parametrize("use_gzip", [True, False])
+def test_decode_versioned_secure_qr(version, use_gzip):
+    values = [version, *SAMPLE]
+    values[2] = "432120241021140214946"
+    result = decode_aadhaar(build_secure_qr(values, use_gzip=use_gzip))
+    assert result["outcome"] == "card"
+    assert result["data"] == {
+        "full_name": "Ramesh Kumar",
+        "gender": "M",
+        "dob": "1975-08-15",
+        "age": _calc_age("1975-08-15"),
+        "aadhaar_last4": "4321",
+        "address": "12-A, MG Road, Near Temple, Rampur, Rampur PO, Rampur, Modinagar, Ghaziabad, Uttar Pradesh, 201001",
+    }
+
+
+@pytest.mark.parametrize("index,value", [
+    (0, "9"), (1, "2"), (1, "abcd20241021140214946"),
+    (2, "432120241021140214946"), (2, "Name\x00Hidden"),
+    (3, "31-02-1980"), (3, "9999"), (3, ""),
+    (4, "Unexpected"), (4, ""),
+])
+@pytest.mark.parametrize("version", [None, "V3"])
+def test_secure_qr_invalid_identity_is_not_a_card(index, value, version):
+    values = list(SAMPLE)
+    values[index] = value
+    if version:
+        values.insert(0, version)
+    result = decode_aadhaar(build_secure_qr(values))
+    assert result["outcome"] == "garbage"
+    assert "data" not in result
+
+
+@pytest.mark.parametrize("values", [SAMPLE[:3], SAMPLE[:-1], ["V99", *SAMPLE]])
+def test_secure_qr_incomplete_or_unsupported_layout_is_not_a_card(values):
+    result = decode_aadhaar(build_secure_qr(values))
+    assert result["outcome"] == "garbage"
+    assert "data" not in result
+
+
+@pytest.mark.parametrize("version", [None, "V5"])
+def test_secure_qr_unicode_name_year_of_birth_and_binary_tail(version):
+    values = list(SAMPLE)
+    values[1] = "000120241021140214946"
+    values[2] = "অনন্যা রায়"
+    values[3] = "1980"
+    values[4] = "T"
+    if version:
+        values.insert(0, version)
+        values.append("XXXXXX9876")
+    raw = b"\xff".join(value.encode("utf-8") for value in values) + b"\xff"
+    raw += bytes(range(256)) * 8
+    payload = str(int.from_bytes(gzip.compress(raw), "big"))
+    result = decode_aadhaar("\r\n".join(payload[i:i + 70] for i in range(0, len(payload), 70)))
+    assert result["outcome"] == "card"
+    assert result["data"]["full_name"] == "অনন্যা রায়"
+    assert result["data"]["aadhaar_last4"] == "0001"
+    assert result["data"]["dob"] == "1980-01-01"
+    assert result["data"]["gender"] == "O"
+
+
+def test_versioned_secure_qr_raw_deflate():
+    raw = b"\xff".join(value.encode() for value in ["V3", *SAMPLE]) + b"\xff" + b"SIG" * 100
+    compressor = zlib.compressobj(wbits=-zlib.MAX_WBITS)
+    compressed = compressor.compress(raw) + compressor.flush()
+    result = decode_aadhaar(str(int.from_bytes(compressed, "big")))
+    assert result["outcome"] == "card"
+    assert result["data"]["full_name"] == "Ramesh Kumar"
+    assert result["data"]["aadhaar_last4"] == "5678"
+
+
+def test_versioned_secure_qr_decode_endpoint(anon):
+    from conftest import API
+
+    response = anon.post(f"{API}/aadhaar/decode", json={"payload": build_secure_qr(["V3", *SAMPLE])})
+    assert response.status_code == 200
+    result = response.json()
+    assert result["outcome"] == "card"
+    assert result["data"]["full_name"] == "Ramesh Kumar"
+    assert result["data"]["dob"] == "1975-08-15"
+    assert result["data"]["age"] == _calc_age("1975-08-15")
+    assert result["data"]["gender"] == "M"
+    assert result["data"]["aadhaar_last4"] == "5678"
+    rejected = anon.post(f"{API}/aadhaar/decode", json={"payload": build_secure_qr(["V99", *SAMPLE])})
+    assert rejected.status_code == 200
+    assert rejected.json()["outcome"] == "garbage"
+    assert "data" not in rejected.json()
 
 
 def test_decode_secure_qr_large_digits():
@@ -274,4 +365,3 @@ def test_extract_xml_address_helper():
     }
     addr = _extract_xml_address(attrs)
     assert addr == "42, Main St, City, State, 123456"
-

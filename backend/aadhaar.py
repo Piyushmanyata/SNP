@@ -24,7 +24,6 @@ if hasattr(sys, "set_int_max_str_digits"):
     except Exception:
         pass
 
-# Secure QR v2 delimiter-separated text fields (delimiter = byte 0xFF)
 FIELDS = [
     "indicator", "referenceid", "name", "dob", "gender", "careof", "district",
     "landmark", "house", "location", "pincode", "postoffice", "state",
@@ -121,16 +120,29 @@ def _extract_delimited_segments(data: bytes, field_names: list[str]) -> dict[str
 
 def parse_secure_qr(qr: str) -> dict:
     data = _decompress(qr)
+    header, _, remainder = data.partition(b"\xff")
+    if header in (b"V2", b"V3", b"V4", b"V5"):
+        data = remainder
     fields = _extract_delimited_segments(data, FIELDS)
+    if len(fields) != len(FIELDS) or fields["indicator"] not in ("0", "1", "2", "3"):
+        raise ValueError("Incomplete or invalid Secure QR fields")
 
     name = fields.get("name", "").strip()
-    if not name:
-        raise ValueError("No name field decoded")
+    if not name.isprintable() or not any(c.isalpha() for c in name) or any(c.isdigit() for c in name):
+        raise ValueError("Invalid name field decoded")
 
     ref = (fields.get("referenceid", "") or "").strip()
-    last4 = ref[:4] if len(ref) >= 4 else ref
-    gender = _normalize_gender(fields.get("gender", ""))
+    if not re.fullmatch(r"[0-9]{18}(?:[0-9]{3})?", ref):
+        raise ValueError("Invalid Secure QR reference")
+    last4 = ref[:4]
+    raw_gender = fields.get("gender", "").strip().upper()
+    if raw_gender not in ("M", "F", "O", "T", "MALE", "FEMALE", "OTHER", "TRANSGENDER"):
+        raise ValueError("Invalid Secure QR gender")
+    gender = _normalize_gender(raw_gender)
     dob_iso = _to_iso_dob(fields.get("dob", ""))
+    age = _calc_age(dob_iso)
+    if age is None or age < 0:
+        raise ValueError("Invalid Secure QR date of birth")
     addr_keys = ["house", "street", "landmark", "location", "postoffice", "vtc", "subdistrict", "district", "state", "pincode"]
     address = ", ".join(fields.get(k, "").strip() for k in addr_keys if fields.get(k, "").strip())
 
@@ -138,8 +150,8 @@ def parse_secure_qr(qr: str) -> dict:
         "full_name": name,
         "gender": gender,
         "dob": dob_iso,
-        "age": _calc_age(dob_iso),
-        "aadhaar_last4": last4.zfill(4) if last4 else "",
+        "age": age,
+        "aadhaar_last4": last4,
         "address": address,
     }
 

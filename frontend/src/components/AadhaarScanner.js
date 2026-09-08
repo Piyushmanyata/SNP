@@ -25,6 +25,7 @@ export default function AadhaarScanner({ onScanned, onFailure, onScanStall, disa
     source,
     busy,
     decode,
+    cancelDecode,
     scanFile,
   } = useAadhaarDecode({ onScanned, onFailure });
 
@@ -55,8 +56,8 @@ export default function AadhaarScanner({ onScanned, onFailure, onScanStall, disa
     torchAvailable,
     torchOn,
     startCamera: baseStartCamera,
-    stopCamera,
-    switchCamera,
+    stopCamera: baseStopCamera,
+    switchCamera: baseSwitchCamera,
     toggleTorch,
     videoRef,
   } = useAadhaarCamera({
@@ -67,15 +68,26 @@ export default function AadhaarScanner({ onScanned, onFailure, onScanStall, disa
     onScanStall: handleScanStall,
   });
 
+  const stopCamera = useCallback(async () => {
+    cancelDecode();
+    await baseStopCamera();
+  }, [cancelDecode, baseStopCamera]);
+
+  const switchCamera = useCallback(async () => {
+    cancelDecode();
+    await baseSwitchCamera();
+  }, [cancelDecode, baseSwitchCamera]);
+
   const startCamera = useCallback(
     async (cameraIndexToUse) => {
+      cancelDecode();
       setError("");
       setOutcome("");
       setFallbacksRevealed(false);
       setMode("camera");
       await baseStartCamera(cameraIndexToUse);
     },
-    [baseStartCamera, setError, setOutcome]
+    [baseStartCamera, cancelDecode, setError, setOutcome]
   );
 
   return (
