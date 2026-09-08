@@ -56,13 +56,14 @@ def test_nginx_preserves_distinct_client_rate_limit_buckets(anon):
         "age": 40,
         "camp_day_id": "000000000000000000000000",
         "qr_payload": "not-an-aadhaar-qr",
+        "dob": "not-a-date",
     }
     for attempt in range(300):
         response = anon.post(f"{API}/self-register", json=payload, headers={"X-Forwarded-For": first_ip}, timeout=30)
         assert response.status_code == 400, (attempt, response.status_code)
-        assert response.json()["detail"] == "Aadhaar QR could not be decoded"
+        assert response.json()["detail"] == "Enter a valid date of birth as YYYY-MM-DD or a four-digit year"
     limited = anon.post(f"{API}/self-register", json=payload, headers={"X-Forwarded-For": first_ip}, timeout=30)
     assert limited.status_code == 429
     other_client = anon.post(f"{API}/self-register", json=payload, headers={"X-Forwarded-For": second_ip}, timeout=30)
     assert other_client.status_code == 400
-    assert other_client.json()["detail"] == "Aadhaar QR could not be decoded"
+    assert other_client.json()["detail"] == "Enter a valid date of birth as YYYY-MM-DD or a four-digit year"
