@@ -4,6 +4,7 @@ import AadhaarScanner from "./AadhaarScanner";
 import api from "../lib/api";
 import * as nativeDetector from "./aadhaar/liveScan/nativeDetector";
 import * as grab from "./aadhaar/liveScan/grabFrame";
+import * as wasmDetector from "./aadhaar/liveScan/wasmDetector";
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -132,7 +133,7 @@ describe("AadhaarScanner component", () => {
     api.post.mockResolvedValueOnce({
       data: {
         outcome: "card",
-        source: "demo",
+        source: "secure_qr_xml",
         data: fakeData,
       },
     });
@@ -152,7 +153,7 @@ describe("AadhaarScanner component", () => {
         window.HTMLTextAreaElement.prototype,
         "value"
       ).set;
-      nativeSetter.call(textarea, "AADHAAR|Priya Sharma|F|1992-04-10|9876|45 Station Rd, Howrah");
+      nativeSetter.call(textarea, '<PrintLetterBarcodeData uid="999999999876" name="Priya Sharma" gender="F" dob="10/04/1992" house="45 Station Rd" vtc="Howrah" />');
       textarea.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
@@ -162,7 +163,7 @@ describe("AadhaarScanner component", () => {
     });
 
     expect(api.post).toHaveBeenCalledWith("/aadhaar/decode", {
-      payload: "AADHAAR|Priya Sharma|F|1992-04-10|9876|45 Station Rd, Howrah",
+      payload: '<PrintLetterBarcodeData uid="999999999876" name="Priya Sharma" gender="F" dob="10/04/1992" house="45 Station Rd" vtc="Howrah" />',
     });
     expect(onScannedMock).toHaveBeenCalledWith(fakeData, expect.any(String));
     expect(container.textContent).toContain("Identity locked from card");
@@ -209,6 +210,61 @@ describe("AadhaarScanner component", () => {
       }),
       expect.any(String)
     );
+  });
+
+  test("stopping the camera discards a pending identity response", async () => {
+    const onScanned = jest.fn();
+    let finishDecode;
+    nativeDetector.detectNativeImageData.mockResolvedValue("pending-card");
+    api.post.mockImplementationOnce(() => new Promise((resolve) => {
+      finishDecode = resolve;
+    }));
+    act(() => root.render(<AadhaarScanner onScanned={onScanned} />));
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+    expect(api.post).toHaveBeenCalledWith("/aadhaar/decode", { payload: "pending-card" });
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-stop"]').click());
+    await act(async () => finishDecode({
+      data: { outcome: "card", source: "secure_qr", data: { full_name: "Previous Patient" } },
+    }));
+    expect(onScanned).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain("Identity locked from card");
+    expect(container.querySelector('[data-testid="aadhaar-camera-button"]').disabled).toBe(false);
+  });
+
+  test.each(["success", "failure"])("a restarted scan ignores an older %s without clearing its busy state", async (outcome) => {
+    const onScanned = jest.fn();
+    let resolvePrevious;
+    let rejectPrevious;
+    let resolveCurrent;
+    nativeDetector.detectNativeImageData.mockResolvedValue("test-card");
+    api.post
+      .mockImplementationOnce(() => new Promise((resolve, reject) => {
+        resolvePrevious = resolve;
+        rejectPrevious = reject;
+      }))
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveCurrent = resolve;
+      }));
+    act(() => root.render(<AadhaarScanner onScanned={onScanned} />));
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-stop"]').click());
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+    expect(api.post).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      if (outcome === "success") {
+        resolvePrevious({ data: { outcome: "card", data: { full_name: "Previous Patient" } } });
+      } else {
+        rejectPrevious(new Error("Previous request failed"));
+      }
+    });
+    expect(onScanned).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="aadhaar-upload-button"]').disabled).toBe(true);
+    expect(container.textContent).not.toContain("Previous request failed");
+    await act(async () => resolveCurrent({
+      data: { outcome: "card", source: "secure_qr", data: { full_name: "Current Patient" } },
+    }));
+    expect(onScanned).toHaveBeenCalledTimes(1);
+    expect(onScanned).toHaveBeenCalledWith({ full_name: "Current Patient" }, "test-card");
   });
 
   test("opens the rear camera even when the front camera is enumerated first", async () => {
@@ -276,12 +332,12 @@ describe("AadhaarScanner component", () => {
   test("handles file upload QR scan successfully", async () => {
     const onScannedMock = jest.fn();
     nativeDetector.detectNativeImageData.mockResolvedValue(
-      "AADHAAR|Test Person|M|1980-01-01|1234|Test Address"
+      '<PrintLetterBarcodeData uid="999999991234" name="Test Person" gender="M" dob="01/01/1980" house="Test Address" />'
     );
     api.post.mockResolvedValueOnce({
       data: {
         outcome: "card",
-        source: "demo",
+        source: "secure_qr_xml",
         data: { full_name: "Test Person", aadhaar_last4: "1234" },
       },
     });
@@ -304,12 +360,64 @@ describe("AadhaarScanner component", () => {
     expect(global.createImageBitmap).toHaveBeenCalledWith(file);
     expect(nativeDetector.detectNativeImageData).toHaveBeenCalled();
     expect(api.post).toHaveBeenCalledWith("/aadhaar/decode", {
-      payload: "AADHAAR|Test Person|M|1980-01-01|1234|Test Address",
+      payload: '<PrintLetterBarcodeData uid="999999991234" name="Test Person" gender="M" dob="01/01/1980" house="Test Address" />',
     });
     expect(onScannedMock).toHaveBeenCalledWith(
       expect.objectContaining({ full_name: "Test Person", aadhaar_last4: "1234" }),
       expect.any(String)
     );
+  });
+
+  test.each(["bitmap", "native", "wasm"])("cancelled upload during %s recognition cannot replace the next scan", async (stage) => {
+    const onScanned = jest.fn();
+    let now = 10000;
+    let tick;
+    let finishRecognition;
+    let finishCurrent;
+    jest.spyOn(Date, "now").mockImplementation(() => now);
+    jest.spyOn(global, "setInterval").mockImplementation((callback) => {
+      tick = callback;
+      return 12345;
+    });
+    act(() => root.render(<AadhaarScanner onScanned={onScanned} />));
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+    now += 21000;
+    await act(async () => tick());
+    await act(async () => container.querySelector('[data-testid="fallback-upload-button"]').click());
+
+    const recognition = new Promise((resolve) => { finishRecognition = resolve; });
+    const bitmap = { width: 8, height: 8, close: jest.fn() };
+    if (stage === "bitmap") {
+      global.createImageBitmap.mockReturnValueOnce(recognition);
+      nativeDetector.detectNativeImageData.mockResolvedValueOnce("old-upload");
+    } else if (stage === "native") {
+      nativeDetector.detectNativeImageData.mockReturnValueOnce(recognition);
+    } else {
+      wasmDetector.detectWasmImageData.mockReturnValueOnce(recognition);
+    }
+    const fileInput = container.querySelector('[data-testid="aadhaar-file-input"]');
+    await act(async () => {
+      Object.defineProperty(fileInput, "files", { value: [new File(["image"], "card.jpg")] });
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    await act(async () => container.querySelector('[data-testid="fallback-manual-button"]').click());
+    api.post.mockImplementationOnce(() => new Promise((resolve) => { finishCurrent = resolve; }));
+    const textarea = container.querySelector('[data-testid="aadhaar-qr-input"]');
+    act(() => {
+      Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set.call(textarea, "current-card");
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => container.querySelector('[data-testid="aadhaar-scan-button"]').click());
+    await act(async () => finishRecognition(stage === "bitmap" ? bitmap : "old-upload"));
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(api.post).toHaveBeenCalledWith("/aadhaar/decode", { payload: "current-card" });
+    expect(container.querySelector('[data-testid="aadhaar-scan-button"]').disabled).toBe(true);
+    expect(onScanned).not.toHaveBeenCalled();
+    await act(async () => finishCurrent({
+      data: { outcome: "card", source: "secure_qr", data: { full_name: "Current Patient" } },
+    }));
+    expect(onScanned).toHaveBeenCalledTimes(1);
+    expect(onScanned).toHaveBeenCalledWith({ full_name: "Current Patient" }, "current-card");
   });
 
   test("supports camera switching and torch toggle when available", async () => {
@@ -373,7 +481,7 @@ describe("AadhaarScanner component", () => {
     api.post.mockResolvedValueOnce({
       data: {
         outcome: "card",
-        source: "demo",
+        source: "secure_qr_xml",
         data: { full_name: "Anita Rao", aadhaar_last4: "4321" },
       },
     });
@@ -393,7 +501,7 @@ describe("AadhaarScanner component", () => {
         window.HTMLTextAreaElement.prototype,
         "value"
       ).set;
-      nativeSetter.call(textarea, "AADHAAR|Anita Rao|F|1990-02-14|4321|MG Road");
+      nativeSetter.call(textarea, '<PrintLetterBarcodeData uid="999999994321" name="Anita Rao" gender="F" dob="14/02/1990" house="MG Road" />');
       textarea.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
@@ -402,7 +510,7 @@ describe("AadhaarScanner component", () => {
     });
 
     expect(api.post).toHaveBeenCalledWith("/aadhaar/decode", {
-      payload: "AADHAAR|Anita Rao|F|1990-02-14|4321|MG Road",
+      payload: '<PrintLetterBarcodeData uid="999999994321" name="Anita Rao" gender="F" dob="14/02/1990" house="MG Road" />',
     });
     expect(onScannedMock).toHaveBeenCalledWith(
       expect.objectContaining({ full_name: "Anita Rao", aadhaar_last4: "4321" }),
@@ -489,7 +597,7 @@ describe("AadhaarScanner component", () => {
     api.post.mockResolvedValueOnce({
       data: {
         outcome: "card",
-        source: "demo",
+        source: "secure_qr_xml",
         data: { full_name: "Trim Test", aadhaar_last4: "9999" },
       },
     });
@@ -509,7 +617,7 @@ describe("AadhaarScanner component", () => {
         window.HTMLTextAreaElement.prototype,
         "value"
       ).set;
-      nativeSetter.call(textarea, "   AADHAAR|Trim Test|M|1990-01-01|9999|Address   \n");
+      nativeSetter.call(textarea, '   <PrintLetterBarcodeData uid="999999999999" name="Trim Test" gender="M" dob="01/01/1990" house="Address" />   \n');
       textarea.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
@@ -519,7 +627,7 @@ describe("AadhaarScanner component", () => {
     });
 
     expect(api.post).toHaveBeenCalledWith("/aadhaar/decode", {
-      payload: "AADHAAR|Trim Test|M|1990-01-01|9999|Address",
+      payload: '<PrintLetterBarcodeData uid="999999999999" name="Trim Test" gender="M" dob="01/01/1990" house="Address" />',
     });
   });
 });

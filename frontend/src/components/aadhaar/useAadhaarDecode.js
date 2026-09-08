@@ -13,17 +13,25 @@ export function useAadhaarDecode({ onScanned, onFailure } = {}) {
   const [busy, setBusy] = useState(false);
 
   const mountedRef = useRef(true);
+  const requestRef = useRef(0);
+
+  const cancelDecode = useCallback(() => {
+    requestRef.current += 1;
+    setBusy(false);
+  }, []);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      requestRef.current += 1;
     };
   }, []);
 
   const decode = useCallback(
     async (text) => {
       if (!text) return null;
+      const request = ++requestRef.current;
       if (mountedRef.current) {
         setPayload(text);
         setBusy(true);
@@ -32,6 +40,7 @@ export function useAadhaarDecode({ onScanned, onFailure } = {}) {
       }
       try {
         const { data } = await api.post("/aadhaar/decode", { payload: text });
+        if (request !== requestRef.current) return null;
         if (mountedRef.current) {
           setOutcome(data.outcome);
           setSource(data.source || "");
@@ -46,12 +55,12 @@ export function useAadhaarDecode({ onScanned, onFailure } = {}) {
         }
         return data;
       } catch (err) {
-        if (mountedRef.current) {
+        if (mountedRef.current && request === requestRef.current) {
           setError(formatApiError(err));
         }
         return null;
       } finally {
-        if (mountedRef.current) {
+        if (mountedRef.current && request === requestRef.current) {
           setBusy(false);
         }
       }
@@ -62,6 +71,7 @@ export function useAadhaarDecode({ onScanned, onFailure } = {}) {
   const scanFile = useCallback(
     async (file) => {
       if (!file) return;
+      const request = ++requestRef.current;
       if (mountedRef.current) {
         setError("");
         setOutcome("");
@@ -79,6 +89,7 @@ export function useAadhaarDecode({ onScanned, onFailure } = {}) {
           await wasmDetector.loadZxingWorker();
           text = await wasmDetector.detectWasmImageData(imageData);
         }
+        if (!mountedRef.current || request !== requestRef.current) return;
         if (!text) {
           if (mountedRef.current) {
             setError("No Aadhaar QR found in the image. Try a clearer photo.");
@@ -88,11 +99,11 @@ export function useAadhaarDecode({ onScanned, onFailure } = {}) {
         await decode(text);
       } catch (e) {
         logger.warn("QR code scanning from file failed:", e);
-        if (mountedRef.current) {
+        if (mountedRef.current && request === requestRef.current) {
           setError("No Aadhaar QR found in the image. Try a clearer photo.");
         }
       } finally {
-        if (mountedRef.current) {
+        if (mountedRef.current && request === requestRef.current) {
           setBusy(false);
         }
       }
@@ -112,6 +123,7 @@ export function useAadhaarDecode({ onScanned, onFailure } = {}) {
     busy,
     setBusy,
     decode,
+    cancelDecode,
     scanFile,
   };
 }

@@ -91,7 +91,7 @@ class TestDecodeLimits:
         dob = "1992-11-05"
         assert decode_aadhaar(_digits_for(
             b"\xff".join([b"2", b"999920200101120000", b"Aditi Rao", b"05-11-1992", b"F"])
-            + b"\xff"
+            + b"\xff" * 12
         ))["data"]["age"] == helpers.age_from_dob(dob)
 
 
