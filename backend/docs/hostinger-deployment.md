@@ -5,9 +5,9 @@
 - Application domain: `sikarkolkata.io`.
 - VPS: `82.112.234.39`, Ubuntu 24.04.4 LTS, 2 CPUs, 8 GB RAM.
 - Runtime: Docker Engine 29.8.0 and Docker Compose 5.5.1.
-- Application release: `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6` (reviewed Aadhaar transcription, 8 September 2026).
-- Release directory: `/opt/snp/releases/a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`.
-- Previous releases kept for rollback: `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
+- Application release: `7eaed607ba0946c04dd32a405920a49db5e96fe7` (manual entry as a recovery route, 8 September 2026).
+- Release directory: `/opt/snp/releases/7eaed607ba0946c04dd32a405920a49db5e96fe7`.
+- Previous releases kept for rollback: `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`, `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
 - Current release link: `/opt/snp/current`.
 - Production Compose project: `snp`.
 - Production environment: `/opt/snp/.env.production`, readable only by root.
@@ -24,6 +24,18 @@ The 8 September 2026 release adds `/api/aadhaar/extract`. The backend image now 
 Post-deployment checks against the live host: `/api/health` returned `{"status":"ok"}`, the homepage returned 200, HTTP redirected with 308, and `/api/aadhaar/extract` rejected a non-document with 415. A generated QR image returned `outcome: card` with only the last four digits, and a text-only image returned `outcome: review`, which confirms Tesseract runs in the deployed container rather than reporting `OCR_UNAVAILABLE`. These probes used synthetic data; no real Aadhaar document was uploaded.
 
 No database migration was required. `server.py` calls `init_indexes()` on startup, and this release adds no stored field or index.
+
+## Manual-entry recovery release
+
+The second 8 September 2026 release ([PR 25](https://github.com/Piyushmanyata/SNP/pull/25)) removes `AadhaarScanner`'s own manual-entry control, gates the public page's control on a failed read, and derives age from a transcribed date of birth. See [ADR 0003](camp-operations/adr/0003-manual-entry-as-a-recovery-route.md) and [ADR 0004](camp-operations/adr/0004-age-derived-from-date-of-birth.md).
+
+The running `a5acdcd` images had no rollback tags — the previous deployment did not create them — so `snp-backend`, `snp-frontend` and `snp-reminders` were tagged `rollback-a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6` before rebuilding. Retag those to `:latest` and run `up -d --no-build` to roll back. Release directories are unpacked from `git archive` of the merge commit; they contain no `.git`.
+
+No database migration was required. This release adds no stored field and no index; `server.py` calls the idempotent `init_indexes()` on startup, and the API container started clean. An on-demand pre-deployment archive, `snp_camps-20260908T115929Z.archive.gz`, was taken by restarting the backup container, which dumps on startup. MongoDB was not recreated, so the data volume stayed attached throughout.
+
+Post-deployment checks against the live host: `/api/health` returned `{"status":"ok"}`, the homepage returned 200, HTTP redirected with 308, and `/api/aadhaar/extract` rejected a non-document with 415. The served frontend bundle contains the new `self-enter-details` control and no longer contains `aadhaar-enter-details`. A generated text-only image returned `outcome: review` carrying `dob: 1975-06-14` with `age: 51`, which confirms both that Tesseract runs in the deployed container and that age derivation reaches production. This probe used synthetic data; no real Aadhaar document was uploaded.
+
+CI run [34223121551](https://github.com/Piyushmanyata/SNP/actions/runs/34223121551) passed every step: 266 frontend tests across 31 suites, 548 backend tests against real HTTP and MongoDB services, lint, dependency audits and the production image build.
 
 ## Access and operation
 
