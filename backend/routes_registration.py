@@ -420,6 +420,27 @@ async def _confirm_registration(patient: Dict[str, Any]) -> None:
     await sms.send_patient_sms(db, row, "registration", day["day_date"], camp["venue"])
 
 
+def _validate_manual_identity(body: RegisterBody, now) -> None:
+    body.full_name = (body.full_name or '').strip()
+    if not body.full_name or len(body.full_name) > 120:
+        raise HTTPException(status_code=400, detail="Enter a full name of up to 120 characters")
+    body.dob = (body.dob or '').strip() or None
+    if body.dob:
+        year_only = bool(re.fullmatch(r'[0-9]{4}', body.dob))
+        if not year_only and not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', body.dob):
+            raise HTTPException(status_code=400, detail="Enter a valid date of birth as YYYY-MM-DD or a four-digit year")
+        try:
+            dob = date.fromisoformat(body.dob + '-01-01' if year_only else body.dob)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Enter a valid date of birth as YYYY-MM-DD or a four-digit year")
+        if dob > now.date() or now.year - dob.year > 130:
+            raise HTTPException(status_code=400, detail="Enter a date of birth within the last 130 years")
+        if body.age is None:
+            body.age = age_from_dob(dob.isoformat())
+    if body.age is None or not 0 <= body.age <= 130:
+        raise HTTPException(status_code=400, detail="Enter an age between 0 and 130, or a valid date of birth")
+
+
 @router.post("/register")
 async def desk_register(
     body: RegisterBody,
@@ -429,8 +450,8 @@ async def desk_register(
 ) -> Dict[str, Any]:
     if not body.full_name or not body.full_name.strip():
         raise HTTPException(status_code=400, detail="Full name is required")
-    if body.age is None and not body.aadhaar_scanned:
-        raise HTTPException(status_code=400, detail="Age is required")
+    if not body.aadhaar_scanned:
+        _validate_manual_identity(body, now_utc())
     phone_norm = normalize_phone(body.phone)
     if not phone_norm or is_dummy_phone(phone_norm):
         raise HTTPException(status_code=400, detail="A valid 10-digit household mobile number is required")
@@ -471,28 +492,12 @@ async def self_register(body: RegisterBody, request: Request, background_tasks: 
         body.manual_entry = False
         body.manual_exception = False
     else:
-        body.full_name = body.full_name.strip()
-        if not body.full_name or len(body.full_name) > 120:
-            raise HTTPException(status_code=400, detail="Enter a full name of up to 120 characters")
-        body.dob = (body.dob or '').strip() or None
+        _validate_manual_identity(body, now)
+        year_only = bool(body.dob and re.fullmatch(r'[0-9]{4}', body.dob))
         if body.dob:
-            year_only = bool(re.fullmatch(r'[0-9]{4}', body.dob))
-            if not year_only and not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', body.dob):
-                raise HTTPException(status_code=400, detail="Enter a valid date of birth as YYYY-MM-DD or a four-digit year")
-            try:
-                dob = date.fromisoformat(body.dob + '-01-01' if year_only else body.dob)
-            except ValueError:
-                raise HTTPException(status_code=400, detail="Enter a valid date of birth as YYYY-MM-DD or a four-digit year")
-            if dob > now.date() or now.year - dob.year > 130:
-                raise HTTPException(status_code=400, detail="Enter a date of birth within the last 130 years")
-            calculated_age = age_from_dob(dob.isoformat())
-            allowed_ages = {calculated_age, calculated_age - 1} if year_only else {calculated_age}
-            if body.age is not None and body.age not in allowed_ages:
+            calculated_age = age_from_dob(date.fromisoformat(body.dob + '-01-01' if year_only else body.dob).isoformat())
+            if body.age not in ({calculated_age, calculated_age - 1} if year_only else {calculated_age}):
                 raise HTTPException(status_code=400, detail="Age and date of birth do not match. Please correct the reviewed details")
-            if body.age is None:
-                body.age = calculated_age
-        if body.age is None or not 0 <= body.age <= 130:
-            raise HTTPException(status_code=400, detail="Enter an age between 0 and 130, or a valid date of birth")
         body.aadhaar_last4 = (body.aadhaar_last4 or '').strip() or None
         if body.aadhaar_last4 and not re.fullmatch(r'[0-9]{4}', body.aadhaar_last4):
             raise HTTPException(status_code=400, detail="Enter only the last four Aadhaar digits, or leave them blank")

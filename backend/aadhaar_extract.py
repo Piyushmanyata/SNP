@@ -62,9 +62,9 @@ async def extract_document(request: Request) -> dict:
     attempts = [stamp for stamp in _requests.get(ip, []) if stamp > now - 600]
     if len(attempts) >= 12:
         fail(429, 'RATE_LIMITED', 'Too many document attempts. Enter details manually or try again later.')
-    _requests[ip] = attempts + [now]
     if _active:
         fail(429, 'OCR_BUSY', 'Another document is being read. Please retry shortly or enter details manually.')
+    _requests[ip] = attempts + [now]
     _active = True
     try:
         async with asyncio.timeout(EXTRACT_TIMEOUT_SECONDS):
