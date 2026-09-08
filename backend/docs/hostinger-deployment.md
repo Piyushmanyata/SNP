@@ -5,8 +5,9 @@
 - Application domain: `sikarkolkata.io`.
 - VPS: `82.112.234.39`, Ubuntu 24.04.4 LTS, 2 CPUs, 8 GB RAM.
 - Runtime: Docker Engine 29.8.0 and Docker Compose 5.5.1.
-- Application release: `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
-- Release directory: `/opt/snp/releases/51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
+- Application release: `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6` (reviewed Aadhaar transcription, 8 September 2026).
+- Release directory: `/opt/snp/releases/a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`.
+- Previous releases kept for rollback: `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
 - Current release link: `/opt/snp/current`.
 - Production Compose project: `snp`.
 - Production environment: `/opt/snp/.env.production`, readable only by root.
@@ -15,6 +16,14 @@
 The owner selected a fresh production database. Startup created one admin account; no camps or patient records were imported. Production uses newly generated independent secrets and an initial PIN requiring replacement at first login. The initial credentials are in `/opt/snp/initial-admin.txt`; a private copy is on the operator's computer at `C:\Users\piyus\.ssh\snp-initial-admin.txt`. Do not commit either credentials file.
 
 The existing production Compose architecture is unchanged. MongoDB, the API, frontend, Caddy, reminder worker, and local backup service are running. Authoritative and public DNS now return `82.112.234.39`. Caddy obtained a valid Let's Encrypt certificate for `sikarkolkata.io`; the homepage returns HTTP 200, `/api/health` returns `{"status":"ok"}`, and HTTP redirects to HTTPS with status 308. These endpoint checks used an explicit address override while local and VPS recursive resolvers still cached the earlier missing-domain result; certificate and hostname verification remained enabled. The existing `www` CNAME points to the apex, but this deployment configures only the apex hostname for HTTPS.
+
+## Reviewed Aadhaar transcription release
+
+The 8 September 2026 release adds `/api/aadhaar/extract`. The backend image now installs `tesseract-ocr` with the `eng` and `hin` language data, and the build fails if either language is missing. Deployed images for the previous release are retained as `snp-backend:rollback-<sha>`, `snp-frontend:rollback-<sha>` and `snp-reminders:rollback-<sha>`, so a rollback is a retag and `up -d --no-build`.
+
+Post-deployment checks against the live host: `/api/health` returned `{"status":"ok"}`, the homepage returned 200, HTTP redirected with 308, and `/api/aadhaar/extract` rejected a non-document with 415. A generated QR image returned `outcome: card` with only the last four digits, and a text-only image returned `outcome: review`, which confirms Tesseract runs in the deployed container rather than reporting `OCR_UNAVAILABLE`. These probes used synthetic data; no real Aadhaar document was uploaded.
+
+No database migration was required. `server.py` calls `init_indexes()` on startup, and this release adds no stored field or index.
 
 ## Access and operation
 
