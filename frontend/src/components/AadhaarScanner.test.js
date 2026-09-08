@@ -18,6 +18,7 @@ let container = null;
 let root = null;
 let mediaTrack = null;
 let mediaStream = null;
+const PHOTO_HEADER = new Uint8Array([255, 216, 255, 192, 0, 17, 8, 0, 8, 0, 8, 3, 1, 17, 0, 2, 17, 0, 3, 17, 0]);
 
 beforeEach(() => {
   container = document.createElement("div");
@@ -347,7 +348,7 @@ describe("AadhaarScanner component", () => {
     });
 
     const fileInput = container.querySelector('[data-testid="aadhaar-file-input"]');
-    const file = new File(["fake-image-data"], "aadhaar_qr.jpg", { type: "image/jpeg" });
+    const file = new File([PHOTO_HEADER], "aadhaar_qr.jpg", { type: "image/jpeg" });
 
     await act(async () => {
       Object.defineProperty(fileInput, "files", {
@@ -366,6 +367,21 @@ describe("AadhaarScanner component", () => {
       expect.objectContaining({ full_name: "Test Person", aadhaar_last4: "1234" }),
       expect.any(String)
     );
+  });
+
+  test("a native image decoder error still permits the WASM reader to scan the card", async () => {
+    const onScanned = jest.fn();
+    nativeDetector.detectNativeImageData.mockRejectedValueOnce(new Error("Unsupported image"));
+    wasmDetector.detectWasmImageData.mockResolvedValueOnce("fallback-card");
+    api.post.mockResolvedValueOnce({ data: { outcome: "card", data: { full_name: "Test Person" } } });
+    act(() => root.render(<AadhaarScanner onScanned={onScanned} />));
+    const fileInput = container.querySelector('[data-testid="aadhaar-file-input"]');
+    await act(async () => {
+      Object.defineProperty(fileInput, "files", { value: [new File([PHOTO_HEADER], "card.jpg", { type: "image/jpeg" })] });
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(onScanned).toHaveBeenCalledWith({ full_name: "Test Person" }, "fallback-card");
   });
 
   test.each(["bitmap", "native", "wasm"])("cancelled upload during %s recognition cannot replace the next scan", async (stage) => {
@@ -397,8 +413,9 @@ describe("AadhaarScanner component", () => {
     }
     const fileInput = container.querySelector('[data-testid="aadhaar-file-input"]');
     await act(async () => {
-      Object.defineProperty(fileInput, "files", { value: [new File(["image"], "card.jpg")] });
+      Object.defineProperty(fileInput, "files", { value: [new File([PHOTO_HEADER], "card.jpg")] });
       fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
     });
     await act(async () => container.querySelector('[data-testid="fallback-manual-button"]').click());
     api.post.mockImplementationOnce(() => new Promise((resolve) => { finishCurrent = resolve; }));
@@ -560,7 +577,7 @@ describe("AadhaarScanner component", () => {
     expect(container.querySelector('[data-testid="aadhaar-camera-stop"]')).not.toBeNull();
   });
 
-  test("keeps preview scanning fast and spaces high-resolution still captures three seconds apart", async () => {
+  test.each(["bounded", "oversized", "unknown"])("keeps preview scanning fast with %s still photos and spaces captures three seconds apart", async (kind) => {
     let now = 10000;
     let tick;
     jest.spyOn(Date, "now").mockImplementation(() => now);
@@ -568,9 +585,14 @@ describe("AadhaarScanner component", () => {
       tick = callback;
       return 12345;
     });
-    const takePhoto = jest.fn().mockResolvedValue(new Blob());
+    const header = new Uint8Array(PHOTO_HEADER);
+    if (kind === "oversized") header.set([23, 112, 31, 64], 7);
+    const takePhoto = jest.fn().mockResolvedValue(new Blob(kind === "unknown" ? [] : [header]));
     window.ImageCapture = jest.fn().mockImplementation(() => ({ takePhoto }));
-    const scanNextFrame = async () => tick();
+    const scanNextFrame = async () => {
+      tick();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    };
     try {
       act(() => root.render(<AadhaarScanner />));
       await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
@@ -583,6 +605,12 @@ describe("AadhaarScanner component", () => {
       now += 3000;
       await act(scanNextFrame);
       expect(takePhoto).toHaveBeenCalledTimes(1);
+      if (kind === "bounded") {
+        expect(global.createImageBitmap).toHaveBeenCalledTimes(1);
+      } else {
+        expect(global.createImageBitmap).not.toHaveBeenCalled();
+        expect(grab.grabFrame).toHaveBeenCalledTimes(10);
+      }
       for (let i = 0; i < 8; i += 1) {
         now += 125;
         await act(scanNextFrame);

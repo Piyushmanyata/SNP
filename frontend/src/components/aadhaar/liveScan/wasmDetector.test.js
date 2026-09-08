@@ -61,11 +61,27 @@ test("a timed-out detect leaves no pending job behind for a late reply", async (
   await detector.loadZxingWorker();
   const pending = detector.detectWasmImageData(IMAGE);
   const worker = instances[0];
+  const deliverLateReply = worker.onmessage;
   jest.advanceTimersByTime(detector.WASM_DETECT_TIMEOUT_MS);
   await expect(pending).resolves.toBeNull();
   expect(() =>
-    worker.onmessage({ data: { id: worker.posted[0].id, text: "late" } })
+    deliverLateReply({ data: { id: worker.posted[0].id, text: "late" } })
   ).not.toThrow();
+});
+
+test("a stalled worker is terminated and the next frame uses a fresh reader", async () => {
+  await detector.loadZxingWorker();
+  const first = detector.detectWasmImageData(IMAGE);
+  const stalled = instances[0];
+  jest.advanceTimersByTime(detector.WASM_DETECT_TIMEOUT_MS);
+  await expect(first).resolves.toBeNull();
+  expect(stalled.terminated).toBe(true);
+  const next = detector.detectWasmImageData(IMAGE);
+  await Promise.resolve();
+  expect(instances).toHaveLength(2);
+  const replacement = instances[1];
+  replacement.onmessage({ data: { id: replacement.posted[0].id, text: "next-card" } });
+  await expect(next).resolves.toBe("next-card");
 });
 
 test("a fatal worker error restarts the reader on the next frame", async () => {
@@ -95,4 +111,12 @@ test("an undecodable frame keeps the healthy worker for the next frame", async (
   expect(worker.terminated).toBe(false);
   worker.onmessage({ data: { id: worker.posted[1].id, text: "1234567890" } });
   await expect(next).resolves.toBe("1234567890");
+});
+
+test("a frame that cannot be posted settles immediately and releases the broken worker", async () => {
+  await detector.loadZxingWorker();
+  const broken = instances[0];
+  broken.postMessage = () => { throw new Error("DataCloneError"); };
+  await expect(detector.detectWasmImageData(IMAGE)).resolves.toBeNull();
+  expect(broken.terminated).toBe(true);
 });

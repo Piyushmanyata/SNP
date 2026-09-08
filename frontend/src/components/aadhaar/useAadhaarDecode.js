@@ -3,7 +3,40 @@ import api, { formatApiError } from "../../lib/api";
 import * as grab from "./liveScan/grabFrame";
 import * as nativeDetector from "./liveScan/nativeDetector";
 import * as wasmDetector from "./liveScan/wasmDetector";
-import logger from "../../lib/logger";
+
+async function loadBitmap(file) {
+  if (typeof createImageBitmap === "function") {
+    try {
+      return await createImageBitmap(file);
+    } catch {
+      return loadImage(file);
+    }
+  }
+  return loadImage(file);
+}
+
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    const finish = (error) => {
+      clearTimeout(timer);
+      image.onload = null;
+      image.onerror = null;
+      URL.revokeObjectURL(url);
+      if (error) {
+        image.src = "";
+        reject(new Error("Image could not be loaded"));
+      } else {
+        resolve(image);
+      }
+    };
+    const timer = setTimeout(() => finish(true), 8000);
+    image.onload = () => finish(false);
+    image.onerror = () => finish(true);
+    image.src = url;
+  });
+}
 
 export function useAadhaarDecode({ onScanned, onFailure } = {}) {
   const [payload, setPayload] = useState("");
@@ -11,13 +44,19 @@ export function useAadhaarDecode({ onScanned, onFailure } = {}) {
   const [outcome, setOutcome] = useState("");
   const [source, setSource] = useState("");
   const [busy, setBusy] = useState(false);
-
+  const [reviewData, setReviewData] = useState(null);
+  const [passwordRequired, setPasswordRequired] = useState(false);
   const mountedRef = useRef(true);
   const requestRef = useRef(0);
+  const uploadRef = useRef(null);
 
   const cancelDecode = useCallback(() => {
     requestRef.current += 1;
+    uploadRef.current?.abort();
+    uploadRef.current = null;
     setBusy(false);
+    setReviewData(null);
+    setPasswordRequired(false);
   }, []);
 
   useEffect(() => {
@@ -25,91 +64,135 @@ export function useAadhaarDecode({ onScanned, onFailure } = {}) {
     return () => {
       mountedRef.current = false;
       requestRef.current += 1;
+      uploadRef.current?.abort();
     };
   }, []);
 
-  const decode = useCallback(
-    async (text) => {
-      if (!text) return null;
-      const request = ++requestRef.current;
-      if (mountedRef.current) {
-        setPayload(text);
-        setBusy(true);
-        setError("");
-        setOutcome("");
-      }
-      try {
-        const { data } = await api.post("/aadhaar/decode", { payload: text });
-        if (request !== requestRef.current) return null;
-        if (mountedRef.current) {
-          setOutcome(data.outcome);
-          setSource(data.source || "");
-          if (data.outcome === "card") {
-            if (onScanned) onScanned(data.data, text);
-          } else {
-            setError(data.message || "Unable to read Aadhaar QR data.");
-            if ((data.outcome === "garbage" || data.outcome === "not-aadhaar") && onFailure) {
-              onFailure(data.outcome);
-            }
-          }
-        }
-        return data;
-      } catch (err) {
-        if (mountedRef.current && request === requestRef.current) {
-          setError(formatApiError(err));
-        }
-        return null;
-      } finally {
-        if (mountedRef.current && request === requestRef.current) {
-          setBusy(false);
-        }
-      }
-    },
-    [onScanned, onFailure]
-  );
+  const begin = useCallback(() => {
+    uploadRef.current?.abort();
+    uploadRef.current = null;
+    const request = ++requestRef.current;
+    setError("");
+    setOutcome("");
+    setSource("");
+    setReviewData(null);
+    setPasswordRequired(false);
+    setBusy(true);
+    return request;
+  }, []);
 
-  const scanFile = useCallback(
-    async (file) => {
-      if (!file) return;
-      const request = ++requestRef.current;
-      if (mountedRef.current) {
-        setError("");
-        setOutcome("");
-        setBusy(true);
+  const current = useCallback((request) => mountedRef.current && request === requestRef.current, []);
+
+  const accept = useCallback((data, text = "") => {
+    setOutcome(data.outcome);
+    setSource(data.source || "");
+    if (data.outcome === "card") {
+      setPayload(text);
+      onScanned?.(data.data, text);
+    } else if (data.outcome === "review") {
+      setPayload("");
+      setReviewData(data.data);
+    } else {
+      setError(data.message || "Unable to read Aadhaar details. Try another photo or enter details manually.");
+      if (data.outcome === "garbage" || data.outcome === "not-aadhaar") onFailure?.(data.outcome);
+    }
+  }, [onScanned, onFailure]);
+
+  const decode = useCallback(async (text) => {
+    if (!text || !mountedRef.current) return null;
+    const request = begin();
+    setPayload(text);
+    try {
+      const { data } = await api.post("/aadhaar/decode", { payload: text });
+      if (!current(request)) return null;
+      accept(data, text);
+      return data;
+    } catch (err) {
+      if (current(request)) setError(formatApiError(err));
+      return null;
+    } finally {
+      if (current(request)) setBusy(false);
+    }
+  }, [accept, begin, current]);
+
+  const scanFile = useCallback(async (file, password = "") => {
+    if (!file || !mountedRef.current) return;
+    const request = begin();
+    setPayload("");
+    try {
+      let text = null;
+      if (file.size > 12 * 1024 * 1024) {
+        setError("Choose an Aadhaar photo or PDF smaller than 12 MB, or enter details manually.");
+        return;
       }
       try {
-        const bitmap = await createImageBitmap(file);
-        const imageData = grab.bitmapToImageData(bitmap);
-        if (bitmap.close) bitmap.close();
-        let text = null;
-        if (nativeDetector.hasNativeBarcodeDetector()) {
-          text = await nativeDetector.detectNativeImageData(imageData);
-        }
-        if (!text) {
-          await wasmDetector.loadZxingWorker();
-          text = await wasmDetector.detectWasmImageData(imageData);
-        }
-        if (!mountedRef.current || request !== requestRef.current) return;
-        if (!text) {
-          if (mountedRef.current) {
-            setError("No Aadhaar QR found in the image. Try a clearer photo.");
+        const serverFile = file.size > 4 * 1024 * 1024 || /^(application\/pdf|image\/hei[cf])/i.test(file.type) || /\.(pdf|heic|heif)$/i.test(file.name);
+        const localPhoto = !serverFile && await grab.canDecodePhoto(file);
+        if (!current(request)) return;
+        const bitmap = localPhoto ? await loadBitmap(file) : null;
+        try {
+          if (!current(request)) return;
+          const sizes = !bitmap ? [] : Math.max(bitmap.width, bitmap.height) > 1600 ? [1600, 2560] : [1600];
+          for (const size of sizes) {
+            const imageData = grab.bitmapToImageData(bitmap, size);
+            if (nativeDetector.hasNativeBarcodeDetector()) {
+              try {
+                text = await nativeDetector.detectNativeImageData(imageData);
+              } catch {
+                text = null;
+              }
+            }
+            if (!current(request)) return;
+            if (!text) {
+              await wasmDetector.loadZxingWorker();
+              if (!current(request)) return;
+              text = await wasmDetector.detectWasmImageData(imageData);
+            }
+            if (!current(request)) return;
+            if (text) break;
           }
+        } finally {
+          bitmap?.close?.();
+          if (bitmap?.src) bitmap.src = "";
+        }
+      } catch {
+        text = null;
+      }
+      if (!current(request)) return;
+      if (text) {
+        const { data } = await api.post("/aadhaar/decode", { payload: text });
+        if (!current(request)) return;
+        if (data.outcome === "card") {
+          accept(data, text);
           return;
         }
-        await decode(text);
-      } catch (e) {
-        logger.warn("QR code scanning from file failed:", e);
-        if (mountedRef.current && request === requestRef.current) {
-          setError("No Aadhaar QR found in the image. Try a clearer photo.");
-        }
-      } finally {
-        if (mountedRef.current && request === requestRef.current) {
-          setBusy(false);
-        }
       }
-    },
-    [decode]
-  );
+      const controller = new AbortController();
+      uploadRef.current = controller;
+      const headers = { "Content-Type": file.type || "application/octet-stream" };
+      if (password) headers["X-PDF-Password"] = encodeURIComponent(password);
+      const { data } = await api.post("/aadhaar/extract", file, {
+        headers,
+        signal: controller.signal,
+        timeout: 35000,
+      });
+      if (current(request)) accept(data, data.payload || "");
+    } catch (err) {
+      if (!current(request)) return;
+      const detail = err.response?.data?.detail;
+      if (detail?.code === "PDF_PASSWORD_REQUIRED") {
+        setPasswordRequired(true);
+        setError("Enter the e-Aadhaar PDF password and try again.");
+      } else {
+        setError(detail?.message || "Could not read this Aadhaar file. Check your connection, try another photo, or enter details manually.");
+      }
+    } finally {
+      if (current(request)) {
+        uploadRef.current = null;
+        setBusy(false);
+      }
+    }
+  }, [accept, begin, current]);
 
   return {
     payload,
@@ -122,6 +205,8 @@ export function useAadhaarDecode({ onScanned, onFailure } = {}) {
     setSource,
     busy,
     setBusy,
+    reviewData,
+    passwordRequired,
     decode,
     cancelDecode,
     scanFile,

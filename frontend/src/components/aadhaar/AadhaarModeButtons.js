@@ -65,12 +65,12 @@ export function AadhaarModeButtons({
         className="min-h-[44px]"
         data-testid="aadhaar-upload-button"
       >
-        <Upload className="w-4 h-4" /> Upload photo
+        <Upload className="w-4 h-4" /> Upload photo / PDF
       </Button>
       <input
         ref={fileRef}
         type="file"
-        accept="image/*"
+        accept="image/*,.heic,.heif,application/pdf,.pdf"
         className="hidden"
         onChange={(e) => {
           const file = e.target.files?.[0];

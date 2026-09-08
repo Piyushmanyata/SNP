@@ -11,7 +11,8 @@ jest.mock("../lib/api", () => ({
 
 jest.mock("../components/AadhaarScanner", () => ({
   __esModule: true,
-  default: ({ onScanned }) => (
+  default: ({ onScanned, onTranscribed }) => (
+    <>
     <button
       type="button"
       data-testid="fake-scan"
@@ -28,6 +29,8 @@ jest.mock("../components/AadhaarScanner", () => ({
     >
       scan
     </button>
+    <button type="button" data-testid="fake-review" onClick={() => onTranscribed({ full_name: "Reviewed Patient", age: "44", gender: "F", aadhaar_last4: "1234", address: "Sikar" })}>Use reviewed details</button>
+    </>
   ),
 }));
 
@@ -78,6 +81,22 @@ test("submit stays disabled without a mobile number", async () => {
     container.querySelector('[data-testid="fake-scan"]').click();
   });
   expect(container.querySelector('[data-testid="self-register-submit"]').disabled).toBe(true);
+});
+
+test("public reviewed details register without a QR and require desk review", async () => {
+  await act(async () => root.render(<SelfRegister />));
+  act(() => container.querySelector('[data-testid="fake-review"]').click());
+  act(() => {
+    const input = container.querySelector('[data-testid="self-phone-input"]');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, "9876500001");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  api.post.mockResolvedValueOnce({ data: { receipt: { reg_no: 14, patient_qr: "qr-14" } } });
+  await submit();
+  expect(api.post).toHaveBeenCalledWith("/self-register", expect.objectContaining({
+    full_name: "Reviewed Patient", age: 44, qr_payload: null, manual_entry: true, aadhaar_scanned: false,
+  }));
+  expect(container.textContent).toContain("identity check");
 });
 
 function submit() {

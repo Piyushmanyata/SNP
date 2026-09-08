@@ -12,13 +12,20 @@ from helpers import (
 from serializers import ser_patient
 from security import require_staff, require_any
 from aadhaar import decode_aadhaar
+from aadhaar_extract import extract_document
 import sms
-from datetime import timedelta
+from datetime import date, timedelta
+import re
 
 router = APIRouter(prefix="/api", tags=["registration"])
 
 # rate limit for self-register (per IP)
 _rl: dict = {}
+
+
+@router.post("/aadhaar/extract")
+async def aadhaar_extract(request: Request) -> Dict[str, Any]:
+    return await extract_document(request)
 
 
 @router.post("/aadhaar/decode")
@@ -452,16 +459,51 @@ async def self_register(body: RegisterBody, request: Request, background_tasks: 
     window.append(now)
 
     decoded = decode_aadhaar(body.qr_payload or "")
-    if decoded.get("outcome") != "card" or not decoded.get("data"):
-        raise HTTPException(status_code=400, detail="Aadhaar QR could not be decoded")
-    card = decoded["data"]
-    body.full_name = card.get("full_name") or ""
-    body.gender = card.get("gender")
-    body.dob = card.get("dob")
-    body.age = card.get("age")
-    body.aadhaar_last4 = card.get("aadhaar_last4")
-    body.address = card.get("address")
-    body.aadhaar_scanned = True
+    if decoded.get("outcome") == "card" and decoded.get("data"):
+        card = decoded["data"]
+        body.full_name = card.get("full_name") or ""
+        body.gender = card.get("gender")
+        body.dob = card.get("dob")
+        body.age = card.get("age")
+        body.aadhaar_last4 = card.get("aadhaar_last4")
+        body.address = card.get("address")
+        body.aadhaar_scanned = True
+        body.manual_entry = False
+        body.manual_exception = False
+    else:
+        body.full_name = body.full_name.strip()
+        if not body.full_name or len(body.full_name) > 120:
+            raise HTTPException(status_code=400, detail="Enter a full name of up to 120 characters")
+        body.dob = (body.dob or '').strip() or None
+        if body.dob:
+            year_only = bool(re.fullmatch(r'[0-9]{4}', body.dob))
+            if not year_only and not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', body.dob):
+                raise HTTPException(status_code=400, detail="Enter a valid date of birth as YYYY-MM-DD or a four-digit year")
+            try:
+                dob = date.fromisoformat(body.dob + '-01-01' if year_only else body.dob)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Enter a valid date of birth as YYYY-MM-DD or a four-digit year")
+            if dob > now.date() or now.year - dob.year > 130:
+                raise HTTPException(status_code=400, detail="Enter a date of birth within the last 130 years")
+            calculated_age = age_from_dob(dob.isoformat())
+            allowed_ages = {calculated_age, calculated_age - 1} if year_only else {calculated_age}
+            if body.age is not None and body.age not in allowed_ages:
+                raise HTTPException(status_code=400, detail="Age and date of birth do not match. Please correct the reviewed details")
+            if body.age is None:
+                body.age = calculated_age
+        if body.age is None or not 0 <= body.age <= 130:
+            raise HTTPException(status_code=400, detail="Enter an age between 0 and 130, or a valid date of birth")
+        body.aadhaar_last4 = (body.aadhaar_last4 or '').strip() or None
+        if body.aadhaar_last4 and not re.fullmatch(r'[0-9]{4}', body.aadhaar_last4):
+            raise HTTPException(status_code=400, detail="Enter only the last four Aadhaar digits, or leave them blank")
+        if body.gender not in (None, '', 'M', 'F', 'O'):
+            raise HTTPException(status_code=400, detail="Choose a gender from the available options")
+        if body.address and len(body.address) > 500:
+            raise HTTPException(status_code=400, detail="Enter an address of up to 500 characters")
+        body.aadhaar_scanned = False
+        body.manual_entry = True
+        body.manual_exception = True
+        body.qr_payload = None
     body.is_self_registered = True
     try:
         patient, created = await _create_registration(body, None, True, request)
