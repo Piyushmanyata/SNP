@@ -2,7 +2,7 @@ import os
 import re
 import hmac
 import hashlib
-import uuid
+import secrets
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -103,8 +103,25 @@ def person_key(last4: str, name: str, dob: str, gender: str) -> str:
     return hmac.new(pepper, material, hashlib.sha256).hexdigest()
 
 
-def new_uuid() -> str:
-    return str(uuid.uuid4())
+# Crockford base32 without I, L, O and U: a volunteer reading a code aloud
+# cannot turn it into a different valid one. Uppercase and digits only, so
+# "SNP:" plus a code encodes in QR alphanumeric mode — a 21x21 symbol.
+PATIENT_CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+PATIENT_CODE_LENGTH = 8
+
+
+def new_patient_code() -> str:
+    return "".join(secrets.choice(PATIENT_CODE_ALPHABET) for _ in range(PATIENT_CODE_LENGTH))
+
+
+def parse_patient_identifier(raw_value: str) -> str:
+    """A scanned QR, a pasted URL or a typed registration number, reduced to the identifier."""
+    val = str(raw_value or "").strip()
+    if val[:4].lower() == "snp:":
+        val = val[4:]
+    if "/p/" in val:
+        val = val.split("/p/")[-1]
+    return val.upper()
 
 
 # ---- labellers (never render raw enums) ----
