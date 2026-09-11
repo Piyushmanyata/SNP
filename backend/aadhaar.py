@@ -230,7 +230,7 @@ def decode_aadhaar(raw: str) -> dict:
     raw = (raw or "").strip().lstrip("\ufeff")
     if not raw:
         return {"outcome": "not-aadhaar", "message": "No data captured."}
-    if raw.startswith("snp:") or "/p/" in raw:
+    if raw[:4].lower() == "snp:" or "/p/" in raw:
         return {"outcome": "not-aadhaar", "message": "This is a patient QR, not an Aadhaar card."}
     xml_result = _try_decode_xml(raw)
     if xml_result:

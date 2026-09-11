@@ -46,6 +46,7 @@ def test_decode_empty():
 
 def test_decode_patient_qr():
     assert decode_aadhaar("snp:12345") == {"outcome": "not-aadhaar", "message": "This is a patient QR, not an Aadhaar card."}
+    assert decode_aadhaar("SNP:K7M2QX9F") == {"outcome": "not-aadhaar", "message": "This is a patient QR, not an Aadhaar card."}
     assert decode_aadhaar("https://camps.snp.org/p/abcde") == {"outcome": "not-aadhaar", "message": "This is a patient QR, not an Aadhaar card."}
 
 

@@ -162,7 +162,7 @@ export function PrescriptionSheet({ rx, logos = [], navigate, preview, patientId
               <p>Contact No. <span className="font-semibold">{rx.phone || "—"}</span></p>
             </div>
             <div className="flex justify-end mt-1">
-              <QRCodeSVG value={`snp:${rx.patient_qr}`} size={68} />
+              <QRCodeSVG value={`SNP:${rx.patient_qr}`} size={104} level="Q" marginSize={4} />
             </div>
           </div>
         </div>
