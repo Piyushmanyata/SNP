@@ -89,7 +89,7 @@ The volunteer gives the app a still image of the QR; the app reads the QR from t
 _Avoid_: scan, gallery scan
 
 **Wedge burst**:
-The keystroke stream a USB imager emits for one card: the whole payload followed by a terminator. On a camp day the Registration desk listens for it wherever focus is, with no mode to select and no field to click; the terminator fires Decode.
+The keystroke stream a USB imager emits for one card: the whole payload followed by a terminator. Registration listens for it wherever focus is, with no mode to select and no field to click; the terminator fires Decode. Scan at the door does not: there the volunteer chooses USB / paste and watches the payload arrive in the box, because a door that reads cards invisibly gives the volunteer nothing to believe.
 _Avoid_: USB wedge (the old name for the fallback textarea), paste mode, manual USB mode
 
 **OT Schedule Day**:
@@ -165,16 +165,24 @@ The single camp day currently selected for door check-in and printing. Automatic
 _Avoid_: calendar today, booked day (a patient may have booked a different day)
 
 **Manual entry**:
-A desk registration typed after three Failures. Permission denial, stall, cancel, frames, network and busy do not count. Marked on the registration; camp-day identity rechecking is required. Self-register has no typed path: without a readable QR the public endpoint refuses with `AADHAAR_QR_REQUIRED` and sends the patient to the desk. No client-supplied flag can mint a public registration without a Lock.
+A desk registration typed instead of scanned. Marked on the registration; camp-day identity rechecking is required. Registration reveals it after three Failures — permission denial, stall, cancel, frames, network and busy do not count. Scan at the door never reveals it by counting Failures; there it is behind the Door manual gate. Self-register has no typed path: without a readable QR the public endpoint refuses with `AADHAAR_QR_REQUIRED` and sends the patient to the desk. No client-supplied flag can mint a public registration without a Lock.
 _Avoid_: permission fallback, two-failure unlock, public reviewed details
+
+**Door manual gate**:
+The admin decision that Scan at the door may accept typed identity today, taken because the scanners are down. Stamped on the active camp as the IST date it was opened, so it lapses when that camp day ends and an admin must take the decision again tomorrow. It reveals the typed form and the OCR transcription route at the door and nothing else: a Manual entry it produces still carries `identity_recheck_required` and still cannot print until an admin records an identity check.
+_Avoid_: manual mode, break-glass, override, failure unlock (the door has no failure counter)
+
+**Patient code**:
+The unguessable short code that identifies one registration, printed as a QR on the prescription and shown on the self-registration receipt. Scanning it at the door finds the patient; it is not identity evidence and never substitutes for a Lock.
+_Avoid_: patient QR (that is the printed symbol, not the code), reg_no (guessable, and unique only within a camp)
 
 **Scan stall**:
 Twenty seconds of live scan with no Detect. Does not count as a Failure and does not unlock Manual entry.
 _Avoid_: scan timeout, camera failure, give up
 
 **Arrival**:
-The patient is physically at the camp on a camp day. Stamped by a desk Lock that matches their registration in this camp, by the registration that creates a walk-in, or by the desk checking in a registration whose Lock was already taken at registration. Registration is a booking; Arrival is presence. Stamped once: a second Lock does not re-stamp it or move the patient again. Print Prescription is gated on Arrival, not on Registration, and closes at Doctor seen — reprints included, until a clinical undo. Doctor seen is gated on clinical completion after print, not on Arrival alone. A Manual entry has no Lock and still needs one at the door: the desk offers no way to check one in from a name or number lookup.
-_Avoid_: check-in, presence, attendance, walk-in (a walk-in registers and arrives in one action), door re-scan (a Lock is taken once)
+The patient is physically at the camp on a camp day. Stamped by a desk Lock that matches their registration in this camp, by the registration that creates a walk-in, or by Print Prescription on a registration whose Lock was already taken at registration. Registration is a booking; Arrival is presence. Stamped once: a second Lock does not re-stamp it or move the patient again. Arrival is never a step the desk performs on its own — it has no button and no screen of its own. Print Prescription is gated on Arrival, not on Registration, and closes at Doctor seen — reprints included, until a clinical undo. Doctor seen is gated on clinical completion after print, not on Arrival alone. A Manual entry has no Lock and still needs one at the door: the desk offers no print control from a name or number lookup.
+_Avoid_: check-in, checking in, presence, attendance, walk-in (a walk-in registers and arrives in one action), door re-scan (a Lock is taken once)
 
 **Door walk-in**:
 A registration created at the door from the card a Scan at the door has already decoded, needing only the household phone typed. Registers and stamps Arrival in one action, and is a scanned registration, not a Manual entry.

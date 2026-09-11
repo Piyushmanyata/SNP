@@ -129,6 +129,11 @@ function Camps() {
     catch (e) { setErr(formatApiError(e)); }
   }, [load]);
 
+  const setDoorManual = useCallback(async (enabled) => {
+    try { await api.post("/camps/door-manual", { enabled }); load(); }
+    catch (e) { setErr(formatApiError(e)); }
+  }, [load]);
+
   return (
     <div className="space-y-4">
       {err && <Alert>{err}</Alert>}
@@ -149,6 +154,26 @@ function Camps() {
             <Button size="sm" variant="outline" onClick={() => setExpand(expand === c.id ? null : c.id)} data-testid={`manage-days-${c.id}`}><CalendarDays className="w-4 h-4" /> Days</Button>
             <Button size="sm" variant="ghost" onClick={() => del(c.id)} data-testid={`delete-camp-${c.id}`}><Trash2 className="w-4 h-4 text-rose-500" /></Button>
           </div>
+          {c.is_active && (
+            <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center gap-3" data-testid="door-manual-control">
+              <div className="flex-1 min-w-[220px]">
+                <p className="font-semibold text-slate-900 text-sm">Manual entry at the door</p>
+                <p className="text-xs text-slate-500" data-testid="door-manual-state">
+                  {c.door_manual_entry
+                    ? "Open for today. It closes on its own when the camp day ends."
+                    : "Closed. Open it only when the scanners are down."}
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant={c.door_manual_entry ? "danger" : "outline"}
+                onClick={() => setDoorManual(!c.door_manual_entry)}
+                data-testid="door-manual-toggle"
+              >
+                {c.door_manual_entry ? "Close manual entry" : "Open for today"}
+              </Button>
+            </div>
+          )}
           {expand === c.id && <CampDays campId={c.id} />}
         </Card>
       ))}

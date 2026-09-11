@@ -36,18 +36,14 @@ export default function Desk() {
   const [scanPayload, setScanPayload] = useState("");
   const [busy, setBusy] = useState(false);
   const [found, setFound] = useState(null);
-  const [lookupVal, setLookupVal] = useState("");
-  const [searchVal, setSearchVal] = useState("");
+  const [findVal, setFindVal] = useState("");
   const [searchResults, setSearchResults] = useState(null);
   const [banner, setBanner] = useState("");
   const [error, setError] = useState("");
-  const [doorFailures, setDoorFailures] = useState(0);
   const [doorPhone, setDoorPhone] = useState("");
   const [doorForm, setDoorForm] = useState(EMPTY_REG_FORM);
   const [doorReqId, setDoorReqId] = useState(v4());
   const [scanning, setScanning] = useState(false);
-  const [manualMode, setManualMode] = useState(false);
-  const lastBurstRef = useRef({ payload: "", at: 0 });
   const scanSequence = useRef(0);
   const [printingOpen, setPrintingOpen] = useState(false);
   const [operatingDayId, setOperatingDayId] = useState("");
@@ -79,13 +75,6 @@ export default function Desk() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => () => { scanSequence.current += 1; }, []);
 
-  const onDoorFailure = useCallback((outcome) => {
-    if (outcome === "garbage" || outcome === "not-aadhaar") {
-      setDoorFailures((n) => n + 1);
-    }
-  }, []);
-
-
   const fillDoorForm = useCallback((card) => {
     if (!card) return;
     setDoorForm({
@@ -102,7 +91,6 @@ export default function Desk() {
   const onScanned = useCallback(async (_card, payload) => {
     if (busy) return;
     const request = ++scanSequence.current;
-    setManualMode(false);
     setBanner(""); setError(""); setSearchResults(null); setFound(null);
     setScanResult(null);
     fillDoorForm(_card);
@@ -114,30 +102,18 @@ export default function Desk() {
       setScanResult(data);
       if (data.card) fillDoorForm(data.card);
       if (data.outcome === "arrived") {
-        setDoorFailures(0);
         const extra = data.overwritten ? " (card details updated)" : "";
-        setBanner(`Checked in #${data.registration.reg_no} — ${data.registration.full_name}${extra}`);
+        setBanner(`Arrived: #${data.registration.reg_no} — ${data.registration.full_name}${extra}`);
         await load();
       }
     } catch (err) {
       if (request !== scanSequence.current) return;
-      if (errorPayload(err)?.code === "NOT_A_CARD") onDoorFailure("garbage");
       setScanResult(null);
       setError(formatApiError(err));
     } finally {
       if (request === scanSequence.current) setScanning(false);
     }
-  }, [load, fillDoorForm, onDoorFailure, busy]);
-
-  const { receiving } = useWedgeBurst({
-    enabled: campDayMode && !showReg && !noCamp && !busy && !scanning && !manualMode,
-    onInterrupted: () => setError("Scan interrupted. Scan the card again and wait for the scanner to finish."),
-    onBurst: (payload) => {
-      if (payload === lastBurstRef.current.payload && Date.now() - lastBurstRef.current.at < 3000) return;
-      lastBurstRef.current = { payload, at: Date.now() };
-      onScanned(null, payload);
-    },
-  });
+  }, [load, fillDoorForm, busy]);
 
   const confirmMismatch = useCallback(async () => {
     if (!scanResult?.registration || busy || scanning) return;
@@ -148,7 +124,7 @@ export default function Desk() {
         payload: scanPayload,
       });
       setScanResult(data);
-      setBanner(`Checked in #${data.registration.reg_no} — ${data.registration.full_name}`);
+      setBanner(`Arrived: #${data.registration.reg_no} — ${data.registration.full_name}`);
       await load();
     } catch (err) {
       setError(formatApiError(err));
@@ -157,38 +133,40 @@ export default function Desk() {
     }
   }, [scanResult, scanPayload, load, busy, scanning]);
 
-  const doLookup = useCallback(async (e) => {
-    e?.preventDefault();
-    if (!lookupVal.trim()) return;
-    setBanner(""); setError(""); setSearchResults(null);
+  const lookupValue = useCallback(async (value) => {
+    setBanner(""); setError(""); setSearchResults(null); setScanResult(null);
     try {
-      const { data } = await api.post("/desk/lookup", { value: lookupVal.trim() });
+      const { data } = await api.post("/desk/lookup", { value });
       setFound(data.registration);
-      setLookupVal("");
+      return true;
     } catch (err) {
       setFound(null);
       setError(formatApiError(err));
+      return false;
     }
-  }, [lookupVal]);
+  }, []);
 
-  const doSearch = useCallback(async (e) => {
+  const doFind = useCallback(async (e) => {
     e?.preventDefault();
-    if (!searchVal.trim()) { setSearchResults(null); return; }
-    setError("");
+    const value = findVal.trim();
+    if (!value) { setSearchResults(null); return; }
+    if (/^\d+$/.test(value) || /^snp:/i.test(value)) {
+      if (await lookupValue(value)) setFindVal("");
+      return;
+    }
+    setBanner(""); setError(""); setFound(null);
     try {
-      const { data } = await api.get(`/patients/search?q=${encodeURIComponent(searchVal.trim())}`);
+      const { data } = await api.get(`/patients/search?q=${encodeURIComponent(value)}`);
       setSearchResults(data.results);
     } catch (err) {
       setError(formatApiError(err));
     }
-  }, [searchVal]);
+  }, [findVal, lookupValue]);
 
-  const print = useCallback((reg) => navigate(`/print/prescription/${reg.id}`), [navigate]);
-
-  const checkInAndPrint = useCallback(async (reg) => {
+  const print = useCallback(async (reg) => {
     setError("");
     try {
-      await api.post(`/desk/arrive/${reg.id}`);
+      if (!reg.arrived_at) await api.post(`/desk/arrive/${reg.id}`);
       navigate(`/print/prescription/${reg.id}`);
     } catch (err) {
       setError(formatApiError(err));
@@ -196,8 +174,6 @@ export default function Desk() {
   }, [navigate]);
 
   const openPreReg = useCallback(() => { setShowReg(true); }, []);
-
-  const onDoorStall = useCallback(() => {}, []);
 
   const submitRegister = useCallback(async ({ form, scanned, dayId, reqId, walkIn: asWalkIn }) => {
     const { data } = await api.post("/register", {
@@ -247,13 +223,13 @@ export default function Desk() {
       });
       setScanResult(null);
       setFound(reg);
-      setBanner(`Registered and checked in #${reg.reg_no} — ${reg.full_name}`);
+      setBanner(`Registered and arrived: #${reg.reg_no} — ${reg.full_name}`);
       setDoorPhone("");
       await load();
     } catch (err) {
       const payload = errorPayload(err);
       if (payload && payload.code === "DUPLICATE_IN_CAMP") {
-        setError(`Already registered as #${payload.registration.reg_no}. Check them in instead.`);
+        setError(`Already registered as #${payload.registration.reg_no}. Find them below and print.`);
       } else {
         setError(formatApiError(err));
       }
@@ -276,17 +252,16 @@ export default function Desk() {
       setFound(reg);
       setBanner(
         asWalkIn
-          ? `Registered and checked in #${reg.reg_no} — ${reg.full_name}`
+          ? `Registered and arrived: #${reg.reg_no} — ${reg.full_name}`
           : `Registered #${reg.reg_no} — ${reg.full_name}. SMS sent.`
       );
-      setDoorFailures(0);
       setDoorForm(EMPTY_REG_FORM);
       setDoorReqId(v4());
       await load();
     } catch (err) {
       const payload = errorPayload(err);
       if (payload && payload.code === "DUPLICATE_IN_CAMP") {
-        setError(`Already registered as #${payload.registration.reg_no}. Check them in instead.`);
+        setError(`Already registered as #${payload.registration.reg_no}. Find them below and print.`);
       } else {
         setError(formatApiError(err));
       }
@@ -326,8 +301,7 @@ export default function Desk() {
       {campDayMode && <DoorScanCard
         noCamp={noCamp}
         onScanned={onScanned}
-        onDoorFailure={onDoorFailure}
-        onDoorStall={onDoorStall}
+        onPatientCode={lookupValue}
         error={error}
         banner={banner}
         scanResult={scanResult}
@@ -337,34 +311,26 @@ export default function Desk() {
         doorPhone={doorPhone}
         setDoorPhone={setDoorPhone}
         submitDoorWalkIn={submitDoorWalkIn}
-        doorFailures={doorFailures}
         doorForm={doorForm}
         setDoorForm={setDoorForm}
         submitDoorManual={submitDoorManual}
         scanning={scanning}
-        receiving={receiving}
-        manualMode={manualMode}
-        setManualMode={setManualMode}
+        doorManualEntry={Boolean(camp?.door_manual_entry)}
         clearScan={() => setScanResult(null)}
         printingOpen={printingOpen}
       />}
 
       <Card className="mb-5" data-desk-card="find" data-testid="desk-card-find">
         <h3 className="font-display font-bold text-slate-900 mb-3">Find one patient</h3>
-        <form onSubmit={doLookup} className="flex gap-2">
-          <Input value={lookupVal} onChange={(e) => setLookupVal(e.target.value)}
-            placeholder="Scan prescription QR or type Reg #" data-testid="desk-lookup-input" />
-          <Button type="submit" variant="secondary" data-testid="desk-lookup-button"><ScanLine className="w-5 h-5" /></Button>
-        </form>
-        <form onSubmit={doSearch} className="flex gap-2 mt-3">
-          <Input value={searchVal} onChange={(e) => setSearchVal(e.target.value)}
-            placeholder="Name search (lost paper/number)" data-testid="desk-name-search-input" />
-          <Button type="submit" variant="outline" data-testid="desk-name-search-button"><Search className="w-5 h-5" /></Button>
+        <form onSubmit={doFind} className="flex gap-2">
+          <Input value={findVal} onChange={(e) => setFindVal(e.target.value)}
+            placeholder="Registration number or name" data-testid="desk-find-input" />
+          <Button type="submit" variant="secondary" data-testid="desk-find-button"><Search className="w-5 h-5" /></Button>
         </form>
 
         {found && (
           <div className="mt-4" data-testid="desk-found-patient">
-            <PatientRow p={found} onPrint={print} onCheckInAndPrint={checkInAndPrint} printingOpen={printingOpen} />
+            <PatientRow p={found} onPrint={print} printingOpen={printingOpen} />
           </div>
         )}
 
@@ -372,11 +338,11 @@ export default function Desk() {
           <div className="mt-4">
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm font-semibold text-slate-700">Search results ({searchResults.length})</p>
-              <Button variant="ghost" size="sm" onClick={() => { setSearchResults(null); setSearchVal(""); }}>Clear</Button>
+              <Button variant="ghost" size="sm" onClick={() => { setSearchResults(null); setFindVal(""); }}>Clear</Button>
             </div>
             <div className="space-y-2" data-testid="desk-search-results">
               {searchResults.map((p) => (
-                <PatientRow key={p.id} p={p} onPrint={print} onCheckInAndPrint={checkInAndPrint} printingOpen={printingOpen} />
+                <PatientRow key={p.id} p={p} onPrint={print} printingOpen={printingOpen} />
               ))}
             </div>
           </div>
@@ -389,8 +355,7 @@ export default function Desk() {
           <DoorScanCard
             noCamp={noCamp}
             onScanned={onScanned}
-            onDoorFailure={onDoorFailure}
-            onDoorStall={onDoorStall}
+            onPatientCode={lookupValue}
             error={error}
             banner={banner}
             scanResult={scanResult}
@@ -400,13 +365,11 @@ export default function Desk() {
             doorPhone={doorPhone}
             setDoorPhone={setDoorPhone}
             submitDoorWalkIn={submitDoorWalkIn}
-            doorFailures={doorFailures}
             doorForm={doorForm}
             setDoorForm={setDoorForm}
             submitDoorManual={submitDoorManual}
             scanning={scanning}
-            manualMode={manualMode}
-            setManualMode={setManualMode}
+            doorManualEntry={Boolean(camp?.door_manual_entry)}
             clearScan={() => setScanResult(null)}
             printingOpen={printingOpen}
             collapsed
@@ -428,21 +391,11 @@ export default function Desk() {
 }
 
 function DoorScanCard({
-  noCamp, onScanned, onDoorFailure, onDoorStall, error, banner, scanResult, busy,
+  noCamp, onScanned, onPatientCode, error, banner, scanResult, busy,
   print, confirmMismatch, doorPhone, setDoorPhone, submitDoorWalkIn,
-  doorFailures, doorForm, setDoorForm, submitDoorManual, collapsed, scanning,
-  receiving, manualMode, setManualMode, clearScan, printingOpen,
+  doorForm, setDoorForm, submitDoorManual, collapsed, scanning,
+  doorManualEntry, clearScan, printingOpen,
 }) {
-  const showManual = manualMode || doorFailures >= 3;
-  const scanner = (
-    <AadhaarScanner onScanned={onScanned} onFailure={onDoorFailure} onScanStall={onDoorStall} disabled={noCamp || busy || scanning || manualMode}
-      onCaptureStart={clearScan}
-      onTranscribed={(details) => {
-        clearScan();
-        setDoorForm({ ...EMPTY_REG_FORM, ...details, phone: doorPhone });
-        setManualMode(true);
-      }} />
-  );
   return (
     <Card className={collapsed ? "mt-2" : "mb-5"} data-desk-card={collapsed ? undefined : "scan"} data-testid="desk-card-scan">
       {!collapsed && (
@@ -451,10 +404,20 @@ function DoorScanCard({
           <h3 className="font-display font-bold text-slate-900">Scan at the door</h3>
         </div>
       )}
-      {collapsed ? scanner : (
-        <div data-testid="wedge-panel" role="status" aria-live="polite" aria-atomic="true" className="flex items-center gap-2 min-h-[44px] text-slate-900 font-semibold">
-          {(receiving || scanning) && <Spinner className="w-5 h-5 text-emerald-700" />}
-          <span>{scanning ? "Decoding Aadhaar and finding patient…" : receiving ? "Receiving Aadhaar… Keep the card in place." : manualMode ? "Manual entry · USB capture paused" : "Ready for USB scan"}</span>
+      <AadhaarScanner
+        onScanned={onScanned}
+        onPatientCode={onPatientCode}
+        disabled={noCamp || busy || scanning}
+        onCaptureStart={clearScan}
+        onTranscribed={doorManualEntry ? (details) => {
+          clearScan();
+          setDoorForm({ ...EMPTY_REG_FORM, ...details, phone: doorPhone });
+        } : undefined}
+      />
+      {scanning && (
+        <div data-testid="door-scan-status" role="status" aria-live="polite" aria-atomic="true" className="flex items-center gap-2 mt-3 min-h-[44px] text-slate-900 font-semibold">
+          <Spinner className="w-5 h-5 text-emerald-700" />
+          <span>Reading the QR and finding the patient…</span>
         </div>
       )}
       {error && <Alert className="mt-3">{error}</Alert>}
@@ -471,19 +434,11 @@ function DoorScanCard({
           printingOpen={printingOpen}
         />
       </div>
-      {!collapsed && (
-        <details className="mt-3" data-testid="camera-fallback">
-          <summary className="min-h-[44px] flex items-center cursor-pointer font-semibold">Use phone camera or upload photo / PDF</summary>
-          {scanner}
-        </details>
-      )}
-      <Button type="button" variant="outline" className="mt-3" disabled={noCamp || busy || scanning} data-testid="door-manual-toggle" onClick={() => {
-        clearScan();
-        setManualMode(!manualMode);
-      }}>{manualMode ? "Use scanner" : "Enter details manually"}</Button>
-      {showManual && (
-        <div className="mt-4 space-y-3" data-testid="door-manual-form" onChange={() => setManualMode(true)}>
-          <p className="text-sm font-semibold text-amber-800" data-testid="manual-entry-note">Manual entry</p>
+      {doorManualEntry && (
+        <div className="mt-4 space-y-3" data-testid="door-manual-form">
+          <p className="text-sm font-semibold text-amber-800" data-testid="manual-entry-note">
+            Manual entry — an admin opened this because the scanners are down. It closes at the end of today.
+          </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Full name" required>
               <Input value={doorForm.full_name} onChange={(e) => setDoorForm({ ...doorForm, full_name: e.target.value })} data-testid="reg-fullname-input" />
@@ -508,7 +463,7 @@ function DoorScanCard({
   );
 }
 
-export function PatientRow({ p, onPrint, onCheckInAndPrint, printingOpen }) {
+export function PatientRow({ p, onPrint, printingOpen }) {
   const needsDoorScan = !p.arrived_at && !p.aadhaar_scanned;
   const windowShut = !printingOpen && !p.printed_at;
   const canPrint = p.queue_status !== "seen" && !needsDoorScan && !windowShut;
@@ -529,7 +484,7 @@ export function PatientRow({ p, onPrint, onCheckInAndPrint, printingOpen }) {
       {p.printed_at && <Badge tone="indigo">Printed</Badge>}
       {needsDoorScan && (
         <span className="text-xs text-slate-500" data-testid={`awaiting-scan-${p.reg_no}`}>
-          Scan their card at the door to check in
+          Scan their Aadhaar at the door to print
         </span>
       )}
       {!needsDoorScan && p.queue_status !== "seen" && windowShut && (
@@ -538,14 +493,9 @@ export function PatientRow({ p, onPrint, onCheckInAndPrint, printingOpen }) {
         </span>
       )}
       <div className="flex gap-1.5 ml-auto">
-        {canPrint && p.arrived_at && (
+        {canPrint && (
           <Button size="sm" variant="outline" onClick={() => onPrint(p)} data-testid={`print-button-${p.reg_no}`}>
             <Printer className="w-4 h-4" /> Print
-          </Button>
-        )}
-        {canPrint && !p.arrived_at && (
-          <Button size="sm" variant="outline" onClick={() => onCheckInAndPrint(p)} data-testid={`checkin-print-button-${p.reg_no}`}>
-            <Printer className="w-4 h-4" /> Check in &amp; print
           </Button>
         )}
       </div>
@@ -650,7 +600,7 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
       }
       setBanner(
         walkIn
-          ? `Registered and checked in #${reg.reg_no} — ${reg.full_name}`
+          ? `Registered and arrived: #${reg.reg_no} — ${reg.full_name}`
           : `Registered #${reg.reg_no} — ${reg.full_name}. SMS sent.`
       );
       if (onRegistered) onRegistered(reg);
@@ -658,7 +608,7 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
     } catch (err) {
       const payload = errorPayload(err);
       if (payload && payload.code === "DUPLICATE_IN_CAMP") {
-        setError(`Already registered as #${payload.registration.reg_no}. Check them in instead.`);
+        setError(`Already registered as #${payload.registration.reg_no}. Find them below and print.`);
       } else if (payload && payload.code === "AMBIGUOUS_MANUAL_ENTRY") {
         const nos = (payload.registrations || []).map((r) => `#${r.reg_no}`).join(", ");
         setError(`Multiple Manual entries match (${nos}). Check one of them in instead.`);
@@ -730,7 +680,7 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
           <div className="flex gap-2 justify-end pt-1">
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
             <Button onClick={submit} disabled={busy || !form.full_name || !dayId} data-testid="patient-register-submit">
-              {busy ? "Registering…" : walkIn ? "Register and check in" : "Register"}
+              {busy ? "Registering…" : "Register"}
             </Button>
           </div>
         )}
