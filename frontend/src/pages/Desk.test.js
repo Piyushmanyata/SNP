@@ -230,6 +230,18 @@ describe("Desk page", () => {
     expect(container.querySelector('[data-testid="scan-print-button"]')).not.toBeNull();
   });
 
+  test("a repeat door scan of a patient the doctor has seen offers no print", async () => {
+    api.post.mockResolvedValueOnce({
+      data: { outcome: "arrived", registration: { ...ARRIVED, queue_status: "seen" } },
+    });
+    await renderDesk();
+    await scanAtDoor();
+
+    expect(container.querySelector('[data-testid="scan-arrived"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="scan-print-button"]')).toBeNull();
+    expect(container.querySelector('[data-testid="scan-already-seen"]')).not.toBeNull();
+  });
+
   test("a wrong-day arrival is shown as moved to the day they came", async () => {
     api.post.mockResolvedValueOnce({
       data: {

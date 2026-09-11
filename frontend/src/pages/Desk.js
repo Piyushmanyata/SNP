@@ -518,12 +518,9 @@ export function PatientRow({ p, onPrint }) {
       )}
       <div className="flex gap-1.5 ml-auto">
         {p.arrived_at && p.queue_status !== "seen" && (
-          <>
-            <Button size="sm" variant="outline" onClick={() => onPrint(p)} data-testid={`print-button-${p.reg_no}`}>
-              <Printer className="w-4 h-4" /> Print
-            </Button>
-
-          </>
+          <Button size="sm" variant="outline" onClick={() => onPrint(p)} data-testid={`print-button-${p.reg_no}`}>
+            <Printer className="w-4 h-4" /> Print
+          </Button>
         )}
       </div>
     </div>

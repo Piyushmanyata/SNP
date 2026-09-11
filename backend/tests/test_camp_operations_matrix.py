@@ -931,13 +931,11 @@ class TestPrintingMatrix:
             assert day2["booked"] == 0
         asyncio.run(run())
 
-
-class TestScoringAndMessages:
     def test_p09_print_blocked_once_doctor_seen(self, monkeypatch):
         async def run():
             mock_db = _mock(monkeypatch)
             _camp, _day, patient = await _printed_patient(mock_db)
-            done = await complete_prescription(_complete_body(patient["_id"], "op-p08"), actor=CLINICAL)
+            done = await complete_prescription(_complete_body(patient["_id"], "op-p09"), actor=CLINICAL)
             assert done["registration"]["queue_status"] == "seen"
             for call in (preview_prescription, print_prescription):
                 with pytest.raises(HTTPException) as exc:
@@ -949,7 +947,7 @@ class TestScoringAndMessages:
                     patient_id=str(patient["_id"]),
                     expected_generation=done["registration"]["clinical_generation"],
                     reason="Wrong patient",
-                    operation_id="op-p08-undo",
+                    operation_id="op-p09-undo",
                 ),
                 actor=CLINICAL,
             )
@@ -957,6 +955,8 @@ class TestScoringAndMessages:
             assert reprint["prescription"]["reg_no"] == patient["reg_no"]
         asyncio.run(run())
 
+
+class TestScoringAndMessages:
     def test_s01_lead_direct_no_double_count(self, monkeypatch):
         async def run():
             mock_db = _mock(monkeypatch)

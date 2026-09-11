@@ -173,7 +173,7 @@ Twenty seconds of live scan with no Detect. Does not count as a Failure and does
 _Avoid_: scan timeout, camera failure, give up
 
 **Arrival**:
-The patient is physically at the camp on a camp day. Stamped by a desk Lock that matches their registration in this camp, or by the registration that creates a walk-in. Registration is a booking; Arrival is presence. Stamped once: a second Lock does not re-stamp it or move the patient again. Print Prescription is gated on Arrival, not on Registration, and closes at Doctor seen. Doctor seen is gated on clinical completion after print, not on Arrival alone. The desk offers no way to check a patient in from a name or number lookup.
+The patient is physically at the camp on a camp day. Stamped by a desk Lock that matches their registration in this camp, or by the registration that creates a walk-in. Registration is a booking; Arrival is presence. Stamped once: a second Lock does not re-stamp it or move the patient again. Print Prescription is gated on Arrival, not on Registration, and closes at Doctor seen — reprints included, until a clinical undo. Doctor seen is gated on clinical completion after print, not on Arrival alone. The desk offers no way to check a patient in from a name or number lookup.
 _Avoid_: check-in, presence, attendance, walk-in (a walk-in registers and arrives in one action)
 
 **Door walk-in**:
@@ -213,7 +213,7 @@ Arrived and printed patients who do not yet have a completed prescription. Docto
 _Avoid_: pending Rx after seen, queue at Doctor's Rx (a physical queue is not the backlog)
 
 **Doctor seen**:
-A clinical desk operator's attestation that consultation is complete, committed with whole-prescription completion after arrival and print. Drafts, reprints and volunteer mark-seen cannot confer it. It closes printing: while a patient is Doctor seen the desk serves neither a first print nor a reprint, and a clinical undo is the only way back.
+A clinical desk operator's attestation that consultation is complete, committed with whole-prescription completion after arrival and print. Drafts, reprints and volunteer mark-seen cannot confer it.
 _Avoid_: arrival, prescription printed, independent mark-seen
 
 **Paper review**:

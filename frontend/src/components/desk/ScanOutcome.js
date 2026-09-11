@@ -29,9 +29,15 @@ export function ArrivedCard({ registration, onPrint, onMarkSeen }) {
         {registration.phone ? ` · ${registration.phone}` : ""}
       </p>
       <div className="flex gap-2 mt-3">
-        <Button size="sm" onClick={() => onPrint(registration)} data-testid="scan-print-button">
-          <Printer className="w-4 h-4" /> Print prescription
-        </Button>
+        {registration.queue_status === "seen" ? (
+          <span className="text-xs text-slate-500" data-testid="scan-already-seen">
+            The doctor has already seen this patient. There is nothing to print.
+          </span>
+        ) : (
+          <Button size="sm" onClick={() => onPrint(registration)} data-testid="scan-print-button">
+            <Printer className="w-4 h-4" /> Print prescription
+          </Button>
+        )}
       </div>
     </div>
   );
