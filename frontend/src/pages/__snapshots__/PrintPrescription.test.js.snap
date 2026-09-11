@@ -300,26 +300,22 @@ exports[`PrintPrescription component the reference form snapshot and named strin
       </p>
       <div
         class="border-b border-slate-400 h-10 mt-1"
+        data-testid="rx-medicine-line"
       />
       <div
         class="border-b border-slate-400 h-6 mt-1"
+        data-testid="rx-medicine-line"
+      />
+      <div
+        class="border-b border-slate-400 h-6 mt-1"
+        data-testid="rx-medicine-line"
       />
     </div>
   </div>
   <div
     class="border border-slate-900 mt-3 p-2"
-    data-testid="rx-operation-box"
+    data-testid="rx-glasses-box"
   >
-    <p
-      class="text-[12px]"
-    >
-      Operation will be done at : 
-      <span
-        class="border-b border-slate-400 inline-block min-w-[80mm]"
-      >
-         
-      </span>
-    </p>
     <p
       class="text-center font-bold text-[12px] my-1 tracking-wide"
     >
@@ -480,6 +476,12 @@ exports[`PrintPrescription component the reference form snapshot and named strin
     >
        
     </span>
+  </div>
+  <div
+    class="border border-slate-900 mt-2 p-2 text-[11px] font-semibold leading-tight"
+    data-testid="rx-disclaimer"
+  >
+    Please carry your Aadhaar card, ration card and mobile phone on the day of the operation.
   </div>
   <div
     class="grid grid-cols-2 gap-4 mt-3 items-end"

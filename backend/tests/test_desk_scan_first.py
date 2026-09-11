@@ -411,16 +411,29 @@ class TestPublicOccupancy:
         assert dead["id"] != pub["camp"]["id"]
 
 
-class TestSelfRegisterReviewedManual:
-    def test_self_register_without_lock_requires_desk_review(self, admin, anon):
+class TestSelfRegisterRequiresALock:
+    def test_self_register_without_lock_is_refused(self, admin, anon):
         camp_id = _camp(admin, "selflock")
         day = _day(admin, camp_id, TODAY_IST)
         r = _self(anon, day["id"], full_name=f"TEST NoLock {TAG}", age=30,
                   aadhaar_scanned=False, phone="9876500601")
-        assert r.status_code == 200, r.text
-        assert r.json()["registration"]["identity_recheck_required"] is True
-        assert r.json()["registration"]["manual_entry"] is True
-        assert r.json()["registration"]["aadhaar_scanned"] is False
+        assert r.status_code == 400, r.text
+        assert r.json()["detail"]["code"] == "AADHAAR_QR_REQUIRED"
+
+    def test_client_flags_cannot_mint_a_public_row_without_a_lock(self, admin, anon):
+        camp_id = _camp(admin, "selfflags")
+        day = _day(admin, camp_id, TODAY_IST)
+        body = {
+            "full_name": f"TEST Forged {TAG}", "age": 30, "phone": "9876500602",
+            "camp_day_id": day["id"], "registration_request_id": str(uuid.uuid4()),
+            "aadhaar_scanned": True, "manual_entry": False, "aadhaar_last4": "1234",
+            "dob": "1996-01-01", "gender": "M", "qr_payload": "not-an-aadhaar-qr",
+        }
+        r = anon.post(f"{API}/self-register", json=body, timeout=30)
+        assert r.status_code == 400, r.text
+        assert r.json()["detail"]["code"] == "AADHAAR_QR_REQUIRED"
+        found = admin.get(f"{API}/patients/search?q=TEST Forged {TAG}", timeout=30)
+        assert found.json()["results"] == []
 
 
 class TestPrescriptionLockdown:

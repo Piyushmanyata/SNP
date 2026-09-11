@@ -171,7 +171,8 @@ describe("PrintPrescription component", () => {
     expect(api.get).toHaveBeenCalledWith("/templates/logos?camp_id=camp-001");
     expect(container.querySelector('[data-testid="rx-block-identity"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="rx-diagnosis-row"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="rx-operation-box"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="rx-glasses-box"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="rx-disclaimer"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="rx-footer"]')).not.toBeNull();
   });
 
@@ -198,6 +199,12 @@ describe("PrintPrescription component", () => {
     expect(sheet.textContent).toContain("PRESCRIPTION FOR GLASSES");
     expect(sheet.textContent).toContain("Inter Pupillary distance");
     expect(sheet.textContent).toContain("Sponsorer :");
+    expect(sheet.textContent).toContain(
+      "Please carry your Aadhaar card, ration card and mobile phone on the day of the operation."
+    );
+    expect(sheet.textContent).not.toContain("Operation will be done at");
+    expect(sheet.textContent).toContain("Operation will be done by");
+    expect(sheet.querySelectorAll('[data-testid="rx-medicine-line"]')).toHaveLength(3);
     expect(sheet).toMatchSnapshot();
   });
 

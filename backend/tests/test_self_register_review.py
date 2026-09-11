@@ -36,7 +36,7 @@ def public_client(monkeypatch):
         yield client, str(day_id)
 
 
-def test_public_manual_review_forces_truthful_provenance_and_preserves_replay(public_client):
+def test_public_registration_without_a_readable_qr_is_refused(public_client):
     client, day_id = public_client
     body = {
         'full_name': 'Reviewed Patient', 'age': 45, 'gender': 'F', 'phone': '9876543210',
@@ -44,31 +44,21 @@ def test_public_manual_review_forces_truthful_provenance_and_preserves_replay(pu
         'manual_entry': False, 'is_self_registered': False, 'registration_request_id': 'review-1',
     }
     response = client.post('/api/self-register', json=body)
-    assert response.status_code == 200, response.text
-    patient = response.json()['registration']
-    assert patient['manual_entry'] is True
-    assert patient['aadhaar_scanned'] is False
-    assert patient['identity_recheck_required'] is True
-    assert patient['is_self_registered'] is True
-    assert patient['person_id'] is None
-    retry = client.post('/api/self-register', json=body)
-    assert retry.status_code == 200, retry.text
-    assert retry.json()['receipt']['reg_no'] == response.json()['receipt']['reg_no']
-    duplicate = client.post('/api/self-register', json={**body, 'registration_request_id': 'review-2'})
-    assert duplicate.status_code == 409
-    assert 'registration' not in duplicate.json()['detail']
+    assert response.status_code == 400, response.text
+    assert response.json()['detail']['code'] == 'AADHAAR_QR_REQUIRED'
 
 
 @pytest.mark.parametrize('fields', [
-    {'full_name': ' '}, {'age': -1}, {'age': 131}, {'dob': '2030-13-42'},
-    {'dob': '2999-01-01'}, {'dob': '1980-01-01', 'age': 12}, {'aadhaar_last4': '123456781234'},
-    {'dob': '19800101'}, {'dob': '1980-W01-1'},
+    {}, {'qr_payload': ''}, {'qr_payload': 'not-an-aadhaar-qr'},
+    {'aadhaar_scanned': True, 'manual_entry': False, 'manual_exception': True},
+    {'dob': '1980-01-01', 'aadhaar_last4': '1234', 'gender': 'F'},
 ])
-def test_public_manual_fields_are_validated_before_registration(public_client, fields):
+def test_no_client_flag_mints_a_public_registration_without_a_qr(public_client, fields):
     client, day_id = public_client
     body = {'full_name': 'Reviewed Patient', 'age': 45, 'phone': '9876543210', 'camp_day_id': day_id, **fields}
     response = client.post('/api/self-register', json=body)
     assert response.status_code == 400, response.text
+    assert response.json()['detail']['code'] == 'AADHAAR_QR_REQUIRED'
 
 
 @pytest.mark.parametrize('fields', [

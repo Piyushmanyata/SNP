@@ -466,7 +466,12 @@ describe("Desk page", () => {
     api.get.mockImplementation((url) => {
       if (url === "/kpis") return Promise.resolve({ data: { registered: 2, seen: 1, pending: 1 } });
       if (url === "/camps/active") {
-        return Promise.resolve({ data: { camp: { id: "camp-1", name: "C" }, days: [] } });
+        return Promise.resolve({
+          data: {
+            camp: { id: "camp-1", name: "C" },
+            days: [{ id: "day-1", day_date: "2026-08-27", is_today: true, printing_open: true }],
+          },
+        });
       }
       if (url.startsWith("/patients/search")) {
         return Promise.resolve({
@@ -515,7 +520,82 @@ describe("Desk page", () => {
     expect(container.querySelector('[data-testid="arrive-button-101"]')).toBeNull();
     expect(container.querySelector('[data-testid="print-button-101"]')).toBeNull();
     expect(container.querySelector('[data-testid="mark-seen-button-101"]')).toBeNull();
+    expect(container.querySelector('[data-testid="checkin-print-button-101"]')).toBeNull();
     expect(api.post).not.toHaveBeenCalledWith("/desk/arrive/p-1");
+  });
+
+  async function lookup(registration, days) {
+    if (days) {
+      api.get.mockImplementation((url) => {
+        if (url === "/kpis") return Promise.resolve({ data: { registered: 45, seen: 0, pending: 0 } });
+        if (url === "/camps/active") {
+          return Promise.resolve({
+            data: { camp: { id: "camp-1", name: "Howrah Eye Camp", venue: "Community Hall" }, days },
+          });
+        }
+        return Promise.resolve({ data: {} });
+      });
+    }
+    api.post.mockImplementation((url) => {
+      if (url === "/desk/lookup") return Promise.resolve({ data: { registration } });
+      return Promise.resolve({ data: {} });
+    });
+    await renderDesk();
+    act(() => {
+      setInput(container.querySelector('[data-testid="desk-lookup-input"]'), "101");
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="desk-lookup-button"]').click();
+    });
+  }
+
+  test("a QR-locked booking checks in and prints without a door re-scan", async () => {
+    await lookup({ ...ARRIVED, queue_status: "registered", arrived_at: null, aadhaar_scanned: true });
+
+    expect(container.querySelector('[data-testid="awaiting-scan-101"]')).toBeNull();
+    await act(async () => {
+      container.querySelector('[data-testid="checkin-print-button-101"]').click();
+    });
+    expect(api.post).toHaveBeenCalledWith("/desk/arrive/p-1");
+  });
+
+  test("a closed print window withdraws print and says so instead", async () => {
+    await lookup(ARRIVED, [{ id: "day-1", day_date: "2026-08-27", is_today: true, printing_open: false }]);
+
+    expect(container.querySelector('[data-testid="print-button-101"]')).toBeNull();
+    expect(container.querySelector('[data-testid="print-window-closed-101"]')).not.toBeNull();
+  });
+
+  test("a closed print window still reprints a sheet that already printed", async () => {
+    await lookup(
+      { ...ARRIVED, printed_at: "2026-09-01T05:00:00Z" },
+      [{ id: "day-1", day_date: "2026-08-27", is_today: true, printing_open: false }],
+    );
+
+    expect(container.querySelector('[data-testid="print-button-101"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="print-window-closed-101"]')).toBeNull();
+  });
+
+  test("a closed print window withdraws print from the door scan card", async () => {
+    api.get.mockImplementation((url) => {
+      if (url === "/kpis") return Promise.resolve({ data: { registered: 45, seen: 0, pending: 0 } });
+      if (url === "/camps/active") {
+        return Promise.resolve({
+          data: {
+            camp: { id: "camp-1", name: "Howrah Eye Camp", venue: "Community Hall" },
+            days: [{ id: "day-1", day_date: "2026-08-27", is_today: true, printing_open: false }],
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+    api.post.mockResolvedValueOnce({ data: { outcome: "arrived", registration: ARRIVED } });
+    await renderDesk();
+    await scanAtDoor();
+
+    expect(container.querySelector('[data-testid="scan-arrived"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="scan-print-button"]')).toBeNull();
+    expect(container.querySelector('[data-testid="scan-print-window-closed"]')).not.toBeNull();
   });
 
   test("three Failures reveal the typed form and there is no Register anyway", async () => {

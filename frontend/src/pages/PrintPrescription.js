@@ -187,13 +187,13 @@ export function PrescriptionSheet({ rx, logos = [], navigate, preview, patientId
           </div>
           <div>
             <p className="font-bold">MEDICINES :</p>
-            <div className="border-b border-slate-400 h-10 mt-1" />
-            <div className="border-b border-slate-400 h-6 mt-1" />
+            <div className="border-b border-slate-400 h-10 mt-1" data-testid="rx-medicine-line" />
+            <div className="border-b border-slate-400 h-6 mt-1" data-testid="rx-medicine-line" />
+            <div className="border-b border-slate-400 h-6 mt-1" data-testid="rx-medicine-line" />
           </div>
         </div>
 
-        <div className="border border-slate-900 mt-3 p-2" data-testid="rx-operation-box">
-          <p className="text-[12px]">Operation will be done at : <span className="border-b border-slate-400 inline-block min-w-[80mm]">&nbsp;</span></p>
+        <div className="border border-slate-900 mt-3 p-2" data-testid="rx-glasses-box">
           <p className="text-center font-bold text-[12px] my-1 tracking-wide">PRESCRIPTION FOR GLASSES</p>
           <table className="w-full border-collapse text-[10px] text-center">
             <thead>
@@ -234,6 +234,10 @@ export function PrescriptionSheet({ rx, logos = [], navigate, preview, patientId
         <div className="border border-slate-900 mt-2 p-2 text-[11px] leading-tight" data-testid="rx-declaration">
           SIKAR NAGARIK PARISHAD(KOLKATA) &amp; SIKAR ZILLA WELFARE TRUST have done Eye Screening, distributed spectacles and Cataract (IOL) Operation will be done by :
           <span className="border-b border-slate-400 inline-block min-w-[50mm] ml-1">&nbsp;</span>
+        </div>
+
+        <div className="border border-slate-900 mt-2 p-2 text-[11px] font-semibold leading-tight" data-testid="rx-disclaimer">
+          Please carry your Aadhaar card, ration card and mobile phone on the day of the operation.
         </div>
 
         <div className="grid grid-cols-2 gap-4 mt-3 items-end" data-testid="rx-footer">

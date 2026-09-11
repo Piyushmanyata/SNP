@@ -492,23 +492,10 @@ async def self_register(body: RegisterBody, request: Request, background_tasks: 
         body.manual_entry = False
         body.manual_exception = False
     else:
-        _validate_manual_identity(body, now)
-        year_only = bool(body.dob and re.fullmatch(r'[0-9]{4}', body.dob))
-        if body.dob:
-            calculated_age = age_from_dob(date.fromisoformat(body.dob + '-01-01' if year_only else body.dob).isoformat())
-            if body.age not in ({calculated_age, calculated_age - 1} if year_only else {calculated_age}):
-                raise HTTPException(status_code=400, detail="Age and date of birth do not match. Please correct the reviewed details")
-        body.aadhaar_last4 = (body.aadhaar_last4 or '').strip() or None
-        if body.aadhaar_last4 and not re.fullmatch(r'[0-9]{4}', body.aadhaar_last4):
-            raise HTTPException(status_code=400, detail="Enter only the last four Aadhaar digits, or leave them blank")
-        if body.gender not in (None, '', 'M', 'F', 'O'):
-            raise HTTPException(status_code=400, detail="Choose a gender from the available options")
-        if body.address and len(body.address) > 500:
-            raise HTTPException(status_code=400, detail="Enter an address of up to 500 characters")
-        body.aadhaar_scanned = False
-        body.manual_entry = True
-        body.manual_exception = True
-        body.qr_payload = None
+        raise HTTPException(status_code=400, detail={
+            "code": "AADHAAR_QR_REQUIRED",
+            "message": "We could not read the QR code on this Aadhaar card. Please register at the camp desk.",
+        })
     body.is_self_registered = True
     try:
         patient, created = await _create_registration(body, None, True, request)

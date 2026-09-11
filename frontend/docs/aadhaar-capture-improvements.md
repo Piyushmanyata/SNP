@@ -2,19 +2,21 @@
 
 Status: implementation under verification, 8 September 2026. Scope confirmed by the user.
 
+> **Partly superseded by [ADR 0033](../../docs/adr/0033-a-lock-is-the-identity-evidence-taken-once.md).** The public self-registration page no longer offers reviewed transcription or manual entry of any kind: `/self-register` refuses a submission without a readable QR with 400 `AADHAAR_QR_REQUIRED`, and the patient is sent to the desk. Every clause below about public review, public manual provenance, or a public desk-recheck receipt is history, not current behaviour. The **staff** capture, OCR and reviewed-transcription paths described here are unchanged and still in force.
+
 ## Agreed scope
 
 Improve camera scanning and photo uploads across phones, expose USB scan progress while printing is open, and make the SNP Camps heading return to the existing role-specific home page.
 
-When QR capture fails, offer OCR suggestions with mandatory submitter review before saving. For staff registration the operator reviews; for public registration the patient reviews and existing desk identity recheck remains required. OCR suggestions must not become locked or verified card identity.
+When QR capture fails, offer OCR suggestions with mandatory submitter review before saving. For staff registration the operator reviews. OCR suggestions must not become locked or verified card identity. (Public review was withdrawn by ADR 0033.)
 
 Run OCR on the existing backend without retaining uploaded photos. Manual registration must be available immediately, without waiting for three failed scans. Both decisions were confirmed by the user. The immediacy clause was later narrowed for the public page: see [ADR 0003](../../backend/docs/camp-operations/adr/0003-manual-entry-as-a-recovery-route.md).
 
 Include JPEG, PNG and iPhone HEIC photos, English/Hindi text extraction, and e-Aadhaar PDF uploads. Ask for a password when a PDF requires one; do not retain passwords or documents. The user selected photos and PDFs during the discussion.
 
-Include both staff registration and public self-registration. Patients may review/correct OCR suggestions or enter details manually when the QR is unreadable. Their review is not staff verification; retain truthful manual/transcribed provenance and the existing desk workflow.
+Staff registration only. ADR 0033 withdrew the public typed and reviewed paths: a patient whose QR will not read is sent to the desk, which keeps the capture, OCR and review routes described here.
 
-The backend must assign OCR/manual provenance: `aadhaar_scanned=False`, `manual_entry=True`, and `is_self_registered=True` for public submissions. Preserve `identity_recheck_required` and the existing desk identity check before the first stamped prescription. Preserve mobile validation, active day/capacity checks, duplicate detection and request replay. Validate manual name and age/DOB server-side; unknown Aadhaar digits remain optional. The receipt should explain that desk identity review is still needed.
+The backend assigns OCR/manual provenance on the **desk** path: `aadhaar_scanned=False`, `manual_entry=True`. `identity_recheck_required` and the desk identity check before the first stamped prescription are preserved, as are mobile validation, active day/capacity checks, duplicate detection and request replay. Manual name and age/DOB are validated server-side; unknown Aadhaar digits remain optional.
 
 ## Language
 
@@ -36,7 +38,7 @@ The backend must assign OCR/manual provenance: `aadhaar_scanned=False`, `manual_
 1. USB: ready, receiving data, decoding/checking registration, then result or actionable failure. Show an accessible spinner and status while receiving and processing. Start receiving feedback only when keyboard activity can reasonably be identified as a scanner burst. Do not display or log raw QR digits. An ordinary keyboard-wedge scanner cannot expose its internal optical decoding before it sends data.
 2. Keep scanner detection separate from ordinary typing. Cover long payloads, interrupted transmission, supported terminators, duplicate scans and overlapping requests. Avoid a fake percentage when total length is unknown.
 3. Camera and upload: recover from native-decoder failure using the existing WASM decoder; recover or replace timed-out workers; cap image-processing work and use staged attempts that retain dense-QR detail. Distinguish unreadable QR, unsupported image, camera denial, decoder failure and server/network failure.
-4. OCR: offer editable suggestions when QR capture fails. Process JPEG/PNG/HEIC photos and e-Aadhaar PDFs on the existing backend without retaining documents or PDF passwords. Try QR extraction before text transcription. Require explicit review; retain the existing manual-entry identity semantics and last-four-only Aadhaar storage. Do not infer missing fields or silently submit extracted text. Allow immediate manual registration at the desk; the public page offers it once a read attempt has failed ([ADR 0003](../../backend/docs/camp-operations/adr/0003-manual-entry-as-a-recovery-route.md)).
+4. OCR: offer editable suggestions when QR capture fails. Process JPEG/PNG/HEIC photos and e-Aadhaar PDFs on the existing backend without retaining documents or PDF passwords. Try QR extraction before text transcription. Require explicit review; retain the existing manual-entry identity semantics and last-four-only Aadhaar storage. Do not infer missing fields or silently submit extracted text. Allow immediate manual registration at the desk. The public page offers no typed or reviewed path at all (ADR 0033); a failed read tells the patient to register at the desk.
 5. Home navigation: make the brand an accessible link to `/`, using the existing role routing.
 
 Switching files, changing capture modes, choosing manual entry, leaving the page, or starting to edit must invalidate superseded recognition results. A late QR/OCR response must never overwrite reviewed/manual fields or clear a newer request's loading state. Keep the existing scanner cancellation behavior and extend it to the new upload/review path.
@@ -58,7 +60,7 @@ See [primary-source OCR research](../../backend/docs/aadhaar-ocr-research.md). T
 
 ## Verification plan
 
-Add targeted regressions for receiving status before the terminator, status cleanup, ordinary typing, native-to-WASM recovery, worker timeout recovery, bounded image handling, reviewed OCR without identity locking, late OCR responses after editing/manual fallback, public provenance and desk recheck enforcement, and role-home navigation. Run the repository's typecheck, lint and test gates and parallel correctness/simplicity reviews for implementation.
+Add targeted regressions for receiving status before the terminator, status cleanup, ordinary typing, native-to-WASM recovery, worker timeout recovery, bounded image handling, reviewed OCR without identity locking, late OCR responses after editing/manual fallback, public refusal without a readable QR, desk recheck enforcement, and role-home navigation. Run the repository's typecheck, lint and test gates and parallel correctness/simplicity reviews for implementation.
 
 Measure capture-to-result timings and success rates on authorized test cards across the agreed phones, lighting and image quality. Synthetic tests cannot establish real camera focus or universal card support. Do not use real Aadhaar data in committed fixtures or logs.
 

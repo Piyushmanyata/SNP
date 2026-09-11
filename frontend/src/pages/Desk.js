@@ -185,6 +185,16 @@ export default function Desk() {
 
   const print = useCallback((reg) => navigate(`/print/prescription/${reg.id}`), [navigate]);
 
+  const checkInAndPrint = useCallback(async (reg) => {
+    setError("");
+    try {
+      await api.post(`/desk/arrive/${reg.id}`);
+      navigate(`/print/prescription/${reg.id}`);
+    } catch (err) {
+      setError(formatApiError(err));
+    }
+  }, [navigate]);
+
   const openPreReg = useCallback(() => { setShowReg(true); }, []);
 
   const onDoorStall = useCallback(() => {}, []);
@@ -336,6 +346,7 @@ export default function Desk() {
         manualMode={manualMode}
         setManualMode={setManualMode}
         clearScan={() => setScanResult(null)}
+        printingOpen={printingOpen}
       />}
 
       <Card className="mb-5" data-desk-card="find" data-testid="desk-card-find">
@@ -353,7 +364,7 @@ export default function Desk() {
 
         {found && (
           <div className="mt-4" data-testid="desk-found-patient">
-            <PatientRow p={found} onPrint={print} />
+            <PatientRow p={found} onPrint={print} onCheckInAndPrint={checkInAndPrint} printingOpen={printingOpen} />
           </div>
         )}
 
@@ -365,7 +376,7 @@ export default function Desk() {
             </div>
             <div className="space-y-2" data-testid="desk-search-results">
               {searchResults.map((p) => (
-                <PatientRow key={p.id} p={p} onPrint={print} />
+                <PatientRow key={p.id} p={p} onPrint={print} onCheckInAndPrint={checkInAndPrint} printingOpen={printingOpen} />
               ))}
             </div>
           </div>
@@ -397,6 +408,7 @@ export default function Desk() {
             manualMode={manualMode}
             setManualMode={setManualMode}
             clearScan={() => setScanResult(null)}
+            printingOpen={printingOpen}
             collapsed
           />
         </details>
@@ -419,7 +431,7 @@ function DoorScanCard({
   noCamp, onScanned, onDoorFailure, onDoorStall, error, banner, scanResult, busy,
   print, confirmMismatch, doorPhone, setDoorPhone, submitDoorWalkIn,
   doorFailures, doorForm, setDoorForm, submitDoorManual, collapsed, scanning,
-  receiving, manualMode, setManualMode, clearScan,
+  receiving, manualMode, setManualMode, clearScan, printingOpen,
 }) {
   const showManual = manualMode || doorFailures >= 3;
   const scanner = (
@@ -456,6 +468,7 @@ function DoorScanCard({
           phone={doorPhone}
           setPhone={setDoorPhone}
           onWalkIn={submitDoorWalkIn}
+          printingOpen={printingOpen}
         />
       </div>
       {!collapsed && (
@@ -495,7 +508,10 @@ function DoorScanCard({
   );
 }
 
-export function PatientRow({ p, onPrint }) {
+export function PatientRow({ p, onPrint, onCheckInAndPrint, printingOpen }) {
+  const needsDoorScan = !p.arrived_at && !p.aadhaar_scanned;
+  const windowShut = !printingOpen && !p.printed_at;
+  const canPrint = p.queue_status !== "seen" && !needsDoorScan && !windowShut;
   return (
     <div
       id={`row-${p.id}`}
@@ -511,15 +527,25 @@ export function PatientRow({ p, onPrint }) {
       </div>
       <StatusBadge status={p.queue_status} />
       {p.printed_at && <Badge tone="indigo">Printed</Badge>}
-      {!p.arrived_at && (
+      {needsDoorScan && (
         <span className="text-xs text-slate-500" data-testid={`awaiting-scan-${p.reg_no}`}>
           Scan their card at the door to check in
         </span>
       )}
+      {!needsDoorScan && p.queue_status !== "seen" && windowShut && (
+        <span className="text-xs text-slate-500" data-testid={`print-window-closed-${p.reg_no}`}>
+          The print window is closed.
+        </span>
+      )}
       <div className="flex gap-1.5 ml-auto">
-        {p.arrived_at && p.queue_status !== "seen" && (
+        {canPrint && p.arrived_at && (
           <Button size="sm" variant="outline" onClick={() => onPrint(p)} data-testid={`print-button-${p.reg_no}`}>
             <Printer className="w-4 h-4" /> Print
+          </Button>
+        )}
+        {canPrint && !p.arrived_at && (
+          <Button size="sm" variant="outline" onClick={() => onCheckInAndPrint(p)} data-testid={`checkin-print-button-${p.reg_no}`}>
+            <Printer className="w-4 h-4" /> Check in &amp; print
           </Button>
         )}
       </div>
