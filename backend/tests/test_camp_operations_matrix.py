@@ -45,7 +45,7 @@ from routes_clinical import (
     record_fulfilment,
     undo_completion,
 )
-from routes_desk import arrive, mark_seen, print_prescription
+from routes_desk import arrive, mark_seen, preview_prescription, print_prescription
 from routes_registration import _create_registration, desk_register
 from test_adversarial_challenger import FIXED_POWER, MEDICINE, MEDICINE_ALT, setup_mock_db
 from test_camp_lifecycle import _Request
@@ -929,6 +929,30 @@ class TestPrintingMatrix:
             day2 = await mock_db.camp_days.find_one({"_id": d2})
             assert day1["booked"] == 1
             assert day2["booked"] == 0
+        asyncio.run(run())
+
+    def test_p09_print_blocked_once_doctor_seen(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            _camp, _day, patient = await _printed_patient(mock_db)
+            done = await complete_prescription(_complete_body(patient["_id"], "op-p09"), actor=CLINICAL)
+            assert done["registration"]["queue_status"] == "seen"
+            for call in (preview_prescription, print_prescription):
+                with pytest.raises(HTTPException) as exc:
+                    await call(str(patient["_id"]), actor=VOLUNTEER)
+                assert exc.value.status_code == 409
+                assert exc.value.detail["code"] == "ALREADY_SEEN"
+            await undo_completion(
+                UndoCompletionBody(
+                    patient_id=str(patient["_id"]),
+                    expected_generation=done["registration"]["clinical_generation"],
+                    reason="Wrong patient",
+                    operation_id="op-p09-undo",
+                ),
+                actor=CLINICAL,
+            )
+            reprint = await print_prescription(str(patient["_id"]), actor=VOLUNTEER)
+            assert reprint["prescription"]["reg_no"] == patient["reg_no"]
         asyncio.run(run())
 
 

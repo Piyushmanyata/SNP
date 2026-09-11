@@ -267,6 +267,11 @@ async def arrive(
 
 
 async def _prescription_payload(db, p: dict, actor: dict, stamp: bool) -> Dict[str, Any]:
+    if p.get("queue_status") == "seen":
+        raise HTTPException(status_code=409, detail={
+            "code": "ALREADY_SEEN",
+            "message": "The doctor has already seen this patient. The prescription cannot be printed again.",
+        })
     if not p.get("arrived_at"):
         raise HTTPException(status_code=409, detail={
             "code": "NOT_ARRIVED",
