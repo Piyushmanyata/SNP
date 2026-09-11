@@ -450,6 +450,43 @@ describe("Desk page", () => {
     expect(container.querySelector('[data-testid="mark-seen-button-101"]')).toBeNull();
   });
 
+  test("print is offered to an arrived patient and withdrawn once the doctor has seen them", async () => {
+    api.get.mockImplementation((url) => {
+      if (url === "/kpis") return Promise.resolve({ data: { registered: 2, seen: 1, pending: 1 } });
+      if (url === "/camps/active") {
+        return Promise.resolve({ data: { camp: { id: "camp-1", name: "C" }, days: [] } });
+      }
+      if (url.startsWith("/patients/search")) {
+        return Promise.resolve({
+          data: {
+            results: [
+              ARRIVED,
+              {
+                ...ARRIVED,
+                id: "p-2",
+                reg_no: "102",
+                queue_status: "seen",
+                printed_at: "2026-09-01T05:00:00Z",
+              },
+            ],
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+
+    await renderDesk();
+    act(() => {
+      setInput(container.querySelector('[data-testid="desk-name-search-input"]'), "Aadhaar");
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="desk-name-search-button"]').click();
+    });
+
+    expect(container.querySelector('[data-testid="print-button-101"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="print-button-102"]')).toBeNull();
+  });
+
   test("a booking that has not arrived cannot be checked in from a lookup", async () => {
     api.post.mockResolvedValue({
       data: { registration: { ...ARRIVED, queue_status: "registered", arrived_at: null } },
