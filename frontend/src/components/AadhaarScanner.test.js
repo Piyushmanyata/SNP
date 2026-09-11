@@ -661,6 +661,29 @@ describe("AadhaarScanner component", () => {
     });
   });
 
+  test("a patient code found on camera tears the camera down", async () => {
+    const onPatientCode = jest.fn().mockResolvedValue(true);
+    nativeDetector.detectNativeImageData.mockResolvedValue("SNP:AB3K7T29");
+    act(() => root.render(<AadhaarScanner onScanned={jest.fn()} onPatientCode={onPatientCode} />));
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+
+    expect(onPatientCode).toHaveBeenCalledWith("SNP:AB3K7T29");
+    expect(api.post).not.toHaveBeenCalledWith("/aadhaar/decode", expect.anything());
+    expect(mediaTrack.stop).toHaveBeenCalled();
+  });
+
+  test("a patient code that matches nobody leaves the camera scanning", async () => {
+    const onPatientCode = jest.fn().mockResolvedValue(false);
+    nativeDetector.detectNativeImageData.mockResolvedValue("SNP:NOBODY99");
+    act(() => root.render(<AadhaarScanner onScanned={jest.fn()} onPatientCode={onPatientCode} />));
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+
+    expect(onPatientCode).toHaveBeenCalledWith("SNP:NOBODY99");
+    expect(mediaTrack.stop).not.toHaveBeenCalled();
+  });
+
   test.each(["SNP:AB3K7T29", "snp:ab3k7t29"])("%s is looked up as a patient, never decoded as a card", async (code) => {
     const onPatientCode = jest.fn().mockResolvedValue(true);
     act(() => root.render(<AadhaarScanner onScanned={jest.fn()} onPatientCode={onPatientCode} />));
