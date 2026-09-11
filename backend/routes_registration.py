@@ -329,12 +329,7 @@ async def _insert_patient_document(
         res = await db.patients.insert_one(doc)
         doc["_id"] = res.inserted_id
         return ser_patient(doc), True
-    except DuplicateKeyError as exc:
-        if "patient_qr" in (exc.details or {}).get("keyPattern", {}):
-            doc["patient_qr"] = new_patient_code()
-            res = await db.patients.insert_one(doc)
-            doc["_id"] = res.inserted_id
-            return ser_patient(doc), True
+    except DuplicateKeyError:
         if body.registration_request_id:
             existing = await db.patients.find_one({"registration_request_id": body.registration_request_id})
             if existing:

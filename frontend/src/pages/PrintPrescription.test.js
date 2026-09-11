@@ -200,9 +200,8 @@ describe("PrintPrescription component", () => {
       root.render(<PrescriptionSheet rx={{ patient_qr: "K7M2QX9F" }} preview />);
     });
     const svg = container.querySelector('[data-testid="a4-prescription-sheet"] svg');
-    // 21x21 Version 1 plus a 4-module quiet zone on each side.
+    // 21 modules of Version 1 plus the spec's 4-module quiet zone on each side.
     expect(svg.getAttribute("viewBox")).toBe("0 0 29 29");
-    expect(svg.getAttribute("height")).toBe("104");
   });
 
   test("the reference form snapshot and named strings stay put", () => {

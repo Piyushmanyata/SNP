@@ -19,7 +19,7 @@ The production database holds test data only and is being wiped as part of this 
 - **Both render sites get real geometry**: `size={104}` with `marginSize={4}` on the prescription (≈27mm square, ≈0.95mm modules — a 4× improvement in module area over the old sheet) and `level="Q" marginSize={4}` on the self-registration receipt.
 - **No new field, no migration.** `patient_qr` already carries a unique index (`db.py:127`). The generator changes; the storage does not.
 - **Parsing is shared and case-insensitive.** `parse_patient_identifier()` in `helpers.py` strips an `snp:`/`SNP:` prefix, strips a `/p/` URL path, and uppercases. `routes_desk._resolve` and `routes_clinical.clinical_lookup` both call it; their two near-identical private copies are deleted. `decode_aadhaar`'s "this is a patient QR" guard is made case-insensitive to match.
-- **A collision cannot fail a registration.** `_insert_patient_document` retries once with a fresh code when — and only when — the `DuplicateKeyError` names the `patient_qr` index. Every other duplicate key keeps its existing handling.
+- **A collision is left to the unique index.** No retry. At 32⁸ the birthday probability across a 10,000-patient database is about 4.5 × 10⁻⁵, and the index already makes the failure safe rather than silent: the insert raises, the desk re-submits, and `_build_patient_document` mints a fresh code. A second write path inside the registration route's error handler is not worth one avoided error message per twenty thousand camps.
 
 ## Consequences
 
@@ -31,7 +31,7 @@ Excluding `I`, `L`, `O` and `U` means a code read aloud over a phone cannot be t
 
 Any sheet printed before this change stops scanning, and any stored UUID stops resolving, because `parse_patient_identifier` uppercases and a UUID is lowercase with hyphens. This is safe **only** because the database is being wiped in the same deployment. A future change to the code format on a live dataset would need the backfill and dual-resolution window this one skips, and must not copy this decision's shortcut.
 
-`new_uuid()` remains in `helpers.py` and is now unused by `routes_registration`. It is left alone rather than deleted; it is a one-line general utility, not dead branch logic.
+`new_uuid()` had exactly one caller — this one — so it and its `import uuid` are deleted with it.
 
 `benchmark_dataset.py` seeds `patient_qr` with a UUID5. Those rows are never looked up by code, so they are unaffected, but they no longer resemble production data in that one field.
 
@@ -43,3 +43,4 @@ Any sheet printed before this change stops scanning, and any stored UUID stops r
 - **Keep honouring old lowercase UUID codes anyway, as insurance** — three lines and harmless. Rejected as speculative: there is nothing to honour, and a resolution path nobody exercises is a path nobody notices breaking.
 - **Base58 or full base32 including `I`/`O`** — slightly more entropy per character. Rejected because `O`/`0` and `I`/`1` are exactly the confusions a volunteer reading a code down a phone line makes, and the entropy is already ample.
 - **Level H error correction** — maximum damage tolerance for a sheet that gets folded. Rejected because V1-H holds only 10 alphanumeric characters and the payload is 12, so it would push the symbol to Version 2 and shrink the modules to buy resilience the paper does not need.
+- **Retrying the insert on a `patient_qr` duplicate key** — guarantees a collision can never surface as an error. Rejected as a defensive layer for a one-in-twenty-thousand-camps event that the unique index already fails safely on.

@@ -3,7 +3,6 @@ import re
 import hmac
 import hashlib
 import secrets
-import uuid
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -102,10 +101,6 @@ def person_key(last4: str, name: str, dob: str, gender: str) -> str:
     pepper = os.environ.get("AADHAAR_HASH_PEPPER", "dev_secret_aadhaar_pepper").encode()
     material = f"{last4}|{normalize_name(name)}|{dob or ''}|{(gender or '').lower()}".encode()
     return hmac.new(pepper, material, hashlib.sha256).hexdigest()
-
-
-def new_uuid() -> str:
-    return str(uuid.uuid4())
 
 
 # Crockford base32 without I, L, O and U: a volunteer reading a code aloud
