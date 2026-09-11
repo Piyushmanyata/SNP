@@ -19,7 +19,7 @@ export function ArrivedCard({ registration, onPrint, printingOpen }) {
       <div className="flex flex-wrap items-center gap-3">
         <span className="font-mono font-bold text-emerald-700">#{registration.reg_no}</span>
         <span className="font-semibold text-slate-900">{registration.full_name}</span>
-        <Badge tone="emerald">Checked in</Badge>
+        <Badge tone="emerald">Arrived</Badge>
         {registration.camp_day_changed_from && (
           <span data-testid="scan-day-changed">
             <Badge tone="amber">Moved from {registration.camp_day_changed_from}</Badge>
@@ -55,7 +55,7 @@ export function MismatchReview({ registration, diff, busy, onConfirm }) {
       <p className="font-display font-bold text-slate-900">Mismatch review</p>
       <p className="text-xs text-amber-900 mt-1 mb-3">
         Reg #{registration.reg_no} was typed in. The card is the authority on identity.
-        Confirming replaces the stored values and checks the patient in.
+        Confirming replaces the stored values and lets the prescription print.
       </p>
       <table className="w-full text-sm">
         <thead>
@@ -85,7 +85,7 @@ export function MismatchReview({ registration, diff, busy, onConfirm }) {
         disabled={busy}
         data-testid="mismatch-confirm-button"
       >
-        Confirm card and check in
+        Confirm card
       </Button>
     </div>
   );
@@ -136,7 +136,7 @@ export function NoMatch({ card, phone, setPhone, busy, onSubmit }) {
         disabled={!ready || busy}
         data-testid="door-register-button"
       >
-        Register and check in
+        Register
       </Button>
     </div>
   );

@@ -165,6 +165,27 @@ describe("AdminDashboard component", () => {
     expect(gotoClinical).not.toBeNull();
   });
 
+  test("only the active camp offers the door manual-entry gate, and opening it posts today", async () => {
+    api.post.mockResolvedValue({ data: {} });
+    await act(async () => {
+      root.render(
+        <MemoryRouter>
+          <AdminDashboard />
+        </MemoryRouter>
+      );
+    });
+    await act(async () => container.querySelector('[data-testid="admin-tab-camps"]').click());
+
+    const active = container.querySelector('[data-testid="camp-card-c-1"]');
+    const inactive = container.querySelector('[data-testid="camp-card-c-2"]');
+    expect(active.querySelector('[data-testid="door-manual-control"]')).not.toBeNull();
+    expect(inactive.querySelector('[data-testid="door-manual-control"]')).toBeNull();
+    expect(active.querySelector('[data-testid="door-manual-state"]').textContent).toContain("Closed");
+
+    await act(async () => active.querySelector('[data-testid="door-manual-toggle"]').click());
+    expect(api.post).toHaveBeenCalledWith("/camps/door-manual", { enabled: true });
+  });
+
   test("has no Staff or Roster tab or content and links to Team once", async () => {
     await act(async () => {
       root.render(

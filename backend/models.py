@@ -50,6 +50,10 @@ class CampDayBody(BaseModel):
     seat_limit: int = Field(gt=0)
 
 
+class DoorManualBody(BaseModel):
+    enabled: bool
+
+
 class PrintWindowBody(BaseModel):
     printing_open: Optional[bool] = None
     mode: Optional[str] = None

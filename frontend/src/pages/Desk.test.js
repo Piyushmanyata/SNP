@@ -36,7 +36,7 @@ jest.mock("../components/Layout", () => {
 const CARD_PAYLOAD = "AADHAAR|Aadhaar Scanned User|M|1984-05-12|8888|10 Downing St, Kolkata";
 
 jest.mock("../components/AadhaarScanner", () => {
-  return function MockAadhaarScanner({ onScanned, onFailure, onScanStall }) {
+  return function MockAadhaarScanner({ onScanned, onFailure, onScanStall, onPatientCode }) {
     return (
       <div data-testid="mock-aadhaar-scanner">
         <button
@@ -71,6 +71,13 @@ jest.mock("../components/AadhaarScanner", () => {
           onClick={() => onScanStall && onScanStall()}
         >
           Simulate Scan stall
+        </button>
+        <button
+          type="button"
+          data-testid="mock-patient-code-trigger"
+          onClick={() => onPatientCode && onPatientCode("snp:ABC12345")}
+        >
+          Simulate patient QR
         </button>
       </div>
     );
@@ -146,7 +153,15 @@ afterEach(() => {
   container = null;
 });
 
-async function renderDesk() {
+async function renderDesk(campOverrides) {
+  if (campOverrides) {
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation(async (url) => {
+      const r = await base(url);
+      if (url !== "/camps/active") return r;
+      return { ...r, data: { ...r.data, camp: { ...r.data.camp, ...campOverrides } } };
+    });
+  }
   await act(async () => {
     root.render(
       <MemoryRouter>
@@ -185,7 +200,7 @@ describe("Desk page", () => {
     await scanAtDoor();
     await act(async () => resolveFirst({ data: { outcome: "no_match", card: { full_name: "Previous patient" } } }));
     expect(container.textContent).not.toContain("Previous patient");
-    expect(container.textContent).toContain("Decoding Aadhaar");
+    expect(container.textContent).toContain("Reading the QR");
     await act(async () => resolveSecond({ data: { outcome: "no_match", card: { full_name: "Latest patient" } } }));
     expect(container.textContent).toContain("Latest patient");
   });
@@ -226,7 +241,7 @@ describe("Desk page", () => {
 
     expect(api.post).toHaveBeenCalledWith("/desk/scan", { payload: CARD_PAYLOAD });
     expect(container.querySelector('[data-testid="scan-arrived"]')).not.toBeNull();
-    expect(container.textContent).toContain("Checked in #101");
+    expect(container.textContent).toContain("Arrived: #101");
     expect(container.querySelector('[data-testid="scan-print-button"]')).not.toBeNull();
   });
 
@@ -369,7 +384,7 @@ describe("Desk page", () => {
       camp_day_id: "day-1",
     }));
     expect(api.post).toHaveBeenCalledWith("/desk/arrive/p-9");
-    expect(container.textContent).toContain("Registered and checked in #109");
+    expect(container.textContent).toContain("Registered and arrived: #109");
     expect(container.querySelectorAll('[data-testid="mock-aadhaar-scanner"]').length).toBe(1);
   });
 
@@ -424,10 +439,10 @@ describe("Desk page", () => {
 
     await renderDesk();
     act(() => {
-      setInput(container.querySelector('[data-testid="desk-lookup-input"]'), "101");
+      setInput(container.querySelector('[data-testid="desk-find-input"]'), "101");
     });
     await act(async () => {
-      container.querySelector('[data-testid="desk-lookup-button"]').click();
+      container.querySelector('[data-testid="desk-find-button"]').click();
     });
     expect(container.querySelector('[data-testid="desk-found-patient"]')).not.toBeNull();
 
@@ -452,10 +467,10 @@ describe("Desk page", () => {
 
     await renderDesk();
     act(() => {
-      setInput(container.querySelector('[data-testid="desk-name-search-input"]'), "Aadhaar");
+      setInput(container.querySelector('[data-testid="desk-find-input"]'), "Aadhaar");
     });
     await act(async () => {
-      container.querySelector('[data-testid="desk-name-search-button"]').click();
+      container.querySelector('[data-testid="desk-find-button"]').click();
     });
 
     expect(container.querySelector('[data-testid="desk-search-results"]')).not.toBeNull();
@@ -494,10 +509,10 @@ describe("Desk page", () => {
 
     await renderDesk();
     act(() => {
-      setInput(container.querySelector('[data-testid="desk-name-search-input"]'), "Aadhaar");
+      setInput(container.querySelector('[data-testid="desk-find-input"]'), "Aadhaar");
     });
     await act(async () => {
-      container.querySelector('[data-testid="desk-name-search-button"]').click();
+      container.querySelector('[data-testid="desk-find-button"]').click();
     });
 
     expect(container.querySelector('[data-testid="print-button-101"]')).not.toBeNull();
@@ -510,17 +525,17 @@ describe("Desk page", () => {
     });
     await renderDesk();
     act(() => {
-      setInput(container.querySelector('[data-testid="desk-lookup-input"]'), "101");
+      setInput(container.querySelector('[data-testid="desk-find-input"]'), "101");
     });
     await act(async () => {
-      container.querySelector('[data-testid="desk-lookup-button"]').click();
+      container.querySelector('[data-testid="desk-find-button"]').click();
     });
 
     expect(container.querySelector('[data-testid="awaiting-scan-101"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="arrive-button-101"]')).toBeNull();
     expect(container.querySelector('[data-testid="print-button-101"]')).toBeNull();
     expect(container.querySelector('[data-testid="mark-seen-button-101"]')).toBeNull();
-    expect(container.querySelector('[data-testid="checkin-print-button-101"]')).toBeNull();
+    expect(container.querySelector('[data-testid="print-button-101"]')).toBeNull();
     expect(api.post).not.toHaveBeenCalledWith("/desk/arrive/p-1");
   });
 
@@ -542,10 +557,10 @@ describe("Desk page", () => {
     });
     await renderDesk();
     act(() => {
-      setInput(container.querySelector('[data-testid="desk-lookup-input"]'), "101");
+      setInput(container.querySelector('[data-testid="desk-find-input"]'), "101");
     });
     await act(async () => {
-      container.querySelector('[data-testid="desk-lookup-button"]').click();
+      container.querySelector('[data-testid="desk-find-button"]').click();
     });
   }
 
@@ -554,7 +569,7 @@ describe("Desk page", () => {
 
     expect(container.querySelector('[data-testid="awaiting-scan-101"]')).toBeNull();
     await act(async () => {
-      container.querySelector('[data-testid="checkin-print-button-101"]').click();
+      container.querySelector('[data-testid="print-button-101"]').click();
     });
     expect(api.post).toHaveBeenCalledWith("/desk/arrive/p-1");
   });
@@ -900,13 +915,13 @@ describe("Desk page", () => {
     expect(api.post).toHaveBeenCalledWith("/desk/arrive/p-9");
   });
 
-  test("door manual books the operating day and checks in when printing is open", async () => {
+  test("door manual books the operating day and arrives them when printing is open", async () => {
     api.get.mockImplementation((url) => {
       if (url === "/kpis") return Promise.resolve({ data: { registered: 3, seen: 1, pending: 2 } });
       if (url === "/camps/active") {
         return Promise.resolve({
           data: {
-            camp: { id: "camp-1", name: "Howrah Eye Camp" },
+            camp: { id: "camp-1", name: "Howrah Eye Camp", door_manual_entry: true },
             days: [
               { id: "day-1", day_date: "2026-08-27", is_today: true, printing_open: false },
               { id: "day-2", day_date: "2026-08-28", is_today: false, printing_open: true },
@@ -928,9 +943,6 @@ describe("Desk page", () => {
       return Promise.resolve({ data: {} });
     });
     await renderDesk();
-    act(() => { deskScanner().parentNode.querySelector('[data-testid="mock-failure-trigger"]').click(); });
-    act(() => { deskScanner().parentNode.querySelector('[data-testid="mock-failure-trigger"]').click(); });
-    act(() => { deskScanner().parentNode.querySelector('[data-testid="mock-failure-trigger"]').click(); });
     act(() => {
       setInput(container.querySelector('[data-testid="reg-fullname-input"]'), "Manual Patient");
       setInput(container.querySelector('[data-testid="reg-age-input"]'), "40");
@@ -945,7 +957,7 @@ describe("Desk page", () => {
       manual_entry: true,
     }));
     expect(api.post).toHaveBeenCalledWith("/desk/arrive/p-8");
-    expect(container.textContent).toContain("Registered and checked in #108");
+    expect(container.textContent).toContain("Registered and arrived: #108");
   });
 
   test("camp-day mode hides Pre-registration and shows the full KPI strip", async () => {
@@ -957,31 +969,44 @@ describe("Desk page", () => {
     expect(container.querySelector('[data-testid="kpi-pending-count"]')).not.toBeNull();
   });
 
-  test("three Failures at the door reveal the typed form", async () => {
+  test("no number of Failures reveals the typed form at the door", async () => {
     await renderDesk();
-    expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
-    act(() => { deskScanner().parentNode.querySelector('[data-testid="mock-failure-trigger"]').click(); });
-    expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
-    act(() => { deskScanner().parentNode.querySelector('[data-testid="mock-failure-trigger"]').click(); });
-    expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
-    act(() => { deskScanner().parentNode.querySelector('[data-testid="mock-failure-trigger"]').click(); });
-    expect(container.querySelector('[data-testid="door-manual-form"]')).not.toBeNull();
-    expect(container.querySelectorAll('[data-testid="mock-aadhaar-scanner"]').length).toBe(1);
+    for (let i = 0; i < 4; i += 1) {
+      act(() => { deskScanner().parentNode.querySelector('[data-testid="mock-failure-trigger"]').click(); });
+      expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
+    }
   });
 
-  test("camp-day desk shows wedge-panel and hides scanner behind camera-fallback", async () => {
+  test("the door card shows the scanner itself, with no USB panel and no camera fallback", async () => {
     await renderDesk();
-    expect(container.querySelector('[data-testid="wedge-panel"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="camera-fallback"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="camera-fallback"] [data-testid="mock-aadhaar-scanner"]')).not.toBeNull();
+    const card = container.querySelector('[data-testid="desk-card-scan"]');
+    expect(card.querySelector('[data-testid="mock-aadhaar-scanner"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="wedge-panel"]')).toBeNull();
+    expect(container.querySelector('[data-testid="camera-fallback"]')).toBeNull();
+    expect(container.querySelector('[data-testid="door-manual-toggle"]')).toBeNull();
   });
 
-  test("desk manual registration is available before any scan failure", async () => {
+  test("the door typed form stays hidden while the admin gate is shut", async () => {
     await renderDesk();
-    const button = container.querySelector('[data-testid="door-manual-toggle"]');
-    expect(button).not.toBeNull();
-    act(() => button.click());
+    expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
+  });
+
+  test("the door typed form appears once an admin opens the gate", async () => {
+    await renderDesk({ door_manual_entry: true });
     expect(container.querySelector('[data-testid="door-manual-form"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="manual-entry-note"]').textContent)
+      .toContain("closes at the end of today");
+  });
+
+  test("a scanned patient QR is looked up instead of decoded as a card", async () => {
+    api.post.mockResolvedValue({ data: { registration: ARRIVED } });
+    await renderDesk();
+    await act(async () => {
+      deskScanner().parentNode.querySelector('[data-testid="mock-patient-code-trigger"]').click();
+    });
+    expect(api.post).toHaveBeenCalledWith("/desk/lookup", { value: "snp:ABC12345" });
+    expect(api.post.mock.calls.filter((c) => c[0] === "/desk/scan")).toHaveLength(0);
+    expect(container.querySelector('[data-testid="desk-found-patient"]')).not.toBeNull();
   });
 
   test("switching the registration modal to manual ignores a pending USB decode", async () => {
@@ -998,25 +1023,15 @@ describe("Desk page", () => {
     expect(document.querySelector('[data-testid="reg-fullname-input"]').readOnly).toBe(false);
   });
 
-  test("desk shows receiving before Enter and decoding until the response", async () => {
+  test("the door shows a reading status while the scan resolves", async () => {
     let resolveScan;
     api.post.mockImplementation((url) => url === "/desk/scan" ? new Promise((resolve) => { resolveScan = resolve; }) : Promise.resolve({ data: {} }));
     await renderDesk();
-    let time = 1000;
-    const spy = jest.spyOn(performance, "now").mockImplementation(() => time);
-    act(() => {
-      for (const key of "1234567890".repeat(4)) {
-        time += 10;
-        document.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
-      }
-    });
-    expect(container.querySelector('[data-testid="wedge-panel"]').textContent).toContain("Receiving Aadhaar");
-    expect(api.post).not.toHaveBeenCalled();
-    act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
-    expect(container.querySelector('[data-testid="wedge-panel"]').textContent).toContain("Decoding Aadhaar");
+    expect(container.querySelector('[data-testid="door-scan-status"]')).toBeNull();
+    await act(async () => { deskScanner().click(); });
+    expect(container.querySelector('[data-testid="door-scan-status"]').textContent).toContain("Reading the QR");
     await act(async () => resolveScan({ data: { outcome: "arrived", registration: ARRIVED } }));
-    expect(container.querySelector('[data-testid="wedge-panel"]').textContent).toContain("Ready for USB scan");
-    spy.mockRestore();
+    expect(container.querySelector('[data-testid="door-scan-status"]')).toBeNull();
   });
 
   async function fireBurst(text) {
@@ -1033,41 +1048,34 @@ describe("Desk page", () => {
     spy.mockRestore();
   }
 
-  test("a wedge burst posts /desk/scan", async () => {
-    api.post.mockResolvedValueOnce({ data: { outcome: "arrived", registration: ARRIVED } });
-    await renderDesk();
-    await fireBurst(CARD_PAYLOAD);
-    expect(api.post).toHaveBeenCalledWith("/desk/scan", { payload: CARD_PAYLOAD });
-  });
-
-  test("a second identical burst within 3 s is ignored", async () => {
+  test("the door no longer listens for USB bursts behind the scanner", async () => {
     api.post.mockResolvedValue({ data: { outcome: "arrived", registration: ARRIVED } });
-    const nowSpy = jest.spyOn(Date, "now").mockReturnValue(1_000_000);
     await renderDesk();
     await fireBurst(CARD_PAYLOAD);
-    await fireBurst(CARD_PAYLOAD);
-    const scans = api.post.mock.calls.filter((c) => c[0] === "/desk/scan");
-    expect(scans).toHaveLength(1);
-    nowSpy.mockReturnValue(1_000_000 + 3001);
-    await fireBurst(CARD_PAYLOAD);
-    expect(api.post.mock.calls.filter((c) => c[0] === "/desk/scan")).toHaveLength(2);
-    nowSpy.mockRestore();
+    expect(api.post.mock.calls.filter((c) => c[0] === "/desk/scan")).toHaveLength(0);
   });
 
-  test("two NOT_A_CARD bursts reveal the typed form", async () => {
+  test("a slow lookup cannot land on top of a newer name search", async () => {
+    let resolveLookup;
+    api.post.mockImplementation((url) => url === "/desk/lookup"
+      ? new Promise((resolve) => { resolveLookup = resolve; })
+      : Promise.resolve({ data: {} }));
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => url.startsWith("/patients/search")
+      ? Promise.resolve({ data: { results: [{ ...ARRIVED, id: "p-2", reg_no: "202", full_name: "Someone Else" }] } })
+      : base(url));
     await renderDesk();
-    const rejectCard = () => api.post.mockRejectedValueOnce({
-      response: { status: 400, data: { detail: { code: "NOT_A_CARD", message: "not a card" } } },
-    });
-    rejectCard();
-    await fireBurst("X".repeat(24));
-    expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
-    rejectCard();
-    await fireBurst("Y".repeat(24));
-    expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
-    rejectCard();
-    await fireBurst("Z".repeat(24));
-    expect(container.querySelector('[data-testid="door-manual-form"]')).not.toBeNull();
+
+    act(() => setInput(container.querySelector('[data-testid="desk-find-input"]'), "101"));
+    act(() => { container.querySelector('[data-testid="desk-find-button"]').click(); });
+
+    act(() => setInput(container.querySelector('[data-testid="desk-find-input"]'), "Someone"));
+    await act(async () => { container.querySelector('[data-testid="desk-find-button"]').click(); });
+    expect(container.querySelector('[data-testid="desk-search-results"]')).not.toBeNull();
+
+    await act(async () => resolveLookup({ data: { registration: ARRIVED } }));
+    expect(container.querySelector('[data-testid="desk-found-patient"]')).toBeNull();
+    expect(container.querySelector('[data-testid="print-button-101"]')).toBeNull();
   });
 
   test("a Scan stall at the door does not reveal the typed form", async () => {

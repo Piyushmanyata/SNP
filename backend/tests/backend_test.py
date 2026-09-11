@@ -115,6 +115,23 @@ class TestCamps:
         r = anon.post(f"{API}/camps", json={"name": "x", "venue": "y", "camp_date": TODAY_IST}, timeout=30)
         assert r.status_code in (401, 403)
 
+    def test_door_manual_entry_is_shut_until_an_admin_opens_it(self, admin):
+        assert admin.get(f"{API}/camps/active", timeout=30).json()["camp"]["door_manual_entry"] is False
+
+        r = admin.post(f"{API}/camps/door-manual", json={"enabled": True}, timeout=30)
+        assert r.status_code == 200, r.text
+        assert r.json()["camp"]["door_manual_entry"] is True
+        assert admin.get(f"{API}/camps/active", timeout=30).json()["camp"]["door_manual_entry"] is True
+
+        r = admin.post(f"{API}/camps/door-manual", json={"enabled": False}, timeout=30)
+        assert r.status_code == 200, r.text
+        assert r.json()["camp"]["door_manual_entry"] is False
+        assert admin.get(f"{API}/camps/active", timeout=30).json()["camp"]["door_manual_entry"] is False
+
+    def test_door_manual_entry_refuses_a_non_admin(self, anon):
+        r = anon.post(f"{API}/camps/door-manual", json={"enabled": True}, timeout=30)
+        assert r.status_code in (401, 403)
+
 
 # ---------------- aadhaar mock ----------------
 class TestAadhaarMock:
