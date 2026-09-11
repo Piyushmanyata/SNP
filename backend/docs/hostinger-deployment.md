@@ -1,13 +1,13 @@
-# Hostinger deployment — 8 September 2026
+# Hostinger deployment — 11 September 2026
 
 ## Deployment record
 
 - Application domain: `sikarkolkata.io`.
 - VPS: `82.112.234.39`, Ubuntu 24.04.4 LTS, 2 CPUs, 8 GB RAM.
 - Runtime: Docker Engine 29.8.0 and Docker Compose 5.5.1.
-- Application release: `7eaed607ba0946c04dd32a405920a49db5e96fe7` (manual entry as a recovery route, 8 September 2026).
-- Release directory: `/opt/snp/releases/7eaed607ba0946c04dd32a405920a49db5e96fe7`.
-- Previous releases kept for rollback: `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`, `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
+- Application release: `ac60bdfe2ecb13555ae449a7d299229ca8758afd` (no print after doctor seen, 11 September 2026).
+- Release directory: `/opt/snp/releases/ac60bdfe2ecb13555ae449a7d299229ca8758afd`.
+- Previous releases kept for rollback: `7eaed607ba0946c04dd32a405920a49db5e96fe7`, `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`, `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
 - Current release link: `/opt/snp/current`.
 - Production Compose project: `snp`.
 - Production environment: `/opt/snp/.env.production`, readable only by root.
@@ -36,6 +36,20 @@ No database migration was required. This release adds no stored field and no ind
 Post-deployment checks against the live host: `/api/health` returned `{"status":"ok"}`, the homepage returned 200, HTTP redirected with 308, and `/api/aadhaar/extract` rejected a non-document with 415. The served frontend bundle contains the new `self-enter-details` control and no longer contains `aadhaar-enter-details`. A generated text-only image returned `outcome: review` carrying `dob: 1975-06-14` with `age: 51`, which confirms both that Tesseract runs in the deployed container and that age derivation reaches production. This probe used synthetic data; no real Aadhaar document was uploaded.
 
 CI run [34223121551](https://github.com/Piyushmanyata/SNP/actions/runs/34223121551) passed every step: 266 frontend tests across 31 suites, 548 backend tests against real HTTP and MongoDB services, lint, dependency audits and the production image build.
+
+## No print after doctor seen release
+
+The 11 September 2026 release ([PR 26](https://github.com/Piyushmanyata/SNP/pull/26)) stops the desk printing a prescription for a patient the doctor has already seen. `_prescription_payload` refuses `queue_status == "seen"` with 409 `ALREADY_SEEN`, covering both the preview and the stamping route, and both desk entry points — the board row and the door scan card — withdraw Print. Clinical undo returns the patient to `arrived` and printing resumes. See [ADR 0031](../../docs/adr/0031-no-print-after-doctor-seen.md).
+
+The running `7eaed60` images again had no rollback tags, so `snp-backend`, `snp-frontend` and `snp-reminders` were tagged `rollback-7eaed607ba0946c04dd32a405920a49db5e96fe7` before rebuilding. Retag those to `:latest` and run `up -d --no-build` to roll back.
+
+No database migration was required. This release adds no stored field and no index; the guard reads `queue_status`, which clinical completion already writes. The pre-deployment archive `snp_camps-20260911T121231Z.archive.gz` was taken by restarting the backup container, which dumps on startup, and sits in the `snp_backups` volume beside the daily archives. MongoDB was not recreated, so the data volume stayed attached throughout.
+
+Post-deployment checks against the live host: `/api/health` returned `{"status":"ok"}`, the homepage returned 200, HTTP redirected with 308, and all six services reported healthy. The deployed backend image carries the `ALREADY_SEEN` guard and the served frontend bundle `static/Desk-K6WqbTAz.js` carries the new `scan-already-seen` control. The API container started clean with no errors in its log. No probe created or altered patient data.
+
+CI run [34597291085](https://github.com/Piyushmanyata/SNP/actions/runs/34597291085) passed every step: 268 frontend tests across 31 suites, 549 backend tests against real HTTP and MongoDB services, lint, dependency audits and the production image build.
+
+The first CI run on this branch failed on eight fulfilment tests the branch does not touch. They hardcoded `2026-09-10` and `2026-09-11` as future booking dates, which `routes_clinical.py` rejects once that date passes, so the suite rotted on the calendar — main was red on 11 September for the same reason, having last gone green on 8 September. Those dates now derive from `now_ist()`. Other test files still hold hardcoded future dates that will rot the same way.
 
 ## Access and operation
 
