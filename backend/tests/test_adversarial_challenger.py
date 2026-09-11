@@ -38,6 +38,8 @@ from routes_clinical import (
     _validate_fulfilment_matrix,
 )
 import db as db_module
+from datetime import timedelta
+from helpers import now_ist
 
 # =====================================================================
 # IN-MEMORY ASYNC MONGO MOCK
@@ -48,6 +50,8 @@ MEDICINE = {"medicine_id": str(ObjectId()), "name": "Moxifloxacin"}
 MEDICINE_ALT = {"medicine_id": str(ObjectId()), "name": "Chloramphenicol"}
 STOCKED_POWERS = (-1.5, 2.0, 2.25)
 FIXED_POWER = 2.0
+SCHEDULE_DAY = (now_ist().date() + timedelta(days=1)).isoformat()
+SCHEDULE_DAY_2 = (now_ist().date() + timedelta(days=2)).isoformat()
 
 
 class MockCursor:
@@ -739,7 +743,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 "specs_measurements": RX, "prescribed_medicines": [MEDICINE],
                 "fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER})
             await mock_db.specs_collection_days.insert_one({
-                "_id": day1, "camp_id": ObjectId(), "day_date": "2026-09-15",
+                "_id": day1, "camp_id": ObjectId(), "day_date": SCHEDULE_DAY,
                 "venue": "District Hospital", "start_time": "09:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
             })
             await mock_db.specs_collection_days.insert_one({
@@ -756,7 +760,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 transcription_id=str(t_id),
                 item_type="specs_made",
                 status="deferred",
-                collection_date="2026-09-15",
+                collection_date=SCHEDULE_DAY,
                 collection_venue="District Hospital",
             )
             with pytest.raises(HTTPException) as exc:
@@ -772,7 +776,7 @@ class TestFulfilmentDecomposedAndInvariants:
             res1 = await record_fulfilment(good_body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
             assert res1["slip"]["version"] == 1
             assert res1["slip"]["active"] is True
-            assert res1["slip"]["collection_date"] == "2026-09-15"
+            assert res1["slip"]["collection_date"] == SCHEDULE_DAY
             assert res1["slip"]["collection_venue"] == "District Hospital"
             assert res1["fulfilment"]["status"] == "deferred"
             d1 = await mock_db.specs_collection_days.find_one({"_id": day1})
@@ -813,7 +817,7 @@ class TestFulfilmentDecomposedAndInvariants:
             await mock_db.specs_collection_days.insert_one({
                 "_id": specs_day_id,
                 "camp_id": ObjectId(),
-                "day_date": "2026-09-10",
+                "day_date": SCHEDULE_DAY,
                 "venue": "Optical Desk",
                 "start_time": "09:00", "end_time": "17:00",
                 "seat_limit": 1,
@@ -860,11 +864,11 @@ class TestFulfilmentDecomposedAndInvariants:
                 "specs_measurements": RX, "prescribed_medicines": [MEDICINE],
                 "fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER})
             await mock_db.specs_collection_days.insert_one({
-                "_id": day1, "camp_id": ObjectId(), "day_date": "2026-09-10",
+                "_id": day1, "camp_id": ObjectId(), "day_date": SCHEDULE_DAY,
                 "venue": "Optical 1", "start_time": "09:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
             })
             await mock_db.specs_collection_days.insert_one({
-                "_id": day2, "camp_id": ObjectId(), "day_date": "2026-09-11",
+                "_id": day2, "camp_id": ObjectId(), "day_date": SCHEDULE_DAY_2,
                 "venue": "Optical 2", "start_time": "09:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
             })
 
@@ -899,7 +903,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 "specs_measurements": RX, "prescribed_medicines": [MEDICINE],
                 "fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER})
             await mock_db.specs_collection_days.insert_one({
-                "_id": day_id, "camp_id": ObjectId(), "day_date": "2026-09-10",
+                "_id": day_id, "camp_id": ObjectId(), "day_date": SCHEDULE_DAY,
                 "venue": "Optical", "start_time": "09:00", "end_time": "17:00", "seat_limit": 1, "seats_taken": 0,
             })
             await record_fulfilment(
@@ -928,7 +932,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 "specs_measurements": RX, "prescribed_medicines": [MEDICINE],
                 "fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER})
             await mock_db.specs_collection_days.insert_one({
-                "_id": day_id, "camp_id": ObjectId(), "day_date": "2026-09-10",
+                "_id": day_id, "camp_id": ObjectId(), "day_date": SCHEDULE_DAY,
                 "venue": "Optical", "start_time": "09:00", "end_time": "17:00", "seat_limit": 1, "seats_taken": 0,
             })
             await record_fulfilment(
@@ -957,7 +961,7 @@ class TestFulfilmentDecomposedAndInvariants:
             await mock_db.transcriptions.insert_one({"_id": t_a, "patient_id": p_a, "locked": False, "specs_measurements": RX})
             await mock_db.transcriptions.insert_one({"_id": t_b, "patient_id": p_b, "locked": False, "specs_measurements": RX})
             await mock_db.specs_collection_days.insert_one({
-                "_id": day_id, "camp_id": ObjectId(), "day_date": "2026-09-10",
+                "_id": day_id, "camp_id": ObjectId(), "day_date": SCHEDULE_DAY,
                 "venue": "Optical", "start_time": "09:00", "end_time": "17:00", "seat_limit": 1, "seats_taken": 0,
             })
             actor = {"_id": ObjectId(), "role": "clinical_desk_operator"}
@@ -992,7 +996,7 @@ class TestFulfilmentDecomposedAndInvariants:
             await mock_db.ot_schedule_days.insert_one({
                 "_id": ot_day_id,
                 "camp_id": ObjectId(),
-                "day_date": "2026-09-10",
+                "day_date": SCHEDULE_DAY,
                 "venue": "Civil Hospital OT 1",
                 "seat_limit": 1,
                 "seats_taken": 0,
@@ -1040,10 +1044,10 @@ class TestFulfilmentDecomposedAndInvariants:
                 "specs_measurements": RX, "prescribed_medicines": [MEDICINE],
                 "fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER})
             await mock_db.ot_schedule_days.insert_one({
-                "_id": ot_day1, "camp_id": ObjectId(), "day_date": "2026-09-10", "venue": "OT 1", "seat_limit": 5, "seats_taken": 0
+                "_id": ot_day1, "camp_id": ObjectId(), "day_date": SCHEDULE_DAY, "venue": "OT 1", "seat_limit": 5, "seats_taken": 0
             })
             await mock_db.ot_schedule_days.insert_one({
-                "_id": ot_day2, "camp_id": ObjectId(), "day_date": "2026-09-11", "venue": "OT 2", "seat_limit": 5, "seats_taken": 0
+                "_id": ot_day2, "camp_id": ObjectId(), "day_date": SCHEDULE_DAY_2, "venue": "OT 2", "seat_limit": 5, "seats_taken": 0
             })
 
             body1 = review_body(mock_db,transcription_id=str(t_id), item_type="ot", status="deferred", ot_schedule_day_id=str(ot_day1))
@@ -1068,7 +1072,7 @@ class TestFulfilmentDecomposedAndInvariants:
             await mock_db.ot_schedule_days.insert_one({
                 "_id": ot_day_id,
                 "camp_id": ObjectId(),
-                "day_date": "2026-09-10",
+                "day_date": SCHEDULE_DAY,
                 "venue": "OT 1",
                 "seat_limit": 1,
                 "seats_taken": 0,
