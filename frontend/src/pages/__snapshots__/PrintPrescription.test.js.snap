@@ -2,7 +2,7 @@
 
 exports[`PrintPrescription component the reference form snapshot and named strings stay put 1`] = `
 <div
-  class="print-a4 bg-white mx-auto shadow-lg text-slate-900"
+  class="print-a4 bg-white mx-auto shadow-lg text-slate-900 flex flex-col"
   data-testid="a4-prescription-sheet"
   style="width: 210mm; min-height: auto; padding: 10mm 12mm;"
 >
@@ -262,7 +262,8 @@ exports[`PrintPrescription component the reference form snapshot and named strin
     </div>
   </div>
   <div
-    class="grid grid-cols-2 gap-3 mt-2 text-[12px]"
+    class="grid grid-cols-2 gap-3 mt-2 text-[12px] flex-1"
+    data-testid="rx-write-area"
   >
     <div
       class="space-y-2"
@@ -292,22 +293,24 @@ exports[`PrintPrescription component the reference form snapshot and named strin
         </span>
       </p>
     </div>
-    <div>
+    <div
+      class="flex flex-col"
+    >
       <p
         class="font-bold"
       >
         MEDICINES :
       </p>
       <div
-        class="border-b border-slate-400 h-10 mt-1"
+        class="border-b border-slate-400 flex-[2] min-h-10 mt-1"
         data-testid="rx-medicine-line"
       />
       <div
-        class="border-b border-slate-400 h-6 mt-1"
+        class="border-b border-slate-400 flex-1 min-h-6 mt-1"
         data-testid="rx-medicine-line"
       />
       <div
-        class="border-b border-slate-400 h-6 mt-1"
+        class="border-b border-slate-400 flex-1 min-h-6 mt-1"
         data-testid="rx-medicine-line"
       />
     </div>
@@ -484,28 +487,11 @@ exports[`PrintPrescription component the reference form snapshot and named strin
     Please carry your Aadhaar card, ration card and mobile phone on the day of the operation.
   </div>
   <div
-    class="grid grid-cols-2 gap-4 mt-3 items-end"
-    data-testid="rx-footer"
+    class="flex justify-end mt-3 text-[12px]"
+    data-testid="rx-signature"
   >
-    <div>
-      <p
-        class="font-semibold text-[12px]"
-      >
-        Sponsorer :
-      </p>
-      <div
-        class="flex flex-wrap gap-2 mt-1"
-      >
-        <img
-          alt="rupa.png"
-          class="object-contain"
-          src="data:image/png;base64,aaa"
-          style="height: 18mm;"
-        />
-      </div>
-    </div>
     <div
-      class="text-right text-[12px]"
+      class="text-right"
     >
       <p>
         Signature of
@@ -515,6 +501,27 @@ exports[`PrintPrescription component the reference form snapshot and named strin
       >
         Optometrist / Eye Surgeon
       </p>
+    </div>
+  </div>
+  <div
+    class="mt-2 pt-2 border-t border-slate-300"
+    data-testid="rx-footer"
+  >
+    <p
+      class="font-semibold text-[12px] mb-1"
+    >
+      Sponsorer :
+    </p>
+    <div
+      class="flex items-center gap-3"
+      data-testid="rx-sponsor-strip"
+    >
+      <img
+        alt="rupa.png"
+        class="flex-1 min-w-0 object-contain object-left"
+        src="data:image/png;base64,aaa"
+        style="height: 18mm;"
+      />
     </div>
   </div>
 </div>

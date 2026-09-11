@@ -176,6 +176,30 @@ describe("PrintPrescription component", () => {
     expect(container.querySelector('[data-testid="rx-footer"]')).not.toBeNull();
   });
 
+  test("the sheet fills the page and the sponsor band spans it in one row", () => {
+    const logos = Array.from({ length: 5 }, (_, i) => ({
+      id: `logo-${i}`, name: `sponsor-${i}.png`, data_url: "data:image/png;base64,aaa",
+    }));
+    act(() => {
+      root.render(<PrescriptionSheet rx={{ patient_qr: "qr-1" }} logos={logos} />);
+    });
+    const sheet = container.querySelector('[data-testid="a4-prescription-sheet"]');
+    expect(sheet.className).toContain("flex-col");
+    expect(sheet.style.minHeight).toBe("297mm");
+
+    const writeArea = sheet.querySelector('[data-testid="rx-write-area"]');
+    expect(writeArea.className).toContain("flex-1");
+    expect(sheet.querySelectorAll('[data-testid="rx-medicine-line"]')).toHaveLength(3);
+
+    const strip = sheet.querySelector('[data-testid="rx-sponsor-strip"]');
+    expect(strip.children).toHaveLength(5);
+    for (const logo of strip.children) {
+      expect(logo.className).toContain("flex-1");
+    }
+    expect(sheet.querySelector('[data-testid="rx-footer"]').contains(strip)).toBe(true);
+    expect(sheet.querySelector('[data-testid="rx-signature"]')).not.toBeNull();
+  });
+
   test("the reference form snapshot and named strings stay put", () => {
     const sample = {
       camp_name: "Kolkata Eye Camp",
