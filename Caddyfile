@@ -2,6 +2,10 @@
 	email {$TLS_EMAIL}
 }
 
+www.{$APP_DOMAIN} {
+	redir https://{$APP_DOMAIN}{uri} permanent
+}
+
 {$APP_DOMAIN} {
 	encode zstd gzip
 	header Strict-Transport-Security "max-age=31536000"
