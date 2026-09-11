@@ -61,9 +61,9 @@ def test_nginx_preserves_distinct_client_rate_limit_buckets(anon):
     for attempt in range(300):
         response = anon.post(f"{API}/self-register", json=payload, headers={"X-Forwarded-For": first_ip}, timeout=30)
         assert response.status_code == 400, (attempt, response.status_code)
-        assert response.json()["detail"] == "Enter a valid date of birth as YYYY-MM-DD or a four-digit year"
+        assert response.json()["detail"]["code"] == "AADHAAR_QR_REQUIRED"
     limited = anon.post(f"{API}/self-register", json=payload, headers={"X-Forwarded-For": first_ip}, timeout=30)
     assert limited.status_code == 429
     other_client = anon.post(f"{API}/self-register", json=payload, headers={"X-Forwarded-For": second_ip}, timeout=30)
     assert other_client.status_code == 400
-    assert other_client.json()["detail"] == "Enter a valid date of birth as YYYY-MM-DD or a four-digit year"
+    assert other_client.json()["detail"]["code"] == "AADHAAR_QR_REQUIRED"

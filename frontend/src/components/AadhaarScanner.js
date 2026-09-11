@@ -33,7 +33,7 @@ export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStar
     scanFile,
     reviewData,
     passwordRequired,
-  } = useAadhaarDecode({ onScanned, onFailure });
+  } = useAadhaarDecode({ onScanned, onFailure, canReview: Boolean(onTranscribed) });
 
   useEffect(() => {
     if (!busy && !passwordRequired) selectedFile.current = null;
@@ -139,7 +139,7 @@ export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStar
         <p className="font-display font-bold text-slate-900">Scan Aadhaar QR</p>
       </div>
       <p className="text-xs text-slate-500 mb-3">
-        Scan the QR or upload a photo or e-Aadhaar PDF. If the QR is unreadable, review extracted text. Uploaded documents and PDF passwords are not retained. Only the last four Aadhaar digits are saved.
+        Scan the QR or upload a photo or e-Aadhaar PDF.{onTranscribed ? " If the QR is unreadable, review extracted text." : ""} Uploaded documents and PDF passwords are not retained. Only the last four Aadhaar digits are saved.
       </p>
 
       <AadhaarFallbackPanel

@@ -679,7 +679,7 @@ describe("CHALLENGE 4: Prescription lockdown and logo validation", () => {
       "rx-block-identity",
     ]);
     expect(container.querySelector('[data-testid="rx-diagnosis-row"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="rx-operation-box"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="rx-glasses-box"]')).not.toBeNull();
   });
 
   test("4.3: the sheet carries the trust letterhead and footer regardless of stored data", () => {

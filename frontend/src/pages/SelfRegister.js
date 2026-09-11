@@ -3,7 +3,6 @@ import { QRCodeSVG } from "qrcode.react";
 import api, { formatApiError } from "../lib/api";
 import { Button, Card, Input, Field, Alert } from "../components/ui";
 import AadhaarScanner from "../components/AadhaarScanner";
-import { AadhaarReviewForm } from "../components/aadhaar/AadhaarReviewForm";
 import { Stethoscope, CheckCircle2, Lock } from "lucide-react";
 import { v4 } from "../lib/uuid";
 
@@ -19,25 +18,16 @@ export default function SelfRegister() {
   const [loadErr, setLoadErr] = useState("");
   const [reqId, setReqId] = useState("");
   const [readFailed, setReadFailed] = useState(false);
-  const [manualEntry, setManualEntry] = useState(false);
 
   const onScanned = useCallback((card, raw) => {
     setScanned({ ...card, qr_payload: raw || card.qr_payload });
     setReqId(v4());
-    setManualEntry(false);
-  }, []);
-
-  const onTranscribed = useCallback((details) => {
-    setScanned({ ...details, qr_payload: null });
-    setReqId(v4());
-    setManualEntry(false);
   }, []);
 
   const onCaptureStart = useCallback(() => {
     setScanned(null);
     setReqId("");
     setReadFailed(false);
-    setManualEntry(false);
   }, []);
 
   const onFailure = useCallback(() => setReadFailed(true), []);
@@ -59,19 +49,12 @@ export default function SelfRegister() {
     setBusy(true); setError("");
     try {
       const { data } = await api.post("/self-register", {
-        qr_payload: scanned.qr_payload || null,
+        qr_payload: scanned.qr_payload,
         phone,
         camp_day_id: dayId,
         is_self_registered: true,
         registration_request_id: reqId,
         full_name: scanned.full_name,
-        age: scanned.age === "" || scanned.age == null ? null : Number(scanned.age),
-        dob: scanned.dob || null,
-        gender: scanned.gender || null,
-        address: scanned.address || null,
-        aadhaar_last4: scanned.aadhaar_last4 || null,
-        aadhaar_scanned: Boolean(scanned.qr_payload),
-        manual_entry: !scanned.qr_payload,
       });
       setReceipt(data.receipt);
     } catch (err) {
@@ -110,19 +93,18 @@ export default function SelfRegister() {
             </Card>
 
             <Card className="space-y-4">
-              <AadhaarScanner onScanned={onScanned} onTranscribed={onTranscribed} onCaptureStart={onCaptureStart} onFailure={onFailure} disabled={busy} />
+              <AadhaarScanner onScanned={onScanned} onCaptureStart={onCaptureStart} onFailure={onFailure} disabled={busy} />
 
-              {readFailed && !manualEntry && !scanned?.qr_payload && (
-                <Button variant="outline" className="w-full" disabled={busy} onClick={() => setManualEntry(true)} data-testid="self-enter-details">
-                  {scanned ? "Edit these details" : "Enter details manually"}
-                </Button>
+              {readFailed && !scanned && (
+                <p className="text-sm font-semibold text-amber-800" data-testid="self-scan-required">
+                  We could not read the QR code on this Aadhaar card. Please register at the camp desk instead.
+                </p>
               )}
-              {manualEntry && <AadhaarReviewForm initial={scanned || undefined} disabled={busy} onConfirm={onTranscribed} />}
 
               {scanned && (
                 <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-1.5" data-testid="self-scanned-preview">
                   <div className="flex items-center gap-1.5 text-emerald-600 text-xs font-semibold mb-1">
-                    {scanned.qr_payload && <Lock className="w-3.5 h-3.5" />} {scanned.qr_payload ? "Details from card QR" : "Reviewed details · desk identity check required"}
+                    <Lock className="w-3.5 h-3.5" /> Details from card QR
                   </div>
                   <Row k="Name" v={scanned.full_name} />
                   <Row k="Gender" v={scanned.gender} />
@@ -155,7 +137,6 @@ export default function SelfRegister() {
             <CheckCircle2 className="w-14 h-14 text-emerald-500 mx-auto" />
             <h2 className="font-display font-extrabold text-2xl text-slate-900 mt-3">You're registered!</h2>
             <p className="text-slate-500 text-sm mt-1">Show this screen (or your number) at the desk.</p>
-            {!scanned?.qr_payload && <p className="text-sm text-amber-800 mt-2">Bring your Aadhaar card or available identity details for an identity check before your prescription is printed.</p>}
             <div className="my-5 flex justify-center">
               <div className="p-3 bg-white border border-slate-200 rounded-xl">
                 <QRCodeSVG value={`snp:${receipt.patient_qr}`} size={160} />
@@ -167,7 +148,7 @@ export default function SelfRegister() {
               <p><span className="text-slate-400">Venue:</span> {receipt.venue}</p>
               <p><span className="text-slate-400">Day:</span> {receipt.day_date}</p>
             </div>
-            <Button variant="outline" className="mt-6 w-full" onClick={() => { setReceipt(null); setScanned(null); setReqId(""); setReadFailed(false); setManualEntry(false); }} data-testid="self-register-another">
+            <Button variant="outline" className="mt-6 w-full" onClick={() => { setReceipt(null); setScanned(null); setReqId(""); setReadFailed(false); }} data-testid="self-register-another">
               Register another patient
             </Button>
           </Card>

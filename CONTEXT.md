@@ -153,7 +153,7 @@ An image of the camp's sponsor, printed in the prescription footer under "Sponso
 _Avoid_: logo (the trust's own emblems are fixed masthead artwork, not sponsor logos), header image
 
 **Print window**:
-Server-derived printing availability for the active camp: automatic on the IST calendar camp day, or one admin-selected day, or off. Manual enable/disable expires at the next IST midnight. A stored per-day boolean is not the authority. Chooses Desk mode via the operating day.
+Server-derived printing availability for the active camp: automatic on the IST calendar camp day, or one admin-selected day, or off. Manual enable/disable expires at the next IST midnight. A stored per-day boolean is not the authority. Chooses Desk mode via the operating day. While it is closed the desk withdraws Print and says so rather than offering a control that fails; a sheet that has already printed keeps its reprint.
 _Avoid_: paused camp, calendar-today-only print, client timer
 
 **Desk mode**:
@@ -165,16 +165,16 @@ The single camp day currently selected for door check-in and printing. Automatic
 _Avoid_: calendar today, booked day (a patient may have booked a different day)
 
 **Manual entry**:
-A desk registration typed after three Failures. Permission denial, stall, cancel, frames, network and busy do not count. Marked on the registration; camp-day identity rechecking is required. Self-register has no typed path.
-_Avoid_: permission fallback, two-failure unlock
+A desk registration typed after three Failures. Permission denial, stall, cancel, frames, network and busy do not count. Marked on the registration; camp-day identity rechecking is required. Self-register has no typed path: without a readable QR the public endpoint refuses with `AADHAAR_QR_REQUIRED` and sends the patient to the desk. No client-supplied flag can mint a public registration without a Lock.
+_Avoid_: permission fallback, two-failure unlock, public reviewed details
 
 **Scan stall**:
 Twenty seconds of live scan with no Detect. Does not count as a Failure and does not unlock Manual entry.
 _Avoid_: scan timeout, camera failure, give up
 
 **Arrival**:
-The patient is physically at the camp on a camp day. Stamped by a desk Lock that matches their registration in this camp, or by the registration that creates a walk-in. Registration is a booking; Arrival is presence. Stamped once: a second Lock does not re-stamp it or move the patient again. Print Prescription is gated on Arrival, not on Registration, and closes at Doctor seen — reprints included, until a clinical undo. Doctor seen is gated on clinical completion after print, not on Arrival alone. The desk offers no way to check a patient in from a name or number lookup.
-_Avoid_: check-in, presence, attendance, walk-in (a walk-in registers and arrives in one action)
+The patient is physically at the camp on a camp day. Stamped by a desk Lock that matches their registration in this camp, by the registration that creates a walk-in, or by the desk checking in a registration whose Lock was already taken at registration. Registration is a booking; Arrival is presence. Stamped once: a second Lock does not re-stamp it or move the patient again. Print Prescription is gated on Arrival, not on Registration, and closes at Doctor seen — reprints included, until a clinical undo. Doctor seen is gated on clinical completion after print, not on Arrival alone. A Manual entry has no Lock and still needs one at the door: the desk offers no way to check one in from a name or number lookup.
+_Avoid_: check-in, presence, attendance, walk-in (a walk-in registers and arrives in one action), door re-scan (a Lock is taken once)
 
 **Door walk-in**:
 A registration created at the door from the card a Scan at the door has already decoded, needing only the household phone typed. Registers and stamps Arrival in one action, and is a scanned registration, not a Manual entry.

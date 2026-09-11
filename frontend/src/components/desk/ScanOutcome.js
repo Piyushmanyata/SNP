@@ -11,7 +11,9 @@ const FIELD_LABELS = {
   address: "Address",
 };
 
-export function ArrivedCard({ registration, onPrint, onMarkSeen }) {
+export function ArrivedCard({ registration, onPrint, printingOpen }) {
+  const seen = registration.queue_status === "seen";
+  const windowShut = !printingOpen && !registration.printed_at;
   return (
     <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-4" data-testid="scan-arrived">
       <div className="flex flex-wrap items-center gap-3">
@@ -29,9 +31,13 @@ export function ArrivedCard({ registration, onPrint, onMarkSeen }) {
         {registration.phone ? ` · ${registration.phone}` : ""}
       </p>
       <div className="flex gap-2 mt-3">
-        {registration.queue_status === "seen" ? (
+        {seen ? (
           <span className="text-xs text-slate-500" data-testid="scan-already-seen">
             The doctor has already seen this patient. There is nothing to print.
+          </span>
+        ) : windowShut ? (
+          <span className="text-xs text-slate-500" data-testid="scan-print-window-closed">
+            The print window is closed.
           </span>
         ) : (
           <Button size="sm" onClick={() => onPrint(registration)} data-testid="scan-print-button">
@@ -136,11 +142,11 @@ export function NoMatch({ card, phone, setPhone, busy, onSubmit }) {
   );
 }
 
-export function ScanOutcome({ result, busy, onPrint, onMarkSeen, onConfirm, phone, setPhone, onWalkIn }) {
+export function ScanOutcome({ result, busy, onPrint, onConfirm, phone, setPhone, onWalkIn, printingOpen }) {
   if (!result) return null;
   if (result.outcome === "arrived") {
     return (
-      <ArrivedCard registration={result.registration} onPrint={onPrint} onMarkSeen={onMarkSeen} />
+      <ArrivedCard registration={result.registration} onPrint={onPrint} printingOpen={printingOpen} />
     );
   }
   if (result.outcome === "mismatch_review") {
