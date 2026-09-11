@@ -33,7 +33,7 @@ export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStar
     scanFile,
     reviewData,
     passwordRequired,
-  } = useAadhaarDecode({ onScanned, onFailure });
+  } = useAadhaarDecode({ onScanned, onFailure, canReview: Boolean(onTranscribed) });
 
   useEffect(() => {
     if (!busy && !passwordRequired) selectedFile.current = null;
@@ -187,7 +187,7 @@ export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStar
         </div>
       )}
 
-      {!busy && reviewData && onTranscribed && (
+      {!busy && reviewData && (
         <AadhaarReviewForm initial={reviewData} disabled={disabled} onConfirm={(details) => {
           cancelDecode();
           selectedFile.current = null;

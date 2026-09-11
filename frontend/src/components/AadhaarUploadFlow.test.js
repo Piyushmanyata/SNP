@@ -65,6 +65,15 @@ test("the scanner offers no manual entry until a read has been attempted", async
   expect(container.querySelector('[data-testid="aadhaar-review-form"]')).not.toBeNull();
 });
 
+test("a scanner with no transcription route treats a review outcome as a failed read", async () => {
+  const onFailure = jest.fn();
+  act(() => root.render(<AadhaarScanner onScanned={jest.fn()} onFailure={onFailure} />));
+  api.post.mockResolvedValueOnce({ data: { outcome: "review", data: { full_name: "Test Patient", age: 36 } } });
+  await selectPdf();
+  expect(container.querySelector('[data-testid="aadhaar-review-form"]')).toBeNull();
+  expect(onFailure).toHaveBeenCalledWith("review");
+});
+
 test("cancelling a read aborts the upload and ignores a late result", async () => {
   let resolveUpload;
   api.post.mockImplementation(() => new Promise((resolve) => { resolveUpload = resolve; }));

@@ -38,7 +38,7 @@ function loadImage(file) {
   });
 }
 
-export function useAadhaarDecode({ onScanned, onFailure } = {}) {
+export function useAadhaarDecode({ onScanned, onFailure, canReview = true } = {}) {
   const [payload, setPayload] = useState("");
   const [error, setError] = useState("");
   const [outcome, setOutcome] = useState("");
@@ -89,14 +89,14 @@ export function useAadhaarDecode({ onScanned, onFailure } = {}) {
     if (data.outcome === "card") {
       setPayload(text);
       onScanned?.(data.data, text);
-    } else if (data.outcome === "review") {
+    } else if (data.outcome === "review" && canReview) {
       setPayload("");
       setReviewData(data.data);
     } else {
       setError(data.message || "Unable to read Aadhaar details. Try another photo or enter details manually.");
       onFailure?.(data.outcome);
     }
-  }, [onScanned, onFailure]);
+  }, [onScanned, onFailure, canReview]);
 
   const decode = useCallback(async (text) => {
     if (!text || !mountedRef.current) return null;
