@@ -660,4 +660,21 @@ describe("AadhaarScanner component", () => {
       payload: '<PrintLetterBarcodeData uid="999999999999" name="Trim Test" gender="M" dob="01/01/1990" house="Address" />',
     });
   });
+
+  test.each(["SNP:AB3K7T29", "snp:ab3k7t29"])("%s is looked up as a patient, never decoded as a card", async (code) => {
+    const onPatientCode = jest.fn().mockResolvedValue(true);
+    act(() => root.render(<AadhaarScanner onScanned={jest.fn()} onPatientCode={onPatientCode} />));
+    act(() => container.querySelector('[data-testid="aadhaar-manual-toggle"]').click());
+
+    const textarea = container.querySelector('[data-testid="aadhaar-qr-input"]');
+    act(() => {
+      const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value").set;
+      nativeSetter.call(textarea, code);
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => container.querySelector('[data-testid="aadhaar-scan-button"]').click());
+
+    expect(onPatientCode).toHaveBeenCalledWith(code);
+    expect(api.post).not.toHaveBeenCalledWith("/aadhaar/decode", expect.anything());
+  });
 });

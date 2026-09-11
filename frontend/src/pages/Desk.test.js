@@ -1055,6 +1055,29 @@ describe("Desk page", () => {
     expect(api.post.mock.calls.filter((c) => c[0] === "/desk/scan")).toHaveLength(0);
   });
 
+  test("a slow lookup cannot land on top of a newer name search", async () => {
+    let resolveLookup;
+    api.post.mockImplementation((url) => url === "/desk/lookup"
+      ? new Promise((resolve) => { resolveLookup = resolve; })
+      : Promise.resolve({ data: {} }));
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => url.startsWith("/patients/search")
+      ? Promise.resolve({ data: { results: [{ ...ARRIVED, id: "p-2", reg_no: "202", full_name: "Someone Else" }] } })
+      : base(url));
+    await renderDesk();
+
+    act(() => setInput(container.querySelector('[data-testid="desk-find-input"]'), "101"));
+    act(() => { container.querySelector('[data-testid="desk-find-button"]').click(); });
+
+    act(() => setInput(container.querySelector('[data-testid="desk-find-input"]'), "Someone"));
+    await act(async () => { container.querySelector('[data-testid="desk-find-button"]').click(); });
+    expect(container.querySelector('[data-testid="desk-search-results"]')).not.toBeNull();
+
+    await act(async () => resolveLookup({ data: { registration: ARRIVED } }));
+    expect(container.querySelector('[data-testid="desk-found-patient"]')).toBeNull();
+    expect(container.querySelector('[data-testid="print-button-101"]')).toBeNull();
+  });
+
   test("a Scan stall at the door does not reveal the typed form", async () => {
     await renderDesk();
     act(() => { deskScanner().parentNode.querySelector('[data-testid="mock-stall-trigger"]').click(); });

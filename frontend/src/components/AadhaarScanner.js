@@ -37,13 +37,15 @@ export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStar
     passwordRequired,
   } = useAadhaarDecode({ onScanned, onFailure, canReview: Boolean(onTranscribed) });
 
-  const decodeAny = useCallback((value) => {
+  const decodeAny = useCallback(async (value) => {
     const text = String(value ?? "").trim();
-    if (onPatientCode && PATIENT_CODE.test(text)) {
-      setMode("idle");
-      return Promise.resolve(onPatientCode(text));
-    }
-    return decode(text);
+    if (!onPatientCode || !PATIENT_CODE.test(text)) return decode(text);
+    setMode("idle");
+    // The live scanner only tears the camera down for a result shaped like a
+    // card, so a found patient has to answer in that shape to stop the stream.
+    return await onPatientCode(text)
+      ? { outcome: "card", source: "patient_code" }
+      : { outcome: "not-aadhaar", message: "No patient found for that code." };
   }, [decode, onPatientCode]);
 
   useEffect(() => {

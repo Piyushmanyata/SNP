@@ -44,7 +44,7 @@ export default function Desk() {
   const [doorForm, setDoorForm] = useState(EMPTY_REG_FORM);
   const [doorReqId, setDoorReqId] = useState(v4());
   const [scanning, setScanning] = useState(false);
-  const scanSequence = useRef(0);
+  const findSequence = useRef(0);
   const [printingOpen, setPrintingOpen] = useState(false);
   const [operatingDayId, setOperatingDayId] = useState("");
   const todayDay = days.find((d) => d.is_today);
@@ -73,7 +73,7 @@ export default function Desk() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
-  useEffect(() => () => { scanSequence.current += 1; }, []);
+  useEffect(() => () => { findSequence.current += 1; }, []);
 
   const fillDoorForm = useCallback((card) => {
     if (!card) return;
@@ -90,7 +90,7 @@ export default function Desk() {
 
   const onScanned = useCallback(async (_card, payload) => {
     if (busy) return;
-    const request = ++scanSequence.current;
+    const request = ++findSequence.current;
     setBanner(""); setError(""); setSearchResults(null); setFound(null);
     setScanResult(null);
     fillDoorForm(_card);
@@ -98,7 +98,7 @@ export default function Desk() {
     setScanning(true);
     try {
       const { data } = await api.post("/desk/scan", { payload });
-      if (request !== scanSequence.current) return;
+      if (request !== findSequence.current) return;
       setScanResult(data);
       if (data.card) fillDoorForm(data.card);
       if (data.outcome === "arrived") {
@@ -107,11 +107,11 @@ export default function Desk() {
         await load();
       }
     } catch (err) {
-      if (request !== scanSequence.current) return;
+      if (request !== findSequence.current) return;
       setScanResult(null);
       setError(formatApiError(err));
     } finally {
-      if (request === scanSequence.current) setScanning(false);
+      if (request === findSequence.current) setScanning(false);
     }
   }, [load, fillDoorForm, busy]);
 
@@ -134,12 +134,15 @@ export default function Desk() {
   }, [scanResult, scanPayload, load, busy, scanning]);
 
   const lookupValue = useCallback(async (value) => {
+    const request = ++findSequence.current;
     setBanner(""); setError(""); setSearchResults(null); setScanResult(null);
     try {
       const { data } = await api.post("/desk/lookup", { value });
+      if (request !== findSequence.current) return false;
       setFound(data.registration);
       return true;
     } catch (err) {
+      if (request !== findSequence.current) return false;
       setFound(null);
       setError(formatApiError(err));
       return false;
@@ -154,11 +157,14 @@ export default function Desk() {
       if (await lookupValue(value)) setFindVal("");
       return;
     }
+    const request = ++findSequence.current;
     setBanner(""); setError(""); setFound(null);
     try {
       const { data } = await api.get(`/patients/search?q=${encodeURIComponent(value)}`);
+      if (request !== findSequence.current) return;
       setSearchResults(data.results);
     } catch (err) {
+      if (request !== findSequence.current) return;
       setError(formatApiError(err));
     }
   }, [findVal, lookupValue]);
