@@ -319,9 +319,16 @@ class TestDeskPrintWindow:
         assert r.status_code == 200, r.text
         assert r.json()["registration"]["id"] == STATE["p1"]["id"]
 
-        r = admin.post(f"{API}/desk/lookup", json={"value": f"snp:{STATE['p1']['patient_qr']}"}, timeout=30)
-        assert r.status_code == 200, r.text
-        assert r.json()["registration"]["id"] == STATE["p1"]["id"]
+        code = STATE["p1"]["patient_qr"]
+        for value in (f"SNP:{code}", f"snp:{code}", code, f"https://sikarkolkata.io/p/{code}"):
+            r = admin.post(f"{API}/desk/lookup", json={"value": value}, timeout=30)
+            assert r.status_code == 200, f"{value}: {r.text}"
+            assert r.json()["registration"]["id"] == STATE["p1"]["id"]
+
+    def test_the_patient_code_is_short_and_qr_alphanumeric(self, admin):
+        code = STATE["p1"]["patient_qr"]
+        assert len(code) == 8, code
+        assert set(code) <= set("0123456789ABCDEFGHJKMNPQRSTVWXYZ"), code
 
     def test_lookup_unknown_404(self, admin):
         r = admin.post(f"{API}/desk/lookup", json={"value": "99999999"}, timeout=30)

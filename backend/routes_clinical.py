@@ -21,6 +21,7 @@ from clinical_state import (
 )
 from helpers import (
     now_utc, iso, DIAGNOSIS_OPTIONS, now_ist, parse_hhmm, ist_local_instant,
+    parse_patient_identifier,
 )
 from bson.errors import InvalidId
 from serializers import ser_patient, ser_person
@@ -167,20 +168,11 @@ async def _fetch_clinical_bundle(db: AsyncIOMotorDatabase, patient: dict) -> Dic
     }
 
 
-def _parse_lookup_identifier(raw_value: str) -> str:
-    val = str(raw_value).strip()
-    if val.startswith("snp:"):
-        val = val[4:]
-    if "/p/" in val:
-        val = val.split("/p/")[-1]
-    return val
-
-
 @router.post("/lookup")
 async def clinical_lookup(body: dict, actor: dict = Depends(require_clinical)) -> Dict[str, Any]:
     assert_clinical_operator(actor)
     db = get_db()
-    value = _parse_lookup_identifier(body.get("value", ""))
+    value = parse_patient_identifier(body.get("value", ""))
     p = await db.patients.find_one({"patient_qr": value})
     if not p and value.isdigit():
         p = await db.patients.find_one({"reg_no": int(value)})

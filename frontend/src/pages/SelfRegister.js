@@ -139,7 +139,7 @@ export default function SelfRegister() {
             <p className="text-slate-500 text-sm mt-1">Show this screen (or your number) at the desk.</p>
             <div className="my-5 flex justify-center">
               <div className="p-3 bg-white border border-slate-200 rounded-xl">
-                <QRCodeSVG value={`snp:${receipt.patient_qr}`} size={160} />
+                <QRCodeSVG value={`SNP:${receipt.patient_qr}`} size={160} level="Q" marginSize={4} />
               </div>
             </div>
             <p className="text-5xl font-display font-extrabold text-emerald-600" data-testid="self-receipt-regno">#{receipt.reg_no}</p>

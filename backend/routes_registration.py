@@ -7,7 +7,7 @@ from db import get_db, next_seq
 from models import AadhaarDecodeBody, RegisterBody, DuplicateCheckBody
 from helpers import (
     now_utc, normalize_name, normalize_phone, is_dummy_phone,
-    person_key, new_uuid, age_from_dob,
+    person_key, new_patient_code, age_from_dob,
 )
 from serializers import ser_patient
 from security import require_staff, require_any
@@ -248,7 +248,7 @@ def _build_patient_document(
         "dob": body.dob,
         "aadhaar_scanned": body.aadhaar_scanned,
         "queue_status": "registered",
-        "patient_qr": new_uuid(),
+        "patient_qr": new_patient_code(),
         "arrived_at": None,
         "arrived_by": None,
         "camp_day_changed_from": None,
@@ -329,7 +329,12 @@ async def _insert_patient_document(
         res = await db.patients.insert_one(doc)
         doc["_id"] = res.inserted_id
         return ser_patient(doc), True
-    except DuplicateKeyError:
+    except DuplicateKeyError as exc:
+        if "patient_qr" in (exc.details or {}).get("keyPattern", {}):
+            doc["patient_qr"] = new_patient_code()
+            res = await db.patients.insert_one(doc)
+            doc["_id"] = res.inserted_id
+            return ser_patient(doc), True
         if body.registration_request_id:
             existing = await db.patients.find_one({"registration_request_id": body.registration_request_id})
             if existing:

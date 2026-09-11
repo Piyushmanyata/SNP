@@ -5,7 +5,7 @@ from pymongo.errors import DuplicateKeyError
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from db import get_db
 from models import IdentityCheckBody, QrLookupBody, ScanBody, ScanConfirmBody, RegisterBody
-from helpers import now_utc, age_from_dob, normalize_name, person_key
+from helpers import now_utc, age_from_dob, normalize_name, parse_patient_identifier, person_key
 from serializers import ser_patient
 from security import require_admin, require_staff
 from routes_camps import effective_printing
@@ -20,11 +20,7 @@ OVERWRITTEN_FIELDS = ("full_name", "age", "gender", "dob", "aadhaar_last4", "add
 
 async def _resolve(value: str) -> Optional[Dict[str, Any]]:
     db = get_db()
-    v = (value or "").strip()
-    if v.startswith("snp:"):
-        v = v[4:]
-    if "/p/" in v:
-        v = v.split("/p/")[-1]
+    v = parse_patient_identifier(value)
     p = await db.patients.find_one({"patient_qr": v})
     if p:
         return p
