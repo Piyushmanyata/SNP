@@ -111,7 +111,7 @@ export function PrescriptionSheet({ rx, logos = [], navigate, preview, patientId
       {printError && <Alert className="no-print max-w-[210mm] mx-auto mb-4">{printError}</Alert>}
 
       <div
-        className="print-a4 bg-white mx-auto shadow-lg text-slate-900"
+        className="print-a4 bg-white mx-auto shadow-lg text-slate-900 flex flex-col"
         style={{ width: "210mm", minHeight: preview ? "auto" : "297mm", padding: "10mm 12mm" }}
         data-testid="a4-prescription-sheet"
       >
@@ -179,17 +179,17 @@ export function PrescriptionSheet({ rx, logos = [], navigate, preview, patientId
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 mt-2 text-[12px]">
+        <div className="grid grid-cols-2 gap-3 mt-2 text-[12px] flex-1" data-testid="rx-write-area">
           <div className="space-y-2">
             <p>Blood Sugar (Random) : <span className="border-b border-slate-400 inline-block min-w-[40mm]">&nbsp;</span></p>
             <p>BP : <span className="border-b border-slate-400 inline-block min-w-[40mm]">&nbsp;</span></p>
             <p>Remaks : <span className="border-b border-slate-400 inline-block min-w-[40mm]">&nbsp;</span></p>
           </div>
-          <div>
+          <div className="flex flex-col">
             <p className="font-bold">MEDICINES :</p>
-            <div className="border-b border-slate-400 h-10 mt-1" data-testid="rx-medicine-line" />
-            <div className="border-b border-slate-400 h-6 mt-1" data-testid="rx-medicine-line" />
-            <div className="border-b border-slate-400 h-6 mt-1" data-testid="rx-medicine-line" />
+            <div className="border-b border-slate-400 flex-[2] min-h-10 mt-1" data-testid="rx-medicine-line" />
+            <div className="border-b border-slate-400 flex-1 min-h-6 mt-1" data-testid="rx-medicine-line" />
+            <div className="border-b border-slate-400 flex-1 min-h-6 mt-1" data-testid="rx-medicine-line" />
           </div>
         </div>
 
@@ -240,24 +240,25 @@ export function PrescriptionSheet({ rx, logos = [], navigate, preview, patientId
           Please carry your Aadhaar card, ration card and mobile phone on the day of the operation.
         </div>
 
-        <div className="grid grid-cols-2 gap-4 mt-3 items-end" data-testid="rx-footer">
-          <div>
-            <p className="font-semibold text-[12px]">Sponsorer :</p>
-            <div className="flex flex-wrap gap-2 mt-1">
-              {logos.map((lg, i) => (
-                <img
-                  key={lg.id || i}
-                  src={lg.data_url}
-                  alt={lg.name}
-                  className="object-contain"
-                  style={{ height: "18mm" }}
-                />
-              ))}
-            </div>
-          </div>
-          <div className="text-right text-[12px]">
+        <div className="flex justify-end mt-3 text-[12px]" data-testid="rx-signature">
+          <div className="text-right">
             <p>Signature of</p>
             <p className="border-t border-slate-800 inline-block mt-8 px-4">Optometrist / Eye Surgeon</p>
+          </div>
+        </div>
+
+        <div className="mt-2 pt-2 border-t border-slate-300" data-testid="rx-footer">
+          <p className="font-semibold text-[12px] mb-1">Sponsorer :</p>
+          <div className="flex items-center gap-3" data-testid="rx-sponsor-strip">
+            {logos.map((lg, i) => (
+              <img
+                key={lg.id || i}
+                src={lg.data_url}
+                alt={lg.name}
+                className="flex-1 min-w-0 object-contain object-left"
+                style={{ height: "18mm" }}
+              />
+            ))}
           </div>
         </div>
       </div>

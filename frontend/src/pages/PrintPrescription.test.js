@@ -176,6 +176,25 @@ describe("PrintPrescription component", () => {
     expect(container.querySelector('[data-testid="rx-footer"]')).not.toBeNull();
   });
 
+  test("the sheet is a full page and every sponsor sits in the footer band", () => {
+    const logos = Array.from({ length: 5 }, (_, i) => ({
+      id: `logo-${i}`, name: `sponsor-${i}.png`, data_url: "data:image/png;base64,aaa",
+    }));
+    act(() => {
+      root.render(<PrescriptionSheet rx={{ patient_qr: "qr-1" }} logos={logos} />);
+    });
+    const sheet = container.querySelector('[data-testid="a4-prescription-sheet"]');
+    expect(sheet.style.width).toBe("210mm");
+    expect(sheet.style.minHeight).toBe("297mm");
+    expect(sheet.querySelector('[data-testid="rx-write-area"]')).not.toBeNull();
+    expect(sheet.querySelectorAll('[data-testid="rx-medicine-line"]')).toHaveLength(3);
+
+    const strip = sheet.querySelector('[data-testid="rx-sponsor-strip"]');
+    expect(strip.children).toHaveLength(5);
+    expect(sheet.querySelector('[data-testid="rx-footer"]').contains(strip)).toBe(true);
+    expect(sheet.querySelector('[data-testid="rx-signature"]')).not.toBeNull();
+  });
+
   test("the reference form snapshot and named strings stay put", () => {
     const sample = {
       camp_name: "Kolkata Eye Camp",
