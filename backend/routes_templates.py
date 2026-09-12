@@ -49,7 +49,7 @@ def _validate_logos(logos: Optional[List[dict]]) -> List[Dict[str, Any]]:
     return out
 
 
-async def _assert_camp(camp_id: str) -> None:
+async def _assert_camp(camp_id: str | None) -> None:
     db = get_db()
     if not camp_id:
         raise HTTPException(status_code=400, detail="camp_id is required")

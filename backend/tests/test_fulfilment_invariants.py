@@ -38,7 +38,7 @@ def test_failed_ot_replace_leaves_prior_fulfilment_and_seat(monkeypatch):
         first = await record_fulfilment(_fulfil(
             trans_id, mock_db.last_rev_id, item_type="ot", status="deferred",
             ot_schedule_day_id=str(day_a),
-        ), actor=actor)
+        ), actor=actor, background_tasks=None)
         prior_id = first["fulfilment"]["id"]
         assert (await mock_db.ot_schedule_days.find_one({"_id": day_a}))["seats_taken"] == 1
 
@@ -50,7 +50,7 @@ def test_failed_ot_replace_leaves_prior_fulfilment_and_seat(monkeypatch):
             await record_fulfilment(_fulfil(
                 trans_id, mock_db.last_rev_id, item_type="ot", status="deferred",
                 ot_schedule_day_id=str(day_b), operation_id="op-replace",
-            ), actor=actor)
+            ), actor=actor, background_tasks=None)
             raise AssertionError("expected failure")
         except RuntimeError:
             pass
@@ -85,8 +85,8 @@ def test_overlapping_ot_assignments_never_consume_two_seats(monkeypatch):
             return await original(*args, **kwargs)
 
         monkeypatch.setattr(routes_clinical, "_process_deferral", delayed)
-        results = await asyncio.gather(record_fulfilment(body, actor=actor),
-                                       record_fulfilment(body, actor=actor), return_exceptions=True)
+        results = await asyncio.gather(record_fulfilment(body, actor=actor, background_tasks=None),
+                                       record_fulfilment(body, actor=actor, background_tasks=None), return_exceptions=True)
         assert sum(isinstance(result, dict) for result in results) >= 1
         day = await mock_db.ot_schedule_days.find_one({"_id": day_id})
         assert day["seats_taken"] == 1
@@ -106,8 +106,8 @@ def test_concurrent_same_line_leaves_one_current_specs_record(monkeypatch):
         actor = {"_id": ObjectId(), "role": "clinical_desk_operator"}
         body = _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",
                        specs_collection_day_id=str(day), operation_id="op-specs")
-        await record_fulfilment(body, actor=actor)
-        await record_fulfilment(body, actor=actor)
+        await record_fulfilment(body, actor=actor, background_tasks=None)
+        await record_fulfilment(body, actor=actor, background_tasks=None)
         rows = await mock_db.fulfilments.find(
             {"transcription_id": trans_id, "item_type": "specs_made"},
         ).to_list(20)

@@ -152,7 +152,7 @@ class TestAuthenticatedAttribution:
             result = await desk_register(RegisterBody(
                 full_name="Sunita Devi", age=51, phone="9876500001",
                 camp_day_id=str(day_id),
-            ), _Request(), actor=VOLUNTEER)
+            ), _Request(), actor=VOLUNTEER, background_tasks=None)
             stored = await mock_db.patients.find_one(
                 {"_id": ObjectId(result["registration"]["id"])},
             )
@@ -170,7 +170,7 @@ class TestAuthenticatedAttribution:
                 full_name="Sunita Devi", gender="F", dob="1975-06-14",
                 aadhaar_last4="1234", aadhaar_scanned=True, age=51,
                 phone="9876500001", camp_day_id=str(day_id),
-            ), _Request(), actor=VOLUNTEER)
+            ), _Request(), actor=VOLUNTEER, background_tasks=None)
             out = await scan(ScanBody(payload=CARD), actor=VOLUNTEER)
             assert out["outcome"] == "arrived"
             stored = await mock_db.patients.find_one(
@@ -190,7 +190,7 @@ class TestAuthenticatedAttribution:
                 full_name="Sunita Devi", gender="F", dob="1975-06-14",
                 aadhaar_last4="1234", aadhaar_scanned=True, age=51,
                 phone="9876500001", camp_day_id=str(day_id),
-            ), _Request(), actor=VOLUNTEER)
+            ), _Request(), actor=VOLUNTEER, background_tasks=None)
             await scan(ScanBody(payload=CARD), actor=VOLUNTEER)
             printed = await print_prescription(registered["registration"]["id"], actor=VOLUNTEER)
             stored = await mock_db.patients.find_one(
@@ -219,7 +219,7 @@ class TestAuthenticatedAttribution:
                     medicine_outcomes=[{"medicine_id": MEDICINE["medicine_id"], "given": True}],
                 ),
                 actor=CLINICAL,
-            )
+             background_tasks=None)
             stored = await mock_db.fulfilments.find_one(
                 {"_id": ObjectId(result["fulfilment"]["id"])},
             )
@@ -247,12 +247,12 @@ class TestAuthenticatedAttribution:
             await desk_register(RegisterBody(
                 full_name="Sunita Devi", age=51, phone="9876500001",
                 camp_day_id=str(day_id),
-            ), _Request(), actor=anita_user)
+            ), _Request(), actor=anita_user, background_tasks=None)
             await desk_register(RegisterBody(
                 full_name="Sunita Devi", gender="F", dob="1975-06-14",
                 aadhaar_last4="1234", aadhaar_scanned=True, age=51,
                 phone="9876500002", camp_day_id=str(day_id),
-            ), _Request(), actor=ramesh_user)
+            ), _Request(), actor=ramesh_user, background_tasks=None)
             await scan(ScanBody(payload=CARD), actor=ramesh_user)
             await mock_db.patients.insert_one({
                 "camp_id": camp_id,

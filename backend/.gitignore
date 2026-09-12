@@ -1,1 +1,4 @@
 .venv-ocr/
+.venv-ci/
+test-results.xml
+coverage.xml

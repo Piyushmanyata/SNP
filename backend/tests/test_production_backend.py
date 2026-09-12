@@ -21,7 +21,7 @@ def test_surgery_can_only_be_scheduled_at_the_hospital(monkeypatch):
         with pytest.raises(HTTPException) as error:
             await routes_clinical.record_fulfilment(_fulfil(
                 trans_id, database.last_rev_id, item_type="ot", status="fulfilled",
-            ), actor=actor)
+            ), actor=actor, background_tasks=None)
         assert error.value.status_code == 400
         admin = {"_id": ObjectId(), "role": "admin"}
         result = await routes_clinical.create_ot_day(OtScheduleBody(

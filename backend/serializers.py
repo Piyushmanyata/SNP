@@ -11,7 +11,7 @@ def ser_patient(p: dict) -> dict:
         "full_name": p.get("full_name"),
         "latin_display_name": p.get("latin_display_name"),
         "gender": p.get("gender"),
-        "gender_label": GENDER_LABELS.get(p.get("gender"), p.get("gender") or "-"),
+        "gender_label": GENDER_LABELS.get(p.get("gender") or "", p.get("gender") or "-"),
         "age": p.get("age"),
         "address": p.get("address"),
         "phone": p.get("phone"),

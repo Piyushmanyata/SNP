@@ -1,10 +1,13 @@
 import asyncio
+import logging
 from typing import Any, Dict, Optional
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 import helpers
 import msg91
+
+logger = logging.getLogger(__name__)
 
 REGISTRATION_CONFIRMATION = "SNP नेत्र शिविर में आपका पंजीकरण हो गया है। क्रमांक: {reg_no} दिनांक: {date} शिविर स्थल: {venue}। कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।"
 CAMP_REMINDER = "कल ({date}) को SNP नेत्र शिविर में आपका नेत्र परीक्षण है। कृपया समय पर {venue} पहुँचें। यह टोकन शिविर स्थल पर दिखाएँ। क्रमांक: {reg_no}। कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।"
@@ -89,6 +92,7 @@ async def send_patient_sms(
     Never raises: the registration or deferral is the durable outcome.
     """
     row = None
+    sent = False
     try:
         if not msg91.configured():
             return False
@@ -106,15 +110,20 @@ async def send_patient_sms(
         provider_id = await asyncio.to_thread(
             msg91.send_dlt_sms, message_type, number, reg_no, event_date + fields.get("window", ""), venue
         )
+        sent = True
         await db.reminder_ledger.update_one(
             {"_id": row["_id"]},
             {"$set": {"status": "sent", "provider_id": provider_id}},
         )
         return True
     except Exception as exc:
-        if row:
-            await db.reminder_ledger.update_one(
-                {"_id": row["_id"]},
-                {"$set": {"status": "failed", "error": str(exc)[:200]}},
-            )
-        return False
+        logger.exception("Patient SMS processing failed; provider accepted=%s", sent)
+        if row and not sent:
+            try:
+                await db.reminder_ledger.update_one(
+                    {"_id": row["_id"]},
+                    {"$set": {"status": "failed", "error": str(exc)[:200]}},
+                )
+            except Exception:
+                logger.exception("Could not record patient SMS failure")
+        return sent

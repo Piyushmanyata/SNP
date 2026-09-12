@@ -57,7 +57,7 @@ def serialize_user(user: dict) -> dict:
         "team_lead_id": user.get("team_lead_id"),
         "line": user.get("line"),
         "must_change_pin": bool(user.get("must_change_pin", False)),
-        "disabled_at": user.get("disabled_at").isoformat() if user.get("disabled_at") else None,
+        "disabled_at": user["disabled_at"].isoformat() if user.get("disabled_at") else None,
     }
 
 

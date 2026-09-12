@@ -30,14 +30,14 @@ def test_ot_day_expires_at_ist_midnight_even_when_loaded_before_midnight(monkeyp
         listed = await routes_clinical.list_ot_days(actor=actor)
         assert [day["id"] for day in listed["ot_days"]] == [str(day_id)]
         if already_booked:
-            await routes_clinical.record_fulfilment(body, actor=actor)
+            await routes_clinical.record_fulfilment(body, actor=actor, background_tasks=None)
 
         monkeypatch.setattr(routes_clinical, "now_ist", lambda: before_midnight + timedelta(minutes=1))
         with pytest.raises(HTTPException) as error:
             await routes_clinical.record_fulfilment(_fulfil(
                 trans_id, database.last_rev_id, item_type="ot", status="deferred",
                 ot_schedule_day_id=str(day_id), operation_id="op-ot-2",
-            ), actor=actor)
+            ), actor=actor, background_tasks=None)
         assert error.value.status_code == 400
         assert (await routes_clinical.list_ot_days(actor=actor))["ot_days"] == []
         stored = await database.ot_schedule_days.find_one({"_id": day_id})

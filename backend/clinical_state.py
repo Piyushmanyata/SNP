@@ -345,6 +345,7 @@ async def release_issue_authorization(db, patient_id, operation_id: str) -> None
 def serialize_revision(rev: dict | None) -> Optional[dict]:
     if not rev:
         return None
+    created_at = rev.get("created_at")
     return {
         "id": str(rev["_id"]),
         "patient_id": str(rev["patient_id"]),
@@ -354,6 +355,6 @@ def serialize_revision(rev: dict | None) -> Optional[dict]:
         "none_prescribed": bool(rev.get("none_prescribed")),
         "reason": rev.get("reason"),
         "author_id": rev.get("author_id"),
-        "created_at": rev.get("created_at").isoformat() if rev.get("created_at") else None,
+        "created_at": created_at.isoformat() if created_at else None,
         **{field: rev.get(field) for field in CONTENT_FIELDS},
     }

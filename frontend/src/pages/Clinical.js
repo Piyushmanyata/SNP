@@ -198,14 +198,20 @@ export default function Clinical() {
   }, [data?.registration?.reg_no]);
 
   const saveStep = useCallback(async () => {
-    if (!data?.registration?.id) return;
+    if (!data?.registration?.id) return false;
+    setBusy(true);
+    setError("");
     try {
       await api.post("/clinical/transcription", {
         patient_id: data.registration.id,
         ...rx,
       });
+      return true;
     } catch (err) {
       setError(formatApiError(err));
+      return false;
+    } finally {
+      setBusy(false);
     }
   }, [data?.registration?.id, rx]);
 

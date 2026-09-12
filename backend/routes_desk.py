@@ -111,6 +111,8 @@ async def _stamp_arrival(
     if patient.get("arrived_at"):
         return patient
     camp = await db.camps.find_one({"_id": patient["camp_id"]})
+    if not camp:
+        raise HTTPException(status_code=404, detail="Camp not found")
     state = await _require_door_open(db, camp)
     updates: Dict[str, Any] = {
         "arrived_at": now_utc(),
@@ -125,8 +127,14 @@ async def _stamp_arrival(
         booked = await db.camp_days.find_one({"_id": patient["camp_day_id"]})
         updates["camp_day_id"] = operating["_id"]
         updates["camp_day_changed_from"] = booked["day_date"] if booked else None
-    await db.patients.update_one({"_id": patient["_id"]}, {"$set": updates})
-    return await db.patients.find_one({"_id": patient["_id"]})
+    arrived = await db.patients.find_one_and_update(
+        {"_id": patient["_id"], "arrived_at": None}, {"$set": updates}, return_document=True,
+    )
+    if not arrived:
+        arrived = await db.patients.find_one({"_id": patient["_id"]})
+    if not arrived:
+        raise HTTPException(status_code=404, detail="Registration not found")
+    return arrived
 
 
 def _material_diff(card: dict, stored: dict) -> List[Dict[str, Any]]:
@@ -143,7 +151,7 @@ def _material_diff(card: dict, stored: dict) -> List[Dict[str, Any]]:
             trivial = cn == sn or sorted(cn.split()) == sorted(sn.split())
         elif field == "age":
             try:
-                trivial = abs(int(cv) - int(sv)) <= 1
+                trivial = cv is not None and abs(int(cv) - int(sv)) <= 1
             except (TypeError, ValueError):
                 trivial = False
         elif field == "gender":
@@ -167,14 +175,15 @@ async def _apply_overwrite(db: AsyncIOMotorDatabase, patient: dict, card: dict) 
             "gender": card["gender"],
         })
     try:
-        await db.patients.update_one({"_id": patient["_id"]}, {"$set": {
+        updated = await db.patients.find_one_and_update(
+            {"_id": patient["_id"], "aadhaar_scanned": {"$ne": True}, "person_id": None}, {"$set": {
             **{field: card[field] for field in OVERWRITTEN_FIELDS},
             "full_name_normalized": normalize_name(card["full_name"] or ""),
             "aadhaar_scanned": True,
             "person_id": person["_id"] if person else None,
             "manual_entry": False,
             "manual_exception": None,
-        }})
+        }}, return_document=True)
     except DuplicateKeyError:
         if person:
             existing = await db.patients.find_one(
@@ -183,7 +192,12 @@ async def _apply_overwrite(db: AsyncIOMotorDatabase, patient: dict, card: dict) 
             if existing:
                 raise _dup_409(existing)
         raise
-    return await db.patients.find_one({"_id": patient["_id"]})
+    if not updated:
+        raise HTTPException(status_code=409, detail={
+            "code": "NOT_A_MANUAL_ENTRY",
+            "message": "This registration already has Aadhaar on file. Scan again.",
+        })
+    return updated
 
 
 @router.post("/scan")
@@ -378,6 +392,8 @@ async def record_identity_check(
         "aadhaar_verified": False,
     }})
     p = await db.patients.find_one({"_id": p["_id"]})
+    if not p:
+        raise HTTPException(status_code=404, detail="Registration not found")
     return {"registration": ser_patient(p)}
 
 

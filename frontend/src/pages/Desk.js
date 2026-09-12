@@ -135,7 +135,8 @@ export default function Desk() {
 
   const lookupValue = useCallback(async (value) => {
     const request = ++findSequence.current;
-    setBanner(""); setError(""); setSearchResults(null); setScanResult(null);
+    setScanning(false);
+    setBanner(""); setError(""); setSearchResults(null); setScanResult(null); setFound(null);
     try {
       const { data } = await api.post("/desk/lookup", { value });
       if (request !== findSequence.current) return false;
@@ -158,7 +159,8 @@ export default function Desk() {
       return;
     }
     const request = ++findSequence.current;
-    setBanner(""); setError(""); setFound(null);
+    setBanner(""); setError(""); setFound(null); setSearchResults(null); setScanResult(null);
+    setScanning(false);
     try {
       const { data } = await api.get(`/patients/search?q=${encodeURIComponent(value)}`);
       if (request !== findSequence.current) return;

@@ -76,7 +76,7 @@ def test_desk_reviewed_details_reject_unstorable_dates_of_birth(monkeypatch, fie
         camp_day_id=str(ObjectId()), age=fields.get('age', 45), dob=fields.get('dob'),
     )
     with pytest.raises(HTTPException) as error:
-        asyncio.run(desk_register(body, _Request(), actor=ACTOR))
+        asyncio.run(desk_register(body, _Request(), actor=ACTOR, background_tasks=None))
     assert error.value.status_code == 400
 
 

@@ -8,4 +8,5 @@ module.exports = {
   },
   moduleNameMapper: { "\\.css$": "<rootDir>/scripts/style-mock.cjs" },
   clearMocks: true,
+  collectCoverageFrom: ["src/**/*.{js,jsx}", "!src/**/*.test.{js,jsx}"],
 };

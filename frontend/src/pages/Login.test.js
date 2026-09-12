@@ -33,6 +33,7 @@ beforeEach(() => {
   root = ReactDOM.createRoot(container);
   jest.clearAllMocks();
   jest.useFakeTimers();
+  Object.defineProperty(document, "hidden", { configurable: true, value: false });
 
   api.get.mockResolvedValue({
     data: {
@@ -57,6 +58,27 @@ afterEach(() => {
 });
 
 describe("Login page occupancy", () => {
+  test("does not overlap occupancy requests while a slow response is pending", async () => {
+    let resolve;
+    api.get.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    await act(async () => { root.render(<MemoryRouter><Login /></MemoryRouter>); });
+    await act(async () => { jest.advanceTimersByTime(15000); });
+    expect(api.get).toHaveBeenCalledTimes(1);
+    await act(async () => { resolve({ data: { camp: null } }); });
+    await act(async () => { jest.advanceTimersByTime(5000); });
+    expect(api.get).toHaveBeenCalledTimes(2);
+  });
+
+  test("pauses occupancy requests while hidden and refreshes when visible", async () => {
+    Object.defineProperty(document, "hidden", { configurable: true, value: true });
+    await act(async () => { root.render(<MemoryRouter><Login /></MemoryRouter>); });
+    await act(async () => { jest.advanceTimersByTime(15000); });
+    expect(api.get).not.toHaveBeenCalled();
+    Object.defineProperty(document, "hidden", { configurable: true, value: false });
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(api.get).toHaveBeenCalledTimes(1);
+  });
+
   test("leads with registrations against total camp seats and shows no patient details", async () => {
     await act(async () => {
       root.render(

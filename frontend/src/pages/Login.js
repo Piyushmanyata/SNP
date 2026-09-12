@@ -20,14 +20,22 @@ export default function Login() {
 
   useEffect(() => {
     let cancelled = false;
+    let inFlight = false;
     const load = () => {
+      if (cancelled || inFlight || document.hidden) return;
+      inFlight = true;
       api.get("/camps/active/public").then((r) => {
         if (!cancelled) setOccupancy(r.data);
-      }).catch(() => {});
+      }).catch(() => {}).finally(() => { inFlight = false; });
     };
     load();
     const t = setInterval(load, 5000);
-    return () => { cancelled = true; clearInterval(t); };
+    document.addEventListener("visibilitychange", load);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", load);
+    };
   }, []);
 
   const submit = useCallback(async (e) => {

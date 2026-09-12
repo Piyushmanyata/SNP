@@ -1,4 +1,5 @@
 import os
+from typing import Any, Mapping
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from pymongo import ASCENDING
 
@@ -26,12 +27,12 @@ async def next_seq(name: str) -> int:
 
 
 PERSON_CAMP_INDEX_NAME = "person_id_1_camp_id_1"
-PERSON_CAMP_INDEX = {
+PERSON_CAMP_INDEX: dict[str, Any] = {
     "keys": [("person_id", ASCENDING), ("camp_id", ASCENDING)],
     "unique": True,
     "partialFilterExpression": {"person_id": {"$type": "objectId"}},
 }
-TRANSCRIPTION_PATIENT_INDEX = {"keys": "patient_id", "unique": True}
+TRANSCRIPTION_PATIENT_INDEX: dict[str, Any] = {"keys": "patient_id", "unique": True}
 
 LEDGER_INDEX_NAME = "patient_id_1_message_type_1_event_date_1"
 LEDGER_PARTIAL_FILTER = {"patient_id": {"$exists": True}}
@@ -40,23 +41,23 @@ SETUP_REQUEST_INDEX_NAME = "setup_request_id_1"
 SETUP_REQUEST_PARTIAL = {"setup_request_id": {"$type": "string"}}
 
 
-def should_drop_person_camp_index(index_info: dict) -> bool:
+def should_drop_person_camp_index(index_info: Mapping[str, Any]) -> bool:
     old = index_info.get(PERSON_CAMP_INDEX_NAME)
-    return bool(old) and not old.get("unique")
+    return bool(old and not old.get("unique"))
 
 
-def should_drop_ledger_index(index_info: dict) -> bool:
+def should_drop_ledger_index(index_info: Mapping[str, Any]) -> bool:
     old = index_info.get(LEDGER_INDEX_NAME)
-    return bool(old) and old.get("partialFilterExpression") != LEDGER_PARTIAL_FILTER
+    return bool(old and old.get("partialFilterExpression") != LEDGER_PARTIAL_FILTER)
 
 
-def should_drop_household_ledger_index(index_info: dict) -> bool:
+def should_drop_household_ledger_index(index_info: Mapping[str, Any]) -> bool:
     return HOUSEHOLD_LEDGER_INDEX_NAME in index_info
 
 
-def should_drop_setup_request_index(index_info: dict) -> bool:
+def should_drop_setup_request_index(index_info: Mapping[str, Any]) -> bool:
     old = index_info.get(SETUP_REQUEST_INDEX_NAME)
-    return bool(old) and old.get("partialFilterExpression") != SETUP_REQUEST_PARTIAL
+    return bool(old and old.get("partialFilterExpression") != SETUP_REQUEST_PARTIAL)
 
 
 async def init_indexes() -> None:
@@ -87,7 +88,7 @@ async def init_indexes() -> None:
                 norm = f"{base_norm}_{counter}"
                 counter += 1
         seen_norms.add(norm)
-        updates = {"name_normalized": norm}
+        updates: dict[str, Any] = {"name_normalized": norm}
         if u.get("role") == "admin" and norm == "admin":
             updates["name"] = "admin"
         if not u.get("pin_hash"):

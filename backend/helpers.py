@@ -5,6 +5,8 @@ import hashlib
 import secrets
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
+from typing import overload
+from uuid import UUID
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -14,6 +16,14 @@ def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+@overload
+def as_utc(dt: datetime) -> datetime: ...
+
+
+@overload
+def as_utc(dt: None) -> None: ...
+
+
 def as_utc(dt: datetime | None) -> datetime | None:
     """Mongo returns naive UTC datetimes; normalise to tz-aware UTC for safe compares."""
     if dt is None:
@@ -21,6 +31,14 @@ def as_utc(dt: datetime | None) -> datetime | None:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
+
+
+@overload
+def iso(dt: datetime) -> str: ...
+
+
+@overload
+def iso(dt: None) -> None: ...
 
 
 def iso(dt: datetime | None) -> str | None:
@@ -121,7 +139,10 @@ def parse_patient_identifier(raw_value: str) -> str:
         val = val[4:]
     if "/p/" in val:
         val = val.split("/p/")[-1]
-    return val.upper()
+    try:
+        return str(UUID(val))
+    except ValueError:
+        return val.upper()
 
 
 # ---- labellers (never render raw enums) ----

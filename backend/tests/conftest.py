@@ -17,6 +17,14 @@ BASE_URL = _base.rstrip("/") if _base else ""
 API = f"{BASE_URL}/api" if BASE_URL else ""
 
 
+def pytest_sessionfinish(session, exitstatus):
+    if os.environ.get("SNP_REQUIRE_LIVE_TESTS") == "1":
+        reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+        if reporter and reporter.stats.get("skipped"):
+            reporter.write_line("CI requires zero skipped tests.", red=True)
+            session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
 def _require_live_api():
     if not BASE_URL:
         pytest.skip("SNP_LIVE_API is not configured")
