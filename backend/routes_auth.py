@@ -1,7 +1,7 @@
 import asyncio
 import os
 from datetime import timedelta
-from typing import Any, Dict
+from typing import Any, Dict, Literal
 from fastapi import APIRouter, Request, Response, HTTPException, Depends
 from pymongo.errors import DuplicateKeyError
 from db import get_db
@@ -45,9 +45,20 @@ async def _claim_pin_attempt(db, identifier: str) -> None:
         raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
 
 
+def _cookie_samesite() -> Literal["lax", "strict", "none"]:
+    value = os.environ.get("COOKIE_SAMESITE", "lax")
+    if value == "lax":
+        return "lax"
+    if value == "strict":
+        return "strict"
+    if value == "none":
+        return "none"
+    raise ValueError("COOKIE_SAMESITE must be lax, strict, or none")
+
+
 def set_auth_cookie(response: Response, access: str) -> None:
     secure = os.environ.get("COOKIE_SECURE", "true").lower() == "true"
-    samesite = os.environ.get("COOKIE_SAMESITE", "lax")
+    samesite = _cookie_samesite()
     response.set_cookie("access_token", access, httponly=True, secure=secure,
                         samesite=samesite, max_age=43200, path="/")
 
@@ -105,7 +116,7 @@ async def change_pin(body: ChangePinBody, response: Response, user: dict = Depen
 @router.post("/logout")
 async def logout(response: Response, user: dict = Depends(get_current_user)) -> Dict[str, Any]:
     secure = os.environ.get("COOKIE_SECURE", "true").lower() == "true"
-    samesite = os.environ.get("COOKIE_SAMESITE", "lax")
+    samesite = _cookie_samesite()
     response.delete_cookie("access_token", path="/", secure=secure, httponly=True, samesite=samesite)
     response.delete_cookie("refresh_token", path="/", secure=secure, httponly=True, samesite=samesite)
     return {"ok": True}

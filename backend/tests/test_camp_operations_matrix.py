@@ -115,7 +115,7 @@ async def _printed_patient(mock_db, registrar=VOLUNTEER, **fields):
         camp_day_id=str(day_id),
         **fields,
     )
-    result = await desk_register(body, _Request(), actor=registrar)
+    result = await desk_register(body, _Request(), actor=registrar, background_tasks=None)
     pid = ObjectId(result["registration"]["id"])
     await arrive(str(pid), actor=registrar)
     await print_prescription(str(pid), actor=registrar)
@@ -217,7 +217,7 @@ class TestClinicalMatrix:
                 await record_fulfilment(
                     _issue_body(trans_id, ObjectId(), 0, "op-f-draft"),
                     actor=CLINICAL,
-                )
+                 background_tasks=None)
             assert exc.value.status_code == 409
         asyncio.run(run())
 
@@ -228,7 +228,7 @@ class TestClinicalMatrix:
             result = await desk_register(
                 RegisterBody(full_name="No Arrive", age=40, phone="9876500099", camp_day_id=str(day_id)),
                 _Request(), actor=VOLUNTEER,
-            )
+             background_tasks=None)
             with pytest.raises(HTTPException) as exc:
                 await complete_prescription(_complete_body(result["registration"]["id"], "op-c05"), actor=CLINICAL)
             assert exc.value.status_code == 409
@@ -408,7 +408,7 @@ class TestClinicalMatrix:
                     "op-c14-issue",
                 ),
                 actor=CLINICAL,
-            )
+             background_tasks=None)
             with pytest.raises(HTTPException) as exc:
                 await undo_completion(
                     UndoCompletionBody(
@@ -438,7 +438,7 @@ class TestClinicalMatrix:
                     "op-c15-issue",
                 ),
                 actor=CLINICAL,
-            )
+             background_tasks=None)
             corr = await add_correction(
                 CorrectionBody(
                     transcription_id=done["transcription"]["id"],
@@ -492,7 +492,7 @@ class TestFulfilmentMatrix:
                         status="fulfilled",
                     ),
                     actor=CLINICAL,
-                )
+                 background_tasks=None)
             assert exc.value.status_code == 409
             assert await mock_db.fulfilments.find_one({}) is None
         asyncio.run(run())
@@ -505,7 +505,7 @@ class TestFulfilmentMatrix:
                 RegisterBody(full_name="Other Person", age=40, phone="9876500002",
                              camp_day_id=str(day_id)),
                 _Request(), actor=VOLUNTEER,
-            )
+             background_tasks=None)
             await arrive(other_reg["registration"]["id"], actor=VOLUNTEER)
             await print_prescription(other_reg["registration"]["id"], actor=VOLUNTEER)
             other = await mock_db.patients.find_one({"_id": ObjectId(other_reg["registration"]["id"])})
@@ -523,7 +523,7 @@ class TestFulfilmentMatrix:
                         "op-f02-issue",
                     ),
                     actor=CLINICAL,
-                )
+                 background_tasks=None)
             assert exc.value.status_code in (404, 409)
             name = other["full_name"]
             assert name not in str(exc.value.detail)
@@ -558,7 +558,7 @@ class TestFulfilmentMatrix:
                         "op-f03-issue",
                     ),
                     actor=CLINICAL,
-                )
+                 background_tasks=None)
             assert exc.value.status_code == 409
             assert _code(exc) == "stale_review"
             ok = await record_fulfilment(
@@ -570,7 +570,7 @@ class TestFulfilmentMatrix:
                     medicine_outcomes=[{"medicine_id": MEDICINE_ALT["medicine_id"], "given": True}],
                 ),
                 actor=CLINICAL,
-            )
+             background_tasks=None)
             assert ok["fulfilment"]["status"] == "fulfilled"
         asyncio.run(run())
 
@@ -599,7 +599,7 @@ class TestFulfilmentMatrix:
             )
             results = await asyncio.gather(
                 add_correction(corr_body, actor=CLINICAL),
-                record_fulfilment(issue_body, actor=CLINICAL),
+                record_fulfilment(issue_body, actor=CLINICAL, background_tasks=None),
                 return_exceptions=True,
             )
             http_err = [r for r in results if isinstance(r, HTTPException)]
@@ -629,8 +629,8 @@ class TestFulfilmentMatrix:
                 done["registration"]["clinical_generation"], "op-f05-issue",
                 item_type="ot", status="deferred", ot_schedule_day_id=str(ot_day),
             )
-            first = await record_fulfilment(body, actor=CLINICAL)
-            second = await record_fulfilment(body, actor=CLINICAL)
+            first = await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
+            second = await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
             assert first["fulfilment"]["id"] == second["fulfilment"]["id"]
             day = await mock_db.ot_schedule_days.find_one({"_id": ot_day})
             assert day["seats_taken"] == 1
@@ -645,8 +645,8 @@ class TestFulfilmentMatrix:
                 done["transcription"]["id"], done["revision"]["id"],
                 done["registration"]["clinical_generation"], "op-f06-issue",
             )
-            a = await record_fulfilment(body, actor=CLINICAL)
-            b = await record_fulfilment(body, actor=CLINICAL)
+            a = await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
+            b = await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
             assert a["fulfilment"]["id"] == b["fulfilment"]["id"]
             assert len(mock_db.fulfilments.docs) == 1
         asyncio.run(run())
@@ -660,7 +660,7 @@ class TestFulfilmentMatrix:
                 result = await desk_register(
                     RegisterBody(full_name=name, age=50, phone=f"987650001{i}", camp_day_id=str(day_id)),
                     _Request(), actor=VOLUNTEER,
-                )
+                 background_tasks=None)
                 pid = result["registration"]["id"]
                 await arrive(pid, actor=VOLUNTEER)
                 await print_prescription(pid, actor=VOLUNTEER)
@@ -684,8 +684,8 @@ class TestFulfilmentMatrix:
                     item_type="ot", status="deferred", ot_schedule_day_id=str(ot_day),
                 ))
             results = await asyncio.gather(
-                record_fulfilment(bodies[0], actor=CLINICAL),
-                record_fulfilment(bodies[1], actor=CLINICAL),
+                record_fulfilment(bodies[0], actor=CLINICAL, background_tasks=None),
+                record_fulfilment(bodies[1], actor=CLINICAL, background_tasks=None),
                 return_exceptions=True,
             )
             wins = [r for r in results if not isinstance(r, Exception)]
@@ -717,7 +717,7 @@ class TestFulfilmentMatrix:
                     item_type="specs_fixed", status="fulfilled",
                 ),
                 actor=CLINICAL,
-            )
+             background_tasks=None)
             specs_day = ObjectId()
             await mock_db.specs_collection_days.insert_one({
                 "_id": specs_day, "camp_id": camp_id, "day_date": "2026-09-20",
@@ -733,7 +733,7 @@ class TestFulfilmentMatrix:
                         specs_collection_day_id=str(specs_day),
                     ),
                     actor=CLINICAL,
-                )
+                 background_tasks=None)
             assert exc.value.status_code == 409
         asyncio.run(run())
 
@@ -776,7 +776,7 @@ class TestPrintingMatrix:
             result = await desk_register(
                 RegisterBody(full_name="Walk", age=40, phone="9876500033", camp_day_id=str(day_id)),
                 _Request(), actor=VOLUNTEER,
-            )
+             background_tasks=None)
             with pytest.raises(HTTPException) as exc:
                 await arrive(result["registration"]["id"], actor=VOLUNTEER)
             assert exc.value.detail["code"] == "PRINT_WINDOW_CLOSED"
@@ -844,7 +844,7 @@ class TestPrintingMatrix:
             result = await desk_register(
                 RegisterBody(full_name="Stale", age=40, phone="9876500077", camp_day_id=str(day_id)),
                 _Request(), actor=VOLUNTEER,
-            )
+             background_tasks=None)
             await arrive(result["registration"]["id"], actor=VOLUNTEER)
             await routes_camps.toggle_print_window(str(day_id), PrintWindowBody(mode="disable"), actor=ADMIN)
             with pytest.raises(HTTPException) as exc:
@@ -923,7 +923,7 @@ class TestPrintingMatrix:
             result = await desk_register(
                 RegisterBody(full_name="Booked", age=40, phone="9876500044", camp_day_id=str(d1)),
                 _Request(), actor=VOLUNTEER,
-            )
+             background_tasks=None)
             await arrive(result["registration"]["id"], actor=VOLUNTEER)
             day1 = await mock_db.camp_days.find_one({"_id": d1})
             day2 = await mock_db.camp_days.find_one({"_id": d2})
@@ -1041,11 +1041,11 @@ class TestScoringAndMessages:
             a = await desk_register(
                 RegisterBody(full_name="One", age=40, phone="9876500066", camp_day_id=str(day_id)),
                 _Request(), actor=VOLUNTEER,
-            )
+             background_tasks=None)
             b = await desk_register(
                 RegisterBody(full_name="Two", age=41, phone="9876500066", camp_day_id=str(day_id)),
                 _Request(), actor=VOLUNTEER,
-            )
+             background_tasks=None)
             assert a["registration"]["id"] != b["registration"]["id"]
         asyncio.run(run())
 

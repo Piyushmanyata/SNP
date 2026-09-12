@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": false,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "es2022",
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/lib/uuid.js",
+    "src/lib/operatorLines.js",
+    "src/constants/roles.js",
+    "src/components/aadhaar/liveScan/guideRoi.js",
+    "src/components/aadhaar/liveScan/grabFrame.js",
+    "src/components/template/templateHelpers.js"
+  ]
+}

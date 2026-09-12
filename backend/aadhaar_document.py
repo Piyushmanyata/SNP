@@ -36,7 +36,7 @@ def transcription(image) -> dict:
         raise DocumentError(503, 'OCR_UNAVAILABLE', 'Text reader could not start. Enter details manually or ask the desk.')
     if len(result.stdout) > 2 * 1024 * 1024:
         raise DocumentError(413, 'DOCUMENT_TOO_LARGE', 'This document contains too much text. Crop the Aadhaar card and retry.')
-    grouped = {}
+    grouped: dict[tuple[str | None, ...], list[str]] = {}
     for row in csv.DictReader(io.StringIO(result.stdout.decode('utf-8', errors='replace')), delimiter='\t'):
         if row.get('level') != '5' or float(row.get('conf') or '-1') < 50:
             continue
@@ -52,9 +52,9 @@ def transcription(image) -> dict:
         birth_year = re.search(r'(?:Year\s+of\s+Birth|YOB|जन्म\s*(?:का\s*)?वर्ष)\s*[:：/\s]*([0-9]{4})(?![0-9])', line, re.I)
         if dob:
             try:
-                value = datetime.strptime(dob[1].replace('-', '/'), '%d/%m/%Y').date()
-                if date(1900, 1, 1) <= value <= date.today():
-                    data['dob'] = value.isoformat()
+                birth_date = datetime.strptime(dob[1].replace('-', '/'), '%d/%m/%Y').date()
+                if date(1900, 1, 1) <= birth_date <= date.today():
+                    data['dob'] = birth_date.isoformat()
                     data['age'] = age_from_dob(data['dob'])
             except ValueError:
                 pass
@@ -134,7 +134,7 @@ def extract(document: bytes, password: str = '') -> dict:
             oriented = stack.enter_context(ImageOps.exif_transpose(original))
             images.append(stack.enter_context(oriented.convert('RGB')))
         for image in images:
-            for barcode in zxingcpp.read_barcodes(image, formats=zxingcpp.BarcodeFormat.QRCode):
+            for barcode in zxingcpp.read_barcodes(image, formats=zxingcpp.BarcodeFormats(zxingcpp.BarcodeFormat.QRCode)):
                 result = decode_aadhaar(barcode.text)
                 if result['outcome'] == 'card':
                     return {**result, 'payload': barcode.text}

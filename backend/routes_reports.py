@@ -178,12 +178,12 @@ async def export_camp_records(camp_id: str | None = None, actor: dict = Depends(
         tx_by_patient = {t["patient_id"]: t for t in tx_rows}
         tx_ids = [t["_id"] for t in tx_rows]
         fulfil_rows = await db.fulfilments.find({"transcription_id": {"$in": tx_ids}}).to_list(100000) if tx_ids else []
-        fulfil_by_tx = {}
+        fulfil_by_tx: Dict[ObjectId, Dict[str, dict]] = {}
         for f in fulfil_rows:
             fulfil_by_tx.setdefault(f["transcription_id"], {})[f["item_type"]] = f
         for p in pts:
             t = tx_by_patient.get(p["_id"]) or {}
-            writer.writerow(_export_row(p, t, fulfil_by_tx.get(t.get("_id"), {}), day_dates))
+            writer.writerow(_export_row(p, t, fulfil_by_tx.get(t["_id"], {}) if t else {}, day_dates))
     buf.seek(0)
     return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": "attachment; filename=camp_records.csv"})
@@ -344,8 +344,8 @@ async def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
-@router.get("/health/ready")
-async def readiness() -> Dict[str, Any]:
+@router.get("/health/ready", response_model=Dict[str, Any])
+async def readiness() -> Dict[str, Any] | JSONResponse:
     db = get_db()
     try:
         await db.command("ping")

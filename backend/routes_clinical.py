@@ -1,6 +1,6 @@
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from datetime import datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, NoReturn, Optional
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pymongo.errors import DuplicateKeyError
 from pydantic import ValidationError
@@ -312,25 +312,38 @@ async def complete_prescription(
     if existing_op and existing_op.get("status") == "superseded":
         raise conflict("operation_superseded", "This completion was undone and cannot be replayed.")
     if p.get("committed_revision_id"):
-        raise conflict("already_completed", "This patient already has a completed prescription.")
+        current = await db.prescription_revisions.find_one({"_id": p["committed_revision_id"]})
+        if not current or current.get("operation_id") != body.operation_id:
+            raise conflict("already_completed", "This patient already has a completed prescription.")
     revision = await prepare_revision(
         db, p, actor, content, lines, none, body.operation_id, "complete", None, None,
     )
-    committed = await commit_completion(db, p, revision, actor, body.expected_generation)
-    if not committed:
-        raise conflict("already_completed", "This patient already has a completed prescription.")
-    transcription = await _upsert_transcription(db, p, actor, content, locked=True)
-    result = _clinical_result(committed, revision, transcription)
-    await save_operation(db, {
-        "operation_id": body.operation_id,
-        "kind": "complete",
-        "payload_hash": digest,
-        "patient_id": p["_id"],
-        "status": "committed",
-        "result": result,
-        "created_at": now_utc(),
-    })
-    return result
+    transcription = await db.transcriptions.find_one({"patient_id": p["_id"]})
+    if not transcription:
+        transcription = await _upsert_transcription(db, p, actor, content, locked=False)
+    async with _clinical_write(db, str(transcription["_id"])):
+        current_patient = await _require_printed_patient(db, body.patient_id)
+        committed: dict | None
+        if current_patient.get("committed_revision_id") == revision["_id"]:
+            if generation_of(current_patient) != body.expected_generation + 1:
+                raise conflict("stale_generation", "The prescription changed; reload and retry.")
+            committed = current_patient
+        else:
+            committed = await commit_completion(db, current_patient, revision, actor, body.expected_generation)
+        if not committed:
+            raise conflict("already_completed", "This patient already has a completed prescription.")
+        transcription = await _upsert_transcription(db, committed, actor, content, locked=True)
+        result = _clinical_result(committed, revision, transcription)
+        await save_operation(db, {
+            "operation_id": body.operation_id,
+            "kind": "complete",
+            "payload_hash": digest,
+            "patient_id": p["_id"],
+            "status": "committed",
+            "result": result,
+            "created_at": now_utc(),
+        })
+        return result
 
 
 @router.post("/transcription/undo")
@@ -345,42 +358,44 @@ async def undo_completion(
     p = await db.patients.find_one({"_id": ObjectId(body.patient_id)})
     if not p:
         raise HTTPException(status_code=404, detail="Registration not found")
-    if await has_issue_history(db, p):
-        raise conflict("undo_after_issue", "Completion cannot be undone after an issue or pending issue.")
-    digest = payload_hash("undo", {"patient_id": str(p["_id"]), "reason": body.reason.strip()})
-    existing_op = await recover_operation(db, body.operation_id, "undo", digest)
-    if existing_op and existing_op.get("status") == "committed" and existing_op.get("result"):
-        return existing_op["result"]
-    if not p.get("committed_revision_id"):
-        raise conflict("not_completed", "There is no current completion to undo.")
-    prior_rev = await db.prescription_revisions.find_one({"_id": p["committed_revision_id"]})
-    updated = await commit_undo(db, p, body.expected_generation)
-    if not updated:
-        raise conflict("stale_generation", "The prescription changed; reload and retry.")
-    if prior_rev and prior_rev.get("operation_id"):
-        await db.clinical_operations.update_one(
-            {"operation_id": prior_rev["operation_id"]},
-            {"$set": {"status": "superseded"}},
+    trans = await db.transcriptions.find_one({"patient_id": p["_id"]})
+    async with _clinical_write(db, str(trans["_id"])) if trans else nullcontext():
+        if await has_issue_history(db, p):
+            raise conflict("undo_after_issue", "Completion cannot be undone after an issue or pending issue.")
+        digest = payload_hash("undo", {"patient_id": str(p["_id"]), "reason": body.reason.strip()})
+        existing_op = await recover_operation(db, body.operation_id, "undo", digest)
+        if existing_op and existing_op.get("status") == "committed" and existing_op.get("result"):
+            return existing_op["result"]
+        if not p.get("committed_revision_id"):
+            raise conflict("not_completed", "There is no current completion to undo.")
+        prior_rev = await db.prescription_revisions.find_one({"_id": p["committed_revision_id"]})
+        updated = await commit_undo(db, p, body.expected_generation)
+        if not updated:
+            raise conflict("stale_generation", "The prescription changed; reload and retry.")
+        if prior_rev and prior_rev.get("operation_id"):
+            await db.clinical_operations.update_one(
+                {"operation_id": prior_rev["operation_id"]},
+                {"$set": {"status": "superseded"}},
+            )
+        trans = await db.transcriptions.find_one_and_update(
+            {"patient_id": p["_id"]},
+            {"$set": {"locked": False}},
+            return_document=True,
         )
-    trans = await db.transcriptions.find_one_and_update(
-        {"patient_id": p["_id"]},
-        {"$set": {"locked": False}},
-        return_document=True,
-    )
-    result = {
-        "registration": ser_patient(updated),
-        "transcription": ser_trans(trans) if trans else None,
-    }
-    await save_operation(db, {
-        "operation_id": body.operation_id,
-        "kind": "undo",
-        "payload_hash": digest,
-        "patient_id": p["_id"],
-        "status": "committed",
-        "result": result,
-        "created_at": now_utc(),
-    })
-    return result
+        result = {
+            "registration": ser_patient(updated),
+            "transcription": ser_trans(trans) if trans else None,
+        }
+        await save_operation(db, {
+            "operation_id": body.operation_id,
+            "kind": "undo",
+            "payload_hash": digest,
+            "patient_id": p["_id"],
+            "status": "committed",
+            "result": result,
+            "created_at": now_utc(),
+        })
+        return result
 
 
 def _validate_fulfilment_matrix(item_type: str, status: str) -> None:
@@ -465,7 +480,7 @@ DEFERRAL_CONFIG = {
 }
 
 
-async def _refuse_full(collection: AsyncIOMotorCollection, day: dict, cfg: dict) -> None:
+async def _refuse_full(collection: AsyncIOMotorCollection, day: dict, cfg: dict) -> NoReturn:
     """A single full day is a retry; every day of the type full is an admin problem."""
     free = await collection.count_documents({
         "camp_id": day.get("camp_id"),
@@ -583,26 +598,6 @@ async def persist_fulfilment(db: AsyncIOMotorDatabase, prior: dict | None, doc: 
     return doc
 
 
-async def _cleanup_prior_fulfilment(
-    db: AsyncIOMotorDatabase,
-    transcription_id: ObjectId | str,
-    item_type: str,
-    keep_ot: Optional[ObjectId | str] = None,
-    keep_specs: Optional[ObjectId | str] = None,
-) -> None:
-    prior = await db.fulfilments.find({"transcription_id": transcription_id, "item_type": item_type}).to_list(20)
-    for pf in prior:
-        if pf.get("status") != "deferred":
-            continue
-        oid = pf.get("ot_schedule_day_id")
-        if oid and oid != keep_ot:
-            await db.ot_schedule_days.update_one(
-                {"_id": oid, "seats_taken": {"$gt": 0}},
-                {"$inc": {"seats_taken": -1}},
-            )
-    await db.fulfilments.delete_many({"transcription_id": transcription_id, "item_type": item_type})
-
-
 def _deferred_day_id(body: FulfilmentBody, item_type: str) -> Optional[ObjectId]:
     """A day is only booked for the line that owns it: a specs_made line never holds an OT seat."""
     if body.status != "deferred" or body.item_type != item_type:
@@ -645,8 +640,8 @@ async def _ensure_transcription_locked(db: AsyncIOMotorDatabase, transcription: 
 @router.post("/fulfilment")
 async def record_fulfilment(
     body: FulfilmentBody,
+    background_tasks: BackgroundTasks,
     actor: dict = Depends(require_clinical),
-    background_tasks: BackgroundTasks = None,
 ) -> Dict[str, Any]:
     assert_clinical_operator(actor)
     db = get_db()
@@ -694,15 +689,17 @@ async def record_fulfilment(
         return operation["result"]
     async with _clinical_write(db, body.transcription_id):
         current_patient = await db.patients.find_one({"_id": patient["_id"]})
+        if not current_patient:
+            raise HTTPException(status_code=404, detail="Registration not found")
         if current_patient.get("issue_auth_op") != op_id:
             await begin_issue_authorization(
                 db, current_patient, actor, body.item_type,
                 patient["committed_revision_id"], generation_of(patient), op_id,
             )
         try:
-            operation = await recover_operation(db, op_id, "issue", digest)
-            if operation and operation.get("status") == "committed" and operation.get("result"):
-                result = operation["result"]
+            recovered = await recover_operation(db, op_id, "issue", digest)
+            if recovered and recovered.get("status") == "committed" and recovered.get("result"):
+                result = recovered["result"]
             else:
                 prior_op = await db.fulfilments.find_one({"operation_id": op_id})
                 if prior_op:
@@ -730,7 +727,7 @@ async def record_fulfilment(
 async def _record_fulfilment(
     body: FulfilmentBody,
     actor: dict,
-    background_tasks: BackgroundTasks,
+    background_tasks: BackgroundTasks | None,
     medicine_outcomes: list[dict] | None = None,
     issued_powers: tuple[float, float] | None = None,
 ) -> Dict[str, Any]:
@@ -897,6 +894,8 @@ async def add_correction(
     t = None
     if body.transcription_id:
         t = await db.transcriptions.find_one({"_id": ObjectId(body.transcription_id)})
+        if not t:
+            raise HTTPException(status_code=404, detail="Transcription not found")
     p = None
     if body.patient_id:
         p = await db.patients.find_one({"_id": ObjectId(body.patient_id)})
@@ -906,12 +905,17 @@ async def add_correction(
         raise HTTPException(status_code=404, detail="Registration not found")
     if t and t.get("patient_id") != p["_id"]:
         raise HTTPException(status_code=404, detail="Transcription not found")
+    if not t:
+        t = await db.transcriptions.find_one({"patient_id": p["_id"]})
     if p.get("issue_auth_op"):
         raise conflict("issue_pending", "Another issue is already in progress for this patient.")
     if not p.get("committed_revision_id"):
         raise conflict("not_completed", "There is no current completion to correct.")
     current = await db.prescription_revisions.find_one({"_id": p["committed_revision_id"]}) or {}
     merged = {field: current.get(field) for field in CONTENT_FIELDS}
+    for field in ("diagnosis_options", "prescribed_medicines"):
+        if merged[field] is None:
+            merged[field] = []
     for key, value in (body.changes or {}).items():
         if key in merged:
             merged[key] = value
@@ -920,29 +924,22 @@ async def add_correction(
             merged[field] = getattr(body, field)
     if "prescribed_medicine_ids" in body.model_fields_set:
         merged["prescribed_medicines"] = [{"medicine_id": mid} for mid in body.prescribed_medicine_ids]
-    merged["prescribed_medicines"] = await resolve_medicines(db, [
-        m.get("medicine_id") for m in (merged.get("prescribed_medicines") or []) if isinstance(m, dict)
-    ])
-    merged["fixed_power_r"] = await stocked_power(db, merged.get("fixed_power_r"))
-    merged["fixed_power_l"] = await stocked_power(db, merged.get("fixed_power_l"))
     lines = list(body.prescribed_lines if "prescribed_lines" in body.model_fields_set else current.get("prescribed_lines") or [])
     none = body.none_prescribed if "none_prescribed" in body.model_fields_set else bool(current.get("none_prescribed") and not lines)
     confirmed = body.full_transcription_confirmed or bool(body.changes)
-    class _View:
-        pass
-    view = _View()
-    for k, v in merged.items():
-        setattr(view, k, v)
-    view.full_transcription_confirmed = confirmed
-    view.prescribed_lines = lines
-    view.none_prescribed = none
-    content, lines, none = validate_completion(view)
+    op_id = body.operation_id or str(ObjectId())
     try:
-        TranscriptionBody(patient_id=str(p["_id"]), **{k: content.get(k) for k in CONTENT_FIELDS})
+        view = CompletePrescriptionBody.model_validate({
+            **merged, "patient_id": str(p["_id"]), "operation_id": op_id,
+            "full_transcription_confirmed": confirmed, "prescribed_lines": lines, "none_prescribed": none,
+        })
     except ValidationError:
         raise HTTPException(status_code=400, detail="Invalid prescription correction")
+    view.prescribed_medicines = await resolve_medicines(db, [m.get("medicine_id") for m in view.prescribed_medicines])
+    view.fixed_power_r = await stocked_power(db, view.fixed_power_r)
+    view.fixed_power_l = await stocked_power(db, view.fixed_power_l)
+    content, lines, none = validate_completion(view)
     content["ot_eye"] = normalize_ot_eye(content.get("ot_eye"))
-    op_id = body.operation_id or str(ObjectId())
     digest = payload_hash("correct", {
         "patient_id": str(p["_id"]), "content": content, "reason": body.reason,
         "lines": lines, "none": none,
@@ -954,20 +951,13 @@ async def add_correction(
         db, p, actor, content, lines, none, op_id, "correct", body.reason.strip(),
         p.get("committed_revision_id"),
     )
-    trans = t
-    if t:
-        async with _clinical_write(db, str(t["_id"])):
-            committed = await commit_correction(db, p, revision, actor, body.expected_generation)
-            if committed:
-                trans = await _upsert_transcription(db, p, actor, content, locked=True)
-    else:
+    async with _clinical_write(db, str(t["_id"])) if t else nullcontext():
         committed = await commit_correction(db, p, revision, actor, body.expected_generation)
-        if committed:
-            trans = await _upsert_transcription(db, p, actor, content, locked=True)
-    if not committed:
-        raise conflict("stale_generation", "The prescription changed; reload and retry.")
+        if not committed:
+            raise conflict("stale_generation", "The prescription changed; reload and retry.")
+        trans = await _upsert_transcription(db, p, actor, content, locked=True)
     await db.corrections.insert_one({
-        "transcription_id": (t or trans)["_id"],
+        "transcription_id": trans["_id"],
         "patient_id": p["_id"],
         "reason": body.reason,
         "changes": body.changes,
@@ -1114,6 +1104,8 @@ async def create_specs_day(body: SpecsScheduleBody, actor: dict = Depends(requir
             "camp_id": camp_oid, "day_date": day_date, **fields, "created_at": now_utc(),
         })
         d = await db.specs_collection_days.find_one({"_id": res.inserted_id})
+    if not d:
+        raise HTTPException(status_code=404, detail="Specs collection day not found")
     return {"specs_day": ser_specs_day(d)}
 
 

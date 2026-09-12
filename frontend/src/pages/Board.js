@@ -24,11 +24,11 @@ export default function Board() {
         if (!mounted.current || mine !== seq.current) return;
         setData(r.data);
         setErr("");
-        setStatus(r.data?.state === "current" ? "current" : (r.data?.state || "current"));
+        setStatus(r.data?.state || "current");
       } catch (e) {
         if (!mounted.current || mine !== seq.current) return;
         setErr(formatApiError(e));
-        setStatus((s) => (s === "loading" ? "loading" : "stale"));
+        setStatus((s) => (s === "loading" || s === "error" ? "error" : "stale"));
       } finally {
         inFlight.current = false;
       }
@@ -55,6 +55,9 @@ export default function Board() {
       <div className="space-y-5" data-testid="board-page">
         {status === "loading" && !data && (
           <p data-testid="board-loading">Loading analytics…</p>
+        )}
+        {status === "error" && (
+          <p role="alert">Unable to load analytics: {err}. Retrying automatically.</p>
         )}
         {data?.state === "no_camp" && (
           <p data-testid="board-no-camp">No active camp.</p>

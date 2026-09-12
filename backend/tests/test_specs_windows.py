@@ -218,11 +218,11 @@ def test_many_specs_assignments_do_not_refuse_or_mutate_seats(monkeypatch):
         first = await record_fulfilment(_fulfil(
             trans_a, mock_db.last_rev_id, item_type="specs_made", status="deferred",
             specs_collection_day_id=str(day_id), operation_id="op-a",
-        ), actor=actor)
+        ), actor=actor, background_tasks=None)
         second = await record_fulfilment(_fulfil(
             trans_b, rev_b, item_type="specs_made", status="deferred",
             specs_collection_day_id=str(day_id), operation_id="op-b",
-        ), actor=actor)
+        ), actor=actor, background_tasks=None)
         assert first["slip"]["collection_date"]
         assert second["slip"]["collection_date"]
         day = await mock_db.specs_collection_days.find_one({"_id": day_id})
@@ -265,7 +265,7 @@ def test_clinical_specs_picker_rejects_ended_cross_camp_legacy_and_malformed(mon
                 await record_fulfilment(_fulfil(
                     trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",
                     specs_collection_day_id=bad_id, operation_id=str(bad_id),
-                ), actor=actor)
+                ), actor=actor, background_tasks=None)
             assert exc.value.status_code == 400
 
         other_day = await mock_db.specs_collection_days.find_one({"venue": "Other Camp"})
@@ -273,13 +273,13 @@ def test_clinical_specs_picker_rejects_ended_cross_camp_legacy_and_malformed(mon
             await record_fulfilment(_fulfil(
                 trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",
                 specs_collection_day_id=str(other_day["_id"]), operation_id="op-other",
-            ), actor=actor)
+            ), actor=actor, background_tasks=None)
         assert exc.value.status_code == 400
 
         ok = await record_fulfilment(_fulfil(
             trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",
             specs_collection_day_id=str(valid), operation_id="op-ok",
-        ), actor=actor)
+        ), actor=actor, background_tasks=None)
         assert ok["slip"]["collection_start_time"] == "09:00"
         assert ok["slip"]["collection_end_time"] == "17:00"
         assert ok["slip"]["collection_venue"] == "Optical Desk"
@@ -305,7 +305,7 @@ def test_specs_token_snapshot_survives_later_schedule_edit(monkeypatch):
         out = await record_fulfilment(_fulfil(
             trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",
             specs_collection_day_id=day_id, operation_id="op-snap",
-        ), actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
+        ), actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
         assert out["slip"]["collection_start_time"] == "10:00"
         assert out["slip"]["collection_end_time"] == "12:00"
         client.post("/api/clinical/specs-days", json={

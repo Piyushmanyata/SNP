@@ -156,7 +156,10 @@ async def set_door_manual(body: DoorManualBody, actor: dict = Depends(require_ad
         {"_id": c["_id"]},
         {"$set": {"door_manual_date": today_ist_str() if body.enabled else None}},
     )
-    return {"camp": ser_camp(await db.camps.find_one({"_id": c["_id"]}))}
+    updated = await db.camps.find_one({"_id": c["_id"]})
+    if not updated:
+        raise HTTPException(status_code=404, detail="Camp not found")
+    return {"camp": ser_camp(updated)}
 
 
 @router.get("/active/public")
@@ -254,6 +257,8 @@ async def upsert_camp_day(body: CampDayBody, actor: dict = Depends(require_admin
             "created_at": now_utc(),
         })
         d = await db.camp_days.find_one({"_id": res.inserted_id})
+    if not d:
+        raise HTTPException(status_code=404, detail="Day not found")
     camp = await db.camps.find_one({"_id": camp_oid})
     days = await db.camp_days.find({"camp_id": camp_oid}).to_list(100)
     state = effective_printing(camp, days)
@@ -310,6 +315,8 @@ async def toggle_print_window(day_id: str, body: PrintWindowBody, actor: dict = 
         raise HTTPException(status_code=400, detail="mode must be enable, disable, or automatic")
     camp = await db.camps.find_one({"_id": camp["_id"]})
     d = await db.camp_days.find_one({"_id": d["_id"]})
+    if not d:
+        raise HTTPException(status_code=404, detail="Day not found")
     state = effective_printing(camp, [d])
     return {"day": ser_day(d, printing_open=bool(state["printing_open"] and state["operating_day_id"] == str(d["_id"])))}
 

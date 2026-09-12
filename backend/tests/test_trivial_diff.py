@@ -53,7 +53,7 @@ async def _manual(day_id, phone="9876500001", **fields):
         manual_entry=True,
         **fields,
     )
-    result = await desk_register(body, _Request(), actor=ACTOR)
+    result = await desk_register(body, _Request(), actor=ACTOR, background_tasks=None)
     return result["registration"]
 
 

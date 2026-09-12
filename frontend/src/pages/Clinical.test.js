@@ -85,6 +85,34 @@ afterEach(() => {
 });
 
 describe("Clinical page component", () => {
+  test("keeps the current wizard step until its draft saves and permits retry after failure", async () => {
+    api.post.mockResolvedValueOnce({ data: {
+      registration: { id: "reg-save", reg_no: "1001", full_name: "Draft Patient", queue_status: "arrived" },
+      person: { id: "person-save" }, transcription: null, fulfilments: [], slips: [],
+    } });
+    await act(async () => { root.render(<MemoryRouter><Clinical /></MemoryRouter>); });
+    act(() => {
+      const input = container.querySelector('[data-testid="clinical-lookup-input"]');
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, "1001");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => { container.querySelector('[data-testid="clinical-lookup-button"]').click(); });
+    let reject;
+    api.post.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+    await act(async () => { container.querySelector('[data-testid="wizard-next"]').click(); });
+    expect(container.querySelector('[data-testid="wizard-progress"]').textContent).toContain("Step 1 of");
+    expect(container.querySelector('[data-testid="wizard-next"]').disabled).toBe(true);
+    expect(container.querySelector('[data-testid="clinical-lookup-button"]').disabled).toBe(true);
+    await act(async () => { reject(new Error("Draft save failed")); });
+    expect(container.querySelector('[data-testid="wizard-progress"]').textContent).toContain("Step 1 of");
+    expect(container.textContent).toContain("Draft save failed");
+    expect(container.querySelector('[data-testid="wizard-next"]').disabled).toBe(false);
+    api.post.mockResolvedValueOnce({ data: { transcription: { id: "tx-save" } } });
+    await act(async () => { container.querySelector('[data-testid="wizard-next"]').click(); });
+    expect(container.querySelector('[data-testid="wizard-progress"]').textContent).toContain("Step 2 of");
+    expect(container.textContent).not.toContain("Draft save failed");
+  });
+
   test("renders lookup form and handles initial diagnosis options and OT days load", async () => {
     await act(async () => {
       root.render(

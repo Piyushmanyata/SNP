@@ -111,7 +111,7 @@ async def _register(day_id, **fields):
         camp_day_id=str(day_id),
         **fields,
     )
-    result = await desk_register(body, _Request(), actor=ACTOR)
+    result = await desk_register(body, _Request(), actor=ACTOR, background_tasks=None)
     return result["registration"]
 
 
@@ -442,7 +442,7 @@ class TestRegistrationConfirmationSms:
             _camp_id, (day_id,) = await _seed_camp(mock_db)
             body = RegisterBody(full_name="Sunita Devi", age=51, phone="9876500001",
                                 camp_day_id=str(day_id), manual_entry=True)
-            result = await desk_register(body, _Request(), actor=ACTOR)
+            result = await desk_register(body, _Request(), actor=ACTOR, background_tasks=None)
             await mock_db.patients.update_one(
                 {"_id": ObjectId(result["registration"]["id"])},
                 {"$set": {"phone_normalized": None, "phone": None}},
@@ -500,7 +500,7 @@ class TestFulfilmentLines:
             _camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db)
             body = _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_fixed", status="fulfilled")
             with pytest.raises(HTTPException) as exc:
-                await record_fulfilment(body, actor=CLINICAL)
+                await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
             assert exc.value.status_code == 400
             assert exc.value.detail["code"] == "FIXED_POWER_REQUIRED"
         asyncio.run(run())
@@ -513,7 +513,7 @@ class TestFulfilmentLines:
                 mock_db, RX, fixed_power=FIXED_POWER,
             )
             body = _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_fixed", status="fulfilled")
-            out = await record_fulfilment(body, actor=CLINICAL)
+            out = await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
             assert out["fulfilment"]["status"] == "fulfilled"
             assert out["fulfilment"]["issued_power_r"] == FIXED_POWER
             assert out["slip"] is None
@@ -529,7 +529,7 @@ class TestFulfilmentLines:
             out = await record_fulfilment(_fulfil(
                 trans_id, mock_db.last_rev_id, item_type="specs_fixed", status="fulfilled",
                 issued_power_r=2.25, issued_power_l=2.25,
-            ), actor=CLINICAL)
+            ), actor=CLINICAL, background_tasks=None)
             assert out["fulfilment"]["issued_power_r"] == 2.25
             rev = await mock_db.prescription_revisions.find_one({"_id": mock_db.last_rev_id})
             assert rev["fixed_power_r"] == FIXED_POWER
@@ -545,7 +545,7 @@ class TestFulfilmentLines:
                 await record_fulfilment(_fulfil(
                     trans_id, mock_db.last_rev_id, item_type="specs_fixed", status="fulfilled",
                     issued_power_r=9.75, issued_power_l=9.75,
-                ), actor=CLINICAL)
+                ), actor=CLINICAL, background_tasks=None)
             assert exc.value.detail["code"] == "unknown_power"
         asyncio.run(run())
 
@@ -564,7 +564,7 @@ class TestFulfilmentLines:
                     {"medicine_id": MEDICINE["medicine_id"], "given": True},
                     {"medicine_id": second["medicine_id"], "given": False},
                 ],
-            ), actor=CLINICAL)
+            ), actor=CLINICAL, background_tasks=None)
             assert out["fulfilment"]["status"] == "partially_fulfilled"
             assert [o["name"] for o in out["fulfilment"]["medicine_outcomes"]] == [
                 MEDICINE["name"], MEDICINE_ALT["name"],
@@ -579,7 +579,7 @@ class TestFulfilmentLines:
                 await record_fulfilment(_fulfil(
                     trans_id, mock_db.last_rev_id, item_type="medicine", status="fulfilled",
                     medicine_outcomes=[],
-                ), actor=CLINICAL)
+                ), actor=CLINICAL, background_tasks=None)
             assert exc.value.detail["code"] == "MEDICINE_OUTCOMES_MISMATCH"
         asyncio.run(run())
 
@@ -589,7 +589,7 @@ class TestFulfilmentLines:
             _camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db)
             body = _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_fixed", status="not_required")
             with pytest.raises(HTTPException) as exc:
-                await record_fulfilment(body, actor=CLINICAL)
+                await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
             assert exc.value.status_code == 400
         asyncio.run(run())
 
@@ -598,7 +598,7 @@ class TestFulfilmentLines:
             mock_db = _mock(monkeypatch)
             _camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db)
             body = _fulfil(trans_id, mock_db.last_rev_id, item_type="medicine", status="fulfilled")
-            out = await record_fulfilment(body, actor=CLINICAL)
+            out = await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
             assert out["fulfilment"]["status"] == "fulfilled"
         asyncio.run(run())
 
@@ -614,7 +614,7 @@ class TestFulfilmentLines:
             })
             body = _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_made",
                            status="deferred", specs_collection_day_id=str(specs_day))
-            out = await record_fulfilment(body, actor=CLINICAL)
+            out = await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
             assert out["slip"]["collection_date"] == "2026-09-20"
             assert sent == [{"type": "specs_token", "mobile": "9876500001", "reg_no": 501,
                              "date": "2026-09-20, समय 09:00–17:00", "venue": "Optical Desk"}]
@@ -632,7 +632,7 @@ class TestFulfilmentLines:
             })
             body = _fulfil(trans_id, mock_db.last_rev_id, item_type="ot",
                            status="deferred", ot_schedule_day_id=str(ot_day))
-            await record_fulfilment(body, actor=CLINICAL)
+            await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
             assert sent == [{"type": "ot_token", "mobile": "9876500001", "reg_no": 501,
                              "date": "2026-10-02", "venue": "OT Theatre"}]
         asyncio.run(run())
@@ -649,7 +649,7 @@ class TestFulfilmentLines:
             body = _fulfil(trans_id, mock_db.last_rev_id, item_type="ot",
                            status="deferred", ot_schedule_day_id=str(full_day))
             with pytest.raises(HTTPException) as exc:
-                await record_fulfilment(body, actor=CLINICAL)
+                await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
             assert exc.value.detail["code"] == "NO_CLINICAL_DAY_AVAILABLE"
             assert "Call the admin" in exc.value.detail["message"]
         asyncio.run(run())
@@ -670,7 +670,7 @@ class TestFulfilmentLines:
             body = _fulfil(trans_id, mock_db.last_rev_id, item_type="ot",
                            status="deferred", ot_schedule_day_id=str(full_day))
             with pytest.raises(HTTPException) as exc:
-                await record_fulfilment(body, actor=CLINICAL)
+                await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
             assert exc.value.detail == "OT day is full or not found"
         asyncio.run(run())
 

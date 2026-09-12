@@ -128,26 +128,26 @@ describe("step completion gates", () => {
 });
 
 describe("wizard rendering", () => {
-  test("Next is blocked on a step that has not been answered", () => {
+  test("Next is blocked on a step that has not been answered", async () => {
     renderWizard(baseRx);
-    act(() => container.querySelector('[data-testid="wizard-next"]').click());
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
     expect(container.querySelector('[data-testid="wizard-progress"]').textContent)
       .toContain("Step 2 of 3");
     expect(container.querySelector('[data-testid="wizard-next"]').disabled).toBe(true);
   });
 
-  test("advancing calls saveStep so the draft survives an interruption", () => {
+  test("advancing calls saveStep so the draft survives an interruption", async () => {
     const saveStep = jest.fn();
     renderWizard({ ...baseRx, diagnosis_options: ["Cataract"] }, { saveStep });
-    act(() => container.querySelector('[data-testid="wizard-next"]').click());
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
     expect(saveStep).toHaveBeenCalled();
     expect(container.querySelector('[data-testid="prescribed-lines"]')).not.toBeNull();
   });
 
-  test("vitals are hidden behind a control on review and never block completion", () => {
+  test("vitals are hidden behind a control on review and never block completion", async () => {
     renderWizard({ ...baseRx, none_prescribed: true, full_transcription_confirmed: true });
-    act(() => container.querySelector('[data-testid="wizard-next"]').click());
-    act(() => container.querySelector('[data-testid="wizard-next"]').click());
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
     expect(container.querySelector('[data-testid="bp-input"]')).toBeNull();
     expect(container.querySelector('[data-testid="complete-prescription-button"]').disabled).toBe(false);
     act(() => container.querySelector('[data-testid="add-vitals-button"]').click());
@@ -155,14 +155,14 @@ describe("wizard rendering", () => {
     expect(container.querySelector('[data-testid="sugar-input"]')).not.toBeNull();
   });
 
-  test("recorded vitals keep the panel open when the prescription is reopened", () => {
+  test("recorded vitals keep the panel open when the prescription is reopened", async () => {
     renderWizard({ ...baseRx, none_prescribed: true, bp: "120/80" });
-    act(() => container.querySelector('[data-testid="wizard-next"]').click());
-    act(() => container.querySelector('[data-testid="wizard-next"]').click());
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
     expect(container.querySelector('[data-testid="bp-input"]').value).toBe("120/80");
   });
 
-  test("the review step reads back the medicines and power that were picked", () => {
+  test("the review step reads back the medicines and power that were picked", async () => {
     renderWizard({
       ...baseRx,
       prescribed_lines: ["medicine", "specs_fixed"],
@@ -173,7 +173,7 @@ describe("wizard rendering", () => {
     });
     for (let i = 0; i < 4; i += 1) {
       const next = container.querySelector('[data-testid="wizard-next"]');
-      if (next) act(() => next.click());
+      if (next) await act(async () => next.click());
     }
     expect(container.querySelector('[data-testid="summary-medicines"]').textContent).toBe("Timolol");
     expect(container.querySelector('[data-testid="summary-fixed-power"]').textContent)

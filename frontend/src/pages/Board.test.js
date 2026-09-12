@@ -68,6 +68,16 @@ afterEach(() => {
 });
 
 describe("Camp-day board", () => {
+  test("shows an initial request failure and recovers on the next refresh", async () => {
+    api.get.mockRejectedValueOnce(new Error("Network Error"));
+    await act(async () => { root.render(<MemoryRouter><Board /></MemoryRouter>); });
+    expect(container.querySelector('[data-testid="board-loading"]')).toBeNull();
+    expect(container.querySelector('[role="alert"]').textContent).toContain("Network Error");
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+    expect(container.querySelector('[data-testid="board-kpis"]')).not.toBeNull();
+  });
+
   test("renders KPIs before the activity table with camp day and quiet text", async () => {
     await act(async () => {
       root.render(

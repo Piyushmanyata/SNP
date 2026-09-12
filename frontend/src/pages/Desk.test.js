@@ -177,7 +177,55 @@ async function scanAtDoor() {
   });
 }
 
+test("a new patient lookup immediately removes the previous patient's actions", async () => {
+  api.post.mockResolvedValueOnce({ data: { registration: ARRIVED } });
+  await renderDesk();
+  const code = () => container.querySelector('[data-testid="mock-patient-code-trigger"]');
+  await act(async () => { code().click(); });
+  expect(container.querySelector('[data-testid="desk-found-patient"]')).not.toBeNull();
+  let resolve;
+  api.post.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+  await act(async () => { code().click(); });
+  expect(container.querySelector('[data-testid="desk-found-patient"]')).toBeNull();
+  await act(async () => { resolve({ data: { registration: { ...ARRIVED, id: "p-2", full_name: "Next Patient" } } }); });
+  expect(container.querySelector('[data-testid="desk-found-patient"]').textContent).toContain("Next Patient");
+});
+
+test("a new name search immediately removes the previous search results", async () => {
+  const base = api.get.getMockImplementation();
+  api.get.mockImplementation((url) => url.startsWith("/patients/search")
+    ? Promise.resolve({ data: { results: [ARRIVED] } }) : base(url));
+  await renderDesk();
+  act(() => { setInput(container.querySelector('[data-testid="desk-find-input"]'), "Scanned"); });
+  await act(async () => { container.querySelector('[data-testid="desk-find-button"]').click(); });
+  expect(container.querySelector('[data-testid="desk-search-results"]')).not.toBeNull();
+  let reject;
+  api.get.mockImplementationOnce(() => new Promise((_resolve, fail) => { reject = fail; }));
+  act(() => { setInput(container.querySelector('[data-testid="desk-find-input"]'), "Another"); });
+  await act(async () => { container.querySelector('[data-testid="desk-find-button"]').click(); });
+  expect(container.querySelector('[data-testid="desk-search-results"]')).toBeNull();
+  await act(async () => { reject(new Error("Network Error")); });
+  expect(container.querySelector('[data-testid="desk-search-results"]')).toBeNull();
+});
+
 describe("Desk page", () => {
+  test.each(["41", "Scanned"])("search %s releases a superseded scan's busy state", async (value) => {
+    let finishScan;
+    api.post.mockImplementationOnce(() => new Promise((resolve) => { finishScan = resolve; }));
+    if (value === "41") api.post.mockResolvedValueOnce({ data: { registration: ARRIVED } });
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => url.startsWith("/patients/search")
+      ? Promise.resolve({ data: { results: [ARRIVED] } }) : base(url));
+    await renderDesk();
+    await scanAtDoor();
+    expect(container.querySelector('[data-testid="door-scan-status"]')).not.toBeNull();
+    act(() => { setInput(container.querySelector('[data-testid="desk-find-input"]'), value); });
+    await act(async () => { container.querySelector('[data-testid="desk-find-button"]').click(); });
+    expect(container.querySelector('[data-testid="door-scan-status"]')).toBeNull();
+    await act(async () => finishScan({ data: { outcome: "no_match", card: { full_name: "Old scan" } } }));
+    expect(container.textContent).not.toContain("Old scan");
+  });
+
   test("a new scan immediately removes the previous mismatch confirmation", async () => {
     api.post.mockResolvedValueOnce({ data: { outcome: "mismatch_review", registration: ARRIVED, diff: [] } });
     let resolveScan;

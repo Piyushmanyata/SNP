@@ -669,14 +669,15 @@ class TestFulfilmentStateMachineAndDeskStress:
                 reviewed_generation=1, operation_id=str(ObjectId()),
                 medicine_outcomes=[{"medicine_id": MEDICINE["medicine_id"], "given": True}],
             )
-            await record_fulfilment(body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
+            await record_fulfilment(body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
 
             t_doc = await mock_db.transcriptions.find_one({"_id": t_id})
             assert t_doc["locked"] is True
 
         asyncio.run(_run())
 
-    def test_correction_append_only_audit_log(self, monkeypatch):
+    @pytest.mark.parametrize("legacy_lists", [{}, {"diagnosis_options": None, "prescribed_medicines": None}])
+    def test_correction_append_only_audit_log(self, monkeypatch, legacy_lists):
         """Corrections modify only allowed fields and persist an immutable record in corrections collection."""
         async def _run():
             mock_db = setup_stress_db(monkeypatch)
@@ -691,6 +692,7 @@ class TestFulfilmentStateMachineAndDeskStress:
             await mock_db.prescription_revisions.insert_one({
                 "_id": rev_id, "patient_id": p_id, "none_prescribed": True, "prescribed_lines": [],
                 "bp": "120/80", "blood_sugar": "110",
+                **legacy_lists,
             })
             await mock_db.transcriptions.insert_one({
                 "_id": t_id, "patient_id": p_id, "locked": True, "blood_sugar": "110", "bp": "120/80",
@@ -711,6 +713,8 @@ class TestFulfilmentStateMachineAndDeskStress:
             # Allowed field bp updated, unauthorized field ignored
             t_doc = await mock_db.transcriptions.find_one({"_id": t_id})
             assert t_doc["bp"] == "135/85"
+            assert t_doc["diagnosis_options"] == []
+            assert t_doc["prescribed_medicines"] == []
             assert "unauthorized_field" not in t_doc
 
             # Audit record stored
@@ -764,7 +768,7 @@ class TestFulfilmentStateMachineAndDeskStress:
                     operation_id=str(tid),
                 )
                 try:
-                    await record_fulfilment(body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
+                    await record_fulfilment(body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
                     return "OK"
                 except HTTPException as e:
                     return f"FAIL_{e.status_code}"

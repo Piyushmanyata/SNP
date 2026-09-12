@@ -170,7 +170,7 @@ class TestConflictsAreNotCrashes:
                 "queue_status": "arrived", "patient_qr": "qr-2",
             })
 
-            async def clashing_update(query, update):
+            async def clashing_update(query, update, **kwargs):
                 raise DuplicateKeyError("person_id_1_camp_id_1 dup key")
 
             async def person_holder(query):
@@ -179,7 +179,7 @@ class TestConflictsAreNotCrashes:
                 return await original_find_one(query)
 
             original_find_one = mock_db.patients.find_one
-            monkeypatch.setattr(mock_db.patients, "update_one", clashing_update)
+            monkeypatch.setattr(mock_db.patients, "find_one_and_update", clashing_update)
             monkeypatch.setattr(mock_db.patients, "find_one", person_holder)
 
             with pytest.raises(HTTPException) as exc:
@@ -318,7 +318,7 @@ class TestRateLimitWindow:
                 await routes_registration.self_register(
                     routes_registration.RegisterBody(camp_day_id=str(ObjectId()), full_name="X"),
                     _Request(),
-                )
+                 background_tasks=None)
             assert "10.0.0.1" not in routes_registration._rl
             assert routes_registration._rl["10.0.0.2"]
             assert routes_registration._rl["10.0.0.3"]

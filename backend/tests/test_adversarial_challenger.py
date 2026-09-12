@@ -684,7 +684,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 status="fulfilled"
             )
             with pytest.raises(HTTPException) as exc:
-                await record_fulfilment(body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
+                await record_fulfilment(body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
             assert exc.value.status_code == 404
             assert "Transcription not found" in exc.value.detail
         asyncio.run(_run())
@@ -706,7 +706,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 status="fulfilled",
             )
             with pytest.raises(HTTPException) as exc:
-                await record_fulfilment(body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
+                await record_fulfilment(body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
             assert exc.value.status_code == 409
         asyncio.run(_run())
 
@@ -753,7 +753,7 @@ class TestFulfilmentDecomposedAndInvariants:
 
             bad_body = review_body(mock_db,transcription_id=str(t_id), item_type="specs_made", status="deferred")
             with pytest.raises(HTTPException) as exc:
-                await record_fulfilment(bad_body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
+                await record_fulfilment(bad_body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
             assert exc.value.status_code == 400
 
             freeform = review_body(mock_db,
@@ -764,7 +764,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 collection_venue="District Hospital",
             )
             with pytest.raises(HTTPException) as exc:
-                await record_fulfilment(freeform, actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
+                await record_fulfilment(freeform, actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
             assert exc.value.status_code == 400
 
             good_body = review_body(mock_db,
@@ -773,7 +773,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 status="deferred",
                 specs_collection_day_id=str(day1),
             )
-            res1 = await record_fulfilment(good_body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
+            res1 = await record_fulfilment(good_body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
             assert res1["slip"]["version"] == 1
             assert res1["slip"]["active"] is True
             assert res1["slip"]["collection_date"] == SCHEDULE_DAY
@@ -788,7 +788,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 status="deferred",
                 specs_collection_day_id=str(day2),
             )
-            res2 = await record_fulfilment(update_body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
+            res2 = await record_fulfilment(update_body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
             assert res2["slip"]["version"] == 2
             assert res2["slip"]["collection_date"] == "2026-09-20"
 
@@ -830,7 +830,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 status="deferred",
                 specs_collection_day_id=str(specs_day_id),
             )
-            res1 = await record_fulfilment(body1, actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
+            res1 = await record_fulfilment(body1, actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
             assert res1["fulfilment"]["status"] == "deferred"
 
             specs_day = await mock_db.specs_collection_days.find_one({"_id": specs_day_id})
@@ -845,7 +845,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 status="deferred",
                 specs_collection_day_id=str(specs_day_id),
             )
-            res2 = await record_fulfilment(body2, actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
+            res2 = await record_fulfilment(body2, actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
             assert res2["fulfilment"]["status"] == "deferred"
             specs_day = await mock_db.specs_collection_days.find_one({"_id": specs_day_id})
             assert specs_day.get("seats_taken") in (None, 0)
@@ -876,7 +876,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 transcription_id=str(t_id), item_type="specs_made", status="deferred",
                 specs_collection_day_id=str(day1),
             )
-            await record_fulfilment(body1, actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
+            await record_fulfilment(body1, actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
 
             d1 = await mock_db.specs_collection_days.find_one({"_id": day1})
             assert d1.get("seats_taken") in (None, 0)
@@ -885,7 +885,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 transcription_id=str(t_id), item_type="specs_made", status="deferred",
                 specs_collection_day_id=str(day2),
             )
-            await record_fulfilment(body2, actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
+            await record_fulfilment(body2, actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
 
             d1_after = await mock_db.specs_collection_days.find_one({"_id": day1})
             d2_after = await mock_db.specs_collection_days.find_one({"_id": day2})
@@ -910,12 +910,12 @@ class TestFulfilmentDecomposedAndInvariants:
                 review_body(mock_db, transcription_id=str(t_id), item_type="specs_made", status="deferred",
                                specs_collection_day_id=str(day_id)),
                 actor={"_id": ObjectId(), "role": "clinical_desk_operator"},
-            )
+             background_tasks=None)
             with pytest.raises(HTTPException) as exc:
                 await record_fulfilment(
                     review_body(mock_db, transcription_id=str(t_id), item_type="specs_fixed", status="fulfilled"),
                     actor={"_id": ObjectId(), "role": "clinical_desk_operator"},
-                )
+                 background_tasks=None)
             assert exc.value.status_code == 409
             day = await mock_db.specs_collection_days.find_one({"_id": day_id})
             assert day.get("seats_taken") in (None, 0)
@@ -939,12 +939,12 @@ class TestFulfilmentDecomposedAndInvariants:
                 review_body(mock_db, transcription_id=str(t_id), item_type="specs_made", status="deferred",
                                specs_collection_day_id=str(day_id)),
                 actor={"_id": ObjectId(), "role": "clinical_desk_operator"},
-            )
+             background_tasks=None)
             res = await record_fulfilment(
                 review_body(mock_db, transcription_id=str(t_id), item_type="specs_made", status="deferred",
                                specs_collection_day_id=str(day_id)),
                 actor={"_id": ObjectId(), "role": "clinical_desk_operator"},
-            )
+             background_tasks=None)
             assert res["slip"]["version"] == 2
             day = await mock_db.specs_collection_days.find_one({"_id": day_id})
             assert day.get("seats_taken") in (None, 0)
@@ -969,14 +969,14 @@ class TestFulfilmentDecomposedAndInvariants:
                 review_body(mock_db, transcription_id=str(t_a), item_type="specs_made", status="deferred",
                                specs_collection_day_id=str(day_id)),
                 actor=actor,
-            )
+             background_tasks=None)
             day = await mock_db.specs_collection_days.find_one({"_id": day_id})
             assert day.get("seats_taken") in (None, 0)
             second = await record_fulfilment(
                 review_body(mock_db, transcription_id=str(t_b), item_type="specs_made", status="deferred",
                                specs_collection_day_id=str(day_id)),
                 actor=actor,
-            )
+             background_tasks=None)
             assert second["fulfilment"]["status"] == "deferred"
             day = await mock_db.specs_collection_days.find_one({"_id": day_id})
             assert day.get("seats_taken") in (None, 0)
@@ -1008,7 +1008,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 status="deferred",
                 ot_schedule_day_id=str(ot_day_id)
             )
-            res1 = await record_fulfilment(body1, actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
+            res1 = await record_fulfilment(body1, actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
             assert res1["fulfilment"]["status"] == "deferred"
             
             ot_day = await mock_db.ot_schedule_days.find_one({"_id": ot_day_id})
@@ -1024,7 +1024,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 ot_schedule_day_id=str(ot_day_id)
             )
             with pytest.raises(HTTPException) as exc:
-                await record_fulfilment(body2, actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
+                await record_fulfilment(body2, actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
             assert exc.value.status_code == 409
             assert exc.value.detail["code"] == "NO_CLINICAL_DAY_AVAILABLE"
             assert "Call the admin" in exc.value.detail["message"]
@@ -1051,13 +1051,13 @@ class TestFulfilmentDecomposedAndInvariants:
             })
 
             body1 = review_body(mock_db,transcription_id=str(t_id), item_type="ot", status="deferred", ot_schedule_day_id=str(ot_day1))
-            await record_fulfilment(body1, actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
+            await record_fulfilment(body1, actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
             
             d1 = await mock_db.ot_schedule_days.find_one({"_id": ot_day1})
             assert d1["seats_taken"] == 1
 
             body2 = review_body(mock_db,transcription_id=str(t_id), item_type="ot", status="deferred", ot_schedule_day_id=str(ot_day2))
-            await record_fulfilment(body2, actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
+            await record_fulfilment(body2, actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
 
             d1_after = await mock_db.ot_schedule_days.find_one({"_id": ot_day1})
             d2_after = await mock_db.ot_schedule_days.find_one({"_id": ot_day2})
@@ -1093,7 +1093,7 @@ class TestFulfilmentDecomposedAndInvariants:
                     ot_schedule_day_id=str(ot_day_id)
                 )
                 try:
-                    await record_fulfilment(body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"})
+                    await record_fulfilment(body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
                     return "SUCCESS"
                 except HTTPException as e:
                     return f"FAIL_{e.status_code}"

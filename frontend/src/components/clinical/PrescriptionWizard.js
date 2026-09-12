@@ -160,8 +160,8 @@ export function PrescriptionWizard({
   const position = Math.min(index, steps.length - 1);
   const canAdvance = stepComplete(current.key, rx);
 
-  const goNext = () => {
-    saveStep?.();
+  const goNext = async () => {
+    if (await saveStep?.() === false) return;
     setIndex((i) => Math.min(i + 1, steps.length - 1));
   };
 

@@ -5,6 +5,7 @@ import signal
 import sys
 import time
 from pathlib import Path
+from typing import NoReturn
 from urllib.parse import unquote
 
 from fastapi import HTTPException, Request
@@ -15,7 +16,7 @@ _active = False
 _requests: dict[str, list[float]] = {}
 
 
-def fail(status: int, code: str, message: str):
+def fail(status: int, code: str, message: str) -> NoReturn:
     raise HTTPException(status_code=status, detail={'code': code, 'message': message})
 
 

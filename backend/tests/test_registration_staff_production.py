@@ -150,7 +150,7 @@ def test_public_duplicate_errors_exclude_patient_records(monkeypatch):
         body = RegisterBody(full_name="Patient", camp_day_id=str(ObjectId()))
         request = Request({"type": "http", "client": ("audit-client", 1234), "headers": []})
         with pytest.raises(HTTPException) as exc:
-            await routes_registration.self_register(body, request)
+            await routes_registration.self_register(body, request, background_tasks=None)
         assert exc.value.status_code == 409
         assert exc.value.detail == {"code": "DUPLICATE_IN_CAMP", "message": "Already registered in this camp"}
 

@@ -146,16 +146,6 @@ async def _duplicate_hits(
     return hits
 
 
-async def _check_registration_duplicates(
-    db: AsyncIOMotorDatabase,
-    camp_id: ObjectId | str,
-    body: RegisterBody,
-    person: dict | None = None,
-) -> Optional[Dict[str, Any]]:
-    hits = await _duplicate_hits(db, camp_id, body, person)
-    return hits[0] if hits else None
-
-
 async def _assert_capacity(db: AsyncIOMotorDatabase, day: dict) -> None:
     limit = day.get("seat_limit") or 0
     if limit <= 0:
@@ -204,14 +194,21 @@ async def _overwrite_manual(
         "manual_exception": None,
     }
     try:
-        await db.patients.update_one({"_id": target["_id"]}, {"$set": updates})
+        p = await db.patients.find_one_and_update(
+            {"_id": target["_id"], "aadhaar_scanned": {"$ne": True}, "person_id": None},
+            {"$set": updates}, return_document=True,
+        )
     except DuplicateKeyError:
         if person:
             existing = await db.patients.find_one({"person_id": person["_id"], "camp_id": target["camp_id"]})
             if existing:
                 raise _dup_409(existing)
         raise
-    p = await db.patients.find_one({"_id": target["_id"]})
+    if not p:
+        raise HTTPException(status_code=409, detail={
+            "code": "NOT_A_MANUAL_ENTRY",
+            "message": "This registration already has Aadhaar on file. Scan again.",
+        })
     return ser_patient(p), False
 
 
@@ -325,20 +322,25 @@ async def _insert_patient_document(
     person: dict | None,
     camp_id: ObjectId | str,
 ) -> Tuple[Dict[str, Any], bool]:
-    try:
-        res = await db.patients.insert_one(doc)
-        doc["_id"] = res.inserted_id
-        return ser_patient(doc), True
-    except DuplicateKeyError:
-        if body.registration_request_id:
-            existing = await db.patients.find_one({"registration_request_id": body.registration_request_id})
-            if existing:
-                return _replay_registration(existing, body, camp_id)
-        if person:
-            existing = await db.patients.find_one({"person_id": person["_id"], "camp_id": camp_id})
-            if existing:
-                raise _dup_409(existing)
-        raise
+    retries = 2
+    while True:
+        try:
+            res = await db.patients.insert_one(doc)
+            doc["_id"] = res.inserted_id
+            return ser_patient(doc), True
+        except DuplicateKeyError as exc:
+            if body.registration_request_id:
+                existing = await db.patients.find_one({"registration_request_id": body.registration_request_id})
+                if existing:
+                    return _replay_registration(existing, body, camp_id)
+            if person:
+                existing = await db.patients.find_one({"person_id": person["_id"], "camp_id": camp_id})
+                if existing:
+                    raise _dup_409(existing)
+            if (exc.details or {}).get("keyPattern") != {"patient_qr": 1} or not retries:
+                raise
+            retries -= 1
+            doc["patient_qr"] = new_patient_code()
 
 
 async def _create_registration(
@@ -445,8 +447,8 @@ def _validate_manual_identity(body: RegisterBody, now) -> None:
 async def desk_register(
     body: RegisterBody,
     request: Request,
+    background_tasks: BackgroundTasks,
     actor: dict = Depends(require_staff),
-    background_tasks: BackgroundTasks = None,
 ) -> Dict[str, Any]:
     if not body.full_name or not body.full_name.strip():
         raise HTTPException(status_code=400, detail="Full name is required")
@@ -467,7 +469,7 @@ async def desk_register(
 
 
 @router.post("/self-register")
-async def self_register(body: RegisterBody, request: Request, background_tasks: BackgroundTasks = None) -> Dict[str, Any]:
+async def self_register(body: RegisterBody, request: Request, background_tasks: BackgroundTasks) -> Dict[str, Any]:
     ip = request.client.host if request.client else "unknown"
     now = now_utc()
     cutoff = now - timedelta(minutes=10)

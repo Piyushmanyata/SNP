@@ -41,7 +41,7 @@ async def _send_each(
 
 async def _camp_targets(db: AsyncIOMotorDatabase, event_date: str) -> List[Tuple[dict, str]]:
     days = await db.camp_days.find({"day_date": event_date}).to_list(2000)
-    targets = []
+    targets: List[Tuple[dict, str]] = []
     for day in days:
         camp = await db.camps.find_one({"_id": day["camp_id"]})
         venue = camp["venue"] if camp else ""
@@ -52,7 +52,7 @@ async def _camp_targets(db: AsyncIOMotorDatabase, event_date: str) -> List[Tuple
 
 async def _token_targets(
     db: AsyncIOMotorDatabase, item_type: str, event_date: str
-) -> List[Tuple[dict, str]]:
+) -> List[Tuple[dict, str, str | None, str | None]]:
     slips = await db.deferred_slips.find({
         "item_type": item_type,
         "active": True,
