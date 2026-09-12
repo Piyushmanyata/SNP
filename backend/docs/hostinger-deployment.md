@@ -5,9 +5,9 @@
 - Application domain: `sikarkolkata.io`.
 - VPS: `82.112.234.39`, Ubuntu 24.04.4 LTS, 2 CPUs, 8 GB RAM.
 - Runtime: Docker Engine 29.8.0 and Docker Compose 5.5.1.
-- Application release: `6f5ab0cb4bd7e58bbf1aacefbaf54db97ff0f3e7` (one-scan door, full-page prescription, short patient code, 12 September 2026).
-- Release directory: `/opt/snp/releases/6f5ab0cb4bd7e58bbf1aacefbaf54db97ff0f3e7`.
-- Previous releases kept for rollback: `ac60bdfe2ecb13555ae449a7d299229ca8758afd`, `7eaed607ba0946c04dd32a405920a49db5e96fe7`, `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`, `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
+- Application release: `13854767e93b1f95bda958680ef27aff387bd36e` (reliability and CI audit, 12 September 2026).
+- Release directory: `/opt/snp/releases/13854767e93b1f95bda958680ef27aff387bd36e`.
+- Previous releases kept for rollback: `6f5ab0cb4bd7e58bbf1aacefbaf54db97ff0f3e7`, `ac60bdfe2ecb13555ae449a7d299229ca8758afd`, `7eaed607ba0946c04dd32a405920a49db5e96fe7`, `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`, `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
 - Current release link: `/opt/snp/current`.
 - Production Compose project: `snp`.
 - Production environment: `/opt/snp/.env.production`, readable only by root.
@@ -69,6 +69,16 @@ CI passed on all four pull requests before merge. On `main` at the deployed comm
 
 Two adversarial reviews ran against the change set. Correctness found that a scanned patient code left the camera stream and torch running, because the live scan engine only tears the camera down for a result whose `outcome` is `card`; and that the desk lookup and name search had no request sequencing, so a slow lookup could place a stale patient above a newer search and print the wrong prescription. Both were fixed before merge and both have regression tests that were verified to fail against the pre-fix code. Simplicity removed a `patient_qr` collision retry, the dead `new_uuid` helper, and class-name assertions duplicated by the reference snapshot.
 
+## Reliability and CI audit release
+
+[PR #32](https://github.com/Piyushmanyata/SNP/pull/32) merged after all five checks passed in [CI run 34685321529](https://github.com/Piyushmanyata/SNP/actions/runs/34685321529). The merged commit also passed [main CI run 34685464681](https://github.com/Piyushmanyata/SNP/actions/runs/34685464681). Backend, frontend and reminder images were rebuilt from that exact merge commit, and all six services started successfully under the existing `snp` project.
+
+The pre-deployment database archive is `/opt/snp/backup-export/pre-audit-13854767e93b1f95bda958680ef27aff387bd36e.archive.gz`. A `mongorestore --dryRun` accepted it without importing data. An off-machine copy is stored at `C:\Users\piyus\.ssh\snp-pre-audit-1385476.archive.gz`; both copies have SHA-256 `d8c34e8c662cb4737f83424ce78a638a00aed7423d39f6bb96a271e6a286767f`.
+
+No data migration was required. Startup ran the existing index initializer. Before/after counts and index-name sets were identical across all 18 collections, preserving two patients, one person, one camp and two users. No database reset or volume removal occurred. The prior images retain `rollback-13854767e93b1f95bda958680ef27aff387bd36e` tags. HTTPS homepage returned 200 and `/api/health` returned `{"status":"ok"}`; the deployed clinical module hash matches the release source. The current-release symlink points to the new release.
+
+See `adr-2026-09-ci-reliability.md`, `clinical-audit.md` and `production-registration-security.md` for fixes, verification boundaries and remaining reconciliation requirements.
+
 ## Access and operation
 
 The dedicated SSH key is installed. Connect from the operator's computer:
@@ -90,11 +100,11 @@ Keep the explicit `-p snp` project name across releases so the existing database
 
 ## Verification evidence
 
-- Frontend: ESLint passed, 26 Jest suites passed, 209 tests and one snapshot passed, and the Vite production build passed.
-- Backend: Python 3.12 compilation and fatal-error Flake8 passed; all 474 tests passed against isolated HTTP/API and MongoDB services. The suite emitted 24 existing warnings about short test-only JWT keys; production uses a generated 64-character secret.
+- Frontend: ESLint with zero warnings passed, 31 Jest suites passed, 289 tests and one snapshot passed, and the Vite production build passed. Initial gzip sizes are 85,589 JavaScript bytes and 5,448 CSS bytes.
+- Backend: Python 3.12 compilation and fatal-error Flake8 passed; all 580 tests passed against isolated HTTP/API and MongoDB services with zero skips. The suite emitted 24 non-failing upstream/test-secret warnings; production uses a generated 64-character secret.
 - Production Docker builds, Compose configuration validation, `nginx -t`, and Caddy configuration validation passed.
 - Correctness and simplicity reviews ran independently; neither found a confirmed deployment blocker.
-- No separate static typechecker is configured for this JavaScript/Python application; compilation is not static type coverage.
+- Mypy passes all 24 production Python modules. Checked JavaScript passes the six utility modules explicitly listed in `frontend/tsconfig.json`; React component static coverage remains incomplete.
 - The isolated verification project and its synthetic database were removed after the checks.
 
 ## Backups and remaining integrations
