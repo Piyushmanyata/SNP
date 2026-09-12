@@ -1,13 +1,13 @@
-# Hostinger deployment — 11 September 2026
+# Hostinger deployment — 12 September 2026
 
 ## Deployment record
 
 - Application domain: `sikarkolkata.io`.
 - VPS: `82.112.234.39`, Ubuntu 24.04.4 LTS, 2 CPUs, 8 GB RAM.
 - Runtime: Docker Engine 29.8.0 and Docker Compose 5.5.1.
-- Application release: `ac60bdfe2ecb13555ae449a7d299229ca8758afd` (no print after doctor seen, 11 September 2026).
-- Release directory: `/opt/snp/releases/ac60bdfe2ecb13555ae449a7d299229ca8758afd`.
-- Previous releases kept for rollback: `7eaed607ba0946c04dd32a405920a49db5e96fe7`, `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`, `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
+- Application release: `6f5ab0cb4bd7e58bbf1aacefbaf54db97ff0f3e7` (one-scan door, full-page prescription, short patient code, 12 September 2026).
+- Release directory: `/opt/snp/releases/6f5ab0cb4bd7e58bbf1aacefbaf54db97ff0f3e7`.
+- Previous releases kept for rollback: `ac60bdfe2ecb13555ae449a7d299229ca8758afd`, `7eaed607ba0946c04dd32a405920a49db5e96fe7`, `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`, `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
 - Current release link: `/opt/snp/current`.
 - Production Compose project: `snp`.
 - Production environment: `/opt/snp/.env.production`, readable only by root.
@@ -50,6 +50,24 @@ Post-deployment checks against the live host: `/api/health` returned `{"status":
 CI run [34597291085](https://github.com/Piyushmanyata/SNP/actions/runs/34597291085) passed every step: 268 frontend tests across 31 suites, 549 backend tests against real HTTP and MongoDB services, lint, dependency audits and the production image build.
 
 The first CI run on this branch failed on eight fulfilment tests the branch does not touch. They hardcoded `2026-09-10` and `2026-09-11` as future booking dates, which `routes_clinical.py` rejects once that date passes, so the suite rotted on the calendar — main was red on 11 September for the same reason, having last gone green on 8 September. Those dates now derive from `now_ist()`. Other test files still hold hardcoded future dates that will rot the same way.
+
+## One-scan door, full-page prescription and short patient code release
+
+The 12 September 2026 release deploys four merged pull requests at once: [PR 27](https://github.com/Piyushmanyata/SNP/pull/27) (QR-only self-registration, a Lock taken once), [PR 28](https://github.com/Piyushmanyata/SNP/pull/28) (the door is one scan and a print, manual entry admin-gated), [PR 29](https://github.com/Piyushmanyata/SNP/pull/29) (the prescription fills the page) and [PR 31](https://github.com/Piyushmanyata/SNP/pull/31) (the short patient code). See ADRs [0033](../../docs/adr/0033-a-lock-is-the-identity-evidence-taken-once.md), [0034](../../docs/adr/0034-the-door-is-one-scan-and-a-print.md), [0035](../../docs/adr/0035-manual-entry-at-the-door-is-admin-gated.md), [0036](../../docs/adr/0036-the-prescription-fills-the-page.md) and [0037](../../docs/adr/0037-the-patient-code-is-short-and-alphanumeric.md).
+
+The running `ac60bdf` images had no rollback tags, so `snp-backend`, `snp-frontend` and `snp-reminders` were tagged `rollback-ac60bdfe2ecb13555ae449a7d299229ca8758afd` before rebuilding. Retag those to `:latest` and run `up -d --no-build` to roll back — but see the database note below before doing so.
+
+**The production database was dropped as part of this release, at the owner's instruction.** It held test data only: 8 patients, 7 persons, 2 camps, 3 camp days, 3 OT schedule days, 2 specs collection days, 11 clinical operations, 5 fulfilments, 6 prescription revisions, 4 transcriptions and 3 user accounts. The drop was required, not cosmetic: ADR 0037 changes `patient_qr` from a lowercase UUID to an uppercase 8-character code, and `parse_patient_identifier` uppercases every identifier, so every code stored before this release had already stopped resolving. A pre-wipe archive, `snp_camps-20260912T040119Z.archive.gz`, was taken by restarting the backup container and copied to `/opt/snp/backup-export/` and to the operator's computer. **A rollback to any earlier release must restore that archive as well**, or the old code will run against an empty database.
+
+The database was dropped with `db.dropDatabase()` through `mongosh`, never with `down -v`; the `mongo_data` volume stayed attached throughout. `seed_admin()` then recreated the single `admin` account on backend startup. That account's PIN comes from `ADMIN_BOOTSTRAP_PIN` in `/opt/snp/.env.production` rather than being generated, so `/opt/snp/initial-admin.txt` and its private copy at `C:\Users\piyus\.ssh\snp-initial-admin.txt` remain correct and were not rewritten — their 8 September timestamp is expected, not stale. The account is again marked `must_change_pin`.
+
+No migration script was needed. `server.py` calls the idempotent `init_indexes()` on startup, which rebuilt every index against the empty database, the unique `patient_qr` index included.
+
+Post-deployment checks against the live host: `/api/health` returned `{"status":"ok"}`, the homepage returned 200, HTTP redirected with 308, and `https://www.sikarkolkata.io/` returned 301 to the apex under a valid certificate for `CN = www.sikarkolkata.io` (valid to 10 December 2026) — the first live confirmation of the `www` block added to the `Caddyfile` in `a7cdb38`. All six services reported healthy. An admin login returned 200 with `must_change_pin: true`, confirming the bootstrap account works. The served `Desk-glgWCkf3.js` carries `desk-find-input`, `door-manual-form` and `door-scan-status` and no longer carries `desk-lookup-input`, `wedge-panel` or `checkin-print-button`; `PrintPrescription-CtKaq14M.js` carries the `SNP:` QR prefix and `rx-sponsor-strip`. No probe created patient data.
+
+CI passed on all four pull requests before merge. On `main` at the deployed commit: 281 frontend tests across 31 suites, 110 pure backend tests, ESLint, the Vite production build and Flake8 all pass.
+
+Two adversarial reviews ran against the change set. Correctness found that a scanned patient code left the camera stream and torch running, because the live scan engine only tears the camera down for a result whose `outcome` is `card`; and that the desk lookup and name search had no request sequencing, so a slow lookup could place a stale patient above a newer search and print the wrong prescription. Both were fixed before merge and both have regression tests that were verified to fail against the pre-fix code. Simplicity removed a `patient_qr` collision retry, the dead `new_uuid` helper, and class-name assertions duplicated by the reference snapshot.
 
 ## Access and operation
 
