@@ -414,7 +414,7 @@ class TestRegistrationConfirmationSms:
             assert [s["type"] for s in sent] == ["registration", "registration"]
             assert [s["reg_no"] for s in sent] == [a["reg_no"], b["reg_no"]]
             assert {s["mobile"] for s in sent} == {"9876500001"}
-            assert {s["date"] for s in sent} == {TODAY}
+            assert {s["date"] for s in sent} == {"01-09-2026"}
             assert {s["venue"] for s in sent} == {"Sikar Bhawan"}
         asyncio.run(run())
 
@@ -480,7 +480,7 @@ async def _seen_patient_with_transcription(mock_db, measurements=None, fixed_pow
         "_id": rev_id, "patient_id": patient_id, "camp_id": camp_id,
         "prescribed_lines": ["medicine", "specs_fixed", "specs_made", "ot"],
         "none_prescribed": False, "specs_measurements": measurements,
-        "prescribed_medicines": [MEDICINE], "ot_eye": "R", "ot_procedure": "Cataract Surgery",
+        "prescribed_medicines": [MEDICINE], "ot_eye": "R", "ot_outcome": "iol_surgery",
         "fixed_power_r": fixed_power, "fixed_power_l": fixed_power,
     })
     await mock_db.transcriptions.insert_one({
@@ -617,7 +617,7 @@ class TestFulfilmentLines:
             out = await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
             assert out["slip"]["collection_date"] == "2026-09-20"
             assert sent == [{"type": "specs_token", "mobile": "9876500001", "reg_no": 501,
-                             "date": "2026-09-20, समय 09:00–17:00", "venue": "Optical Desk"}]
+                             "date": "20-09-2026, समय 09:00–17:00", "venue": "Optical Desk"}]
         asyncio.run(run())
 
     def test_deferring_ot_sends_the_ot_token_sms(self, monkeypatch):
@@ -634,7 +634,7 @@ class TestFulfilmentLines:
                            status="deferred", ot_schedule_day_id=str(ot_day))
             await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
             assert sent == [{"type": "ot_token", "mobile": "9876500001", "reg_no": 501,
-                             "date": "2026-10-02", "venue": "OT Theatre"}]
+                             "date": "02-10-2026", "venue": "OT Theatre"}]
         asyncio.run(run())
 
     def test_every_day_full_names_the_admin_action(self, monkeypatch):

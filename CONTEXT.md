@@ -125,15 +125,15 @@ The one of four Fulfilment lines the operator chooses for their current session.
 _Avoid_: role, station, desk assignment
 
 **Fulfilment line**:
-One of the four things a patient can be sent to after Seen: medicine, Fixed-power specs, Spectacles to be made, or Hospital surgery. Each has its own item type and record. The hospital line schedules surgery; operations do not occur at camp. A patient may use multiple lines, except that the two specs lines are mutually exclusive. An absent record means not needed.
-_Avoid_: station, queue, counter, three lines, not required (never a recorded outcome)
+One of the four things a patient can be sent to after Seen: medicine, Fixed-power specs, Spectacles to be made, or Hospital. Each has its own item type and record. The Hospital line carries the Hospital outcome; operations do not occur at camp. A prescription names at most one of Fixed-power specs, Spectacles to be made, or IOL surgery; medicine goes with any of them, and a Hospital referral goes with either specs line. A patient who declines IOL surgery and then wants spectacles needs a correction to the prescription. An absent record means not needed.
+_Avoid_: station, queue, counter, three lines, Hospital surgery (the line also holds referrals), not required (never a recorded outcome)
 
 **Fixed-power specs**:
 The clinical fulfilment outcome for ready-made spectacles handed over at camp. The operator picks the power from the Fixed power catalogue — one tap for both eyes, or one per eye when they differ — and no measurement grid is involved. If that power has run out, the desk may issue a neighbouring one, recorded as the Issued power. No Token, SMS or collection window is required.
 _Avoid_: ready specs, stock specs, issued specs
 
 **Spectacles to be made**:
-The clinical fulfilment outcome for spectacles that cannot be issued at camp and must be collected later. Deferral assigns the patient to a Specs collection day. A patient already issued Fixed-power specs cannot also be deferred here, and the reverse.
+The clinical fulfilment outcome for spectacles that cannot be issued at camp and must be collected later. Deferral assigns the patient to a Specs collection day. Never on the same prescription as Fixed-power specs or IOL surgery.
 _Avoid_: to-be specs, TBD specs, specs order, glasses order
 
 **Specs collection day**:
@@ -141,8 +141,36 @@ An admin-created day, unique per camp and date, on which patients deferred for S
 _Avoid_: specs slot, collection appointment, specs schedule
 
 **Token**:
-The short A6 paper printed when hospital surgery or Spectacles to be made is scheduled. It contains the patient's name, registration number, date or collection window and venue. Surgery tokens include the hospital phone and a reminder to bring the prescription, token, Aadhaar card, voter ID and mobile number. Rescheduling cancels the previous Token.
+The short A6 paper printed when IOL surgery or Spectacles to be made is scheduled — never for a Hospital referral or Surgery declined. It contains the patient's name, registration number, date or collection window and venue. An IOL surgery Token is titled as IOL surgery, names the eye, carries BP and blood sugar when recorded, the hospital phone, and the Bring list. Rescheduling cancels the previous Token.
 _Avoid_: slip, deferred slip, thermal slip, queue ticket, final token
+
+**Bring list**:
+The one list of what a patient carries on the day of IOL surgery: the prescription, the Token, Aadhaar card, ration card and mobile phone. Printed identically on the prescription and the IOL surgery Token. On the prescription it shares a Hindi and English band with the notice that only cataract (IOL) operations are arranged.
+_Avoid_: disclaimer, documents list, voter ID (not required)
+
+**Hospital outcome**:
+What the hospital line records for a patient, chosen explicitly by the operator and never inferred from the diagnosis: IOL surgery, Hospital referral, or Surgery declined. The prescription carries the doctor's choice — IOL surgery with its eye, or Hospital referral. Surgery declined is the patient's answer at the hospital station to a prescribed IOL surgery, the alternative to scheduling it. Only a scheduled IOL surgery takes an OT Schedule Day seat, prints a Token and sends an SMS.
+_Avoid_: OT status, surgery status, glaucoma rule
+
+**IOL surgery**:
+The only operation the trust arranges: cataract surgery with an intraocular lens at the hospital, scheduled onto an OT Schedule Day with a Token. One eye, one seat, one Token. When the paper prescribes both eyes, the eye the doctor marks first is scheduled and the second is noted on the prescription for a later camp.
+_Avoid_: OT procedure, cataract operation (the procedure is not free text), surgery (alone)
+
+**Hospital referral**:
+The doctor sends the patient to the hospital for care the trust does not arrange — glaucoma, for one. Complete once the prescription is committed; there is nothing to do at the hospital station. No seat, no Token, no SMS.
+_Avoid_: glaucoma surgery, referral token, OT referral
+
+**Surgery declined**:
+The patient does not want the prescribed IOL surgery, recorded at the hospital station instead of scheduling it. Never follows a Hospital referral. No seat, no Token, no SMS.
+_Avoid_: not required, no-show, cancelled
+
+**Displayed date**:
+Every date a person reads — on screen, on paper, in an SMS or in the Camp records export — is written DD-MM-YYYY, as 17-09-2026. Only the device's own date picker is exempt.
+_Avoid_: ISO date, YYYY-MM-DD (never shown to a person), DD/MM/YYYY
+
+**Clinical find**:
+How the clinical desk opens a patient: the Patient code on the prescription, read by the USB imager with no click wherever focus is or by the desk camera, or a registration number or name typed into one field. Scoped to the active camp. A name offers only patients who have arrived and been printed, showing the last four digits of the household phone to tell namesakes apart. An Aadhaar card is not a way in; the paper is what gets transcribed.
+_Avoid_: clinical lookup, Reg # box, patient search
 
 **Reference prescription**:
 The trust's own printed eye-camp form, photographed in the repository root. It is the authority for every string and every band of the printed prescription, including its two original misspellings.
@@ -157,7 +185,7 @@ Server-derived printing availability for the active camp: automatic on the IST c
 _Avoid_: paused camp, calendar-today-only print, client timer
 
 **Desk mode**:
-Camp-day mode when printing is open for the operating day: Scan at the door first, Pre-registration hidden. Pre-registration mode when printing is closed: Pre-registration first, Scan at the door last. Search stays in both.
+Camp-day mode when printing is open for the operating day: Scan at the door first, Pre-registration hidden. Pre-registration mode when printing is closed: Pre-registration first, and no Scan at the door, because the door refuses scans while printing is closed. Search stays in both.
 _Avoid_: camp mode, desk state, kiosk mode
 
 **Operating day**:
@@ -173,7 +201,7 @@ The admin decision that Scan at the door may accept typed identity today, taken 
 _Avoid_: manual mode, break-glass, override, failure unlock (the door has no failure counter)
 
 **Patient code**:
-The unguessable short code that identifies one registration, printed as a QR on the prescription and shown on the self-registration receipt. Scanning it at the door finds the patient; it is not identity evidence and never substitutes for a Lock.
+The unguessable short code that identifies one registration, printed as a QR on the prescription and shown on the self-registration receipt. Scanning it at the door or at the clinical desk finds the patient; it is not identity evidence and never substitutes for a Lock.
 _Avoid_: patient QR (that is the printed symbol, not the code), reg_no (guessable, and unique only within a camp)
 
 **Scan stall**:

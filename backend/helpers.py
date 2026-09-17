@@ -53,6 +53,14 @@ def today_ist_str() -> str:
     return now_ist().strftime("%Y-%m-%d")
 
 
+def display_date(day: str | None) -> str:
+    return date.fromisoformat(day).strftime("%d-%m-%Y") if day else ""
+
+
+def display_timestamp(dt: datetime | None) -> str:
+    return as_utc(dt).astimezone(IST).strftime("%d-%m-%Y %H:%M") if dt else ""
+
+
 def next_ist_midnight(now: datetime | None = None):
     ist = as_utc(now or now_utc()).astimezone(IST)
     nxt = ist.date() + timedelta(days=1)

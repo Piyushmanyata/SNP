@@ -71,7 +71,7 @@ export function AadhaarCameraView({
               <div className="absolute bottom-0 left-0 w-4 h-4 border-b-2 border-l-2 border-emerald-400 rounded-bl-lg" />
               <div className="absolute bottom-0 right-0 w-4 h-4 border-b-2 border-r-2 border-emerald-400 rounded-br-lg" />
               <p className="text-[11px] font-medium text-emerald-200 bg-slate-950/70 px-2 py-0.5 rounded-full shadow text-center">
-                Align Aadhaar QR inside frame
+                Align QR inside frame
               </p>
             </div>
           </div>

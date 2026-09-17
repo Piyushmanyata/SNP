@@ -615,7 +615,7 @@ class TestFulfilmentMatrix:
             camp_id, _day, patient = await _printed_patient(mock_db)
             done = await complete_prescription(
                 _complete_body(patient["_id"], "op-f05", prescribed_lines=["ot"],
-                               ot_eye="right", ot_procedure="Cataract Surgery",
+                               ot_eye="right", ot_outcome="iol_surgery",
                                prescribed_medicine_ids=[]),
                 actor=CLINICAL,
             )
@@ -674,7 +674,7 @@ class TestFulfilmentMatrix:
             for i, p in enumerate(patients):
                 done = await complete_prescription(
                     _complete_body(p["_id"], f"op-f07-{i}", prescribed_lines=["ot"],
-                                   ot_eye="left", ot_procedure="Cataract Surgery",
+                                   ot_eye="left", ot_outcome="iol_surgery",
                                    prescribed_medicine_ids=[]),
                     actor=CLINICAL,
                 )
@@ -703,12 +703,16 @@ class TestFulfilmentMatrix:
             done = await complete_prescription(
                 _complete_body(
                     patient["_id"], "op-f08",
-                    prescribed_lines=["specs_fixed", "specs_made"],
+                    prescribed_lines=["specs_fixed"],
                     specs_measurements=RX,
                     fixed_power_r=FIXED_POWER, fixed_power_l=FIXED_POWER,
                     prescribed_medicine_ids=[],
                 ),
                 actor=CLINICAL,
+            )
+            await mock_db.prescription_revisions.update_one(
+                {"_id": ObjectId(done["revision"]["id"])},
+                {"$set": {"prescribed_lines": ["specs_fixed", "specs_made"]}},
             )
             await record_fulfilment(
                 _issue_body(

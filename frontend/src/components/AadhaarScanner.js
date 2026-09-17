@@ -13,8 +13,9 @@ import {
 } from "./aadhaar";
 
 const PATIENT_CODE = /^snp:[a-z0-9-]+$/i;
+const PRESCRIPTION_QR_ONLY = "Scan the QR on the prescription.";
 
-export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStart, onFailure, onScanStall, onPatientCode, disabled }) {
+export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStart, onFailure, onScanStall, onPatientCode, patientCodeOnly = false, disabled }) {
   const [mode, setMode] = useState("idle");
   const [fallbacksRevealed, setFallbacksRevealed] = useState(false);
   const fileRef = useRef(null);
@@ -39,14 +40,21 @@ export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStar
 
   const decodeAny = useCallback(async (value) => {
     const text = String(value ?? "").trim();
-    if (!onPatientCode || !PATIENT_CODE.test(text)) return decode(text);
-    setMode("idle");
-    // The live scanner only tears the camera down for a result shaped like a
-    // card, so a found patient has to answer in that shape to stop the stream.
-    return await onPatientCode(text)
-      ? { outcome: "card", source: "patient_code" }
-      : { outcome: "not-aadhaar", message: "No patient found for that code." };
-  }, [decode, onPatientCode]);
+    if (onPatientCode && PATIENT_CODE.test(text)) {
+      setError("");
+      setOutcome("");
+      if (!await onPatientCode(text)) return { outcome: "not-aadhaar", message: "No patient found for that code." };
+      setMode("idle");
+      // The live scanner only tears the camera down for a result shaped like a
+      // card, so a found patient has to answer in that shape to stop the stream.
+      return { outcome: "card", source: "patient_code" };
+    }
+    if (!patientCodeOnly) return decode(text);
+    setOutcome("not-aadhaar");
+    setError(PRESCRIPTION_QR_ONLY);
+    onFailure?.("not-aadhaar");
+    return { outcome: "not-aadhaar", message: PRESCRIPTION_QR_ONLY };
+  }, [decode, onFailure, onPatientCode, patientCodeOnly, setError, setOutcome]);
 
   useEffect(() => {
     if (!busy && !passwordRequired) selectedFile.current = null;
@@ -146,17 +154,21 @@ export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStar
   };
 
   return (
-    <div className="rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/50 p-4 sm:p-5">
-      <div className="flex items-center gap-2 mb-3">
-        <ScanLine className="w-5 h-5 text-emerald-600" />
-        <p className="font-display font-bold text-slate-900">Scan Aadhaar QR</p>
-      </div>
-      <p className="text-xs text-slate-500 mb-3">
-        {onPatientCode ? "Scan the patient's Aadhaar QR or the QR on their registration slip." : "Scan the QR or upload a photo or e-Aadhaar PDF."}{onTranscribed ? " If the QR is unreadable, review extracted text." : ""} Uploaded documents and PDF passwords are not retained. Only the last four Aadhaar digits are saved.
-      </p>
+    <div className={patientCodeOnly ? "mt-3" : "rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/50 p-4 sm:p-5"}>
+      {!patientCodeOnly && (
+        <>
+          <div className="flex items-center gap-2 mb-3">
+            <ScanLine className="w-5 h-5 text-emerald-600" />
+            <p className="font-display font-bold text-slate-900">Scan Aadhaar QR</p>
+          </div>
+          <p className="text-xs text-slate-500 mb-3">
+            {onPatientCode ? "Scan the patient's Aadhaar QR or the QR on their registration slip." : "Scan the QR or upload a photo or e-Aadhaar PDF."}{onTranscribed ? " If the QR is unreadable, review extracted text." : ""} Uploaded documents and PDF passwords are not retained. Only the last four Aadhaar digits are saved.
+          </p>
+        </>
+      )}
 
       <AadhaarFallbackPanel
-        revealed={fallbacksRevealed}
+        revealed={fallbacksRevealed && !patientCodeOnly}
         torchAvailable={torchAvailable}
         torchOn={torchOn}
         toggleTorch={toggleTorch}
@@ -181,6 +193,7 @@ export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStar
         stopCamera={stopCamera}
         scanFile={upload}
         fileRef={fileRef}
+        cameraOnly={patientCodeOnly}
       />
 
       {busy && (

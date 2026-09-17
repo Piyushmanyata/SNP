@@ -2,10 +2,11 @@ import React from "react";
 import { Card } from "../ui";
 import { hasFixedPower, hasMeasurements } from "./FulfilmentStation";
 import { formatPower } from "./FixedPowerPicker";
+import { hospitalOutcomeLabel } from "./prescriptionRules";
 
-function Row({ k, v }) {
+function Row({ k, v, testId }) {
   return (
-    <div>
+    <div data-testid={testId}>
       <span className="text-slate-400 mr-2">{k}:</span>
       <span className="font-semibold text-slate-900">{v || "—"}</span>
     </div>
@@ -27,9 +28,8 @@ export function ReadOnlyPrescription({ transcription, emphasizePowers }) {
         <Row k="Blood sugar" v={transcription.blood_sugar} />
         <Row k="BP" v={transcription.bp} />
         <Row k="Remarks" v={transcription.remarks} />
-        <Row k="OT eye" v={transcription.ot_eye} />
-        <Row k="OT procedure" v={transcription.ot_procedure} />
-        <Row k="OT notes" v={transcription.ot_notes} />
+        <Row k="Hospital" v={hospitalOutcomeLabel(transcription)} testId="readonly-hospital" />
+        <Row k="Hospital notes" v={transcription.ot_notes} testId="readonly-hospital-notes" />
         <Row
           k="Medicines"
           v={(transcription.prescribed_medicines || []).map((x) => x.name).join(", ")}

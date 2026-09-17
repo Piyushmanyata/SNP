@@ -403,20 +403,38 @@ def _complete_rx(client, patient_id, operation_id, **extra):
     payload = {
         "patient_id": patient_id,
         "full_transcription_confirmed": True,
-        "prescribed_lines": ["medicine", "specs_fixed", "specs_made", "ot"],
+        "prescribed_lines": ["medicine", "specs_made", "ot"],
         "operation_id": operation_id,
-        "diagnosis_options": ["Cataract", "Presbyopia"],
+        "diagnosis_options": ["Glaucoma", "Presbyopia"],
         "prescribed_medicine_ids": [STATE["medicine_id"]],
         "bp": "120/80",
         "blood_sugar": "110",
-        "ot_eye": "left",
-        "ot_procedure": "Cataract Surgery",
+        "ot_outcome": "referral",
         "specs_measurements": RX_MEASUREMENTS,
-        "fixed_power_r": FIXED_POWER,
-        "fixed_power_l": FIXED_POWER,
     }
     payload.update(extra)
     return client.post(f"{API}/clinical/transcription/complete", json=payload, timeout=30)
+
+
+def _arrived_printed(admin, label, phone):
+    r = admin.post(f"{API}/register", json={
+        "full_name": f"TESTPATIENT {label} {TAG}", "age": 48, "gender": "F",
+        "phone": phone, "camp_day_id": STATE["day_id"],
+        "registration_request_id": str(uuid.uuid4()),
+    }, timeout=30)
+    assert r.status_code == 200, r.text
+    patient = r.json()["registration"]
+    assert admin.post(f"{API}/desk/arrive/{patient['id']}", timeout=30).status_code == 200
+    assert admin.post(f"{API}/desk/print/{patient['id']}", timeout=30).status_code == 200
+    return patient
+
+
+def _defer(client, transcription_id, revision_id, generation, operation_id, **extra):
+    return client.post(f"{API}/clinical/fulfilment", json={
+        "transcription_id": transcription_id, "status": "deferred",
+        "paper_reviewed": True, "reviewed_revision_id": revision_id,
+        "reviewed_generation": generation, "operation_id": operation_id, **extra,
+    }, timeout=30)
 
 
 # ---------------- clinical ----------------
@@ -459,7 +477,7 @@ class TestClinical:
             "patient_id": STATE["p1"]["id"], "diagnosis_options": ["Cataract", "Presbyopia"],
             "bp": "130/85", "blood_sugar": "110", "remarks": "TEST remarks",
             "prescribed_medicine_ids": [STATE["medicine_id"]],
-            "ot_eye": "right", "ot_procedure": "Cataract Surgery",
+            "ot_eye": "right", "ot_outcome": "iol_surgery",
             "specs_measurements": RX_MEASUREMENTS,
         }, timeout=30)
         assert r.status_code == 200, r.text
@@ -477,7 +495,7 @@ class TestClinical:
         clin = _clinical(admin)
         r = clin.post(f"{API}/clinical/transcription", json={
             "patient_id": STATE["p1"]["id"], "diagnosis_options": ["Cataract"],
-            "bp": "120/80", "ot_eye": "left", "ot_procedure": "Cataract Surgery",
+            "bp": "120/80", "ot_eye": "left", "ot_outcome": "iol_surgery",
             "prescribed_medicine_ids": [STATE["medicine_id"]],
             "specs_measurements": RX_MEASUREMENTS,
         }, timeout=30)
@@ -618,14 +636,24 @@ class TestClinical:
         assert r.status_code == 200, r.text
         assert r.json()["specs_day"]["start_time"] == "10:00"
 
-    def test_ot_deferral_consumes_seat_and_prints_slip(self, admin):
+    def test_a_hospital_referral_is_refused_at_the_hospital_station(self, admin):
+        r = _defer(_clinical(admin), STATE["trans_id"], STATE["rev_id"], STATE["gen"], f"op-referral-{TAG}",
+                   item_type="ot", ot_schedule_day_id=STATE["ot_day_id"])
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["code"] == "hospital_referral"
+
+    def test_iol_surgery_deferral_consumes_seat_and_prints_slip(self, admin):
+        assert admin.post(f"{API}/desk/arrive/{STATE['p2']['id']}", timeout=30).status_code == 200
+        assert admin.post(f"{API}/desk/print/{STATE['p2']['id']}", timeout=30).status_code == 200
         clin = _clinical(admin)
-        r = clin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": STATE["trans_id"], "item_type": "ot", "status": "deferred",
-            "ot_schedule_day_id": STATE["ot_day_id"],
-            "paper_reviewed": True, "reviewed_revision_id": STATE["rev_id"],
-            "reviewed_generation": STATE["gen"], "operation_id": f"op-ot-{TAG}",
-        }, timeout=30)
+        r = _complete_rx(clin, STATE["p2"]["id"], f"op-p2-{TAG}", prescribed_lines=["medicine", "ot"],
+                         diagnosis_options=["Cataract"], ot_outcome="iol_surgery", ot_eye="left", bp="130/85")
+        assert r.status_code == 200, r.text
+        STATE["trans2_id"] = r.json()["transcription"]["id"]
+        STATE["rev2_id"] = r.json()["revision"]["id"]
+        STATE["gen2"] = r.json()["registration"]["clinical_generation"]
+        r = _defer(clin, STATE["trans2_id"], STATE["rev2_id"], STATE["gen2"], f"op-ot-{TAG}",
+                   item_type="ot", ot_schedule_day_id=STATE["ot_day_id"])
         assert r.status_code == 200, r.text
         slip = r.json()["slip"]
         assert slip["item_type"] == "ot"
@@ -637,9 +665,9 @@ class TestClinical:
         assert day["seats_taken"] == 1
         assert day["seats_free"] == 0
 
-        looked = _clinical(admin).post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
+        looked = clin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p2"]["reg_no"])}, timeout=30)
         active = [s for s in looked.json()["slips"] if s.get("active")]
-        assert {s["item_type"] for s in active} == {"ot", "specs_made"}
+        assert {s["item_type"] for s in active} == {"ot"}
 
     def test_seat_limit_below_assigned(self, admin):
         r = admin.post(f"{API}/clinical/ot-days", json={
@@ -649,37 +677,37 @@ class TestClinical:
         assert r.status_code == 400, r.text
 
     def test_ot_day_full_rejects_further_deferral(self, admin):
-        assert admin.post(f"{API}/desk/arrive/{STATE['p2']['id']}", timeout=30).status_code == 200
-        assert admin.post(f"{API}/desk/print/{STATE['p2']['id']}", timeout=30).status_code == 200
+        p3 = _arrived_printed(admin, "Gamma", "9812345671")
         clin = _clinical(admin)
-        r = _complete_rx(clin, STATE["p2"]["id"], f"op-p2-{TAG}")
+        r = _complete_rx(clin, p3["id"], f"op-p3-{TAG}", prescribed_lines=["ot"], prescribed_medicine_ids=[],
+                         diagnosis_options=["Cataract"], ot_outcome="iol_surgery", ot_eye="right")
         assert r.status_code == 200, r.text
-        t2 = r.json()["transcription"]["id"]
-        STATE["trans2_id"] = t2
-        STATE["rev2_id"] = r.json()["revision"]["id"]
-        STATE["gen2"] = r.json()["registration"]["clinical_generation"]
-        r = clin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": t2, "item_type": "ot", "status": "deferred",
-            "ot_schedule_day_id": STATE["ot_day_id"],
-            "paper_reviewed": True, "reviewed_revision_id": STATE["rev2_id"],
-            "reviewed_generation": STATE["gen2"], "operation_id": f"op-p2-ot-{TAG}",
-        }, timeout=30)
+        done = r.json()
+        r = _defer(clin, done["transcription"]["id"], done["revision"]["id"],
+                   done["registration"]["clinical_generation"], f"op-p3-ot-{TAG}",
+                   item_type="ot", ot_schedule_day_id=STATE["ot_day_id"])
         assert r.status_code == 409, f"expected full-day refusal, got {r.status_code}: {r.text[:200]}"
 
     def test_specs_window_accepts_further_deferral_without_capacity(self, admin):
-        r = _clinical(admin).post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": STATE["trans2_id"], "item_type": "specs_made", "status": "deferred",
-            "specs_collection_day_id": STATE["specs_day_id"],
-            "paper_reviewed": True, "reviewed_revision_id": STATE["rev2_id"],
-            "reviewed_generation": STATE["gen2"], "operation_id": f"op-p2-specs-{TAG}",
-        }, timeout=30)
+        p4 = _arrived_printed(admin, "Delta", "9812345672")
+        clin = _clinical(admin)
+        r = _complete_rx(clin, p4["id"], f"op-p4-{TAG}", prescribed_lines=["specs_made"],
+                         prescribed_medicine_ids=[], ot_outcome=None)
+        assert r.status_code == 200, r.text
+        done = r.json()
+        r = _defer(clin, done["transcription"]["id"], done["revision"]["id"],
+                   done["registration"]["clinical_generation"], f"op-p4-specs-{TAG}",
+                   item_type="specs_made", specs_collection_day_id=STATE["specs_day_id"])
         assert r.status_code == 200, r.text
 
     def test_slip_fetch(self, admin):
         r = _clinical(admin).get(f"{API}/clinical/slip/{STATE['ot_slip_id']}", timeout=30)
         assert r.status_code == 200, r.text
-        assert r.json()["slip"]["item_type"] == "ot"
-        assert r.json()["registration"]["reg_no"] == STATE["p1"]["reg_no"]
+        slip = r.json()["slip"]
+        assert slip["item_type"] == "ot"
+        assert slip["ot_eye"] == "L"
+        assert slip["bp"] == "130/85"
+        assert r.json()["registration"]["reg_no"] == STATE["p2"]["reg_no"]
 
     def test_correction_append_only(self, admin):
         clin = _clinical(admin)
@@ -689,12 +717,11 @@ class TestClinical:
             "expected_generation": STATE["gen"],
             "operation_id": f"op-corr-{TAG}",
             "full_transcription_confirmed": True,
-            "prescribed_lines": ["medicine", "specs_fixed", "specs_made", "ot"],
-            "diagnosis_options": ["Cataract"],
+            "prescribed_lines": ["medicine", "specs_made", "ot"],
+            "diagnosis_options": ["Glaucoma"],
             "prescribed_medicine_ids": [STATE["medicine_id"]],
             "bp": "140/90",
-            "ot_eye": "left",
-            "ot_procedure": "Cataract Surgery",
+            "ot_outcome": "referral",
             "specs_measurements": RX_MEASUREMENTS,
         }, timeout=30)
         assert r.status_code == 200, r.text
@@ -969,13 +996,13 @@ class TestFixRegressions:
         assert a.status_code == 200 and b.status_code == 200, (a.text, b.text)
         day_a, day_b = a.json()["specs_day"]["id"], b.json()["specs_day"]["id"]
 
-        t2 = STATE["trans2_id"]
+        t1 = STATE["trans_id"]
         clin = _clinical(admin)
         r = clin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": t2, "item_type": "specs_made", "status": "deferred",
+            "transcription_id": t1, "item_type": "specs_made", "status": "deferred",
             "specs_collection_day_id": day_a,
-            "paper_reviewed": True, "reviewed_revision_id": STATE["rev2_id"],
-            "reviewed_generation": STATE["gen2"], "operation_id": f"op-rerecord-sp-a-{TAG}",
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev_id"],
+            "reviewed_generation": STATE["gen"], "operation_id": f"op-rerecord-sp-a-{TAG}",
         }, timeout=30)
         assert r.status_code == 200, r.text
 
@@ -985,24 +1012,24 @@ class TestFixRegressions:
 
         assert seats(day_a) == 0
         r = clin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": t2, "item_type": "specs_made", "status": "deferred",
+            "transcription_id": t1, "item_type": "specs_made", "status": "deferred",
             "specs_collection_day_id": day_b,
-            "paper_reviewed": True, "reviewed_revision_id": STATE["rev2_id"],
-            "reviewed_generation": STATE["gen2"], "operation_id": f"op-rerecord-sp-b-{TAG}",
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev_id"],
+            "reviewed_generation": STATE["gen"], "operation_id": f"op-rerecord-sp-b-{TAG}",
         }, timeout=30)
         assert r.status_code == 200, r.text
         assert seats(day_b) == 0
         assert seats(day_a) == 0, "previous Specs collection day seat leaked (not released)"
 
         r = clin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": t2, "item_type": "specs_fixed", "status": "fulfilled",
-            "paper_reviewed": True, "reviewed_revision_id": STATE["rev2_id"],
-            "reviewed_generation": STATE["gen2"], "operation_id": f"op-rerecord-sp-fix-{TAG}",
+            "transcription_id": t1, "item_type": "specs_fixed", "status": "fulfilled",
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev_id"],
+            "reviewed_generation": STATE["gen"], "operation_id": f"op-rerecord-sp-fix-{TAG}",
         }, timeout=30)
         assert r.status_code == 409, r.text
-        assert "Spectacles to be made" in str(r.json())
+        assert r.json()["detail"]["code"] == "line_not_prescribed"
         assert seats(day_b) == 0
-        looked = clin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p2"]["reg_no"])}, timeout=30)
+        looked = clin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
         assert looked.status_code == 200, looked.text
         active_specs = [s for s in looked.json()["slips"] if s.get("active") and s["item_type"] == "specs_made"]
         assert len(active_specs) == 1
@@ -1013,14 +1040,14 @@ class TestFixRegressions:
             "venue": "TEST Specs C", "start_time": "09:00", "end_time": "17:00"}, timeout=30)
         assert c.status_code == 200, c.text
         day_c = c.json()["specs_day"]["id"]
-        t2 = STATE["trans2_id"]
+        t1 = STATE["trans_id"]
         clin = _clinical(admin)
 
         r = clin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": t2, "item_type": "specs_made", "status": "deferred",
+            "transcription_id": t1, "item_type": "specs_made", "status": "deferred",
             "specs_collection_day_id": day_c,
-            "paper_reviewed": True, "reviewed_revision_id": STATE["rev2_id"],
-            "reviewed_generation": STATE["gen2"], "operation_id": f"op-excl-sp-c-{TAG}",
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev_id"],
+            "reviewed_generation": STATE["gen"], "operation_id": f"op-excl-sp-c-{TAG}",
         }, timeout=30)
         assert r.status_code == 200, r.text
 
@@ -1030,10 +1057,10 @@ class TestFixRegressions:
 
         assert seats() == 0
         r = clin.post(f"{API}/clinical/fulfilment", json={
-            "transcription_id": t2, "item_type": "specs_fixed", "status": "fulfilled",
+            "transcription_id": t1, "item_type": "specs_fixed", "status": "fulfilled",
             "specs_collection_day_id": day_c,
-            "paper_reviewed": True, "reviewed_revision_id": STATE["rev2_id"],
-            "reviewed_generation": STATE["gen2"], "operation_id": f"op-excl-sp-fix-{TAG}",
+            "paper_reviewed": True, "reviewed_revision_id": STATE["rev_id"],
+            "reviewed_generation": STATE["gen"], "operation_id": f"op-excl-sp-fix-{TAG}",
         }, timeout=30)
         assert r.status_code == 409, r.text
         assert seats() == 0

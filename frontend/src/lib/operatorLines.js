@@ -5,7 +5,7 @@ export const OPERATOR_LINES = [
   { key: "medicine", label: "Medicine" },
   { key: "specs_fixed", label: "Fixed-power specs" },
   { key: "specs_made", label: "Spectacles to be made" },
-  { key: "ot", label: "Hospital surgery" },
+  { key: "ot", label: "Hospital" },
 ];
 
 export function lineLabel(key) {

@@ -1,6 +1,7 @@
 import React from "react";
 import { Button, Badge, Alert, Input, Field } from "../ui";
 import { Printer } from "lucide-react";
+import { displayDate } from "../../lib/dates";
 
 const FIELD_LABELS = {
   full_name: "Name",
@@ -11,9 +12,8 @@ const FIELD_LABELS = {
   address: "Address",
 };
 
-export function ArrivedCard({ registration, onPrint, printingOpen }) {
+export function ArrivedCard({ registration, onPrint }) {
   const seen = registration.queue_status === "seen";
-  const windowShut = !printingOpen && !registration.printed_at;
   return (
     <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-4" data-testid="scan-arrived">
       <div className="flex flex-wrap items-center gap-3">
@@ -22,7 +22,7 @@ export function ArrivedCard({ registration, onPrint, printingOpen }) {
         <Badge tone="emerald">Arrived</Badge>
         {registration.camp_day_changed_from && (
           <span data-testid="scan-day-changed">
-            <Badge tone="amber">Moved from {registration.camp_day_changed_from}</Badge>
+            <Badge tone="amber">Moved from {displayDate(registration.camp_day_changed_from)}</Badge>
           </span>
         )}
       </div>
@@ -34,10 +34,6 @@ export function ArrivedCard({ registration, onPrint, printingOpen }) {
         {seen ? (
           <span className="text-xs text-slate-500" data-testid="scan-already-seen">
             The doctor has already seen this patient. There is nothing to print.
-          </span>
-        ) : windowShut ? (
-          <span className="text-xs text-slate-500" data-testid="scan-print-window-closed">
-            The print window is closed.
           </span>
         ) : (
           <Button size="sm" onClick={() => onPrint(registration)} data-testid="scan-print-button">
@@ -66,13 +62,16 @@ export function MismatchReview({ registration, diff, busy, onConfirm }) {
           </tr>
         </thead>
         <tbody>
-          {diff.map((row) => (
-            <tr key={row.field} className="border-t border-amber-200" data-testid={`diff-${row.field}`}>
-              <td className="py-1 text-slate-500">{FIELD_LABELS[row.field] || row.field}</td>
-              <td className="py-1 text-slate-700">{row.stored ?? "—"}</td>
-              <td className="py-1 font-semibold text-slate-900">{row.card ?? "—"}</td>
-            </tr>
-          ))}
+          {diff.map((row) => {
+            const shown = (value) => (row.field === "dob" ? displayDate(value) || "—" : value ?? "—");
+            return (
+              <tr key={row.field} className="border-t border-amber-200" data-testid={`diff-${row.field}`}>
+                <td className="py-1 text-slate-500">{FIELD_LABELS[row.field] || row.field}</td>
+                <td className="py-1 text-slate-700">{shown(row.stored)}</td>
+                <td className="py-1 font-semibold text-slate-900">{shown(row.card)}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
       <p className="text-xs text-slate-500 mt-3">
@@ -142,11 +141,11 @@ export function NoMatch({ card, phone, setPhone, busy, onSubmit }) {
   );
 }
 
-export function ScanOutcome({ result, busy, onPrint, onConfirm, phone, setPhone, onWalkIn, printingOpen }) {
+export function ScanOutcome({ result, busy, onPrint, onConfirm, phone, setPhone, onWalkIn }) {
   if (!result) return null;
   if (result.outcome === "arrived") {
     return (
-      <ArrivedCard registration={result.registration} onPrint={onPrint} printingOpen={printingOpen} />
+      <ArrivedCard registration={result.registration} onPrint={onPrint} />
     );
   }
   if (result.outcome === "mismatch_review") {

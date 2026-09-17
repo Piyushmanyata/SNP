@@ -4,7 +4,7 @@ exports[`PrintPrescription component the reference form snapshot and named strin
 <div
   class="print-a4 bg-white mx-auto shadow-lg text-slate-900 flex flex-col"
   data-testid="a4-prescription-sheet"
-  style="width: 210mm; min-height: auto; padding: 10mm 12mm;"
+  style="width: 210mm; height: auto; overflow: hidden; padding: 10mm 12mm;"
 >
   <div
     class="flex items-start justify-between border-b-4 border-slate-900 pb-2"
@@ -154,7 +154,7 @@ exports[`PrintPrescription component the reference form snapshot and named strin
           <span
             class="font-semibold"
           >
-            2026-09-01
+            01-09-2026
           </span>
         </p>
         <p>
@@ -482,9 +482,14 @@ exports[`PrintPrescription component the reference form snapshot and named strin
   </div>
   <div
     class="border border-slate-900 mt-2 p-2 text-[11px] font-semibold leading-tight"
-    data-testid="rx-disclaimer"
+    data-testid="rx-bring-list"
   >
-    Please carry your Aadhaar card, ration card and mobile phone on the day of the operation.
+    <p>
+      केवल मोतियाबिंद (IOL) ऑपरेशन की व्यवस्था की जाती है। ऑपरेशन के दिन लाएँ: यह पर्चा, टोकन, आधार कार्ड, राशन कार्ड, मोबाइल फ़ोन।
+    </p>
+    <p>
+      Only cataract (IOL) operations are arranged. On the day of the operation bring: this prescription, token, Aadhaar card, ration card, mobile phone.
+    </p>
   </div>
   <div
     class="flex justify-end mt-3 text-[12px]"

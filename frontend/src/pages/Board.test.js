@@ -38,7 +38,7 @@ const PAYLOAD = {
     medicine: { fulfilled: 4, not_available: 1 },
     specs_fixed: { fulfilled: 0 },
     specs_made: { deferred: 2 },
-    ot: { fulfilled: 1, deferred: 3 },
+    ot: { deferred: 3, declined: 2 },
   },
   activity: [
     { id: "d1", name: "Vol 1", last_arrival_at: "10:00", quiet: false },
@@ -93,10 +93,14 @@ describe("Camp-day board", () => {
     expect(table).not.toBeNull();
     expect(page.indexOf("Arrived")).toBeLessThan(page.indexOf("Registration activity"));
     expect(container.querySelector('[data-testid="board-context"]').textContent).toContain("Sikar Camp");
-    expect(container.querySelector('[data-testid="board-context"]').textContent).toContain("2026-09-01");
+    expect(container.querySelector('[data-testid="board-context"]').textContent).toContain("Sikar Camp · 01-09-2026 · as of 01-09-2026 15:30");
+    expect(container.querySelector('[data-testid="board-next-ot"]').textContent).toContain("02-09-2026");
+    expect(container.querySelector('[data-testid="board-next-specs"]').textContent).toContain("05-09-2026");
     expect(container.querySelector('[data-testid="board-next-ot"]').textContent).toContain("7 seats");
     expect(container.querySelector('[data-testid="board-next-specs"]').textContent).toContain("09:00–12:00");
     expect(container.querySelector('[data-testid="board-ot-scheduled"]').textContent).toContain("3");
+    expect(page).toContain("Surgery declined");
+    expect(container.querySelector('[data-testid="board-ot-declined"]').textContent).toBe("2");
     expect(container.querySelector('[data-testid="board-ot-done"]')).toBeNull();
     expect(page).not.toContain("OT done");
     expect(container.querySelector('[data-testid="quiet-text-d2"]').textContent).toBe("Quiet");

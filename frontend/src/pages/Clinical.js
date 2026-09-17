@@ -17,6 +17,8 @@ import {
 } from "../components/clinical";
 import { Button, Badge } from "../components/ui";
 
+const PATIENT_CODE_PAYLOAD_LENGTH = "SNP:".length + 8;
+
 const emptyRx = {
   diagnosis_options: [],
   diagnosis_other: "",
@@ -32,8 +34,8 @@ const emptyRx = {
     l_axis: "",
     add: "",
   },
-  ot_eye: "",
-  ot_procedure: "",
+  ot_eye: null,
+  ot_outcome: null,
   ot_notes: "",
   prescribed_medicine_ids: [],
   fixed_power_r: null,
@@ -61,6 +63,7 @@ export default function Clinical() {
   const [line, setLine] = useState(() => effectiveLine(user));
   const [picking, setPicking] = useState(() => !effectiveLine(user));
   const [lookup, setLookup] = useState("");
+  const [results, setResults] = useState(null);
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [banner, setBanner] = useState("");
@@ -146,40 +149,49 @@ export default function Clinical() {
       });
   }, []);
 
-  const lookupValue = useCallback(async (value) => {
-    if (busy || !value.trim()) return;
+  const find = useCallback(async (value, byName = false) => {
+    if (busy || !value) return false;
     const request = ++lookupSequence.current;
     setError("");
     setBanner("");
     setHistory(null);
     setData(null);
     setEditing(false);
+    setResults(null);
     try {
-      const { data: resData } = await api.post("/clinical/lookup", {
-        value: value.trim(),
-      });
-      if (request !== lookupSequence.current) return;
+      if (byName) {
+        const { data: found } = await api.get(`/clinical/search?q=${encodeURIComponent(value)}`);
+        if (request === lookupSequence.current) setResults(found.results);
+        return false;
+      }
+      const { data: resData } = await api.post("/clinical/lookup", { value });
+      if (request !== lookupSequence.current) return false;
       setData(resData);
       setRx(rxFromTranscription(resData.transcription));
+      return true;
     } catch (err) {
-      if (request !== lookupSequence.current) return;
+      if (request !== lookupSequence.current) return false;
       const p = errorPayload(err);
-      setData(null);
       setError(p?.message || formatApiError(err));
+      return false;
     }
   }, [busy]);
 
+  const openPatient = useCallback((value) => {
+    setLookup(value);
+    return find(value.trim());
+  }, [find]);
+
   const doLookup = useCallback((e) => {
     e?.preventDefault();
-    lookupValue(lookup.trim());
-  }, [lookup, lookupValue]);
+    const value = lookup.trim();
+    find(value, !/^\d+$/.test(value) && !/^snp:/i.test(value));
+  }, [lookup, find]);
 
   useWedgeBurst({
-    enabled: !picking && !busy,
-    onBurst: (v) => {
-      setLookup(v);
-      lookupValue(v);
-    },
+    enabled: !picking && !busy && !showCorrection,
+    minLength: PATIENT_CODE_PAYLOAD_LENGTH,
+    onBurst: openPatient,
   });
 
   const reload = useCallback(async () => {
@@ -314,6 +326,8 @@ export default function Clinical() {
         lookup={lookup}
         setLookup={setLookup}
         doLookup={doLookup}
+        openPatient={openPatient}
+        results={results}
         error={error}
         banner={banner}
         inputRef={lookupRef}

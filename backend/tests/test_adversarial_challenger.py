@@ -15,6 +15,7 @@ import io
 import gzip
 import asyncio
 import copy
+import re
 import xml.etree.ElementTree as ET
 from bson import ObjectId
 from fastapi import HTTPException
@@ -132,6 +133,9 @@ class MockCollection:
                                 return False
                         elif op == "$nin":
                             if dv in ov:
+                                return False
+                        elif op == "$regex":
+                            if not isinstance(dv, str) or not re.search(ov, dv):
                                 return False
                         else:
                             return False
@@ -314,7 +318,7 @@ async def insert_seen_patient(mock_db, p_id=None):
         "prescribed_lines": ["medicine", "specs_fixed", "specs_made", "ot"],
         "none_prescribed": False, "specs_measurements": RX,
         "prescribed_medicines": [MEDICINE], "fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER,
-        "ot_eye": "R", "ot_procedure": "Cataract Surgery",
+        "ot_eye": "R", "ot_outcome": "iol_surgery",
     })
     mock_db.last_rev_id = rev_id
     return p_id

@@ -137,7 +137,7 @@ class TranscriptionBody(BaseModel):
     fixed_power_r: Optional[float] = None
     fixed_power_l: Optional[float] = None
     ot_eye: Optional[str] = None
-    ot_procedure: Optional[str] = None
+    ot_outcome: Optional[str] = None
     ot_notes: Optional[str] = None
     expected_draft_version: int = 0
     operation_id: Optional[str] = None
@@ -161,7 +161,7 @@ class UndoCompletionBody(BaseModel):
 class FulfilmentBody(BaseModel):
     transcription_id: str
     item_type: str  # medicine | specs_fixed | specs_made | ot
-    status: str  # fulfilled | not_available | deferred
+    status: str  # fulfilled | not_available | partially_fulfilled | deferred | declined
     collection_date: Optional[str] = None
     collection_venue: Optional[str] = None
     ot_schedule_day_id: Optional[str] = None
@@ -196,7 +196,7 @@ class CorrectionBody(BaseModel):
     fixed_power_r: Optional[float] = None
     fixed_power_l: Optional[float] = None
     ot_eye: Optional[str] = None
-    ot_procedure: Optional[str] = None
+    ot_outcome: Optional[str] = None
     ot_notes: Optional[str] = None
 
 

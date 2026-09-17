@@ -22,8 +22,10 @@ def test_legacy_patient_qr_resolves_at_desk_and_clinical_lookup(monkeypatch, ent
     async def run():
         db = setup_mock_db(monkeypatch)
         patient_id = ObjectId()
+        camp_id = ObjectId()
+        await db.camps.insert_one({"_id": camp_id, "is_active": True})
         await db.patients.insert_one({
-            "_id": patient_id, "patient_qr": "e6d9244e-8d6f-40c1-8753-5717cda5d38e",
+            "_id": patient_id, "camp_id": camp_id, "patient_qr": "e6d9244e-8d6f-40c1-8753-5717cda5d38e",
             "queue_status": "registered",
         })
         patient = await routes_desk._resolve(entry)

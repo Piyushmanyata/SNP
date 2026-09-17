@@ -350,7 +350,7 @@ def test_issue_retry_finishes_failed_cleanup_without_releasing_ot_twice(monkeypa
         camp, _, patient = await _printed_patient(db)
         done = await routes_clinical.complete_prescription(_complete_body(
             patient["_id"], "complete", prescribed_lines=["ot"],
-            prescribed_medicine_ids=[], ot_eye="right", ot_procedure="Cataract Surgery",
+            prescribed_medicine_ids=[], ot_eye="right", ot_outcome="iol_surgery",
         ), actor=CLINICAL)
         old_day, new_day = ObjectId(), ObjectId()
         for day in (old_day, new_day):

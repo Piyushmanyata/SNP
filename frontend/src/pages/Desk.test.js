@@ -316,7 +316,7 @@ describe("Desk page", () => {
     await scanAtDoor();
 
     expect(container.querySelector('[data-testid="scan-day-changed"]').textContent)
-      .toContain("2026-08-28");
+      .toContain("28-08-2026");
   });
 
   test("a Manual entry match shows both value sets with no edit affordance", async () => {
@@ -328,6 +328,7 @@ describe("Desk page", () => {
         diff: [
           { field: "full_name", stored: "A Scanned User", card: "Aadhaar Scanned User" },
           { field: "age", stored: 39, card: 42 },
+          { field: "dob", stored: null, card: "1984-05-12" },
         ],
       },
     });
@@ -340,6 +341,7 @@ describe("Desk page", () => {
     expect(review.textContent).toContain("Aadhaar Scanned User");
     expect(review.textContent).toContain("39");
     expect(review.textContent).toContain("42");
+    expect(review.querySelector('[data-testid="diff-dob"]').textContent).toBe("Date of birth—12-05-1984");
     expect(review.querySelectorAll("input").length).toBe(0);
     expect(review.querySelectorAll("select").length).toBe(0);
     expect(review.textContent).not.toContain("Keep stored");
@@ -468,6 +470,7 @@ describe("Desk page", () => {
     act(() => {
       setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "9876500001");
     });
+    expect(document.body.querySelector('[data-testid="reg-day-select"]').textContent).toBe("27-08-2026 (today)");
     await act(async () => {
       document.body.querySelector('[data-testid="patient-register-submit"]').click();
     });
@@ -637,28 +640,6 @@ describe("Desk page", () => {
 
     expect(container.querySelector('[data-testid="print-button-101"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="print-window-closed-101"]')).toBeNull();
-  });
-
-  test("a closed print window withdraws print from the door scan card", async () => {
-    api.get.mockImplementation((url) => {
-      if (url === "/kpis") return Promise.resolve({ data: { registered: 45, seen: 0, pending: 0 } });
-      if (url === "/camps/active") {
-        return Promise.resolve({
-          data: {
-            camp: { id: "camp-1", name: "Howrah Eye Camp", venue: "Community Hall" },
-            days: [{ id: "day-1", day_date: "2026-08-27", is_today: true, printing_open: false }],
-          },
-        });
-      }
-      return Promise.resolve({ data: {} });
-    });
-    api.post.mockResolvedValueOnce({ data: { outcome: "arrived", registration: ARRIVED } });
-    await renderDesk();
-    await scanAtDoor();
-
-    expect(container.querySelector('[data-testid="scan-arrived"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="scan-print-button"]')).toBeNull();
-    expect(container.querySelector('[data-testid="scan-print-window-closed"]')).not.toBeNull();
   });
 
   test("three Failures reveal the typed form and there is no Register anyway", async () => {
@@ -864,11 +845,37 @@ describe("Desk page", () => {
     });
     await renderDesk();
     const cards = [...container.querySelectorAll("[data-desk-card]")].map((el) => el.getAttribute("data-desk-card"));
-    expect(cards).toEqual(["prereg", "find", "scan"]);
+    expect(cards).toEqual(["prereg", "find"]);
     expect(container.querySelector('[data-testid="kpi-registered-count"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="kpi-seen-count"]')).toBeNull();
-    expect(container.querySelector('[data-testid="door-scan-details"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="door-scan-details"]').open).toBeFalsy();
+    expect(container.querySelector('[data-testid="desk-card-scan"]')).toBeNull();
+    expect(container.querySelector('[data-testid="mock-aadhaar-scanner"]')).toBeNull();
+    expect(container.textContent).not.toContain("Scan at the door");
+  });
+
+  test("pre-registration mode shows a find error with no door card", async () => {
+    api.get.mockImplementation((url) => {
+      if (url === "/kpis") return Promise.resolve({ data: { registered: 12, seen: 0, pending: 0 } });
+      if (url === "/camps/active") {
+        return Promise.resolve({
+          data: {
+            camp: { id: "camp-1", name: "Howrah Eye Camp" },
+            days: [{ id: "day-1", day_date: "2026-08-27", is_today: true, printing_open: false }],
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+    api.post.mockRejectedValueOnce(new Error("Registration not found"));
+    await renderDesk();
+    act(() => {
+      setInput(container.querySelector('[data-testid="desk-find-input"]'), "404");
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="desk-find-button"]').click();
+    });
+    expect(container.querySelector('[data-testid="desk-card-scan"]')).toBeNull();
+    expect(container.textContent).toContain("Registration not found");
   });
 
   test("no camp day today is pre-registration mode", async () => {

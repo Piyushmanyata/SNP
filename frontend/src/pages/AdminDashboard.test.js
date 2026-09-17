@@ -252,6 +252,10 @@ describe("AdminDashboard component", () => {
     expect(container.querySelector('[data-testid="specs-days-list"]')).not.toBeNull();
     expect(container.textContent).toContain("Base Optical");
     expect(container.textContent).toContain("10:00–12:00");
+    expect(container.textContent).toContain("05-09-2026");
+    expect(container.textContent).toContain("12-09-2026");
+    expect(container.textContent).not.toContain("2026-09-05");
+    expect(container.textContent).not.toContain("2026-09-12");
     expect(container.textContent).toContain("Specs collection days");
 
     // Switch to Leaderboards tab
@@ -298,6 +302,9 @@ describe("AdminDashboard component", () => {
     });
 
     expect(api.get).toHaveBeenCalledWith("/camps/c-1/days");
+    expect(container.textContent).toContain("Krishnanagar Hall · 27-08-2026");
+    expect(container.textContent).toContain("01-09-2026");
+    expect(container.textContent).not.toContain("2026-08-27");
     const togglePrintBtn = container.querySelector('[data-testid="toggle-print-window-cd-1"]');
     expect(togglePrintBtn).not.toBeNull();
 

@@ -247,8 +247,8 @@ describe("Fulfilment lines", () => {
 
     const picker = container.querySelector('[data-testid="specs_collection_day_id-select"]');
     expect(picker.value).toBe("sp-2");
-    expect(picker.textContent).toContain("09:00–12:00");
-    expect(picker.textContent).toContain("Optical");
+    expect(picker.textContent).toContain("06-09-2026 · Optical · 09:00–12:00");
+    expect(picker.textContent).not.toContain("2026-09-06");
     expect(picker.textContent).not.toContain("Old Optical");
     expect(picker.textContent).not.toContain("full");
   });
@@ -275,17 +275,26 @@ describe("Fulfilment lines", () => {
     expect(container.querySelector('[data-testid="station-ot-save"]').disabled).toBe(true);
   });
 
-  test("surgery can only be scheduled at the hospital and prints its token", async () => {
+  test("a prescribed IOL surgery is scheduled with a printed token", async () => {
     const navigate = jest.fn();
     api.post.mockResolvedValueOnce({ data: { slip: { id: "hospital-token" } } });
     await renderStation({
       line: "ot",
-      data: { transcription: { id: "tx-1" }, registration: { id: "r" }, fulfilments: [] },
+      data: {
+        transcription: { id: "tx-1" },
+        committed_revision: { id: "rev-1", ot_outcome: "iol_surgery", ot_eye: "R" },
+        registration: { id: "r" },
+        fulfilments: [],
+      },
       otDays: [{ id: "ot-1", day_date: "2026-10-02", venue: "Bajaj Hospital", seats_free: 5 }],
       navigate,
     });
     expect(container.textContent).not.toContain("Done at camp");
-    expect(container.textContent).toContain("hospital");
+    const picker = container.querySelector('[data-testid="ot_schedule_day_id-select"]');
+    expect(picker.textContent).toContain("02-10-2026 · Bajaj Hospital");
+    expect(picker.textContent).not.toContain("2026-10-02");
+    expect(container.querySelector('[data-testid="station-ot-save"]').textContent).toBe("Schedule and print token");
+    expect(container.querySelector('[data-testid="station-ot-declined"]').textContent).toBe("Patient declined");
     await act(async () => {
       container.querySelector('[data-testid="station-ot-paper-review"]').click();
       container.querySelector('[data-testid="station-ot-save"]').click();
@@ -294,6 +303,92 @@ describe("Fulfilment lines", () => {
       item_type: "ot", status: "deferred", ot_schedule_day_id: "ot-1",
     }));
     expect(navigate).toHaveBeenCalledWith("/print/slip/hospital-token");
+  });
+
+  test("Patient declined records the refusal with no day and prints nothing", async () => {
+    const navigate = jest.fn();
+    const onDone = jest.fn();
+    const setBanner = jest.fn();
+    await renderStation({
+      line: "ot",
+      data: {
+        transcription: { id: "tx-1" },
+        committed_revision: { id: "rev-1", ot_outcome: "iol_surgery", ot_eye: "L" },
+        registration: { id: "r" },
+        fulfilments: [],
+      },
+      otDays: [{ id: "ot-1", day_date: "2026-10-02", venue: "Bajaj Hospital", seats_free: 0 }],
+      navigate,
+      onDone,
+      setBanner,
+    });
+    const declined = () => container.querySelector('[data-testid="station-ot-declined"]');
+    expect(declined().disabled).toBe(true);
+    await act(async () => container.querySelector('[data-testid="station-ot-paper-review"]').click());
+    expect(declined().disabled).toBe(false);
+    await act(async () => declined().click());
+    expect(api.post).toHaveBeenCalledWith("/clinical/fulfilment", expect.objectContaining({
+      item_type: "ot", status: "declined", ot_schedule_day_id: null, paper_reviewed: true,
+    }));
+    expect(navigate).not.toHaveBeenCalled();
+    expect(onDone).toHaveBeenCalled();
+    expect(setBanner).toHaveBeenCalledWith("Hospital: Surgery declined");
+  });
+
+  test("a Hospital referral offers nothing to record at the station", async () => {
+    await renderStation({
+      line: "ot",
+      data: {
+        transcription: { id: "tx-1" },
+        committed_revision: { id: "rev-1", ot_outcome: "referral" },
+        registration: { id: "r" },
+        fulfilments: [],
+      },
+      otDays: [{ id: "ot-1", day_date: "2026-10-02", venue: "Bajaj Hospital", seats_free: 5 }],
+    });
+    expect(container.querySelector('[data-testid="station-ot-referral"]').textContent)
+      .toContain("Hospital referral");
+    expect(container.querySelector("button")).toBeNull();
+    expect(container.querySelector("select")).toBeNull();
+    expect(container.querySelector("input")).toBeNull();
+  });
+
+  test("a scheduled IOL surgery can still be recorded as declined", async () => {
+    await renderStation({
+      line: "ot",
+      data: {
+        transcription: { id: "tx-1" },
+        committed_revision: { id: "rev-1", ot_outcome: "iol_surgery", ot_eye: "R" },
+        registration: { id: "r" },
+        fulfilments: [{ item_type: "ot", status: "deferred", ot_schedule_day_id: "ot-1" }],
+        slips: [{ id: "slip-ot", item_type: "ot", active: true }],
+      },
+      otDays: [{ id: "ot-1", day_date: "2026-10-02", venue: "Bajaj Hospital", seats_free: 5 }],
+    });
+    expect(container.querySelector('[data-testid="station-ot-recorded"]').textContent).toBe("IOL surgery scheduled");
+    expect(container.querySelector('[data-testid="station-ot-print-token"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="station-ot-save"]')).toBeNull();
+    const declined = () => container.querySelector('[data-testid="station-ot-declined"]');
+    expect(declined().disabled).toBe(true);
+    await act(async () => container.querySelector('[data-testid="station-ot-paper-review"]').click());
+    await act(async () => declined().click());
+    expect(api.post).toHaveBeenCalledWith("/clinical/fulfilment", expect.objectContaining({
+      item_type: "ot", status: "declined", ot_schedule_day_id: null,
+    }));
+  });
+
+  test("a declined surgery shows Surgery declined and offers nothing more", async () => {
+    await renderStation({
+      line: "ot",
+      data: {
+        transcription: { id: "tx-1" },
+        committed_revision: { id: "rev-1", ot_outcome: "iol_surgery", ot_eye: "R" },
+        registration: { id: "r" },
+        fulfilments: [{ item_type: "ot", status: "declined" }],
+      },
+    });
+    expect(container.querySelector('[data-testid="station-ot-recorded"]').textContent).toBe("Surgery declined");
+    expect(container.querySelector("button")).toBeNull();
   });
 
   test("a deferred specs_made record shows a reprint control", async () => {

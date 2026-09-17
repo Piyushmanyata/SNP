@@ -97,6 +97,17 @@ test("a scan submits the QR payload and never typed identity", async () => {
   expect(container.textContent).not.toContain("identity check");
 });
 
+test("dates read DD-MM-YYYY in the day picker, the card preview and the receipt", async () => {
+  await renderAndScan();
+  expect(container.querySelector('[data-testid="self-day-select"]').textContent).toBe("01-09-2026 (today)");
+  expect(container.querySelector('[data-testid="self-scanned-preview"]').textContent).toContain("14-06-1975");
+  api.post.mockResolvedValueOnce({ data: { receipt: { reg_no: 14, patient_qr: "qr-14", day_date: "2026-09-01" } } });
+  await submit();
+  const receipt = container.querySelector('[data-testid="self-receipt"]').textContent;
+  expect(receipt).toContain("01-09-2026");
+  expect(receipt).not.toContain("2026-09-01");
+});
+
 test("a failed read sends the patient to the desk and offers no typed path", async () => {
   await act(async () => root.render(<SelfRegister />));
   expect(container.querySelector('[data-testid="self-scan-required"]')).toBeNull();

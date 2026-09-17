@@ -100,7 +100,7 @@ async def send_patient_sms(
         reg_no = patient.get("reg_no")
         if not number or reg_no is None:
             return False
-        fields = {"reg_no": reg_no, "date": event_date, "venue": venue}
+        fields = {"reg_no": reg_no, "date": helpers.display_date(event_date), "venue": venue}
         if "{window}" in MESSAGE_COPY[message_type]:
             fields["window"] = _window_text(start_time, end_time)
         copy = MESSAGE_COPY[message_type].format(**fields)
@@ -108,7 +108,7 @@ async def send_patient_sms(
         if not row:
             return False
         provider_id = await asyncio.to_thread(
-            msg91.send_dlt_sms, message_type, number, reg_no, event_date + fields.get("window", ""), venue
+            msg91.send_dlt_sms, message_type, number, reg_no, fields["date"] + fields.get("window", ""), venue
         )
         sent = True
         await db.reminder_ledger.update_one(
