@@ -1,13 +1,13 @@
-# Hostinger deployment — 12 September 2026
+# Hostinger deployment — 17 September 2026
 
 ## Deployment record
 
 - Application domain: `sikarkolkata.io`.
 - VPS: `82.112.234.39`, Ubuntu 24.04.4 LTS, 2 CPUs, 8 GB RAM.
 - Runtime: Docker Engine 29.8.0 and Docker Compose 5.5.1.
-- Application release: `13854767e93b1f95bda958680ef27aff387bd36e` (reliability and CI audit, 12 September 2026).
-- Release directory: `/opt/snp/releases/13854767e93b1f95bda958680ef27aff387bd36e`.
-- Previous releases kept for rollback: `6f5ab0cb4bd7e58bbf1aacefbaf54db97ff0f3e7`, `ac60bdfe2ecb13555ae449a7d299229ca8758afd`, `7eaed607ba0946c04dd32a405920a49db5e96fe7`, `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`, `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
+- Application release: `730112cb5a122f99b592cce50bb8faf082b3eece` (Hospital outcomes and Clinical find, 17 September 2026).
+- Release directory: `/opt/snp/releases/730112cb5a122f99b592cce50bb8faf082b3eece`.
+- Previous releases kept for rollback: `13854767e93b1f95bda958680ef27aff387bd36e`, `6f5ab0cb4bd7e58bbf1aacefbaf54db97ff0f3e7`, `ac60bdfe2ecb13555ae449a7d299229ca8758afd`, `7eaed607ba0946c04dd32a405920a49db5e96fe7`, `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`, `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
 - Current release link: `/opt/snp/current`.
 - Production Compose project: `snp`.
 - Production environment: `/opt/snp/.env.production`, readable only by root.
@@ -78,6 +78,46 @@ The pre-deployment database archive is `/opt/snp/backup-export/pre-audit-1385476
 No data migration was required. Startup ran the existing index initializer. Before/after counts and index-name sets were identical across all 18 collections, preserving two patients, one person, one camp and two users. No database reset or volume removal occurred. The prior images retain `rollback-13854767e93b1f95bda958680ef27aff387bd36e` tags. HTTPS homepage returned 200 and `/api/health` returned `{"status":"ok"}`; the deployed clinical module hash matches the release source. The current-release symlink points to the new release.
 
 See `adr-2026-09-ci-reliability.md`, `clinical-audit.md` and `production-registration-security.md` for fixes, verification boundaries and remaining reconciliation requirements.
+
+## Hospital outcomes and Clinical find release
+
+[PR #35](https://github.com/Piyushmanyata/SNP/pull/35) implements [issue #34](https://github.com/Piyushmanyata/SNP/issues/34).
+
+- The Hospital line records IOL surgery (one eye) or Hospital referral, and the station records scheduled or Surgery declined.
+- Line rules are enforced on the prescription.
+- The Token and prescription share one Bring list; the prescription has an IOL-only bilingual band and a declared A4 page box.
+- Every displayed date, SMS date and export date is DD-MM-YYYY.
+- Clinical find is scoped to the active camp.
+- Pre-registration mode no longer offers Scan at the door.
+
+See ADRs [0038](../../docs/adr/0038-hospital-outcomes-are-explicit-and-iol-is-the-only-surgery.md) and [0039](../../docs/adr/0039-iol-only-band-shared-bring-list-and-a4-page-box.md).
+
+The PR merged after all five checks passed on its head commit in [CI run 35206682594](https://github.com/Piyushmanyata/SNP/actions/runs/35206682594), and the merge commit passed [main CI run 35206934454](https://github.com/Piyushmanyata/SNP/actions/runs/35206934454). Backend, frontend and reminder images were rebuilt from merge commit `730112c`, and all six services reported healthy under the existing `snp` project.
+
+The pre-deployment database archive is `/opt/snp/backup-export/pre-hospital-outcomes-730112cb5a122f99b592cce50bb8faf082b3eece.archive.gz`. `mongorestore --dryRun` accepted it without importing data. An off-machine copy is at `C:\Users\piyus\.ssh\snp-pre-hospital-outcomes-730112c.archive.gz`. Both copies have SHA-256 `954c6576569120376c815de11deb0d78eb5dc1660a51847c7d66dd3ce871d2b6`.
+
+No data migration was run, as the issue specified, because production holds test data only.
+
+- The stored `ot_procedure` field is no longer read, and a revision without `ot_outcome` is refused at the Hospital station.
+- Before and after counts and index-name sets were identical across every collection (`before-730112c…json`, `after-730112c…json` in `/opt/snp/backup-export/`).
+- No database reset or volume removal occurred.
+- The prior images carry `rollback-13854767e93b1f95bda958680ef27aff387bd36e` tags.
+
+Post-deployment checks against the live host:
+
+- `/api/health` returned `{"status":"ok"}`, the homepage returned 200, and HTTP redirected with 308.
+- `/api/clinical/search` exists: it returns 401 without a session.
+- The deployed `routes_clinical.py`, `clinical_state.py`, `routes_reports.py`, `sms.py` and `helpers.py` hashes match the release source.
+- The served bundles carry the new strings: `Clinical-CUOvmLoo.js` has the "Registration number or name" field, `PrintSlip-CqEw_a8Y.js` has "IOL Surgery", and `PrintPrescription-ZqWrJVxv.js` has the `size: A4` page rule.
+- The backend log showed no errors.
+- No probe created patient data.
+
+Two items remain before the camp:
+
+- One physical print of the prescription on the camp printer, to confirm it fits one A4 sheet.
+- Confirmation in the MSG91 console that a DD-MM-YYYY `date` value is accepted.
+
+The SMS copy still names voter ID, because aligning it with the Bring list needs DLT template re-approval.
 
 ## Access and operation
 
