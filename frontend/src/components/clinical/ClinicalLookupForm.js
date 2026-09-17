@@ -32,7 +32,7 @@ export function ClinicalLookupForm({
         </Button>
       </form>
       <p className="text-xs text-slate-700 mt-2">
-        Only patients who have arrived and whose prescription was printed can be opened. Scan the prescription QR with the USB scanner at any time.
+        Only patients who have arrived and whose prescription was printed can be opened. Scan the prescription QR with the USB imager at any time.
       </p>
       <AadhaarScanner patientCodeOnly onPatientCode={openPatient} disabled={busy} />
       {error && <Alert className="mt-3">{error}</Alert>}

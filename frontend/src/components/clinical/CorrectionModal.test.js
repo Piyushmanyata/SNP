@@ -88,17 +88,17 @@ test("a declined IOL surgery becomes spectacles only once the Hospital line is r
     onDone={jest.fn()}
   />));
   const save = () => container.querySelector('[data-testid="save-transcription-button"]');
-  expect(container.querySelector('[role="alert"]').textContent)
-    .toBe("Spectacles to be made and IOL surgery cannot be on one prescription.");
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+  expect(container.querySelector('[data-testid="prescribed-specs_made"]').checked).toBe(false);
+  expect(container.querySelector('[data-testid="prescribed-specs_made"]').disabled).toBe(true);
+
+  act(() => container.querySelector('[data-testid="prescribed-ot"]').click());
+  act(() => container.querySelector('[data-testid="prescribed-specs_made"]').click());
   act(() => {
     setInput(container.querySelector('[data-testid="specs-r_sph"]'), "-1.00");
     setInput(container.querySelector('[data-testid="specs-l_sph"]'), "-1.25");
     setInput(container.querySelector('[data-testid="correction-reason-input"]'), "Patient declined surgery, wants spectacles");
   });
-  expect(save().disabled).toBe(true);
-  expect(container.querySelector('[data-testid="prescribed-specs_fixed"]').disabled).toBe(true);
-
-  act(() => container.querySelector('[data-testid="prescribed-ot"]').click());
   expect(container.querySelector('[role="alert"]')).toBeNull();
   expect(container.querySelector('[data-testid="ot-outcome-iol_surgery"]')).toBeNull();
   expect(save().disabled).toBe(false);
@@ -106,6 +106,34 @@ test("a declined IOL surgery becomes spectacles only once the Hospital line is r
   const body = api.post.mock.calls[0][1];
   expect(body.prescribed_lines).toEqual(["specs_made"]);
   expect(body.changes).toEqual(expect.objectContaining({ ot_outcome: null, ot_eye: null }));
+});
+
+test("a correction that only changes the ticked lines can be saved", async () => {
+  await act(async () => root.render(<CorrectionForm
+    transcription={{ id: "tx-6", prescribed_medicines: [], specs_measurements: { r_sph: "-1.00", l_sph: "-1.25" } }}
+    line="specs_made"
+    prescribedLines={["medicine", "specs_made"]}
+    onDone={jest.fn()}
+  />));
+  act(() => {
+    container.querySelector('[data-testid="prescribed-medicine"]').click();
+    setInput(container.querySelector('[data-testid="correction-reason-input"]'), "Medicine was not written");
+  });
+  const save = container.querySelector('[data-testid="save-transcription-button"]');
+  expect(save.disabled).toBe(false);
+  await act(async () => save.click());
+  expect(api.post.mock.calls[0][1].prescribed_lines).toEqual(["specs_made"]);
+});
+
+test("a correction names every line that clashes", async () => {
+  await act(async () => root.render(<CorrectionForm
+    transcription={{ id: "tx-7", ot_outcome: "iol_surgery", ot_eye: "R" }}
+    line="medicine"
+    prescribedLines={["specs_fixed", "specs_made", "ot"]}
+    onDone={jest.fn()}
+  />));
+  expect(container.querySelector('[role="alert"]').textContent)
+    .toBe("Fixed-power specs, Spectacles to be made and IOL surgery cannot be on one prescription.");
 });
 
 test("choosing Hospital referral in a correction drops the eye", async () => {

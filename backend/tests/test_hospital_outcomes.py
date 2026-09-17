@@ -278,6 +278,33 @@ class TestHospitalStation:
             assert [s["type"] for s in sent] == ["ot_token"]
         asyncio.run(run())
 
+    @pytest.mark.parametrize("change", [
+        {"prescribed_lines": ["ot"], "ot_outcome": "referral", "ot_eye": None},
+        {"prescribed_lines": ["medicine"], "ot_outcome": None, "ot_eye": None,
+         "prescribed_medicine_ids": [MEDICINE["medicine_id"]]},
+    ])
+    def test_a_scheduled_iol_surgery_cannot_be_corrected_away_until_it_is_declined(self, monkeypatch, change):
+        async def run():
+            db = _mock(monkeypatch)
+            camp_id, _day, patient = await _printed_patient(db)
+            done = await _complete(patient, **_lines(["ot"]))
+            day_id = await _ot_day(db, camp_id)
+            await _record(done, "schedule", "deferred", day_id)
+            body = dict(
+                patient_id=str(patient["_id"]), reason="Doctor wrote referral", expected_generation=1,
+                operation_id="corr-away", full_transcription_confirmed=True, **change,
+            )
+            with pytest.raises(HTTPException) as exc:
+                await add_correction(CorrectionBody(**body), actor=CLINICAL)
+            status_code, detail = _refusal(exc)
+            assert status_code == 409
+            assert detail["code"] == "surgery_scheduled"
+            assert (await db.ot_schedule_days.find_one({"_id": day_id}))["seats_taken"] == 1
+            await _record(done, "decline", "declined")
+            corrected = await add_correction(CorrectionBody(**{**body, "operation_id": "corr-after"}), actor=CLINICAL)
+            assert corrected["revision"]["prescribed_lines"] == change["prescribed_lines"]
+        asyncio.run(run())
+
     @pytest.mark.parametrize("status", ["deferred", "declined"])
     def test_a_referral_cannot_be_recorded_at_the_station(self, monkeypatch, status):
         async def run():
@@ -351,6 +378,15 @@ class TestClinicalFind:
             for row in results:
                 assert set(row) == {"id", "reg_no", "full_name", "age", "gender_label", "phone_last4"}
                 assert re.fullmatch(r"\d{4}", row["phone_last4"])
+        asyncio.run(run())
+
+    def test_a_long_digit_payload_finds_nobody(self, monkeypatch):
+        async def run():
+            db = _mock(monkeypatch)
+            await _printed_patient(db)
+            with pytest.raises(HTTPException) as exc:
+                await clinical_lookup({"value": "2567820190301120000123456789"}, actor=CLINICAL)
+            assert exc.value.status_code == 404
         asyncio.run(run())
 
     @pytest.mark.parametrize("role", ["volunteer", "team_lead", "admin"])

@@ -34,7 +34,7 @@ export const FULFILMENT_LINES = {
     icon: Scissors,
     itemType: "ot",
     dayField: "ot_schedule_day_id",
-    dayLabel: "IOL surgery day",
+    dayLabel: "OT Schedule Day",
     actions: [
       { status: "deferred", label: "Schedule and print token" },
       { status: "declined", label: "Patient declined" },

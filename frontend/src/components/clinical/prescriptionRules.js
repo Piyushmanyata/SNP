@@ -11,9 +11,9 @@ export function lineClash(lines, outcome) {
     key === "iol_surgery"
       ? (lines || []).includes("ot") && outcome === "iol_surgery"
       : (lines || []).includes(key));
-  return chosen.length > 1
-    ? `${EXCLUSIVE_LINES[chosen[0]]} and ${EXCLUSIVE_LINES[chosen[1]]} cannot be on one prescription.`
-    : "";
+  if (chosen.length < 2) return "";
+  const names = chosen.map((key) => EXCLUSIVE_LINES[key]);
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]} cannot be on one prescription.`;
 }
 
 export function hospitalComplete(rx) {

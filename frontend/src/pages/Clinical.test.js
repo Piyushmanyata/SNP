@@ -192,6 +192,33 @@ describe("Clinical find", () => {
     expect(container.textContent).toContain("Scanned Patient");
   });
 
+  test("a USB scan while a correction is open does not switch patients", async () => {
+    let now = 0;
+    jest.spyOn(performance, "now").mockImplementation(() => now);
+    api.post.mockResolvedValueOnce({ data: {
+      registration: { id: "reg-7", reg_no: 7, full_name: "Corrected Patient", queue_status: "seen" },
+      person: { id: "p-7" },
+      transcription: { id: "tx-7", locked: true, diagnosis_options: ["Cataract"] },
+      committed_revision: { id: "rev-7", prescribed_lines: ["medicine"] },
+      clinical_generation: 1,
+      fulfilments: [],
+      slips: [],
+    } });
+    await renderPage();
+    typeLookup("7");
+    await submitLookup();
+    await act(async () => container.querySelector('[data-testid="add-correction-button"]').click());
+    expect(document.querySelector('[data-testid="correction-form"]')).not.toBeNull();
+    await act(async () => {
+      for (const key of [..."SNP:AB3K7T29", "Enter"]) {
+        now += 10;
+        document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      }
+    });
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("Corrected Patient");
+  });
+
   test("the camera opens a patient from the prescription QR and then closes", async () => {
     api.post.mockResolvedValueOnce(patientFound("1002", "Camera Patient"));
     await renderPage();

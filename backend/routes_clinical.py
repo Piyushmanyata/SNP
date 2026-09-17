@@ -170,7 +170,7 @@ async def clinical_lookup(body: dict, actor: dict = Depends(require_clinical)) -
     p = None
     if camp:
         p = await db.patients.find_one({"camp_id": camp["_id"], "patient_qr": value})
-        if not p and value.isdigit():
+        if not p and value.isdigit() and int(value) < 2 ** 63:
             p = await db.patients.find_one({"camp_id": camp["_id"], "reg_no": int(value)})
     if not p:
         raise HTTPException(status_code=404, detail="No matching registration found")
@@ -896,10 +896,9 @@ async def get_slip(slip_id: str, actor: dict = Depends(require_clinical)) -> Dic
         raise HTTPException(status_code=404, detail="Slip not found")
     p = await db.patients.find_one({"_id": s["patient_id"]})
     camp = await db.camps.find_one({"_id": p["camp_id"]}) if p and p.get("camp_id") else None
-    revision = None
+    surgery: dict = {}
     if s["item_type"] == "ot" and p and p.get("committed_revision_id"):
-        revision = await db.prescription_revisions.find_one({"_id": p["committed_revision_id"]})
-    surgery = revision or {}
+        surgery = await db.prescription_revisions.find_one({"_id": p["committed_revision_id"]}) or {}
     return {
         "slip": {**ser_slip(s), **{field: surgery.get(field) for field in ("ot_eye", "bp", "blood_sugar")}},
         "registration": ser_patient(p) if p else None,
@@ -971,6 +970,11 @@ async def add_correction(
     existing_op = await recover_operation(db, op_id, "correct", digest)
     if existing_op and existing_op.get("status") == "committed" and existing_op.get("result"):
         return existing_op["result"]
+    still_iol = "ot" in lines and content.get("ot_outcome") == "iol_surgery"
+    if t and not still_iol and await db.fulfilments.find_one(
+        {"transcription_id": t["_id"], "item_type": "ot", "status": "deferred"},
+    ):
+        raise conflict("surgery_scheduled", "Record Surgery declined at the Hospital station before changing a scheduled IOL surgery.")
     revision = await prepare_revision(
         db, p, actor, content, lines, none, op_id, "correct", body.reason.strip(),
         p.get("committed_revision_id"),

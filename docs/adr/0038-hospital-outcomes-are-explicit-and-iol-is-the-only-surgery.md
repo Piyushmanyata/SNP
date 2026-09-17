@@ -17,6 +17,7 @@ The prescription carried a free-text procedure and allowed "Both" eyes, so one s
 - The `ot` fulfilment matrix becomes `deferred` (scheduled) or `declined`. `fulfilled` is accepted for nothing on this line.
 - Any `ot` record for a prescription whose outcome is not `iol_surgery` is refused with `409 hospital_referral`. A referral is complete once the prescription is committed.
 - `declined` over a prior `deferred` uses the existing re-record path. It releases the held seat once, cancels the active Token and sends nothing. OT reminders read only active Tokens, so no reminder follows.
+- A correction that would leave a scheduled IOL surgery without an IOL surgery prescription (a referral, or no Hospital line) is refused with `409 surgery_scheduled`. Surgery declined is recorded first, so the seat and Token are released by the path above rather than stranded behind a referral the station refuses to touch.
 - Stored names do not change: the line key and item type stay `ot`, as ADR 0034 did for stored fields. "Hospital" is the glossary name.
 - No migration. Production holds test data only.
 

@@ -40,10 +40,14 @@ export function CorrectionForm({
   patientId,
   prescribedLines = [],
 }) {
-  const [initial] = useState(() => ({
-    ...Object.fromEntries(PRESCRIPTION_FIELDS.map((f) => [f, initialValue(transcription, f)])),
-    prescribed_lines: [...new Set([...(prescribedLines || []), line].filter((key) => key && key !== "doctor_rx"))],
-  }));
+  const [initial] = useState(() => {
+    const committed = prescribedLines || [];
+    const withLine = [...new Set([...committed, line].filter((key) => key && key !== "doctor_rx"))];
+    return {
+      ...Object.fromEntries(PRESCRIPTION_FIELDS.map((f) => [f, initialValue(transcription, f)])),
+      prescribed_lines: lineClash(withLine, transcription?.ot_outcome) ? committed : withLine,
+    };
+  });
   const [rx, setRx] = useState(initial);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -55,7 +59,8 @@ export function CorrectionForm({
     .map((field) => [field, rx[field]]));
   const hospital = rx.prescribed_lines.includes("ot");
   const canSubmit = Boolean(reason.trim())
-    && Object.keys(changes).length > 0
+    && (Object.keys(changes).length > 0
+      || JSON.stringify(rx.prescribed_lines) !== JSON.stringify(initial.prescribed_lines))
     && !lineClash(rx.prescribed_lines, rx.ot_outcome)
     && (!hospital || hospitalComplete(rx));
 

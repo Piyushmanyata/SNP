@@ -34,8 +34,8 @@ const emptyRx = {
     l_axis: "",
     add: "",
   },
-  ot_eye: "",
-  ot_outcome: "",
+  ot_eye: null,
+  ot_outcome: null,
   ot_notes: "",
   prescribed_medicine_ids: [],
   fixed_power_r: null,
@@ -189,7 +189,7 @@ export default function Clinical() {
   }, [lookup, find]);
 
   useWedgeBurst({
-    enabled: !picking && !busy,
+    enabled: !picking && !busy && !showCorrection,
     minLength: PATIENT_CODE_PAYLOAD_LENGTH,
     onBurst: openPatient,
   });
