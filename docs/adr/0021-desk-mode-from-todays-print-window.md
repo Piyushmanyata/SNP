@@ -12,6 +12,7 @@ Print window is already an admin-declared open/closed state on a camp day, and t
 
 - The desk has two modes, chosen by today's camp day and its Print window. Open is camp-day mode. Closed, or no camp day matching today at all, is pre-registration mode.
 - Pre-registration mode: the Pre-registration card first, Find one patient below it, Scan at the door collapsed at the bottom, and the counter strip reduced to Registered.
+  - *Amended by issue #34:* Scan at the door is not rendered in Pre-registration mode, because the server refuses every door scan while printing is closed.
 - Camp-day mode: Scan at the door first, Find one patient below it, Pre-registration not rendered, and the full Registered / Seen / Pending strip.
 - No camp-level print flag is added. The per-day state and its existing admin control stay the single source of truth, and the server's print gate is unchanged.
 - A door scan that finds no booking registers the walk-in from the card it already read: card values shown read-only, one household-mobile field, one button that registers and stamps Arrival. No second scan, no modal, and no new endpoint — it reuses the walk-in path the registration popup already uses.

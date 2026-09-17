@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
 from catalogue import format_power
 from db import get_db
-from helpers import as_utc, iso, ist_day_bounds, now_utc, today_ist_str
+from helpers import as_utc, display_date, display_timestamp, iso, ist_day_bounds, now_utc, today_ist_str
 from security import require_admin, require_staff, require_any, require_lead
 
 router = APIRouter(prefix="/api", tags=["reports"])
@@ -104,8 +104,17 @@ def _line_statuses(fulfilments: dict) -> List[str]:
         fulfilments.get("medicine", {}).get("status", ""),
         fulfilments.get("specs_fixed", {}).get("status", ""),
         fulfilments.get("specs_made", {}).get("status", ""),
-        fulfilments.get("ot", {}).get("status", ""),
     ]
+
+
+def _hospital_outcome(ot: dict, revision: dict) -> str:
+    if ot.get("status") == "deferred":
+        return "scheduled"
+    if ot.get("status") == "declined":
+        return "declined"
+    if "ot" in (revision.get("prescribed_lines") or []) and revision.get("ot_outcome") == "referral":
+        return "referred"
+    return ""
 
 
 def _diagnosis(t: dict) -> str:
@@ -134,9 +143,11 @@ def _medicine_cells(t: dict, medicine: dict) -> List[str]:
     return [";".join(prescribed), ";".join(not_given)]
 
 
-def _export_row(p: dict, t: dict, fulfilments: dict, day_dates: dict) -> List[Any]:
+def _export_row(p: dict, t: dict, fulfilments: dict, day_dates: dict, revision: dict) -> List[Any]:
     m = t.get("specs_measurements") or {}
     ot = fulfilments.get("ot", {})
+    hospital = _hospital_outcome(ot, revision)
+    scheduled = ot if hospital == "scheduled" else {}
     specs = fulfilments.get("specs_made", {})
     fixed = fulfilments.get("specs_fixed", {})
     cells = [
@@ -144,16 +155,17 @@ def _export_row(p: dict, t: dict, fulfilments: dict, day_dates: dict) -> List[An
         p.get("gender", ""), p.get("phone", ""), p.get("address", ""),
         p.get("aadhaar_last4", ""),
         "yes" if (p.get("manual_entry") or p.get("manual_exception")) else "no",
-        day_dates.get(p.get("camp_day_id"), ""),
-        iso(p.get("created_at")) or "", iso(p.get("arrived_at")) or "", iso(p.get("seen_at")) or "",
+        display_date(day_dates.get(p.get("camp_day_id"))),
+        display_timestamp(p.get("created_at")), display_timestamp(p.get("arrived_at")),
+        display_timestamp(p.get("seen_at")),
         _diagnosis(t), t.get("bp", "") or "", t.get("blood_sugar", "") or "",
         *[m.get(k, "") or "" for k in ("r_sph", "r_cyl", "r_axis", "l_sph", "l_cyl", "l_axis", "add")],
         *_medicine_cells(t, fulfilments.get("medicine", {})),
         _power_cell(t.get("fixed_power_r")), _power_cell(t.get("fixed_power_l")),
         _power_cell(fixed.get("issued_power_r")), _power_cell(fixed.get("issued_power_l")),
-        *_line_statuses(fulfilments),
-        ot.get("collection_date", "") or "", ot.get("collection_venue", "") or "",
-        specs.get("collection_date", "") or "",
+        *_line_statuses(fulfilments), hospital,
+        display_date(scheduled.get("collection_date")), scheduled.get("collection_venue", "") or "",
+        display_date(specs.get("collection_date")),
         specs.get("collection_venue", "") or "",
         specs.get("collection_start_time", "") or "",
         specs.get("collection_end_time", "") or "",
@@ -174,6 +186,9 @@ async def export_camp_records(camp_id: str | None = None, actor: dict = Depends(
         day_dates = {d["_id"]: d["day_date"] for d in days}
         pts = await db.patients.find({"camp_id": camp["_id"]}).to_list(100000)
         pids = [p["_id"] for p in pts]
+        rev_ids = [p["committed_revision_id"] for p in pts if p.get("committed_revision_id")]
+        rev_rows = await db.prescription_revisions.find({"_id": {"$in": rev_ids}}).to_list(100000) if rev_ids else []
+        rev_by_id = {r["_id"]: r for r in rev_rows}
         tx_rows = await db.transcriptions.find({"patient_id": {"$in": pids}}).to_list(100000) if pids else []
         tx_by_patient = {t["patient_id"]: t for t in tx_rows}
         tx_ids = [t["_id"] for t in tx_rows]
@@ -183,7 +198,10 @@ async def export_camp_records(camp_id: str | None = None, actor: dict = Depends(
             fulfil_by_tx.setdefault(f["transcription_id"], {})[f["item_type"]] = f
         for p in pts:
             t = tx_by_patient.get(p["_id"]) or {}
-            writer.writerow(_export_row(p, t, fulfil_by_tx.get(t["_id"], {}) if t else {}, day_dates))
+            writer.writerow(_export_row(
+                p, t, fulfil_by_tx.get(t["_id"], {}) if t else {}, day_dates,
+                rev_by_id.get(p.get("committed_revision_id")) or {},
+            ))
     buf.seek(0)
     return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv",
                              headers={"Content-Disposition": "attachment; filename=camp_records.csv"})
@@ -206,7 +224,7 @@ def _empty_board(as_of: str, state: str) -> Dict[str, Any]:
             "medicine": {"fulfilled": 0, "not_available": 0, "partially_fulfilled": 0},
             "specs_fixed": {"fulfilled": 0},
             "specs_made": {"deferred": 0},
-            "ot": {"fulfilled": 0, "deferred": 0},
+            "ot": {"deferred": 0, "declined": 0},
         },
         "activity": [],
         "quiet_count": 0,
@@ -267,12 +285,7 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
     activity.sort(key=lambda r: r["name"] or "")
     quiet_count = sum(1 for r in activity if r["quiet"])
 
-    fulfil_counts = {
-        "medicine": {"fulfilled": 0, "not_available": 0, "partially_fulfilled": 0},
-        "specs_fixed": {"fulfilled": 0},
-        "specs_made": {"deferred": 0},
-        "ot": {"fulfilled": 0, "deferred": 0},
-    }
+    fulfil_counts = _empty_board(as_of, "current")["fulfilment"]
     if tx_ids:
         fulfilments = await db.fulfilments.aggregate([
             {"$match": {"transcription_id": {"$in": tx_ids}}},

@@ -1,4 +1,4 @@
-import { OPERATOR_LINES, LINE_STORAGE_KEY, effectiveLine, writeSessionLine } from "./operatorLines";
+import { OPERATOR_LINES, LINE_STORAGE_KEY, effectiveLine, lineLabel, writeSessionLine } from "./operatorLines";
 
 beforeEach(() => sessionStorage.clear());
 
@@ -7,6 +7,10 @@ test("operators choose their line without an account assignment or a separate Rx
   expect(effectiveLine({ role: "clinical_desk_operator", line: "medicine" })).toBeNull();
   writeSessionLine("specs_fixed");
   expect(effectiveLine({ role: "clinical_desk_operator", line: "medicine" })).toBe("specs_fixed");
+});
+
+test("the ot line carries its glossary name, Hospital", () => {
+  expect(lineLabel("ot")).toBe("Hospital");
 });
 
 test("retired and invalid station preferences return to the picker", () => {

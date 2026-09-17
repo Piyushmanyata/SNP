@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import api, { formatApiError } from "../lib/api";
 import Layout from "../components/Layout";
 import { Card, Stat } from "../components/ui";
+import { displayDate, displayTimestamp } from "../lib/dates";
 
 const POLL_MS = 15000;
 
@@ -67,15 +68,15 @@ export default function Board() {
         )}
         {stale && (
           <p data-testid="board-stale">
-            Showing last snapshot from {data?.as_of}. Refresh failed{err ? `: ${err}` : "."}
+            Showing last snapshot from {displayTimestamp(data?.as_of)}. Refresh failed{err ? `: ${err}` : "."}
           </p>
         )}
         {data && (
           <>
             <p className="text-sm text-slate-600" data-testid="board-context">
               {data.camp?.name || "No camp"}
-              {data.day?.day_date ? ` · ${data.day.day_date}` : ""}
-              {data.as_of ? ` · as of ${data.as_of}` : ""}
+              {data.day?.day_date ? ` · ${displayDate(data.day.day_date)}` : ""}
+              {data.as_of ? ` · as of ${displayTimestamp(data.as_of)}` : ""}
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3" data-testid="board-kpis">
               <Stat label="Arrived" value={stages.arrived ?? 0} testid="board-arrived" />
@@ -101,15 +102,20 @@ export default function Board() {
                 testid="board-medicine-oos"
               />
               <Stat
-                label="OT scheduled"
+                label="IOL surgery scheduled"
                 value={fulfilment.ot?.deferred ?? 0}
                 testid="board-ot-scheduled"
+              />
+              <Stat
+                label="Surgery declined"
+                value={fulfilment.ot?.declined ?? 0}
+                testid="board-ot-declined"
               />
               <Stat
                 label="Next OT"
                 value={
                   data.next_ot
-                    ? `${data.next_ot.day_date} · ${data.next_ot.venue} · ${data.next_ot.seats_left} seats`
+                    ? `${displayDate(data.next_ot.day_date)} · ${data.next_ot.venue} · ${data.next_ot.seats_left} seats`
                     : "No day scheduled"
                 }
                 testid="board-next-ot"
@@ -118,7 +124,7 @@ export default function Board() {
                 label="Next Specs"
                 value={
                   data.next_specs
-                    ? `${data.next_specs.day_date} · ${data.next_specs.venue} · ${data.next_specs.start_time}–${data.next_specs.end_time}`
+                    ? `${displayDate(data.next_specs.day_date)} · ${data.next_specs.venue} · ${data.next_specs.start_time}–${data.next_specs.end_time}`
                     : "No day scheduled"
                 }
                 testid="board-next-specs"
@@ -144,7 +150,7 @@ export default function Board() {
                         className={row.quiet ? "bg-amber-50" : ""}
                       >
                         <td className="py-2 font-medium min-h-[44px]">{row.name}</td>
-                        <td>{row.last_arrival_at || "—"}</td>
+                        <td>{displayTimestamp(row.last_arrival_at) || "—"}</td>
                         <td>
                           <span data-testid={`quiet-text-${row.id}`}>
                             {row.quiet ? "Quiet" : "Active"}

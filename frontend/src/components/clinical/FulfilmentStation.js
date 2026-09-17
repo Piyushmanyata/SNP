@@ -3,6 +3,7 @@ import api, { formatApiError } from "../../lib/api";
 import { Button, Badge } from "../ui";
 import { Pill, Glasses, Scissors, Printer } from "lucide-react";
 import { FixedPowerPicker, formatPower } from "./FixedPowerPicker";
+import { displayDate } from "../../lib/dates";
 
 export const FULFILMENT_LINES = {
   medicine: {
@@ -29,14 +30,24 @@ export const FULFILMENT_LINES = {
     actions: [{ status: "deferred", label: "Defer and print Token" }],
   },
   ot: {
-    label: "Hospital surgery",
+    label: "Hospital",
     icon: Scissors,
     itemType: "ot",
     dayField: "ot_schedule_day_id",
-    dayLabel: "Hospital surgery day",
-    actions: [{ status: "deferred", label: "Schedule at hospital and print token" }],
+    dayLabel: "IOL surgery day",
+    actions: [
+      { status: "deferred", label: "Schedule and print token" },
+      { status: "declined", label: "Patient declined" },
+    ],
+    statusLabels: { deferred: "IOL surgery scheduled", declined: "Surgery declined" },
   },
 };
+
+const STATUS_TONES = { deferred: "amber", declined: "slate" };
+
+function statusLabel(line, status) {
+  return line.statusLabels?.[status] || status.replace(/_/g, " ");
+}
 
 export function hasMeasurements(transcription) {
   const m = transcription?.specs_measurements || {};
@@ -88,7 +99,7 @@ function DayPicker({ line, days, value, onChange }) {
             value={d.id}
             disabled={!specs && d.seats_free <= 0 && d.id !== value}
           >
-            {d.day_date} · {d.venue}
+            {displayDate(d.day_date)} · {d.venue}
             {specs
               ? ` · ${d.start_time}–${d.end_time}`
               : d.seats_free <= 0 ? " (full)" : ` (${d.seats_free} free)`}
@@ -193,7 +204,6 @@ export function FulfilmentStation({
     return data?.fulfilments?.find((f) => f.item_type === line.itemType) || null;
   }, [data, line]);
   const slip = data?.slips?.find((s) => s.item_type === line.itemType && s.active);
-  const [status, setStatus] = useState(existing?.status || line.actions[0].status);
   const [dayId, setDayId] = useState("");
   const [busy, setBusy] = useState(false);
   const [paperReviewed, setPaperReviewed] = useState(false);
@@ -206,7 +216,6 @@ export function FulfilmentStation({
   const [issued, setIssued] = useState({ r: null, l: null });
 
   useEffect(() => {
-    setStatus(existing?.status || line.actions[0].status);
     setPaperReviewed(false);
     issueOpRef.current = null;
   }, [existing?.status, line, data?.registration?.id, data?.committed_revision?.id]);
@@ -231,14 +240,13 @@ export function FulfilmentStation({
     );
   }, [days, existing, line.dayField, line.itemType]);
 
-  const needsDay = Boolean(line.dayField) && status === "deferred";
   const measurementsMissing =
     (line.needsMeasurements && !hasMeasurements(data?.transcription))
     || (line.needsFixedPower && !hasFixedPower(data?.transcription));
 
-  const save = useCallback(async (chosen) => {
+  const save = useCallback(async (nextStatus) => {
     if (!data?.transcription?.id) return;
-    const nextStatus = chosen || status;
+    const day = nextStatus === "deferred" ? dayId || null : null;
     setBusy(true);
     onBusyChange?.(true);
     setError("");
@@ -252,15 +260,15 @@ export function FulfilmentStation({
           : [],
         issued_power_r: line.needsFixedPower ? issued.r : null,
         issued_power_l: line.needsFixedPower ? issued.l : null,
-        ot_schedule_day_id: line.dayField === "ot_schedule_day_id" ? dayId || null : null,
-        specs_collection_day_id: line.dayField === "specs_collection_day_id" ? dayId || null : null,
+        ot_schedule_day_id: line.dayField === "ot_schedule_day_id" ? day : null,
+        specs_collection_day_id: line.dayField === "specs_collection_day_id" ? day : null,
         paper_reviewed: paperReviewed,
         reviewed_revision_id: data.committed_revision?.id,
         reviewed_generation: data.clinical_generation ?? data.registration?.clinical_generation,
         operation_id: issueOpRef.current || (issueOpRef.current = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`),
       });
       issueOpRef.current = null;
-      setBanner(`${line.label}: ${(res.fulfilment?.status || nextStatus).replace(/_/g, " ")}`);
+      setBanner(`${line.label}: ${statusLabel(line, res.fulfilment?.status || nextStatus)}`);
       if (res.slip) {
         navigate(`/print/slip/${res.slip.id}`);
       } else {
@@ -272,17 +280,44 @@ export function FulfilmentStation({
       setBusy(false);
       onBusyChange?.(false);
     }
-  }, [data?.transcription?.id, data?.committed_revision?.id, data?.clinical_generation, data?.registration?.clinical_generation, line, status, dayId, paperReviewed, outcomes, issued, navigate, onDone, setBanner, setError, onBusyChange]);
+  }, [data?.transcription?.id, data?.committed_revision?.id, data?.clinical_generation, data?.registration?.clinical_generation, line, dayId, paperReviewed, outcomes, issued, navigate, onDone, setBanner, setError, onBusyChange]);
+
+  const header = (
+    <div className="flex items-center gap-2 mb-3">
+      <Icon className="w-5 h-5 text-emerald-600" />
+      <p className="font-semibold text-slate-900 text-sm">{line.label}</p>
+    </div>
+  );
+  const paperReview = (
+    <label className="flex items-center gap-2 min-h-[44px] mb-3 text-sm">
+      <input
+        type="checkbox"
+        checked={paperReviewed}
+        onChange={(e) => setPaperReviewed(e.target.checked)}
+        data-testid={`station-${lineKey}-paper-review`}
+      />
+      <span>I compared the paper with this saved prescription</span>
+    </label>
+  );
+  const decline = line.actions.find((a) => a.status === "declined");
+
+  if (line.itemType === "ot" && data?.committed_revision?.ot_outcome === "referral") {
+    return (
+      <div className="rounded-xl border border-slate-200 p-4" data-testid={`station-${lineKey}`}>
+        {header}
+        <p className="text-sm text-slate-700" data-testid={`station-${lineKey}-referral`}>
+          Hospital referral: nothing to record here. The referral was complete when the prescription was saved.
+        </p>
+      </div>
+    );
+  }
 
   if (existing) {
     return (
       <div className="rounded-xl border border-slate-200 p-4" data-testid={`station-${lineKey}`}>
-        <div className="flex items-center gap-2 mb-3">
-          <Icon className="w-5 h-5 text-emerald-600" />
-          <p className="font-semibold text-slate-900 text-sm">{line.label}</p>
-        </div>
-        <Badge tone={existing.status === "deferred" ? "amber" : "emerald"} data-testid={`station-${lineKey}-recorded`}>
-          {existing.status.replace(/_/g, " ")}
+        {header}
+        <Badge tone={STATUS_TONES[existing.status] || "emerald"} data-testid={`station-${lineKey}-recorded`}>
+          {statusLabel(line, existing.status)}
         </Badge>
         {slip && (
           <Button
@@ -295,26 +330,29 @@ export function FulfilmentStation({
             <Printer className="w-4 h-4" /> Reprint Token
           </Button>
         )}
+        {decline && existing.status === "deferred" && (
+          <div className="mt-3">
+            {paperReview}
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full"
+              onClick={() => save(decline.status)}
+              disabled={!paperReviewed || busy}
+              data-testid={`station-${lineKey}-${decline.status}`}
+            >
+              {decline.label}
+            </Button>
+          </div>
+        )}
       </div>
     );
   }
 
   return (
     <div className="rounded-xl border border-slate-200 p-4" data-testid={`station-${lineKey}`}>
-      <div className="flex items-center gap-2 mb-3">
-        <Icon className="w-5 h-5 text-emerald-600" />
-        <p className="font-semibold text-slate-900 text-sm">{line.label}</p>
-      </div>
-
-      <label className="flex items-center gap-2 min-h-[44px] mb-3 text-sm">
-        <input
-          type="checkbox"
-          checked={paperReviewed}
-          onChange={(e) => setPaperReviewed(e.target.checked)}
-          data-testid={`station-${lineKey}-paper-review`}
-        />
-        <span>I compared the paper with this saved prescription</span>
-      </label>
+      {header}
+      {paperReview}
       <p className="text-sm font-semibold text-slate-900 mb-2" data-testid={`station-${lineKey}-patient`}>
         #{data?.registration?.reg_no} {data?.registration?.full_name}
       </p>
@@ -341,54 +379,23 @@ export function FulfilmentStation({
         />
       )}
 
-      {line.actions.length > 1 && (
-        <div className="flex flex-col gap-2">
-          {line.actions.map((a) => (
-            <Button
-              key={a.status}
-              size="sm"
-              variant={status === a.status ? "primary" : "outline"}
-              className="w-full"
-              disabled={!paperReviewed || busy || measurementsMissing || (a.status === "deferred" && line.dayField && !dayId && status === "deferred")}
-              onClick={() => {
-                setStatus(a.status);
-                if (a.status !== "deferred" || !line.dayField) save(a.status);
-              }}
-              data-testid={`station-${lineKey}-${a.status}`}
-            >
-              {a.label}
-            </Button>
-          ))}
-        </div>
-      )}
-
-      {needsDay && (
+      {line.dayField && (
         <DayPicker line={line} days={days} value={dayId} onChange={setDayId} />
       )}
 
-      {line.actions.length === 1 && (
+      {line.actions.map((a, i) => (
         <Button
+          key={a.status}
           size="sm"
+          variant={i ? "outline" : "primary"}
           className="w-full mt-2"
-          onClick={() => save(line.actions[0].status)}
-          disabled={!paperReviewed || !status || busy || measurementsMissing || (needsDay && !dayId)}
-          data-testid={`station-${lineKey}-save`}
+          onClick={() => save(a.status)}
+          disabled={!paperReviewed || busy || measurementsMissing || (a.status === "deferred" && Boolean(line.dayField) && !dayId)}
+          data-testid={`station-${lineKey}-${i ? a.status : "save"}`}
         >
-          {line.actions[0].label}
+          {a.label}
         </Button>
-      )}
-
-      {line.actions.length > 1 && status === "deferred" && line.dayField && (
-        <Button
-          size="sm"
-          className="w-full mt-2"
-          onClick={() => save("deferred")}
-          disabled={busy || !dayId}
-          data-testid={`station-${lineKey}-save`}
-        >
-          {line.actions.find((a) => a.status === "deferred")?.label || "Save"}
-        </Button>
-      )}
+      ))}
 
       {measurementsMissing && (
         <p className="text-xs text-amber-800 mt-2" data-testid={`station-${lineKey}-needs-power`}>

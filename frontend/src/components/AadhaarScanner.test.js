@@ -682,6 +682,24 @@ describe("AadhaarScanner component", () => {
 
     expect(onPatientCode).toHaveBeenCalledWith("SNP:NOBODY99");
     expect(mediaTrack.stop).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="aadhaar-camera-stop"]')).not.toBeNull();
+  });
+
+  test("patient-code-only mode is a Failure for any other QR and never decodes it", async () => {
+    const onPatientCode = jest.fn();
+    const onFailure = jest.fn();
+    nativeDetector.detectNativeImageData.mockResolvedValue("2567820190301120000");
+    act(() => root.render(<AadhaarScanner patientCodeOnly onPatientCode={onPatientCode} onFailure={onFailure} />));
+    expect(container.querySelector('[data-testid="aadhaar-upload-button"]')).toBeNull();
+    expect(container.querySelector('[data-testid="aadhaar-manual-toggle"]')).toBeNull();
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+
+    expect(container.textContent).toContain("Scan the QR on the prescription");
+    expect(onFailure).toHaveBeenCalledWith("not-aadhaar");
+    expect(onPatientCode).not.toHaveBeenCalled();
+    expect(api.post).not.toHaveBeenCalled();
+    expect(mediaTrack.stop).not.toHaveBeenCalled();
   });
 
   test.each(["SNP:AB3K7T29", "snp:ab3k7t29"])("%s is looked up as a patient, never decoded as a card", async (code) => {

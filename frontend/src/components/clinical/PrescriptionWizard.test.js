@@ -1,4 +1,4 @@
-import React, { act } from "react";
+import React, { act, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { PrescriptionWizard, stepComplete, visibleSteps } from "./PrescriptionWizard";
 
@@ -20,8 +20,8 @@ const baseRx = {
   bp: "",
   remarks: "",
   specs_measurements: { r_sph: "", r_cyl: "", r_axis: "", l_sph: "", l_cyl: "", l_axis: "", add: "" },
-  ot_eye: "",
-  ot_procedure: "",
+  ot_outcome: null,
+  ot_eye: null,
   ot_notes: "",
   prescribed_medicine_ids: [],
   fixed_power_r: null,
@@ -33,11 +33,13 @@ const baseRx = {
 
 let container = null;
 let root = null;
+let latestRx = null;
 
 beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
   root = ReactDOM.createRoot(container);
+  latestRx = null;
 });
 
 afterEach(() => {
@@ -46,27 +48,45 @@ afterEach(() => {
   container = null;
 });
 
+function wizardProps(overrides) {
+  return {
+    diagOpts: ["Cataract"],
+    medicines: MEDICINES,
+    powers: POWERS,
+    toggleDiag: jest.fn(),
+    locked: false,
+    busy: false,
+    saveStep: jest.fn(),
+    completeRx: jest.fn(),
+    setShowCorrection: jest.fn(),
+    ...overrides,
+  };
+}
+
 function renderWizard(rx, overrides = {}) {
   const setRx = jest.fn();
   act(() => {
-    root.render(
-      <PrescriptionWizard
-        rx={rx}
-        setRx={setRx}
-        diagOpts={["Cataract"]}
-        medicines={MEDICINES}
-        powers={POWERS}
-        toggleDiag={jest.fn()}
-        locked={false}
-        busy={false}
-        saveStep={jest.fn()}
-        completeRx={jest.fn()}
-        setShowCorrection={jest.fn()}
-        {...overrides}
-      />,
-    );
+    root.render(<PrescriptionWizard rx={rx} setRx={setRx} {...wizardProps(overrides)} />);
   });
   return setRx;
+}
+
+function Live({ initial }) {
+  const [rx, setRx] = useState(initial);
+  latestRx = rx;
+  return <PrescriptionWizard rx={rx} setRx={setRx} {...wizardProps()} />;
+}
+
+function renderLive(rx) {
+  act(() => root.render(<Live initial={rx} />));
+}
+
+const q = (id) => container.querySelector(`[data-testid="${id}"]`);
+
+async function next(times = 1) {
+  for (let i = 0; i < times; i += 1) {
+    await act(async () => q("wizard-next").click());
+  }
 }
 
 describe("wizard step pruning", () => {
@@ -74,7 +94,7 @@ describe("wizard step pruning", () => {
     expect(visibleSteps(baseRx).map((s) => s.key)).toEqual(["diagnosis", "lines", "review"]);
   });
 
-  test("a medicine-only patient never meets a specs or surgery step", () => {
+  test("a medicine-only patient never meets a specs or Hospital step", () => {
     const rx = { ...baseRx, prescribed_lines: ["medicine"] };
     expect(visibleSteps(rx).map((s) => s.key)).toEqual([
       "diagnosis", "lines", "medicine", "review",
@@ -99,6 +119,19 @@ describe("step completion gates", () => {
     })).toBe(false);
   });
 
+  test("the lines step refuses two specs lines or IOL surgery beside a specs line", () => {
+    expect(stepComplete("lines", { ...baseRx, prescribed_lines: ["specs_fixed", "specs_made"] })).toBe(false);
+    expect(stepComplete("lines", {
+      ...baseRx, prescribed_lines: ["specs_fixed", "ot"], ot_outcome: "iol_surgery", ot_eye: "R",
+    })).toBe(false);
+    expect(stepComplete("lines", {
+      ...baseRx, prescribed_lines: ["specs_made", "ot"], ot_outcome: "referral",
+    })).toBe(true);
+    expect(stepComplete("lines", {
+      ...baseRx, prescribed_lines: ["medicine", "ot"], ot_outcome: "iol_surgery", ot_eye: "L",
+    })).toBe(true);
+  });
+
   test("medicine needs at least one pick", () => {
     expect(stepComplete("medicine", baseRx)).toBe(false);
     expect(stepComplete("medicine", { ...baseRx, prescribed_medicine_ids: ["med-1"] })).toBe(true);
@@ -110,15 +143,25 @@ describe("step completion gates", () => {
     expect(stepComplete("specs_fixed", { ...baseRx, fixed_power_r: 0, fixed_power_l: 0 })).toBe(true);
   });
 
-  test("made specs need both spheres and surgery needs eye and procedure", () => {
+  test("made specs need both spheres", () => {
     expect(stepComplete("specs_made", {
       ...baseRx, specs_measurements: { r_sph: "-1.00", l_sph: "" },
     })).toBe(false);
     expect(stepComplete("specs_made", {
       ...baseRx, specs_measurements: { r_sph: "-1.00", l_sph: "-1.25" },
     })).toBe(true);
-    expect(stepComplete("ot", { ...baseRx, ot_eye: "R" })).toBe(false);
-    expect(stepComplete("ot", { ...baseRx, ot_eye: "R", ot_procedure: "Phaco" })).toBe(true);
+  });
+
+  test("the Hospital step needs an outcome, and IOL surgery needs one eye and no specs line", () => {
+    const ot = { ...baseRx, prescribed_lines: ["ot"] };
+    expect(stepComplete("ot", ot)).toBe(false);
+    expect(stepComplete("ot", { ...ot, ot_outcome: "referral" })).toBe(true);
+    expect(stepComplete("ot", { ...ot, ot_outcome: "iol_surgery" })).toBe(false);
+    expect(stepComplete("ot", { ...ot, ot_outcome: "iol_surgery", ot_eye: "B" })).toBe(false);
+    expect(stepComplete("ot", { ...ot, ot_outcome: "iol_surgery", ot_eye: "R" })).toBe(true);
+    expect(stepComplete("ot", {
+      ...ot, prescribed_lines: ["ot", "specs_fixed"], ot_outcome: "iol_surgery", ot_eye: "R",
+    })).toBe(false);
   });
 
   test("review is gated on the paper attestation", () => {
@@ -130,36 +173,134 @@ describe("step completion gates", () => {
 describe("wizard rendering", () => {
   test("Next is blocked on a step that has not been answered", async () => {
     renderWizard(baseRx);
-    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
-    expect(container.querySelector('[data-testid="wizard-progress"]').textContent)
-      .toContain("Step 2 of 3");
-    expect(container.querySelector('[data-testid="wizard-next"]').disabled).toBe(true);
+    await next();
+    expect(q("wizard-progress").textContent).toContain("Step 2 of 3");
+    expect(q("wizard-next").disabled).toBe(true);
   });
 
   test("advancing calls saveStep so the draft survives an interruption", async () => {
     const saveStep = jest.fn();
     renderWizard({ ...baseRx, diagnosis_options: ["Cataract"] }, { saveStep });
-    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
+    await next();
     expect(saveStep).toHaveBeenCalled();
-    expect(container.querySelector('[data-testid="prescribed-lines"]')).not.toBeNull();
+    expect(q("prescribed-lines")).not.toBeNull();
+  });
+
+  test("the lines step stops a second specs line and names the clash", async () => {
+    renderLive({ ...baseRx, prescribed_lines: ["specs_fixed"] });
+    await next();
+    expect(q("prescribed-lines").textContent).toContain("Hospital");
+    expect(q("prescribed-specs_made").disabled).toBe(true);
+    expect(q("prescribed-specs_made-blocked").textContent)
+      .toBe("Fixed-power specs and Spectacles to be made cannot be on one prescription.");
+    expect(q("prescribed-ot").disabled).toBe(false);
+    expect(q("prescribed-medicine").disabled).toBe(false);
+    act(() => q("prescribed-ot").click());
+    act(() => q("prescribed-medicine").click());
+    expect(latestRx.prescribed_lines).toEqual(["specs_fixed", "ot", "medicine"]);
+  });
+
+  test("specs lines are stopped once IOL surgery is chosen", async () => {
+    renderLive({ ...baseRx, prescribed_lines: ["ot"], ot_outcome: "iol_surgery", ot_eye: "R" });
+    await next();
+    expect(q("prescribed-specs_fixed").disabled).toBe(true);
+    expect(q("prescribed-specs_fixed-blocked").textContent)
+      .toBe("Fixed-power specs and IOL surgery cannot be on one prescription.");
+    expect(q("prescribed-medicine").disabled).toBe(false);
+  });
+
+  test("unticking Hospital clears the outcome and eye", async () => {
+    renderLive({ ...baseRx, prescribed_lines: ["ot"], ot_outcome: "iol_surgery", ot_eye: "R" });
+    await next();
+    act(() => q("prescribed-ot").click());
+    expect(latestRx).toEqual(expect.objectContaining({
+      prescribed_lines: [], ot_outcome: null, ot_eye: null,
+    }));
+  });
+
+  test("the Hospital step asks IOL surgery or referral, one eye for surgery, and optional vitals", async () => {
+    renderLive({ ...baseRx, prescribed_lines: ["ot"] });
+    await next(2);
+    expect(q("wizard-progress").textContent).toContain("Step 3 of 4");
+    expect(container.querySelector("h3").textContent).toBe("Hospital");
+    expect(q("ot-procedure-input")).toBeNull();
+    expect(q("ot-eye-select")).toBeNull();
+    expect(q("ot-notes-input")).not.toBeNull();
+    expect(q("bp-input")).not.toBeNull();
+    expect(q("sugar-input")).not.toBeNull();
+    expect(q("wizard-next").disabled).toBe(true);
+
+    act(() => q("ot-outcome-iol_surgery").click());
+    expect(latestRx.ot_outcome).toBe("iol_surgery");
+    const eye = q("ot-eye-select");
+    expect([...eye.options].map((o) => o.textContent)).toEqual(["—", "Right", "Left"]);
+    expect(q("wizard-next").disabled).toBe(true);
+    act(() => {
+      eye.value = "L";
+      eye.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(latestRx.ot_eye).toBe("L");
+    expect(q("wizard-next").disabled).toBe(false);
+
+    act(() => q("ot-outcome-referral").click());
+    expect(latestRx).toEqual(expect.objectContaining({ ot_outcome: "referral", ot_eye: null }));
+    expect(q("ot-eye-select")).toBeNull();
+    expect(q("wizard-next").disabled).toBe(false);
+  });
+
+  test("IOL surgery cannot be chosen beside a specs line and the clash is named", async () => {
+    renderLive({
+      ...baseRx,
+      prescribed_lines: ["specs_made", "ot"],
+      specs_measurements: { ...baseRx.specs_measurements, r_sph: "-1.00", l_sph: "-1.25" },
+    });
+    await next(3);
+    expect(q("ot-outcome-iol_surgery").disabled).toBe(true);
+    expect(q("ot-outcome-blocked").textContent)
+      .toBe("Spectacles to be made and IOL surgery cannot be on one prescription.");
+    expect(q("ot-outcome-referral").disabled).toBe(false);
+    act(() => q("ot-outcome-referral").click());
+    expect(q("wizard-next").disabled).toBe(false);
+  });
+
+  test("vitals from the Hospital step are read back on review with the outcome", async () => {
+    renderWizard({
+      ...baseRx,
+      prescribed_lines: ["ot"],
+      ot_outcome: "iol_surgery",
+      ot_eye: "R",
+      ot_notes: "Left eye also prescribed",
+      bp: "130/85",
+      blood_sugar: "140",
+    });
+    await next(3);
+    expect(q("summary-hospital").textContent).toBe("IOL surgery · Right eye · Left eye also prescribed");
+    expect(q("summary-vitals").textContent).toBe("BP 130/85 · Blood sugar 140");
+    expect(q("add-vitals-button")).toBeNull();
+    expect(q("bp-input")).toBeNull();
+  });
+
+  test("a referral reads back as Hospital referral", async () => {
+    renderWizard({ ...baseRx, prescribed_lines: ["ot"], ot_outcome: "referral" });
+    await next(3);
+    expect(q("summary-hospital").textContent).toBe("Hospital referral");
+    expect(q("summary-vitals")).toBeNull();
   });
 
   test("vitals are hidden behind a control on review and never block completion", async () => {
     renderWizard({ ...baseRx, none_prescribed: true, full_transcription_confirmed: true });
-    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
-    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
-    expect(container.querySelector('[data-testid="bp-input"]')).toBeNull();
-    expect(container.querySelector('[data-testid="complete-prescription-button"]').disabled).toBe(false);
-    act(() => container.querySelector('[data-testid="add-vitals-button"]').click());
-    expect(container.querySelector('[data-testid="bp-input"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="sugar-input"]')).not.toBeNull();
+    await next(2);
+    expect(q("bp-input")).toBeNull();
+    expect(q("complete-prescription-button").disabled).toBe(false);
+    act(() => q("add-vitals-button").click());
+    expect(q("bp-input")).not.toBeNull();
+    expect(q("sugar-input")).not.toBeNull();
   });
 
   test("recorded vitals keep the panel open when the prescription is reopened", async () => {
     renderWizard({ ...baseRx, none_prescribed: true, bp: "120/80" });
-    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
-    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
-    expect(container.querySelector('[data-testid="bp-input"]').value).toBe("120/80");
+    await next(2);
+    expect(q("bp-input").value).toBe("120/80");
   });
 
   test("the review step reads back the medicines and power that were picked", async () => {
@@ -171,12 +312,8 @@ describe("wizard rendering", () => {
       fixed_power_l: -1.5,
       full_transcription_confirmed: true,
     });
-    for (let i = 0; i < 4; i += 1) {
-      const next = container.querySelector('[data-testid="wizard-next"]');
-      if (next) await act(async () => next.click());
-    }
-    expect(container.querySelector('[data-testid="summary-medicines"]').textContent).toBe("Timolol");
-    expect(container.querySelector('[data-testid="summary-fixed-power"]').textContent)
-      .toBe("RE +2.00 · LE -1.50");
+    await next(4);
+    expect(q("summary-medicines").textContent).toBe("Timolol");
+    expect(q("summary-fixed-power").textContent).toBe("RE +2.00 · LE -1.50");
   });
 });

@@ -19,8 +19,8 @@ For phone camera testing, use a trusted HTTPS address; see [local HTTPS setup](d
 1. Admin creates/activates the camp, opens camp days and the print window, and creates team leads and operators.
 2. A patient registers, then a desk volunteer scans their Aadhaar to record arrival. Manual fallback remains available to desk staff.
 3. Staff prints the prescription, the doctor examines the patient, and staff marks them Seen.
-4. A clinical operator chooses Medicine, Fixed-power specs, Spectacles to be made, or Hospital surgery. At that same desk they transcribe the paper prescription, then issue supplies or schedule collection/hospital treatment.
-5. Hospital surgery and later spectacle collection produce a short A6 token. Surgery is performed at the hospital only.
+4. A clinical operator chooses Medicine, Fixed-power specs, Spectacles to be made, or Hospital. At that same desk they transcribe the paper prescription, then issue supplies or schedule collection/hospital treatment.
+5. A scheduled IOL surgery and later spectacle collection produce a short A6 token. A Hospital referral or Surgery declined produces none. IOL surgery is the only operation arranged, and it is performed at the hospital only.
 
 Team Management and Analytics are beside each other in the admin overview (also available to team leads from the desk). Reset PIN sits beside Logout. Forgotten PINs can be reset by the user's lead or an admin.
 

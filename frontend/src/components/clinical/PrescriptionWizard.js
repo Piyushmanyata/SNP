@@ -4,14 +4,11 @@ import { ChevronLeft, ChevronRight, FileEdit } from "lucide-react";
 import { SpecsMeasurementsGrid } from "./SpecsMeasurementsGrid";
 import { MedicinePicker } from "./MedicinePicker";
 import { FixedPowerPicker, formatPower } from "./FixedPowerPicker";
-import { DiagnosisFields, OtFields, VitalsFields } from "./PrescriptionFields";
-
-const LINE_LABELS = {
-  medicine: "Medicine",
-  specs_fixed: "Fixed-power specs",
-  specs_made: "Spectacles to be made",
-  ot: "Hospital surgery",
-};
+import {
+  DiagnosisFields, LineChoices, OtFields, RemarksField, VitalsFields, VitalsInputs,
+} from "./PrescriptionFields";
+import { hospitalComplete, hospitalOutcomeLabel, lineClash, withLines } from "./prescriptionRules";
+import { lineLabel } from "../../lib/operatorLines";
 
 const ALL_STEPS = [
   { key: "diagnosis", label: "Diagnosis" },
@@ -19,7 +16,7 @@ const ALL_STEPS = [
   { key: "medicine", label: "Medicines", line: "medicine" },
   { key: "specs_fixed", label: "Fixed power", line: "specs_fixed" },
   { key: "specs_made", label: "Spectacles to be made", line: "specs_made" },
-  { key: "ot", label: "Hospital surgery", line: "ot" },
+  { key: "ot", label: "Hospital", line: "ot" },
   { key: "review", label: "Review and save" },
 ];
 
@@ -34,7 +31,7 @@ export function stepComplete(key, rx) {
     case "lines": {
       const none = Boolean(rx.none_prescribed);
       const some = (rx.prescribed_lines || []).length > 0;
-      return none ? !some : some;
+      return none ? !some : some && !lineClash(rx.prescribed_lines, rx.ot_outcome);
     }
     case "medicine":
       return (rx.prescribed_medicine_ids || []).length > 0;
@@ -44,7 +41,7 @@ export function stepComplete(key, rx) {
     case "specs_made":
       return Boolean(String(m.r_sph || "").trim() && String(m.l_sph || "").trim());
     case "ot":
-      return Boolean(String(rx.ot_eye || "").trim() && String(rx.ot_procedure || "").trim());
+      return hospitalComplete(rx);
     case "review":
       return Boolean(rx.full_transcription_confirmed);
     default:
@@ -72,7 +69,7 @@ function Summary({ rx, medicines }) {
         <dd className="font-semibold text-slate-900">
           {rx.none_prescribed
             ? "No fulfilment prescribed"
-            : lines.map((l) => LINE_LABELS[l]).join(", ") || "—"}
+            : lines.map(lineLabel).join(", ") || "—"}
         </dd>
       </div>
       {lines.includes("medicine") && (
@@ -104,10 +101,19 @@ function Summary({ rx, medicines }) {
       )}
       {lines.includes("ot") && (
         <div>
-          <dt className="text-slate-500">Hospital surgery</dt>
-          <dd className="font-semibold text-slate-900">
-            {rx.ot_eye || "—"} · {rx.ot_procedure || "—"}
-            {rx.ot_notes ? ` · ${rx.ot_notes}` : ""}
+          <dt className="text-slate-500">Hospital</dt>
+          <dd className="font-semibold text-slate-900" data-testid="summary-hospital">
+            {[hospitalOutcomeLabel(rx), rx.ot_notes].filter(Boolean).join(" · ") || "—"}
+          </dd>
+        </div>
+      )}
+      {(rx.bp || rx.blood_sugar) && (
+        <div>
+          <dt className="text-slate-500">Vitals</dt>
+          <dd className="font-semibold text-slate-900" data-testid="summary-vitals">
+            {[rx.bp && `BP ${rx.bp}`, rx.blood_sugar && `Blood sugar ${rx.blood_sugar}`]
+              .filter(Boolean)
+              .join(" · ")}
           </dd>
         </div>
       )}
@@ -116,8 +122,9 @@ function Summary({ rx, medicines }) {
 }
 
 function OptionalVitals({ rx, setRx, locked }) {
+  const hospital = (rx.prescribed_lines || []).includes("ot");
   const [open, setOpen] = useState(
-    Boolean(rx.blood_sugar || rx.bp || rx.remarks),
+    Boolean(rx.remarks || (!hospital && (rx.blood_sugar || rx.bp))),
   );
   if (!open) {
     return (
@@ -127,15 +134,17 @@ function OptionalVitals({ rx, setRx, locked }) {
         variant="ghost"
         className="mt-4"
         onClick={() => setOpen(true)}
-        data-testid="add-vitals-button"
+        data-testid={hospital ? "add-remarks-button" : "add-vitals-button"}
       >
-        Add vitals &amp; remarks
+        {hospital ? "Add remarks" : "Add vitals & remarks"}
       </Button>
     );
   }
   return (
     <div className="mt-4">
-      <VitalsFields rx={rx} setRx={setRx} disabled={locked} />
+      {hospital
+        ? <RemarksField rx={rx} setRx={setRx} disabled={locked} />
+        : <VitalsFields rx={rx} setRx={setRx} disabled={locked} />}
     </div>
   );
 }
@@ -201,26 +210,7 @@ export function PrescriptionWizard({
           <legend className="text-sm text-slate-700 mb-2">
             Tick every line the doctor wrote on the paper.
           </legend>
-          {Object.keys(LINE_LABELS).map((key) => (
-            <label key={key} className="flex items-center gap-3 min-h-[52px]">
-              <input
-                type="checkbox"
-                checked={(rx.prescribed_lines || []).includes(key)}
-                disabled={locked || rx.none_prescribed}
-                onChange={() => {
-                  const cur = rx.prescribed_lines || [];
-                  setRx({
-                    ...rx,
-                    prescribed_lines: cur.includes(key)
-                      ? cur.filter((k) => k !== key)
-                      : [...cur, key],
-                  });
-                }}
-                data-testid={`prescribed-${key}`}
-              />
-              <span className="font-medium text-slate-900">{LINE_LABELS[key]}</span>
-            </label>
-          ))}
+          <LineChoices rx={rx} setRx={setRx} disabled={locked || rx.none_prescribed} />
           <label className="flex items-center gap-3 min-h-[52px] border-t border-slate-200 mt-2 pt-2">
             <input
               type="checkbox"
@@ -228,9 +218,8 @@ export function PrescriptionWizard({
               disabled={locked}
               onChange={(e) =>
                 setRx({
-                  ...rx,
+                  ...withLines(rx, e.target.checked ? [] : rx.prescribed_lines || []),
                   none_prescribed: e.target.checked,
-                  prescribed_lines: e.target.checked ? [] : rx.prescribed_lines,
                 })
               }
               data-testid="none-prescribed"
@@ -267,7 +256,14 @@ export function PrescriptionWizard({
         />
       )}
 
-      {current.key === "ot" && <OtFields rx={rx} setRx={setRx} disabled={locked} />}
+      {current.key === "ot" && (
+        <>
+          <OtFields rx={rx} setRx={setRx} disabled={locked} />
+          <div className="mt-4">
+            <VitalsInputs rx={rx} setRx={setRx} disabled={locked} />
+          </div>
+        </>
+      )}
 
       {current.key === "review" && (
         <>

@@ -5,6 +5,7 @@ import { Button, Card, Input, Field, Alert } from "../components/ui";
 import AadhaarScanner from "../components/AadhaarScanner";
 import { Stethoscope, CheckCircle2, Lock } from "lucide-react";
 import { v4 } from "../lib/uuid";
+import { displayDate } from "../lib/dates";
 
 export default function SelfRegister() {
   const [camp, setCamp] = useState(null);
@@ -108,7 +109,7 @@ export default function SelfRegister() {
                   </div>
                   <Row k="Name" v={scanned.full_name} />
                   <Row k="Gender" v={scanned.gender} />
-                  <Row k="DOB / Age" v={`${scanned.dob || "-"} · ${scanned.age ?? "-"}`} />
+                  <Row k="DOB / Age" v={`${displayDate(scanned.dob) || "-"} · ${scanned.age ?? "-"}`} />
                   <Row k="Aadhaar last-4" v={scanned.aadhaar_last4} />
                   <Row k="Address" v={scanned.address} />
                 </div>
@@ -120,7 +121,7 @@ export default function SelfRegister() {
 
               <Field label="Camp day">
                 <select className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300" value={dayId} onChange={(e) => setDayId(e.target.value)} data-testid="self-day-select">
-                  {days.map((d) => <option key={d.id} value={d.id}>{d.day_date}{d.is_today ? " (today)" : ""}</option>)}
+                  {days.map((d) => <option key={d.id} value={d.id}>{displayDate(d.day_date)}{d.is_today ? " (today)" : ""}</option>)}
                 </select>
               </Field>
 
@@ -146,7 +147,7 @@ export default function SelfRegister() {
             <div className="mt-4 text-sm text-slate-600 space-y-1">
               <p><span className="text-slate-400">Camp:</span> {receipt.camp_name}</p>
               <p><span className="text-slate-400">Venue:</span> {receipt.venue}</p>
-              <p><span className="text-slate-400">Day:</span> {receipt.day_date}</p>
+              <p><span className="text-slate-400">Day:</span> {displayDate(receipt.day_date)}</p>
             </div>
             <Button variant="outline" className="mt-6 w-full" onClick={() => { setReceipt(null); setScanned(null); setReqId(""); setReadFailed(false); }} data-testid="self-register-another">
               Register another patient

@@ -132,14 +132,14 @@ describe("CHALLENGE 1: FulfilmentStation & FulfilmentSection Patient Switch Stat
       );
     });
 
-    expect(container.querySelector('[data-testid="station-ot-recorded"]').textContent).toContain("deferred");
+    expect(container.querySelector('[data-testid="station-ot-recorded"]').textContent).toBe("IOL surgery scheduled");
     expect(container.querySelector('[data-testid="station-ot-print-token"]')).toBeNull();
 
     const patient2Data = {
       transcription: { id: "tx-2" },
       registration: { id: "reg-2" },
       fulfilments: [
-        { item_type: "ot", status: "fulfilled" }
+        { item_type: "ot", status: "declined" }
       ],
     };
 
@@ -157,7 +157,7 @@ describe("CHALLENGE 1: FulfilmentStation & FulfilmentSection Patient Switch Stat
       );
     });
 
-    expect(container.querySelector('[data-testid="station-ot-recorded"]').textContent).toContain("fulfilled");
+    expect(container.querySelector('[data-testid="station-ot-recorded"]').textContent).toBe("Surgery declined");
     expect(container.querySelector('[data-testid="ot_schedule_day_id-select"]')).toBeNull();
   });
 
@@ -215,7 +215,7 @@ describe("CHALLENGE 1: FulfilmentStation & FulfilmentSection Patient Switch Stat
       );
     });
 
-    expect(container.querySelector('[data-testid="station-ot-recorded"]').textContent).toContain("deferred");
+    expect(container.querySelector('[data-testid="station-ot-recorded"]').textContent).toBe("IOL surgery scheduled");
     expect(container.querySelector('[data-testid="ot_schedule_day_id-select"]')).toBeNull();
   });
 

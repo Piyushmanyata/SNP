@@ -1,5 +1,6 @@
 import React from "react";
 import { Modal, Card } from "../ui";
+import { displayTimestamp } from "../../lib/dates";
 
 export function HistoryModal({ open, onClose, history }) {
   return (
@@ -15,7 +16,7 @@ export function HistoryModal({ open, onClose, history }) {
                 {h.camp_name || "Camp"} · #{h.reg_no}
               </span>
               <span className="text-slate-400">
-                {h.transcription?.created_at?.slice(0, 10)}
+                {displayTimestamp(h.transcription?.created_at).slice(0, 10)}
               </span>
             </div>
             <p className="text-sm text-slate-600 mt-1">

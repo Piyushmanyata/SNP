@@ -4,6 +4,8 @@ import { MemoryRouter } from "react-router-dom";
 import Clinical from "./Clinical";
 import api from "../lib/api";
 import { LINE_STORAGE_KEY } from "../lib/operatorLines";
+import * as nativeDetector from "../components/aadhaar/liveScan/nativeDetector";
+import * as grab from "../components/aadhaar/liveScan/grabFrame";
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -82,6 +84,133 @@ afterEach(() => {
   });
   container.remove();
   container = null;
+  jest.restoreAllMocks();
+});
+
+const renderPage = () => act(async () => root.render(<MemoryRouter><Clinical /></MemoryRouter>));
+
+const typeLookup = (value) => act(() => {
+  const input = container.querySelector('[data-testid="clinical-lookup-input"]');
+  Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, value);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+});
+
+const submitLookup = () => act(async () => container.querySelector('[data-testid="clinical-lookup-button"]').click());
+
+const patientFound = (id, name) => ({ data: {
+  registration: { id, reg_no: id, full_name: name }, person: { id }, transcription: null, fulfilments: [], slips: [],
+} });
+
+async function scanWithCamera(payload) {
+  const track = { stop: jest.fn(), getSettings: () => ({}) };
+  const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+  navigator.mediaDevices = {
+    getUserMedia: jest.fn().mockResolvedValue(stream),
+    enumerateDevices: jest.fn().mockResolvedValue([]),
+  };
+  Object.defineProperty(window.HTMLMediaElement.prototype, "play", { configurable: true, value: jest.fn().mockResolvedValue() });
+  Object.defineProperty(window.HTMLMediaElement.prototype, "pause", { configurable: true, value: jest.fn() });
+  Object.defineProperty(window.HTMLVideoElement.prototype, "videoWidth", { configurable: true, get: () => 1280 });
+  jest.spyOn(grab, "grabFrame").mockReturnValue({ width: 4, height: 4, data: new Uint8ClampedArray(64) });
+  jest.spyOn(nativeDetector, "hasNativeBarcodeDetector").mockReturnValue(true);
+  jest.spyOn(nativeDetector, "detectNativeImageData").mockResolvedValue(payload);
+  await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+  return track;
+}
+
+describe("Clinical find", () => {
+  test("one field labelled for a registration number or name states the arrived-and-printed rule", async () => {
+    await renderPage();
+    expect(container.querySelector('[data-testid="clinical-lookup-input"]').getAttribute("aria-label")).toBe("Registration number or name");
+    expect(container.textContent).toContain("arrived");
+    expect(container.textContent).toContain("printed");
+    expect(container.textContent).not.toContain("marked Seen");
+  });
+
+  test.each([
+    ["1001", "lookup"],
+    ["SNP:AB3K7T29", "lookup"],
+    ["snp:ab3k7t29", "lookup"],
+    ["Sunita Devi", "search"],
+    ["12 Sunita", "search"],
+  ])("%s goes to the %s", async (value, route) => {
+    if (route === "lookup") api.post.mockResolvedValueOnce(patientFound("1001", "Found Patient"));
+    await renderPage();
+    typeLookup(value);
+    await submitLookup();
+    if (route === "lookup") {
+      expect(api.post).toHaveBeenCalledWith("/clinical/lookup", { value });
+      expect(api.get).not.toHaveBeenCalledWith(expect.stringMatching(/^\/clinical\/search/));
+    } else {
+      expect(api.get).toHaveBeenCalledWith(`/clinical/search?q=${encodeURIComponent(value)}`);
+      expect(api.post).not.toHaveBeenCalled();
+    }
+  });
+
+  test("a name lists matching patients and tapping one opens it as a scan would", async () => {
+    const loadGet = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url.startsWith("/clinical/search")
+      ? Promise.resolve({ data: { results: [
+        { id: "r-7", reg_no: 1007, full_name: "Sunita Devi", age: 51, gender_label: "Female", phone_last4: "4321" },
+      ] } })
+      : loadGet(url)));
+    api.post.mockResolvedValueOnce(patientFound("r-7", "Sunita Devi"));
+    await renderPage();
+    typeLookup("Sunita");
+    await submitLookup();
+    const results = container.querySelector('[data-testid="clinical-search-results"]');
+    for (const text of ["#1007", "Sunita Devi", "51", "Female", "4321"]) expect(results.textContent).toContain(text);
+    expect(api.post).not.toHaveBeenCalled();
+    await act(async () => container.querySelector('[data-testid="clinical-search-result-r-7"]').click());
+    expect(api.post).toHaveBeenCalledWith("/clinical/lookup", { value: "1007" });
+    expect(container.querySelector('[data-testid="clinical-search-results"]')).toBeNull();
+    expect(container.querySelector('[data-testid="clinical-prescription-form"]')).not.toBeNull();
+  });
+
+  test("a USB scan of a Patient code opens the patient without pressing the focused button", async () => {
+    let now = 0;
+    jest.spyOn(performance, "now").mockImplementation(() => now);
+    api.post
+      .mockResolvedValueOnce(patientFound("1001", "First Patient"))
+      .mockResolvedValueOnce(patientFound("1002", "Scanned Patient"));
+    await renderPage();
+    typeLookup("1001");
+    await submitLookup();
+    container.querySelector('[data-testid="wizard-next"]').focus();
+    await act(async () => {
+      for (const key of [..."SNP:AB3K7T29", "Enter"]) {
+        now += 10;
+        const target = document.activeElement;
+        const keydown = new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true });
+        target.dispatchEvent(keydown);
+        if (key === "Enter" && !keydown.defaultPrevented) target.click();
+      }
+    });
+    expect(api.post).not.toHaveBeenCalledWith("/clinical/transcription", expect.anything());
+    expect(api.post).toHaveBeenLastCalledWith("/clinical/lookup", { value: "SNP:AB3K7T29" });
+    expect(container.textContent).toContain("Scanned Patient");
+  });
+
+  test("the camera opens a patient from the prescription QR and then closes", async () => {
+    api.post.mockResolvedValueOnce(patientFound("1002", "Camera Patient"));
+    await renderPage();
+    const track = await scanWithCamera("SNP:AB3K7T29");
+    expect(api.post).toHaveBeenCalledWith("/clinical/lookup", { value: "SNP:AB3K7T29" });
+    expect(container.textContent).toContain("Camera Patient");
+    expect(track.stop).toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="aadhaar-camera-stop"]')).toBeNull();
+  });
+
+  test("the camera refuses an Aadhaar QR and never decodes it", async () => {
+    await renderPage();
+    const track = await scanWithCamera("2567820190301120000");
+    expect(container.textContent).toContain("Scan the QR on the prescription");
+    expect(api.post).not.toHaveBeenCalled();
+    expect(track.stop).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="aadhaar-upload-button"]')).toBeNull();
+    expect(container.querySelector('[data-testid="aadhaar-manual-toggle"]')).toBeNull();
+  });
 });
 
 describe("Clinical page component", () => {
@@ -157,7 +286,7 @@ describe("Clinical page component", () => {
           add: "+2.0",
         },
         ot_eye: "R",
-        ot_procedure: "Phaco + IOL",
+        ot_outcome: "iol_surgery",
       },
       fulfilments: [
         { item_type: "medicine", status: "fulfilled" },
@@ -258,14 +387,14 @@ describe("Clinical page component", () => {
     await act(async () => {
       root.render(<MemoryRouter><Clinical /></MemoryRouter>);
     });
-    expect(container.querySelector('[data-testid="line-chip"]').textContent).toContain("Hospital surgery");
+    expect(container.querySelector('[data-testid="line-chip"]').textContent).toContain("Hospital");
 
     act(() => { root.unmount(); });
     root = ReactDOM.createRoot(container);
     await act(async () => {
       root.render(<MemoryRouter><Clinical /></MemoryRouter>);
     });
-    expect(container.querySelector('[data-testid="line-chip"]').textContent).toContain("Hospital surgery");
+    expect(container.querySelector('[data-testid="line-chip"]').textContent).toContain("Hospital");
 
     sessionStorage.clear();
     auth.user.line = "medicine";

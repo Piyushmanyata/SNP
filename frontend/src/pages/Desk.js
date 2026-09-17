@@ -7,6 +7,7 @@ import AadhaarScanner from "../components/AadhaarScanner";
 import { useWedgeBurst } from "../components/aadhaar";
 import { ScanOutcome } from "../components/desk/ScanOutcome";
 import { v4 } from "../lib/uuid";
+import { displayDate } from "../lib/dates";
 import {
   Button, Card, Input, Field, Alert, Modal, Stat, StatusBadge, Badge, ErrorCard, Spinner,
 } from "../components/ui";
@@ -295,15 +296,19 @@ export default function Desk() {
       </div>
 
       {!campDayMode && (
-        <Card className="mb-5" data-desk-card="prereg" data-testid="desk-card-prereg">
-          <h3 className="font-display font-bold text-slate-900 mb-1">Pre-registration</h3>
-          <p className="text-sm text-slate-500 mb-3">
-            Books a seat and sends the patient their registration number. Nothing prints.
-          </p>
-          <Button size="lg" onClick={openPreReg} disabled={noCamp} data-testid="new-registration-button">
-            <UserPlus className="w-5 h-5" /> New Registration
-          </Button>
-        </Card>
+        <>
+          <Card className="mb-5" data-desk-card="prereg" data-testid="desk-card-prereg">
+            <h3 className="font-display font-bold text-slate-900 mb-1">Pre-registration</h3>
+            <p className="text-sm text-slate-500 mb-3">
+              Books a seat and sends the patient their registration number. Nothing prints.
+            </p>
+            <Button size="lg" onClick={openPreReg} disabled={noCamp} data-testid="new-registration-button">
+              <UserPlus className="w-5 h-5" /> New Registration
+            </Button>
+          </Card>
+          {error && <Alert className="mb-5">{error}</Alert>}
+          {banner && <Alert tone="emerald" className="mb-5">{banner}</Alert>}
+        </>
       )}
 
       {campDayMode && <DoorScanCard
@@ -325,7 +330,6 @@ export default function Desk() {
         scanning={scanning}
         doorManualEntry={Boolean(camp?.door_manual_entry)}
         clearScan={() => setScanResult(null)}
-        printingOpen={printingOpen}
       />}
 
       <Card className="mb-5" data-desk-card="find" data-testid="desk-card-find">
@@ -357,34 +361,6 @@ export default function Desk() {
         )}
       </Card>
 
-      {!campDayMode && (
-        <details className="mb-5" data-desk-card="scan" data-testid="door-scan-details">
-          <summary className="cursor-pointer font-display font-bold text-slate-900 py-2 min-h-[44px]">Scan at the door</summary>
-          <DoorScanCard
-            noCamp={noCamp}
-            onScanned={onScanned}
-            onPatientCode={lookupValue}
-            error={error}
-            banner={banner}
-            scanResult={scanResult}
-            busy={busy}
-            print={print}
-            confirmMismatch={confirmMismatch}
-            doorPhone={doorPhone}
-            setDoorPhone={setDoorPhone}
-            submitDoorWalkIn={submitDoorWalkIn}
-            doorForm={doorForm}
-            setDoorForm={setDoorForm}
-            submitDoorManual={submitDoorManual}
-            scanning={scanning}
-            doorManualEntry={Boolean(camp?.door_manual_entry)}
-            clearScan={() => setScanResult(null)}
-            printingOpen={printingOpen}
-            collapsed
-          />
-        </details>
-      )}
-
       <RegisterModal
         open={showReg}
         walkIn={false}
@@ -401,17 +377,15 @@ export default function Desk() {
 function DoorScanCard({
   noCamp, onScanned, onPatientCode, error, banner, scanResult, busy,
   print, confirmMismatch, doorPhone, setDoorPhone, submitDoorWalkIn,
-  doorForm, setDoorForm, submitDoorManual, collapsed, scanning,
-  doorManualEntry, clearScan, printingOpen,
+  doorForm, setDoorForm, submitDoorManual, scanning,
+  doorManualEntry, clearScan,
 }) {
   return (
-    <Card className={collapsed ? "mt-2" : "mb-5"} data-desk-card={collapsed ? undefined : "scan"} data-testid="desk-card-scan">
-      {!collapsed && (
-        <div className="flex items-center gap-2 mb-3">
-          <ScanLine className="w-5 h-5 text-emerald-600" />
-          <h3 className="font-display font-bold text-slate-900">Scan at the door</h3>
-        </div>
-      )}
+    <Card className="mb-5" data-desk-card="scan" data-testid="desk-card-scan">
+      <div className="flex items-center gap-2 mb-3">
+        <ScanLine className="w-5 h-5 text-emerald-600" />
+        <h3 className="font-display font-bold text-slate-900">Scan at the door</h3>
+      </div>
       <AadhaarScanner
         onScanned={onScanned}
         onPatientCode={onPatientCode}
@@ -439,7 +413,6 @@ function DoorScanCard({
           phone={doorPhone}
           setPhone={setDoorPhone}
           onWalkIn={submitDoorWalkIn}
-          printingOpen={printingOpen}
         />
       </div>
       {doorManualEntry && (
@@ -672,7 +645,7 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
               </Field>
               <Field label="Camp day">
                 <select className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300" value={dayId} onChange={(e) => setDayId(e.target.value)} data-testid="reg-day-select">
-                  {days.map((d) => <option key={d.id} value={d.id}>{d.day_date}{d.is_today ? " (today)" : ""}</option>)}
+                  {days.map((d) => <option key={d.id} value={d.id}>{displayDate(d.day_date)}{d.is_today ? " (today)" : ""}</option>)}
                 </select>
               </Field>
             </div>

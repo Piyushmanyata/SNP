@@ -363,6 +363,7 @@ class TestFulfilmentMatrix:
                 transcription_id=str(trans_id),
                 reason="Missed powers",
                 changes={"fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER},
+                prescribed_lines=["medicine", "specs_fixed"], ot_outcome=None, ot_eye=None,
                 expected_generation=1,
                 operation_id="op-corr-powers",
                 full_transcription_confirmed=True,

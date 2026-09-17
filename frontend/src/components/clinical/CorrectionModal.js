@@ -4,12 +4,13 @@ import { Modal, Field, Input, Alert, Button } from "../ui";
 import { SpecsMeasurementsGrid } from "./SpecsMeasurementsGrid";
 import { MedicinePicker } from "./MedicinePicker";
 import { FixedPowerPicker } from "./FixedPowerPicker";
-import { DiagnosisFields, OtFields, VitalsFields } from "./PrescriptionFields";
+import { DiagnosisFields, LineChoices, OtFields, VitalsFields } from "./PrescriptionFields";
+import { hospitalComplete, lineClash } from "./prescriptionRules";
 
 const PRESCRIPTION_FIELDS = [
   "diagnosis_options", "diagnosis_other", "blood_sugar", "bp", "remarks",
   "prescribed_medicines", "specs_measurements", "fixed_power_r", "fixed_power_l",
-  "ot_eye", "ot_procedure", "ot_notes",
+  "ot_outcome", "ot_eye", "ot_notes",
 ];
 const EMPTY_MEASUREMENTS = {
   r_sph: "", r_cyl: "", r_axis: "", l_sph: "", l_cyl: "", l_axis: "", add: "",
@@ -24,6 +25,7 @@ function initialValue(transcription, field) {
   if (field === "fixed_power_r" || field === "fixed_power_l") {
     return transcription?.[field] ?? null;
   }
+  if (field === "ot_outcome" || field === "ot_eye") return transcription?.[field] || null;
   return transcription?.[field] ?? "";
 }
 
@@ -38,9 +40,10 @@ export function CorrectionForm({
   patientId,
   prescribedLines = [],
 }) {
-  const [initial] = useState(() =>
-    Object.fromEntries(PRESCRIPTION_FIELDS.map((f) => [f, initialValue(transcription, f)])),
-  );
+  const [initial] = useState(() => ({
+    ...Object.fromEntries(PRESCRIPTION_FIELDS.map((f) => [f, initialValue(transcription, f)])),
+    prescribed_lines: [...new Set([...(prescribedLines || []), line].filter((key) => key && key !== "doctor_rx"))],
+  }));
   const [rx, setRx] = useState(initial);
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -50,7 +53,11 @@ export function CorrectionForm({
   const changes = Object.fromEntries(PRESCRIPTION_FIELDS
     .filter((field) => JSON.stringify(rx[field]) !== JSON.stringify(initial[field]))
     .map((field) => [field, rx[field]]));
-  const canSubmit = Boolean(reason.trim()) && Object.keys(changes).length > 0;
+  const hospital = rx.prescribed_lines.includes("ot");
+  const canSubmit = Boolean(reason.trim())
+    && Object.keys(changes).length > 0
+    && !lineClash(rx.prescribed_lines, rx.ot_outcome)
+    && (!hospital || hospitalComplete(rx));
 
   useEffect(() => { firstFieldRef.current?.focus(); }, []);
 
@@ -62,14 +69,13 @@ export function CorrectionForm({
       if (!opRef.current) {
         opRef.current = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`;
       }
-      const lines = [...new Set([...(prescribedLines || []), line].filter((key) => key && key !== "doctor_rx"))];
       await api.post("/clinical/correction", {
         transcription_id: transcription.id,
         patient_id: patientId,
         reason: reason.trim(),
         changes,
         expected_generation: expectedGeneration,
-        prescribed_lines: lines,
+        prescribed_lines: rx.prescribed_lines,
         operation_id: opRef.current,
       });
       opRef.current = null;
@@ -108,6 +114,13 @@ export function CorrectionForm({
 
       <DiagnosisFields rx={rx} setRx={setRx} diagOpts={options} toggleDiag={toggleDiag} />
 
+      <fieldset data-testid="correction-lines">
+        <legend className="block text-xs font-mono uppercase tracking-widest text-slate-500 mb-1.5">
+          What was prescribed
+        </legend>
+        <LineChoices rx={rx} setRx={setRx} />
+      </fieldset>
+
       <Field label="Medicines">
         <MedicinePicker
           medicines={medicines}
@@ -136,7 +149,7 @@ export function CorrectionForm({
         onChange={(specs) => setRx({ ...rx, specs_measurements: specs })}
       />
 
-      <OtFields rx={rx} setRx={setRx} />
+      {hospital && <OtFields rx={rx} setRx={setRx} />}
       <VitalsFields rx={rx} setRx={setRx} />
 
       <Button

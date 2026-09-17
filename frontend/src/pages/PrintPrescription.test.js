@@ -172,8 +172,22 @@ describe("PrintPrescription component", () => {
     expect(container.querySelector('[data-testid="rx-block-identity"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="rx-diagnosis-row"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="rx-glasses-box"]')).not.toBeNull();
-    expect(container.querySelector('[data-testid="rx-disclaimer"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="rx-bring-list"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="rx-footer"]')).not.toBeNull();
+  });
+
+  test("the sheet declares one A4 page with no margin and a fixed page box", () => {
+    act(() => {
+      root.render(<PrescriptionSheet rx={{ patient_qr: "qr-1" }} navigate={jest.fn()} />);
+    });
+    const printRules = container.querySelector("style").textContent;
+    expect(printRules).toContain("@page { size: A4; margin: 0; }");
+    expect(printRules).toMatch(/.print-rx-page { padding: 0; min-height: 0;/);
+    expect(container.querySelector(".print-rx-page")).not.toBeNull();
+    const sheet = container.querySelector('[data-testid="a4-prescription-sheet"]');
+    expect(sheet.style.height).toBe("297mm");
+    expect(sheet.style.overflow).toBe("hidden");
+    expect(sheet.querySelector('[data-testid="rx-write-area"]').className).toContain("flex-1");
   });
 
   test("the sheet is a full page and every sponsor sits in the footer band", () => {
@@ -185,7 +199,7 @@ describe("PrintPrescription component", () => {
     });
     const sheet = container.querySelector('[data-testid="a4-prescription-sheet"]');
     expect(sheet.style.width).toBe("210mm");
-    expect(sheet.style.minHeight).toBe("297mm");
+    expect(sheet.style.height).toBe("297mm");
     expect(sheet.querySelector('[data-testid="rx-write-area"]')).not.toBeNull();
     expect(sheet.querySelectorAll('[data-testid="rx-medicine-line"]')).toHaveLength(3);
 
@@ -227,9 +241,14 @@ describe("PrintPrescription component", () => {
     expect(sheet.textContent).toContain("PRESCRIPTION FOR GLASSES");
     expect(sheet.textContent).toContain("Inter Pupillary distance");
     expect(sheet.textContent).toContain("Sponsorer :");
-    expect(sheet.textContent).toContain(
-      "Please carry your Aadhaar card, ration card and mobile phone on the day of the operation."
-    );
+    const band = sheet.querySelector('[data-testid="rx-bring-list"]');
+    expect([...band.querySelectorAll("p")].map((line) => line.textContent)).toEqual([
+      "केवल मोतियाबिंद (IOL) ऑपरेशन की व्यवस्था की जाती है। ऑपरेशन के दिन लाएँ: यह पर्चा, टोकन, आधार कार्ड, राशन कार्ड, मोबाइल फ़ोन।",
+      "Only cataract (IOL) operations are arranged. On the day of the operation bring: this prescription, token, Aadhaar card, ration card, mobile phone.",
+    ]);
+    expect(sheet.textContent).not.toContain("Please carry");
+    expect(sheet.textContent).toContain("01-09-2026");
+    expect(sheet.textContent).not.toContain("2026-09-01");
     expect(sheet.textContent).not.toContain("Operation will be done at");
     expect(sheet.textContent).toContain("Operation will be done by");
     expect(sheet.querySelectorAll('[data-testid="rx-medicine-line"]')).toHaveLength(3);

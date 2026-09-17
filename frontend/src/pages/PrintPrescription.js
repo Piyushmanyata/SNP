@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import api, { formatApiError } from "../lib/api";
 import logger from "../lib/logger";
+import { displayDate } from "../lib/dates";
 import { Button, Alert, Spinner } from "../components/ui";
 import { Printer, ArrowLeft } from "lucide-react";
 import rxEmblem from "../assets/rx-emblem.png";
@@ -81,7 +82,8 @@ export function PrescriptionSheet({ rx, logos = [], navigate, preview, patientId
   const male = sex.startsWith("M");
   const female = sex.startsWith("F");
   return (
-    <div className={preview ? "" : "bg-slate-100 min-h-screen py-6"}>
+    <div className={preview ? "" : "bg-slate-100 min-h-screen py-6 print-rx-page"}>
+      {!preview && <style>{`@media print { @page { size: A4; margin: 0; } .print-rx-page { padding: 0; min-height: 0; background: white; } }`}</style>}
       {!preview && (
         <div className="no-print max-w-[210mm] mx-auto px-4 mb-4 flex gap-2">
           <Button variant="outline" disabled={printing} onClick={() => navigate("/desk")}><ArrowLeft className="w-4 h-4" /> Desk</Button>
@@ -112,7 +114,7 @@ export function PrescriptionSheet({ rx, logos = [], navigate, preview, patientId
 
       <div
         className="print-a4 bg-white mx-auto shadow-lg text-slate-900 flex flex-col"
-        style={{ width: "210mm", minHeight: preview ? "auto" : "297mm", padding: "10mm 12mm" }}
+        style={{ width: "210mm", height: preview ? "auto" : "297mm", overflow: "hidden", padding: "10mm 12mm" }}
         data-testid="a4-prescription-sheet"
       >
         <div className="flex items-start justify-between border-b-4 border-slate-900 pb-2">
@@ -153,7 +155,7 @@ export function PrescriptionSheet({ rx, logos = [], navigate, preview, patientId
           <div>
             <div className="border border-slate-900 p-2">
               <p>Reg. No. <span className="font-bold">#{rx.reg_no}</span></p>
-              <p>Date <span className="font-semibold">{rx.date}</span></p>
+              <p>Date <span className="font-semibold">{displayDate(rx.date)}</span></p>
               <p>
                 Age <span className="font-semibold">{rx.age ?? "—"}</span>
                 <SexBox mark={male} label="M" />
@@ -236,8 +238,9 @@ export function PrescriptionSheet({ rx, logos = [], navigate, preview, patientId
           <span className="border-b border-slate-400 inline-block min-w-[50mm] ml-1">&nbsp;</span>
         </div>
 
-        <div className="border border-slate-900 mt-2 p-2 text-[11px] font-semibold leading-tight" data-testid="rx-disclaimer">
-          Please carry your Aadhaar card, ration card and mobile phone on the day of the operation.
+        <div className="border border-slate-900 mt-2 p-2 text-[11px] font-semibold leading-tight" data-testid="rx-bring-list">
+          <p>केवल मोतियाबिंद (IOL) ऑपरेशन की व्यवस्था की जाती है। ऑपरेशन के दिन लाएँ: यह पर्चा, टोकन, आधार कार्ड, राशन कार्ड, मोबाइल फ़ोन।</p>
+          <p>Only cataract (IOL) operations are arranged. On the day of the operation bring: this prescription, token, Aadhaar card, ration card, mobile phone.</p>
         </div>
 
         <div className="flex justify-end mt-3 text-[12px]" data-testid="rx-signature">

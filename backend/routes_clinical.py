@@ -15,13 +15,13 @@ from catalogue import resolve_medicines, stocked_power
 from clinical_state import (
     CONTENT_FIELDS,
     PRESCRIBED_LINE_KEYS, assert_clinical_operator, arrival_ready, begin_issue_authorization, commit_completion,
-    commit_correction, commit_undo, conflict, extract_content,
+    commit_correction, commit_undo, conflict, extract_content, normalize_ot_eye,
     generation_of, has_issue_history, payload_hash, prepare_revision, recover_operation,
     release_issue_authorization, save_operation, serialize_revision, validate_completion,
 )
 from helpers import (
     now_utc, iso, DIAGNOSIS_OPTIONS, now_ist, parse_hhmm, ist_local_instant,
-    parse_patient_identifier,
+    normalize_name, normalize_phone, parse_patient_identifier,
 )
 from bson.errors import InvalidId
 from serializers import ser_patient, ser_person
@@ -68,7 +68,7 @@ def ser_trans(t: dict) -> Dict[str, Any]:
         "remarks": t.get("remarks"),
         "specs_measurements": t.get("specs_measurements"),
         "ot_eye": t.get("ot_eye"),
-        "ot_procedure": t.get("ot_procedure"),
+        "ot_outcome": t.get("ot_outcome"),
         "ot_notes": t.get("ot_notes"),
         "prescribed_medicines": t.get("prescribed_medicines") or [],
         "fixed_power_r": t.get("fixed_power_r"),
@@ -142,13 +142,6 @@ def ser_specs_day(d: dict) -> Dict[str, Any]:
     }
 
 
-def normalize_ot_eye(v: Optional[str]) -> Optional[str]:
-    if not v:
-        return None
-    m = {"r": "R", "right": "R", "l": "L", "left": "L", "b": "B", "both": "B"}
-    return m.get(str(v).strip().lower(), None)
-
-
 @router.get("/diagnosis-options")
 async def diagnosis_options(actor: dict = Depends(require_any)) -> Dict[str, Any]:
     return {"options": DIAGNOSIS_OPTIONS}
@@ -172,10 +165,13 @@ async def _fetch_clinical_bundle(db: AsyncIOMotorDatabase, patient: dict) -> Dic
 async def clinical_lookup(body: dict, actor: dict = Depends(require_clinical)) -> Dict[str, Any]:
     assert_clinical_operator(actor)
     db = get_db()
+    camp = await db.camps.find_one({"is_active": True})
     value = parse_patient_identifier(body.get("value", ""))
-    p = await db.patients.find_one({"patient_qr": value})
-    if not p and value.isdigit():
-        p = await db.patients.find_one({"reg_no": int(value)})
+    p = None
+    if camp:
+        p = await db.patients.find_one({"camp_id": camp["_id"], "patient_qr": value})
+        if not p and value.isdigit():
+            p = await db.patients.find_one({"camp_id": camp["_id"], "reg_no": int(value)})
     if not p:
         raise HTTPException(status_code=404, detail="No matching registration found")
     gate = arrival_ready(p)
@@ -196,6 +192,30 @@ async def clinical_lookup(body: dict, actor: dict = Depends(require_clinical)) -
     bundle["committed_revision"] = serialize_revision(rev)
     bundle["clinical_generation"] = generation_of(p)
     return bundle
+
+
+@router.get("/search")
+async def clinical_search(q: str, actor: dict = Depends(require_clinical)) -> Dict[str, Any]:
+    assert_clinical_operator(actor)
+    db = get_db()
+    camp = await db.camps.find_one({"is_active": True})
+    norm = normalize_name(q)
+    if not camp or not norm:
+        return {"results": []}
+    patients = await db.patients.find({
+        "camp_id": camp["_id"],
+        "full_name_normalized": {"$regex": "^" + norm},
+        "arrived_at": {"$ne": None},
+        "printed_at": {"$ne": None},
+    }).sort("reg_no", 1).limit(20).to_list(20)
+    return {"results": [{
+        "id": str(p["_id"]),
+        "reg_no": p.get("reg_no"),
+        "full_name": p.get("full_name"),
+        "age": p.get("age"),
+        "gender_label": ser_patient(p)["gender_label"],
+        "phone_last4": (normalize_phone(p.get("phone")) or "")[-4:],
+    } for p in patients]}
 
 
 def _content_from_body(body) -> dict:
@@ -301,7 +321,6 @@ async def complete_prescription(
     db = get_db()
     await _apply_catalogue(db, body)
     content, lines, none = validate_completion(body)
-    content["ot_eye"] = normalize_ot_eye(content.get("ot_eye"))
     p = await _require_printed_patient(db, body.patient_id)
     digest = payload_hash("complete", {
         "patient_id": str(p["_id"]), "content": content, "lines": lines, "none": none,
@@ -403,7 +422,7 @@ def _validate_fulfilment_matrix(item_type: str, status: str) -> None:
         "medicine": {"fulfilled", "not_available", "partially_fulfilled"},
         "specs_fixed": {"fulfilled"},
         "specs_made": {"deferred"},
-        "ot": {"deferred"},
+        "ot": {"deferred", "declined"},
     }
     if item_type not in valid or status not in valid[item_type]:
         raise HTTPException(status_code=400, detail="Invalid fulfilment item/status")
@@ -473,7 +492,7 @@ DEFERRAL_CONFIG = {
         "missing_err": "OT deferral needs a scheduled day",
         "full_err": "OT day is full or not found",
         "none_free_err": "Every OT Schedule Day is full. Call the admin to add an OT Schedule Day.",
-        "instructions": "पर्चा, टोकन, आधार कार्ड, वोटर आईडी और मोबाइल नंबर साथ लाएँ। सहायता: 9835317006",
+        "instructions": "पर्चा, यह टोकन, आधार कार्ड, राशन कार्ड और मोबाइल फ़ोन साथ लाएँ। सहायता: 9835317006",
         "slip_kwarg": "ot_schedule_day_id",
         "message_type": "ot_token",
     },
@@ -668,6 +687,8 @@ async def record_fulfilment(
         raise HTTPException(status_code=400, detail="Invalid fulfilment item/status")
     if revision.get("none_prescribed") or body.item_type not in (revision.get("prescribed_lines") or []):
         raise conflict("line_not_prescribed", "This line is not prescribed on the completed prescription.")
+    if body.item_type == "ot" and revision.get("ot_outcome") != "iol_surgery":
+        raise conflict("hospital_referral", "A Hospital referral is complete once the prescription is saved; nothing is recorded at the Hospital station.")
     medicine_outcomes = None
     issued_powers = None
     if body.item_type == "medicine":
@@ -875,8 +896,12 @@ async def get_slip(slip_id: str, actor: dict = Depends(require_clinical)) -> Dic
         raise HTTPException(status_code=404, detail="Slip not found")
     p = await db.patients.find_one({"_id": s["patient_id"]})
     camp = await db.camps.find_one({"_id": p["camp_id"]}) if p and p.get("camp_id") else None
+    revision = None
+    if s["item_type"] == "ot" and p and p.get("committed_revision_id"):
+        revision = await db.prescription_revisions.find_one({"_id": p["committed_revision_id"]})
+    surgery = revision or {}
     return {
-        "slip": ser_slip(s),
+        "slip": {**ser_slip(s), **{field: surgery.get(field) for field in ("ot_eye", "bp", "blood_sugar")}},
         "registration": ser_patient(p) if p else None,
         "camp_name": camp["name"] if camp else None,
     }
@@ -939,7 +964,6 @@ async def add_correction(
     view.fixed_power_r = await stocked_power(db, view.fixed_power_r)
     view.fixed_power_l = await stocked_power(db, view.fixed_power_l)
     content, lines, none = validate_completion(view)
-    content["ot_eye"] = normalize_ot_eye(content.get("ot_eye"))
     digest = payload_hash("correct", {
         "patient_id": str(p["_id"]), "content": content, "reason": body.reason,
         "lines": lines, "none": none,

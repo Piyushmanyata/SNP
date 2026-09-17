@@ -12,6 +12,7 @@ export function AadhaarModeButtons({
   stopCamera,
   scanFile,
   fileRef,
+  cameraOnly = false,
 }) {
   return (
     <div className="flex flex-wrap gap-2 mb-3">
@@ -50,49 +51,53 @@ export function AadhaarModeButtons({
           <X className="w-4 h-4" /> Stop camera
         </Button>
       )}
-      <Button
-        variant="outline"
-        size="md"
-        type="button"
-        onClick={async () => {
-          if (mode === "camera") {
-            await stopCamera();
-            setMode("idle");
-          }
-          fileRef.current?.click();
-        }}
-        disabled={disabled || busy || cameraState === "starting"}
-        className="min-h-[44px]"
-        data-testid="aadhaar-upload-button"
-      >
-        <Upload className="w-4 h-4" /> Upload photo / PDF
-      </Button>
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*,.heic,.heif,application/pdf,.pdf"
-        className="hidden"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) scanFile(file);
-          e.target.value = "";
-        }}
-        data-testid="aadhaar-file-input"
-      />
-      <Button
-        variant="outline"
-        size="md"
-        type="button"
-        onClick={async () => {
-          if (mode === "camera") await stopCamera();
-          setMode(mode === "manual" ? "idle" : "manual");
-        }}
-        disabled={disabled || busy}
-        className="min-h-[44px]"
-        data-testid="aadhaar-manual-toggle"
-      >
-        <Keyboard className="w-4 h-4" /> USB / paste
-      </Button>
+      {!cameraOnly && (
+        <>
+          <Button
+            variant="outline"
+            size="md"
+            type="button"
+            onClick={async () => {
+              if (mode === "camera") {
+                await stopCamera();
+                setMode("idle");
+              }
+              fileRef.current?.click();
+            }}
+            disabled={disabled || busy || cameraState === "starting"}
+            className="min-h-[44px]"
+            data-testid="aadhaar-upload-button"
+          >
+            <Upload className="w-4 h-4" /> Upload photo / PDF
+          </Button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*,.heic,.heif,application/pdf,.pdf"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) scanFile(file);
+              e.target.value = "";
+            }}
+            data-testid="aadhaar-file-input"
+          />
+          <Button
+            variant="outline"
+            size="md"
+            type="button"
+            onClick={async () => {
+              if (mode === "camera") await stopCamera();
+              setMode(mode === "manual" ? "idle" : "manual");
+            }}
+            disabled={disabled || busy}
+            className="min-h-[44px]"
+            data-testid="aadhaar-manual-toggle"
+          >
+            <Keyboard className="w-4 h-4" /> USB / paste
+          </Button>
+        </>
+      )}
     </div>
   );
 }

@@ -36,6 +36,7 @@ from test_adversarial_challenger import setup_mock_db
 
 TODAY = "2026-09-01"
 TOMORROW = "2026-09-02"
+TOMORROW_SHOWN = "02-09-2026"
 SECRET = "cron-test-secret"
 HOUSEHOLD = "9876500001"
 
@@ -193,7 +194,7 @@ class TestReminderCronHttp:
         assert [c["mobile"] for c in captured] == [HOUSEHOLD] * 4
         assert sorted(c["reg_no"] for c in captured) == [1000, 1001, 1002, 1003]
         assert {c["type"] for c in captured} == {"camp"}
-        assert {c["date"] for c in captured} == {TOMORROW}
+        assert {c["date"] for c in captured} == {TOMORROW_SHOWN}
         assert len(mock_db.reminder_ledger.docs) == 4
 
     def test_camp_reminder_ledger_row_carries_reg_no_copy(self, monkeypatch):
@@ -208,7 +209,7 @@ class TestReminderCronHttp:
         assert row["number"] == HOUSEHOLD
         assert row["status"] == "sent"
         assert row["provider_id"] == "id-1"
-        assert row["copy"] == CAMP_REMINDER.format(reg_no=1000, date=TOMORROW, venue="Hall A")
+        assert row["copy"] == CAMP_REMINDER.format(reg_no=1000, date=TOMORROW_SHOWN, venue="Hall A")
 
     def test_same_patient_camp_and_ot_sends_two(self, monkeypatch):
         mock_db = setup_mock_db(monkeypatch)
@@ -320,8 +321,8 @@ class TestReminderCronHttp:
         assert r.status_code == 200, r.text
         assert captured == [{
             "type": "specs", "mobile": HOUSEHOLD, "reg_no": 42,
-            "date": TOMORROW + ", समय 10:00–12:00", "venue": "Token Hall",
+            "date": TOMORROW_SHOWN + ", समय 10:00–12:00", "venue": "Token Hall",
         }]
         assert mock_db.reminder_ledger.docs[0]["copy"] == SPECS_REMINDER.format(
-            reg_no=42, date=TOMORROW, venue="Token Hall", window=", समय 10:00–12:00"
+            reg_no=42, date=TOMORROW_SHOWN, venue="Token Hall", window=", समय 10:00–12:00"
         )

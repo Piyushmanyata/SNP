@@ -20,9 +20,20 @@ CONTENT_FIELDS = (
     "fixed_power_r",
     "fixed_power_l",
     "ot_eye",
-    "ot_procedure",
+    "ot_outcome",
     "ot_notes",
 )
+HOSPITAL_OUTCOMES = ("iol_surgery", "referral")
+SURGERY_EYES = {"r": "R", "right": "R", "l": "L", "left": "L"}
+EXCLUSIVE_LINE_LABELS = {
+    "specs_fixed": "Fixed-power specs",
+    "specs_made": "Spectacles to be made",
+    "ot": "IOL surgery",
+}
+
+
+def normalize_ot_eye(value: Any) -> Optional[str]:
+    return SURGERY_EYES.get(str(value or "").strip().lower())
 
 
 def assert_clinical_operator(actor: dict | None) -> dict:
@@ -76,6 +87,25 @@ def prescribed_lines_of(body: Any) -> Tuple[List[str], bool]:
     return lines, none
 
 
+def _hospital_errors(content: dict, lines: List[str]) -> Dict[str, str]:
+    outcome = content.get("ot_outcome")
+    eye = content.get("ot_eye")
+    if "ot" not in lines:
+        errors: Dict[str, str] = {}
+        if not _blank(outcome):
+            errors["ot_outcome"] = "Tick the Hospital line or clear the Hospital outcome."
+        if not _blank(eye):
+            errors["ot_eye"] = "Tick the Hospital line or clear the surgery eye."
+        return errors
+    if outcome not in HOSPITAL_OUTCOMES:
+        return {"ot_outcome": "Record whether the paper says IOL surgery or Hospital referral."}
+    if outcome == "iol_surgery" and not normalize_ot_eye(eye):
+        return {"ot_eye": "Record the IOL surgery eye as Right or Left."}
+    if outcome == "referral" and not _blank(eye):
+        return {"ot_eye": "A Hospital referral has no surgery eye."}
+    return {}
+
+
 def validate_completion(body: Any) -> Tuple[dict, List[str], bool]:
     if not getattr(body, "full_transcription_confirmed", False):
         raise HTTPException(status_code=400, detail={
@@ -110,9 +140,14 @@ def validate_completion(body: Any) -> Tuple[dict, List[str], bool]:
         m = content.get("specs_measurements") or {}
         if not (str(m.get("r_sph") or "").strip() and str(m.get("l_sph") or "").strip()):
             errors["specs_measurements"] = "Record the prescribed power for both eyes."
-    if "ot" in lines:
-        if _blank(content.get("ot_eye")) or _blank(content.get("ot_procedure")):
-            errors["ot"] = "Record the OT eye and procedure from the paper."
+    errors.update(_hospital_errors(content, lines))
+    exclusive: List[str] = [line for line in ("specs_fixed", "specs_made") if line in lines]
+    if "ot" in lines and content.get("ot_outcome") == "iol_surgery":
+        exclusive.append("ot")
+    if len(exclusive) > 1:
+        labels = [EXCLUSIVE_LINE_LABELS[line] for line in exclusive]
+        errors["prescribed_lines"] = f"{', '.join(labels[:-1])} and {labels[-1]} cannot be on one prescription."
+    content["ot_eye"] = normalize_ot_eye(content.get("ot_eye"))
     if errors:
         raise HTTPException(status_code=400, detail={
             "code": "incomplete_prescription",

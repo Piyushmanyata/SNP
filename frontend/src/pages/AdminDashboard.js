@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { formatPower } from "../components/clinical";
 import TemplateEditor from "../components/TemplateEditor";
+import { displayDate } from "../lib/dates";
 
 const CAMP_VENUE = "Hansa Garden, Rohini Road in Baghmara, Jasidih, Deoghar - 814142";
 const HOSPITAL_VENUE = "Vimla Ramkrishna Bajaj Eye Hospital, Near Canara Bank, Bilasi Mod, Deoghar 814112 (Jharkhand)";
@@ -144,7 +145,7 @@ function Camps() {
             <Tent className={`w-5 h-5 ${c.is_active ? "text-emerald-500" : "text-slate-300"}`} />
             <div className="flex-1">
               <p className="font-display font-bold text-slate-900">{c.name} {c.is_active && <Badge tone="emerald">Active</Badge>}</p>
-              <p className="text-xs text-slate-400">{c.venue} · {c.camp_date}</p>
+              <p className="text-xs text-slate-400">{c.venue} · {displayDate(c.camp_date)}</p>
             </div>
             {c.is_active ? (
               <Button size="sm" variant="ghost" onClick={() => deactivate(c.id)} data-testid={`deactivate-camp-${c.id}`}><Power className="w-4 h-4" /> Deactivate</Button>
@@ -227,7 +228,7 @@ function CampDays({ campId }) {
       {days.map((d) => (
         <div key={d.id} className="flex flex-wrap items-center gap-2 p-2.5 rounded-xl bg-slate-50" data-testid={`day-row-${d.id}`}>
           <CalendarDays className="w-4 h-4 text-slate-400" />
-          <span className="font-medium text-slate-800 text-sm">{d.day_date}</span>
+          <span className="font-medium text-slate-800 text-sm">{displayDate(d.day_date)}</span>
           {d.is_today && <Badge tone="emerald">Today</Badge>}
           <span className="text-xs text-slate-400">seats: {d.seat_limit}</span>
           <div className="ml-auto flex items-center gap-2">
@@ -280,7 +281,7 @@ function OtSchedule() {
           {days.map((d) => (
             <div key={d.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50" data-testid={`ot-day-${d.id}`}>
               <Scissors className="w-4 h-4 text-emerald-600" />
-              <span className="font-medium text-slate-800 text-sm">{d.day_date}</span>
+              <span className="font-medium text-slate-800 text-sm">{displayDate(d.day_date)}</span>
               <span className="text-xs text-slate-400">{d.venue}</span>
               <Badge tone={d.seats_free > 0 ? "emerald" : "rose"} className="ml-auto">{d.seats_taken}/{d.seat_limit} seats</Badge>
             </div>
@@ -327,7 +328,7 @@ function SpecsCollectionDays() {
           {days.map((d) => (
             <div key={d.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50" data-testid={`specs-day-${d.id}`}>
               <Glasses className="w-4 h-4 text-emerald-600" />
-              <span className="font-medium text-slate-800 text-sm">{d.day_date}</span>
+              <span className="font-medium text-slate-800 text-sm">{displayDate(d.day_date)}</span>
               <span className="text-xs text-slate-400">{d.venue}</span>
               <Badge tone={d.window_required ? "amber" : "emerald"} className="ml-auto">
                 {d.start_time && d.end_time ? `${d.start_time}–${d.end_time}` : "window required"}
