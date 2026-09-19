@@ -5,9 +5,9 @@
 - Application domain: `sikarkolkata.io`.
 - VPS: `82.112.234.39`, Ubuntu 24.04.4 LTS, 2 CPUs, 8 GB RAM.
 - Runtime: Docker Engine 29.8.0 and Docker Compose 5.5.1.
-- Application release: `730112cb5a122f99b592cce50bb8faf082b3eece` (Hospital outcomes and Clinical find, 17 September 2026).
-- Release directory: `/opt/snp/releases/730112cb5a122f99b592cce50bb8faf082b3eece`.
-- Previous releases kept for rollback: `13854767e93b1f95bda958680ef27aff387bd36e`, `6f5ab0cb4bd7e58bbf1aacefbaf54db97ff0f3e7`, `ac60bdfe2ecb13555ae449a7d299229ca8758afd`, `7eaed607ba0946c04dd32a405920a49db5e96fe7`, `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`, `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
+- Application release: `68c978b860edaf9db0dc093740a2228f8ca45ec6` (SMS copy corrections and walk-in registration rules, 19 September 2026).
+- Release directory: `/opt/snp/releases/68c978b860edaf9db0dc093740a2228f8ca45ec6`.
+- Previous releases kept for rollback: `730112cb5a122f99b592cce50bb8faf082b3eece`, `13854767e93b1f95bda958680ef27aff387bd36e`, `6f5ab0cb4bd7e58bbf1aacefbaf54db97ff0f3e7`, `ac60bdfe2ecb13555ae449a7d299229ca8758afd`, `7eaed607ba0946c04dd32a405920a49db5e96fe7`, `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`, `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
 - Current release link: `/opt/snp/current`.
 - Production Compose project: `snp`.
 - Production environment: `/opt/snp/.env.production`, readable only by root.
@@ -118,6 +118,18 @@ Two items remain before the camp:
 - Confirmation in the MSG91 console that a DD-MM-YYYY `date` value is accepted.
 
 The SMS copy names ration card, matching the Bring list of ADR 0039. It was aligned before any DLT template was registered, so no re-approval was needed.
+
+## SMS copy and walk-in rules release
+
+The 19 September 2026 release ([PR 36](https://github.com/Piyushmanyata/SNP/pull/36)) changes the surgery SMS copy to राशन कार्ड, removes the hardcoded hospital name from both surgery templates, makes the OT Schedule Day venue admin-typed with an optional short name for SMS, and stops sending the registration SMS to walk-ins while exempting them from the camp-day seat limit. See ADR 0040, 0041 and 0042.
+
+No database migration was required. `venue_sms` on an OT Schedule Day and `collection_venue_sms` on a deferred slip are optional and absent on existing documents, where both fall back to the full venue. `server.py` calls the idempotent `init_indexes()` on startup and this release adds no index.
+
+Images for `730112cb5a122f99b592cce50bb8faf082b3eece` were tagged `snp-backend:rollback-730112cb…`, `snp-frontend:rollback-730112cb…` and `snp-reminders:rollback-730112cb…` before rebuilding. A pre-deployment archive, `snp_camps-20260919T074441Z.archive.gz`, was taken by restarting the backup container. MongoDB was not recreated and its container stayed up throughout, so the data volume never detached.
+
+Post-deployment checks against the live host: all six containers reported healthy, `/api/health` returned `{"status":"ok"}`, the homepage returned 200, and HTTP redirected with 308. The deployed backend container was read directly and returns the new surgery copy, naming राशन कार्ड and carrying no hospital name in its fixed text.
+
+CI run [35429981396](https://github.com/Piyushmanyata/SNP/actions/runs/35429981396) passed every check: backend, frontend, dependencies, workflow and verify.
 
 ## Access and operation
 
