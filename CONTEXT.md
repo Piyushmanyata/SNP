@@ -93,7 +93,7 @@ The keystroke stream a USB imager emits for one card: the whole payload followed
 _Avoid_: USB wedge (the old name for the fallback textarea), paste mode, manual USB mode
 
 **OT Schedule Day**:
-An admin-created hospital surgery date, unique per camp and date, with a finite seat limit. Surgery takes place at Vimla Ramkrishna Bajaj Eye Hospital only; camp staff schedule it and print the token. Past dates cannot accept bookings.
+An admin-created hospital surgery date, unique per camp and date, with a finite seat limit that is always enforced, unlike a camp day's. The admin types the hospital, defaulting to Vimla Ramkrishna Bajaj Eye Hospital, plus an optional short name used in SMS instead of the full address (ADR 0040); camp staff schedule it and print the token. Past dates cannot accept bookings.
 _Avoid_: OT slot, surgery day, OT appointment
 
 **Prescription transcription**:
@@ -237,8 +237,8 @@ The headline on the unauthenticated login page for the active camp: total seats 
 _Avoid_: live feed, registration ticker, public patient list
 
 **Camp-day capacity**:
-Every camp day has a seat limit greater than zero; there is no unlimited day. The limit counts bookings, which Arrival never moves: a patient booked for one camp day who arrives on another is checked in on the day they came without consuming a seat there or releasing one on the day they left. Camp-day capacity is a planning number for footfall. OT Schedule Day and Specs collection day seats are surgical and workshop capacity, and those stay a hard block.
-_Avoid_: seats_taken (that counter is OT and Spectacles to be made only), unlimited day
+Every camp day has a seat limit greater than zero. The limit blocks self-registration and pre-registration, and never blocks a walk-in: a patient who has come to the camp is registered whatever the count says, so a camp day's bookings can exceed its limit (ADR 0042). The limit counts bookings, which Arrival never moves: a patient booked for one camp day who arrives on another is checked in on the day they came without consuming a seat there or releasing one on the day they left. Camp-day capacity is a planning number for footfall. OT Schedule Day and Specs collection day seats are surgical and workshop capacity, and those stay a hard block.
+_Avoid_: seats_taken (that counter is OT and Spectacles to be made only), unlimited day, turning away a walk-in
 
 **Camp-day board**:
 The read-only page a team lead watches during a camp day. Per Registration desk, Arrivals in the last fifteen minutes and the last hour, with a desk that has gone quiet highlighted; the transcription backlog; each Fulfilment line's count today; seats left on the next OT Schedule Day and Specs collection day; SMS failures. Counts only, refreshes on its own, no actions and no patient names.
@@ -263,7 +263,7 @@ _Avoid_: camp records, clinical audit, the reports (there is exactly one export)
 Every SMS below is Devanagari, per patient, and carries that patient's reg_no. A household number covering three patients receives three messages. Each is its own DLT template.
 
 **Registration confirmation**:
-Sent when a registration is created, whether by self-register or by a volunteer. Confirms the patient is registered and states reg_no, camp day date, and venue.
+Sent when a registration is created for a future camp day, whether by self-register or by a volunteer. Confirms the patient is registered and states reg_no, camp day date, and venue. A desk registration for today is a walk-in who is already at the camp, so it sends nothing (ADR 0041); self-registration always sends.
 _Avoid_: welcome SMS, enrolment SMS, receipt
 
 **Camp reminder**:

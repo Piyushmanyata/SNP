@@ -12,7 +12,7 @@ from models import CorrectionBody, OtScheduleBody
 from fastapi import BackgroundTasks
 
 
-def test_surgery_can_only_be_scheduled_at_the_hospital(monkeypatch):
+def test_surgery_venue_is_admin_typed_and_required(monkeypatch):
     async def run():
         database = _mock(monkeypatch)
         camp_id, _, trans_id = await _seen_patient_with_transcription(database, RX)
@@ -24,14 +24,24 @@ def test_surgery_can_only_be_scheduled_at_the_hospital(monkeypatch):
             ), actor=actor, background_tasks=None)
         assert error.value.status_code == 400
         admin = {"_id": ObjectId(), "role": "admin"}
+        tomorrow = (now_ist() + timedelta(days=1)).date().isoformat()
         result = await routes_clinical.create_ot_day(OtScheduleBody(
-            camp_id=str(camp_id), day_date=(now_ist() + timedelta(days=1)).date().isoformat(),
-            venue="Camp tent", seat_limit=20,
+            camp_id=str(camp_id), day_date=tomorrow,
+            venue="District Hospital, Deoghar", venue_sms="जिला अस्पताल", seat_limit=20,
         ), actor=admin)
-        assert result["ot_day"]["venue"] == (
-            "Vimla Ramkrishna Bajaj Eye Hospital, Near Canara Bank, "
-            "Bilasi Mod, Deoghar 814112 (Jharkhand)"
-        )
+        assert result["ot_day"]["venue"] == "District Hospital, Deoghar"
+        assert result["ot_day"]["venue_sms"] == "जिला अस्पताल"
+        with pytest.raises(HTTPException) as error:
+            await routes_clinical.create_ot_day(OtScheduleBody(
+                camp_id=str(camp_id), day_date=(now_ist() + timedelta(days=2)).date().isoformat(),
+                venue="   ", seat_limit=20,
+            ), actor=admin)
+        assert error.value.status_code == 400
+        plain = await routes_clinical.create_ot_day(OtScheduleBody(
+            camp_id=str(camp_id), day_date=(now_ist() + timedelta(days=3)).date().isoformat(),
+            venue="Sadar Hospital", seat_limit=20,
+        ), actor=admin)
+        assert plain["ot_day"]["venue_sms"] is None
         with pytest.raises(HTTPException) as error:
             await routes_clinical.create_ot_day(OtScheduleBody(
                 camp_id=str(camp_id), day_date="2020-01-01", venue="Camp tent", seat_limit=20,

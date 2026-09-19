@@ -355,11 +355,9 @@ class TestScanResolution:
             assert out["outcome"] == "arrived"
             assert out["registration"]["camp_day_id"] == str(today_id)
 
-            # The booking that was already on today still owns the only seat.
-            with pytest.raises(HTTPException) as exc:
-                await _register(today_id, full_name="Third Person", phone="9876500008",
-                                manual_entry=True)
-            assert exc.value.detail["code"] == "CAMP_DAY_FULL"
+            # The arrival moved no seat: each day still holds the booking it had.
+            assert (await mock_db.camp_days.find_one({"_id": today_id}))["booked"] == 1
+            assert (await mock_db.camp_days.find_one({"_id": other_id}))["booked"] == 1
             # And the day they left has not gained a seat back.
             assert await mock_db.patients.count_documents({"booked_camp_day_id": other_id}) == 1
         asyncio.run(run())
@@ -380,19 +378,30 @@ class TestScanResolution:
             assert second["registration"]["camp_day_id"] == str(today_id)
         asyncio.run(run())
 
-    def test_camp_day_capacity_refuses_registration_but_not_arrival(self, monkeypatch):
+    def test_capacity_refuses_pre_registration_but_never_a_walk_in_or_arrival(self, monkeypatch):
         async def run():
             mock_db = _mock(monkeypatch)
-            camp_id, (day_id,) = await _seed_camp(mock_db)
+            _camp_id, (day_id, other_id) = await _seed_camp(mock_db, days=(TODAY, OTHER_DAY))
             await mock_db.camp_days.update_one({"_id": day_id}, {"$set": {"seat_limit": 1}})
+            await mock_db.camp_days.update_one({"_id": other_id}, {"$set": {"seat_limit": 1}})
             first = await _register(
                 day_id, full_name="Sunita Devi", gender="F", dob="1975-06-14",
                 aadhaar_last4="1234", aadhaar_scanned=True,
             )
+            walk_in = await _register(day_id, full_name="Ram Prasad", phone="9876500009",
+                                      manual_entry=True)
+            assert walk_in["reg_no"]
+            today_day = await mock_db.camp_days.find_one({"_id": day_id})
+            assert today_day["booked"] == 2
+            assert today_day["seat_limit"] == 1
+
+            await _register(other_id, full_name="Later One", phone="9876500010",
+                            manual_entry=True)
             with pytest.raises(HTTPException) as exc:
-                await _register(day_id, full_name="Ram Prasad", phone="9876500009",
+                await _register(other_id, full_name="Later Two", phone="9876500011",
                                 manual_entry=True)
             assert exc.value.detail["code"] == "CAMP_DAY_FULL"
+
             out = await scan(ScanBody(payload=CARD), actor=ACTOR)
             assert out["outcome"] == "arrived"
             assert out["registration"]["reg_no"] == first["reg_no"]
@@ -408,13 +417,13 @@ class TestRegistrationConfirmationSms:
         async def run():
             mock_db = _mock(monkeypatch)
             sent = _recorder(monkeypatch)
-            _camp_id, (day_id,) = await _seed_camp(mock_db)
+            _camp_id, (day_id,) = await _seed_camp(mock_db, days=(OTHER_DAY,))
             a = await _register(day_id, full_name="Sunita Devi", manual_entry=True)
             b = await _register(day_id, full_name="Ram Prasad", manual_entry=True)
             assert [s["type"] for s in sent] == ["registration", "registration"]
             assert [s["reg_no"] for s in sent] == [a["reg_no"], b["reg_no"]]
             assert {s["mobile"] for s in sent} == {"9876500001"}
-            assert {s["date"] for s in sent} == {"01-09-2026"}
+            assert {s["date"] for s in sent} == {"03-09-2026"}
             assert {s["venue"] for s in sent} == {"Sikar Bhawan"}
         asyncio.run(run())
 
@@ -427,12 +436,25 @@ class TestRegistrationConfirmationSms:
                 raise RuntimeError("gateway down")
 
             monkeypatch.setattr(sms.msg91, "send_dlt_sms", boom)
-            _camp_id, (day_id,) = await _seed_camp(mock_db)
+            _camp_id, (day_id,) = await _seed_camp(mock_db, days=(OTHER_DAY,))
             reg = await _register(day_id, manual_entry=True)
             assert reg["reg_no"]
             row = mock_db.reminder_ledger.docs[0]
             assert row["message_type"] == "registration"
             assert row["status"] == "failed"
+        asyncio.run(run())
+
+    def test_a_walk_in_registered_on_the_camp_day_gets_no_sms(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            sent = _recorder(monkeypatch)
+            _camp_id, (today_id, later_id) = await _seed_camp(mock_db, days=(TODAY, OTHER_DAY))
+            await _register(today_id, full_name="Sunita Devi", manual_entry=True)
+            assert sent == []
+            assert mock_db.reminder_ledger.docs == []
+            await _register(later_id, full_name="Ram Prasad", manual_entry=True)
+            assert [s["type"] for s in sent] == ["registration"]
+            assert sent[0]["date"] == "03-09-2026"
         asyncio.run(run())
 
     def test_a_patient_with_no_usable_number_is_skipped(self, monkeypatch):

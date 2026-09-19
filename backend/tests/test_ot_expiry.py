@@ -21,7 +21,7 @@ def test_ot_day_expires_at_ist_midnight_even_when_loaded_before_midnight(monkeyp
         day_id = ObjectId()
         await database.ot_schedule_days.insert_one({
             "_id": day_id, "camp_id": camp_id, "day_date": before_midnight.date().isoformat(),
-            "venue": routes_clinical.HOSPITAL_VENUE, "seat_limit": 2, "seats_taken": 0,
+            "venue": "Vimla Ramkrishna Bajaj Eye Hospital, Deoghar", "seat_limit": 2, "seats_taken": 0,
         })
         actor = {"_id": ObjectId(), "role": "clinical_desk_operator"}
         body = _fulfil(trans_id, database.last_rev_id, item_type="ot", status="deferred",

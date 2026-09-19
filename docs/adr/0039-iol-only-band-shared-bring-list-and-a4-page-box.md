@@ -10,7 +10,7 @@ The prescription also prints across two pages on some printers. ADR 0036 kept th
 
 ## Decision
 
-- **One Bring list**: the prescription, the Token, Aadhaar card, ration card and mobile phone. Voter ID is dropped. It is identical on the prescription and the IOL surgery Token.
+- **One Bring list**: the prescription, the Token, Aadhaar card, ration card and mobile phone. Voter ID is dropped. It is identical on the prescription, the IOL surgery Token and the two surgery SMS templates (`ot_token`, `ot`).
 - The prescription's English-only band is replaced by one bordered band of two lines, Hindi then English:
   - "केवल मोतियाबिंद (IOL) ऑपरेशन की व्यवस्था की जाती है। ऑपरेशन के दिन लाएँ: यह पर्चा, टोकन, आधार कार्ड, राशन कार्ड, मोबाइल फ़ोन।"
   - "Only cataract (IOL) operations are arranged. On the day of the operation bring: this prescription, token, Aadhaar card, ration card, mobile phone."

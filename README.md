@@ -41,7 +41,7 @@ docker compose --env-file .env.production -f docker-compose.prod.yml up -d --bui
 
 Caddy obtains and renews TLS certificates. Only ports 80/443 are published; MongoDB and the API remain internal. The backend runs without root privileges. No Emergent account or hosting files are required.
 
-Configure the MSG91 key and approved DLT template IDs before using real SMS. Without them, sending is reported as skipped. Review the exact Hindi text in `backend/sms.py` with the provider; surgery templates include आधार कार्ड, वोटर आईडी और मोबाइल नंबर. Real carrier delivery requires a live provider test.
+Configure the MSG91 key and approved DLT template IDs before using real SMS. Without them, sending is reported as skipped. Review the exact Hindi text in `backend/sms.py` with the provider; surgery templates include आधार कार्ड, राशन कार्ड और मोबाइल नंबर. Real carrier delivery requires a live provider test.
 
 The reminder container dispatches day-before reminders at 10:00 Asia/Kolkata and retries failures. Details: [reminder worker](backend/docs/reminder-worker.md).
 

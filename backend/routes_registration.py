@@ -7,7 +7,7 @@ from db import get_db, next_seq
 from models import AadhaarDecodeBody, RegisterBody, DuplicateCheckBody
 from helpers import (
     now_utc, normalize_name, normalize_phone, is_dummy_phone,
-    person_key, new_patient_code, age_from_dob,
+    person_key, new_patient_code, age_from_dob, today_ist_str,
 )
 from serializers import ser_patient
 from security import require_staff, require_any
@@ -146,9 +146,12 @@ async def _duplicate_hits(
     return hits
 
 
-async def _assert_capacity(db: AsyncIOMotorDatabase, day: dict) -> None:
+async def _assert_capacity(db: AsyncIOMotorDatabase, day: dict, enforce_limit: bool = True) -> None:
     limit = day.get("seat_limit") or 0
     if limit <= 0:
+        return
+    if not enforce_limit:
+        await db.camp_days.update_one({"_id": day["_id"]}, {"$inc": {"booked": 1}})
         return
     updated = await db.camp_days.find_one_and_update(
         {"_id": day["_id"], "$expr": {"$lt": ["$booked", "$seat_limit"]}},
@@ -378,7 +381,8 @@ async def _create_registration(
     if conflict_result is not None:
         return conflict_result
 
-    await _assert_capacity(db, day)
+    walk_in = not is_self and day.get("day_date") == today_ist_str()
+    await _assert_capacity(db, day, enforce_limit=not walk_in)
     try:
         age = body.age if body.age is not None else (age_from_dob(body.dob) if body.dob else None)
         reg_no = await next_seq("reg_no")
@@ -412,12 +416,14 @@ async def _create_registration(
         raise
 
 
-async def _confirm_registration(patient: Dict[str, Any]) -> None:
+async def _confirm_registration(patient: Dict[str, Any], skip_if_today: bool = False) -> None:
     db = get_db()
     row = await db.patients.find_one({"_id": ObjectId(patient["id"])})
     day = await db.camp_days.find_one({"_id": ObjectId(patient["camp_day_id"])})
     camp = await db.camps.find_one({"_id": ObjectId(patient["camp_id"])})
     if not row or not day or not camp:
+        return
+    if skip_if_today and day["day_date"] == today_ist_str():
         return
     await sms.send_patient_sms(db, row, "registration", day["day_date"], camp["venue"])
 
@@ -462,9 +468,9 @@ async def desk_register(
     )
     if created:
         if background_tasks is not None:
-            background_tasks.add_task(_confirm_registration, patient)
+            background_tasks.add_task(_confirm_registration, patient, True)
         else:
-            await _confirm_registration(patient)
+            await _confirm_registration(patient, True)
     return {"registration": patient, "created": created}
 
 

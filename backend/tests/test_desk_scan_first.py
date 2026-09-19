@@ -252,13 +252,10 @@ class TestAadhaarOverwrite:
                     aadhaar_scanned=True, phone="9876500302")
         assert lock.status_code == 200, lock.text
         assert lock.json()["registration"]["reg_no"] == typed.json()["registration"]["reg_no"]
-        extra = _reg(admin, day["id"], full_name=f"TEST Extra {TAG}", age=22,
-                     phone="9876500303", manual_entry=True)
-        assert extra.status_code == 409, extra.text
-        assert extra.json()["detail"]["code"] == "CAMP_DAY_FULL"
         pub = anon.get(f"{API}/camps/active/public", timeout=30).json()
         row = next(d for d in pub["days"] if d["id"] == day["id"])
         assert row["registered"] == 1
+        assert row["remaining"] == 0
 
     def test_lock_matching_already_scanned_409(self, admin):
         camp_id = _camp(admin, "owscan")
@@ -336,7 +333,7 @@ class TestAadhaarOverwrite:
 
 
 class TestCampDayCapacity:
-    def test_full_day_409_desk_and_self(self, admin, anon):
+    def test_full_day_refuses_self_but_never_a_walk_in(self, admin, anon):
         camp_id = _camp(admin, "capfull")
         day = _day(admin, camp_id, TODAY_IST, seat_limit=1)
         a = _reg(admin, day["id"], full_name=f"TEST Cap1 {TAG}", phone="9876500401",
@@ -344,8 +341,7 @@ class TestCampDayCapacity:
         assert a.status_code == 200, a.text
         b = _reg(admin, day["id"], full_name=f"TEST Cap2 {TAG}", phone="9876500402",
                  manual_entry=True)
-        assert b.status_code == 409, b.text
-        assert b.json()["detail"]["code"] == "CAMP_DAY_FULL"
+        assert b.status_code == 200, b.text
         s = _self(anon, day["id"], full_name=f"TEST CapSelf {TAG}", age=30, gender="M",
                   dob="1996-03-03", aadhaar_last4="4401", aadhaar_scanned=True, phone="9876500403")
         assert s.status_code == 409, s.text
