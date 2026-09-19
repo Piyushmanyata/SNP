@@ -71,7 +71,7 @@ async def _token_targets(
         if item_type != "specs_made" and s.get(day_field):
             day = await day_collection.find_one({"_id": s[day_field]})
             if day:
-                venue = day["venue"]
+                venue = day.get("venue_sms") or day["venue"]
         targets.append((
             patient, venue,
             s.get("collection_start_time"), s.get("collection_end_time"),

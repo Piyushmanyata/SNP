@@ -29,7 +29,6 @@ from security import require_clinical, require_admin, require_any
 import sms
 
 router = APIRouter(prefix="/api/clinical", tags=["clinical"])
-HOSPITAL_VENUE = "Vimla Ramkrishna Bajaj Eye Hospital, Near Canara Bank, Bilasi Mod, Deoghar 814112 (Jharkhand)"
 
 
 @asynccontextmanager
@@ -121,6 +120,7 @@ def ser_ot_day(d: dict) -> Dict[str, Any]:
         "camp_id": str(d["camp_id"]),
         "day_date": d["day_date"],
         "venue": d["venue"],
+        "venue_sms": d.get("venue_sms"),
         "seat_limit": d["seat_limit"],
         "seats_taken": d.get("seats_taken", 0),
         "seats_free": d["seat_limit"] - d.get("seats_taken", 0),
@@ -597,6 +597,7 @@ async def _process_deferral(db: AsyncIOMotorDatabase, t: dict, body: FulfilmentB
     try:
         return await _make_slip(
             t, body.item_type, day["day_date"], day["venue"], cfg["instructions"],
+            venue_sms=day.get("venue_sms"),
             start_time=start, end_time=end, **slip_kwargs,
         )
     except Exception:
@@ -834,7 +835,7 @@ async def _finish_fulfilment(db, t: dict, patient: dict, doc: dict, slip: dict |
     if slip:
         args = (
             db, patient, DEFERRAL_CONFIG[doc["item_type"]]["message_type"],
-            slip["collection_date"], slip["collection_venue"],
+            slip["collection_date"], slip.get("collection_venue_sms") or slip["collection_venue"],
             slip.get("collection_start_time"), slip.get("collection_end_time"),
         )
         if background_tasks is not None:
@@ -855,6 +856,7 @@ async def _make_slip(
     coll_date: str,
     venue: str,
     instructions: str,
+    venue_sms: Optional[str] = None,
     ot_schedule_day_id: Optional[ObjectId | str] = None,
     specs_collection_day_id: Optional[ObjectId | str] = None,
     start_time: Optional[str] = None,
@@ -871,6 +873,7 @@ async def _make_slip(
         "cancelled": False,
         "collection_date": coll_date,
         "collection_venue": venue,
+        "collection_venue_sms": venue_sms,
         "collection_start_time": start_time,
         "collection_end_time": end_time,
         "ot_schedule_day_id": ot_schedule_day_id,
@@ -1052,6 +1055,10 @@ async def create_ot_day(body: OtScheduleBody, actor: dict = Depends(require_admi
         raise HTTPException(status_code=400, detail="Surgery date must be today or later")
     if body.seat_limit <= 0:
         raise HTTPException(status_code=400, detail="Seat limit must be positive")
+    venue = (body.venue or "").strip()
+    if not venue:
+        raise HTTPException(status_code=400, detail="Venue is required")
+    venue_sms = (body.venue_sms or "").strip() or None
     if not await db.camps.find_one({"_id": camp_id, "is_active": True}):
         raise HTTPException(status_code=400, detail="Camp is not active")
     existing = await db.ot_schedule_days.find_one({"camp_id": camp_id, "day_date": body.day_date})
@@ -1064,7 +1071,7 @@ async def create_ot_day(body: OtScheduleBody, actor: dict = Depends(require_admi
             })
         d = await db.ot_schedule_days.find_one_and_update(
             {"_id": existing["_id"], "seats_taken": {"$lte": body.seat_limit}},
-            {"$set": {"seat_limit": body.seat_limit, "venue": HOSPITAL_VENUE}},
+            {"$set": {"seat_limit": body.seat_limit, "venue": venue, "venue_sms": venue_sms}},
             return_document=True,
         )
         if not d:
@@ -1072,7 +1079,7 @@ async def create_ot_day(body: OtScheduleBody, actor: dict = Depends(require_admi
     else:
         res = await db.ot_schedule_days.insert_one({
             "camp_id": camp_id, "day_date": body.day_date,
-            "venue": HOSPITAL_VENUE, "seat_limit": body.seat_limit, "seats_taken": 0,
+            "venue": venue, "venue_sms": venue_sms, "seat_limit": body.seat_limit, "seats_taken": 0,
             "created_at": now_utc(),
         })
         d = await db.ot_schedule_days.find_one({"_id": res.inserted_id})

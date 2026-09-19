@@ -254,7 +254,7 @@ function OtSchedule() {
   const [days, setDays] = useState([]);
   const [camp, setCamp] = useState(null);
   const [err, setErr] = useState("");
-  const [form, setForm] = useState({ day_date: "", venue: HOSPITAL_VENUE, seat_limit: 10 });
+  const [form, setForm] = useState({ day_date: "", venue: HOSPITAL_VENUE, venue_sms: "", seat_limit: 10 });
 
   const load = useCallback(() => {
     Promise.all([api.get("/clinical/ot-days"), api.get("/camps/active")])
@@ -266,7 +266,7 @@ function OtSchedule() {
   const add = useCallback(async () => {
     setErr("");
     if (!camp) { setErr("Activate a camp first."); return; }
-    try { await api.post("/clinical/ot-days", { camp_id: camp.id, ...form, seat_limit: Number(form.seat_limit) }); setForm({ day_date: "", venue: HOSPITAL_VENUE, seat_limit: 10 }); load(); }
+    try { await api.post("/clinical/ot-days", { camp_id: camp.id, ...form, seat_limit: Number(form.seat_limit) }); setForm({ day_date: "", venue: HOSPITAL_VENUE, venue_sms: "", seat_limit: 10 }); load(); }
     catch (e) { setErr(formatApiError(e)); }
   }, [camp, form, load]);
 
@@ -288,8 +288,9 @@ function OtSchedule() {
           ))}
         </div>
         <div className="flex flex-wrap gap-2 items-end pt-4 mt-3 border-t border-slate-100">
-          <Field label="Date"><Input type="date" value={form.day_date} onChange={(e) => setForm({ ...form, day_date: e.target.value })} data-testid="ot-date-input" /></Field>
+          <Field label="Date"><Input type="date" value={form.day_date} onChange={(e) => { const existing = days.find((d) => d.day_date === e.target.value); setForm({ ...form, day_date: e.target.value, venue: existing ? existing.venue : HOSPITAL_VENUE, venue_sms: existing?.venue_sms || "", seat_limit: existing ? existing.seat_limit : form.seat_limit }); }} data-testid="ot-date-input" /></Field>
           <Field label="Hospital"><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="ot-venue-input" /></Field>
+          <Field label="Short name for SMS"><Input value={form.venue_sms} onChange={(e) => setForm({ ...form, venue_sms: e.target.value })} placeholder={HOSPITAL_VENUE} data-testid="ot-venue-sms-input" /></Field>
           <Field label="Seats"><Input type="number" value={form.seat_limit} onChange={(e) => setForm({ ...form, seat_limit: e.target.value })} className="w-24" data-testid="ot-seat-input" /></Field>
           <Button size="sm" onClick={add} disabled={!form.day_date || !form.venue} data-testid="add-ot-day-button"><Plus className="w-4 h-4" /> Add</Button>
         </div>

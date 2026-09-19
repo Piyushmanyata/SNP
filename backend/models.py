@@ -210,6 +210,7 @@ class OtScheduleBody(BaseModel):
     camp_id: str
     day_date: str
     venue: str
+    venue_sms: Optional[str] = None
     seat_limit: int
 
 

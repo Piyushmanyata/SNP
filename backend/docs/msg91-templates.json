@@ -6,7 +6,7 @@
   "variables": {
     "reg_no": "Patient registration / token number",
     "date": "Event date as sent by backend; for specs templates the time window is already appended (e.g. \"12/03/2026, समय 10:00–13:00\")",
-    "venue": "Camp, hospital or distribution venue name"
+    "venue": "Camp, hospital or distribution venue name. For surgery this is the OT Schedule Day's venue_sms when set, else its full venue, which defaults to the 93-character HOSPITAL_VENUE string; the DLT variable must be registered long enough to hold that full address (ADR 0040)"
   },
   "templates": [
     {
@@ -30,16 +30,16 @@
       "env_var": "MSG91_TEMPLATE_OT_TOKEN",
       "purpose": "Surgery scheduled confirmation",
       "variables": ["reg_no", "date", "venue"],
-      "body": "SNP नेत्र शिविर में आपका ऑपरेशन बजाज हॉस्पिटल में {date} को निर्धारित हुआ है। पर्चा, टोकन ({reg_no}), आधार कार्ड, वोटर आईडी और मोबाइल नंबर साथ लाएँ। स्थल: {venue}।",
-      "dlt_body": "SNP नेत्र शिविर में आपका ऑपरेशन बजाज हॉस्पिटल में ##date## को निर्धारित हुआ है। पर्चा, टोकन (##reg_no##), आधार कार्ड, वोटर आईडी और मोबाइल नंबर साथ लाएँ। स्थल: ##venue##।"
+      "body": "SNP नेत्र शिविर में आपका ऑपरेशन {date} को निर्धारित हुआ है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ लाएँ। स्थल: {venue}।",
+      "dlt_body": "SNP नेत्र शिविर में आपका ऑपरेशन ##date## को निर्धारित हुआ है। पर्चा, टोकन (##reg_no##), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ लाएँ। स्थल: ##venue##।"
     },
     {
       "key": "ot",
       "env_var": "MSG91_TEMPLATE_OT",
       "purpose": "Day-before surgery reminder",
       "variables": ["reg_no", "date", "venue"],
-      "body": "कल ({date}) को आपका नेत्र ऑपरेशन बजाज हॉस्पिटल में निर्धारित है। पर्चा, टोकन ({reg_no}), आधार कार्ड, वोटर आईडी और मोबाइल नंबर साथ लाएँ। स्थल: {venue}।",
-      "dlt_body": "कल (##date##) को आपका नेत्र ऑपरेशन बजाज हॉस्पिटल में निर्धारित है। पर्चा, टोकन (##reg_no##), आधार कार्ड, वोटर आईडी और मोबाइल नंबर साथ लाएँ। स्थल: ##venue##।"
+      "body": "कल ({date}) को आपका नेत्र ऑपरेशन निर्धारित है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ लाएँ। स्थल: {venue}।",
+      "dlt_body": "कल (##date##) को आपका नेत्र ऑपरेशन निर्धारित है। पर्चा, टोकन (##reg_no##), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ लाएँ। स्थल: ##venue##।"
     },
     {
       "key": "specs_token",
@@ -66,7 +66,7 @@
         "mobiles": "919999999999",
         "reg_no": "142",
         "date": "12/03/2026",
-        "venue": "बजाज हॉस्पिटल"
+        "venue": "Vimla Ramkrishna Bajaj Eye Hospital, Near Canara Bank, Bilasi Mod, Deoghar 814112 (Jharkhand)"
       }
     ]
   }

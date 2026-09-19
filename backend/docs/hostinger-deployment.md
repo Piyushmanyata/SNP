@@ -117,7 +117,7 @@ Two items remain before the camp:
 - One physical print of the prescription on the camp printer, to confirm it fits one A4 sheet.
 - Confirmation in the MSG91 console that a DD-MM-YYYY `date` value is accepted.
 
-The SMS copy still names voter ID, because aligning it with the Bring list needs DLT template re-approval.
+The SMS copy names ration card, matching the Bring list of ADR 0039. It was aligned before any DLT template was registered, so no re-approval was needed.
 
 ## Access and operation
 

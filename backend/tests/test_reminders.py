@@ -125,8 +125,8 @@ class TestMessageCopy:
     def test_six_approved_devanagari_strings(self):
         assert REGISTRATION_CONFIRMATION == "SNP नेत्र शिविर में आपका पंजीकरण हो गया है। क्रमांक: {reg_no} दिनांक: {date} शिविर स्थल: {venue}। कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।"
         assert CAMP_REMINDER == "कल ({date}) को SNP नेत्र शिविर में आपका नेत्र परीक्षण है। कृपया समय पर {venue} पहुँचें। यह टोकन शिविर स्थल पर दिखाएँ। क्रमांक: {reg_no}। कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।"
-        assert OT_TOKEN == "SNP नेत्र शिविर में आपका ऑपरेशन बजाज हॉस्पिटल में {date} को निर्धारित हुआ है। पर्चा, टोकन ({reg_no}), आधार कार्ड, वोटर आईडी और मोबाइल नंबर साथ लाएँ। स्थल: {venue}।"
-        assert OT_REMINDER == "कल ({date}) को आपका नेत्र ऑपरेशन बजाज हॉस्पिटल में निर्धारित है। पर्चा, टोकन ({reg_no}), आधार कार्ड, वोटर आईडी और मोबाइल नंबर साथ लाएँ। स्थल: {venue}।"
+        assert OT_TOKEN == "SNP नेत्र शिविर में आपका ऑपरेशन {date} को निर्धारित हुआ है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ लाएँ। स्थल: {venue}।"
+        assert OT_REMINDER == "कल ({date}) को आपका नेत्र ऑपरेशन निर्धारित है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ लाएँ। स्थल: {venue}।"
         assert SPECS_TOKEN == "SNP द्वारा आपका चश्मा {date}{window} पर {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर आएँ।"
         assert SPECS_REMINDER == "कल SNP से चश्मा लें। क्रमांक {reg_no}, दिनांक {date}{window}, स्थान {venue}। टोकन साथ लाएँ।"
 
@@ -136,8 +136,8 @@ class TestMessageCopy:
             for copy in sms.MESSAGE_COPY.values()
         ]
         assert all(len(text) <= 335 for text in rendered), [len(t) for t in rendered]
-        assert "आधार कार्ड, वोटर आईडी और मोबाइल नंबर" in rendered[2]
-        assert "आधार कार्ड, वोटर आईडी और मोबाइल नंबर" in rendered[3]
+        assert "आधार कार्ड, राशन कार्ड और मोबाइल नंबर" in rendered[2]
+        assert "आधार कार्ड, राशन कार्ड और मोबाइल नंबर" in rendered[3]
 
 
 class TestReminderCronHttp:
@@ -326,3 +326,34 @@ class TestReminderCronHttp:
         assert mock_db.reminder_ledger.docs[0]["copy"] == SPECS_REMINDER.format(
             reg_no=42, date=TOMORROW_SHOWN, venue="Token Hall", window=", समय 10:00–12:00"
         )
+
+    def test_ot_reminder_prefers_the_short_sms_venue(self, monkeypatch):
+        mock_db = setup_mock_db(monkeypatch)
+        long_venue = "Vimla Ramkrishna Bajaj Eye Hospital, Near Canara Bank, Bilasi Mod, Deoghar 814112 (Jharkhand)"
+
+        async def seed():
+            pid = ObjectId()
+            ot_day = ObjectId()
+            await mock_db.patients.insert_one({
+                "_id": pid, "camp_id": ObjectId(), "camp_day_id": ObjectId(), "reg_no": 11,
+                "phone": HOUSEHOLD, "phone_normalized": HOUSEHOLD,
+            })
+            await mock_db.ot_schedule_days.insert_one({
+                "_id": ot_day, "day_date": TOMORROW, "camp_id": ObjectId(),
+                "venue": long_venue, "venue_sms": "बजाज हॉस्पिटल, देवघर",
+            })
+            await mock_db.deferred_slips.insert_one({
+                "patient_id": pid, "item_type": "ot", "active": True, "cancelled": False,
+                "collection_date": TOMORROW, "collection_venue": long_venue,
+                "ot_schedule_day_id": ot_day, "version": 1,
+            })
+        asyncio.run(seed())
+        captured = _calls(monkeypatch)
+        client = _client(monkeypatch, mock_db)
+        r = _post(client)
+        assert r.status_code == 200, r.text
+        assert captured == [{
+            "type": "ot", "mobile": HOUSEHOLD, "reg_no": 11,
+            "date": TOMORROW_SHOWN, "venue": "बजाज हॉस्पिटल, देवघर",
+        }]
+        assert long_venue not in mock_db.reminder_ledger.docs[0]["copy"]
