@@ -2,7 +2,7 @@
 
 Date: 21 September 2026. Repository: `Piyushmanyata/SNP`.
 Reviewed baseline: `0e1c9feb8211820f241df0b05e22f55bbba4c91f` (`main`, 19 September 2026).
-Status: SPECIFICATION WRITTEN; implementation and verification to be recorded below.
+Status: PARTIALLY IMPLEMENTED. R2, R3, R4, R5, R8 and R9 are implemented with tests; R10 is implemented except for a durable outbox; R1, R6, R7 and R11-R17 are not started. See the completion ledger.
 
 ## Outcome and authority
 
@@ -228,19 +228,28 @@ These items are not automatically completed by changing one shared component. Th
 
 ## Completion ledger
 
-Each requirement must receive one of: implemented + test evidence; external validation outstanding; explicitly deferred + concrete reason. This section is updated after integration and CI. Blank or planned is not done.
+Each requirement receives one of: implemented + test evidence; external validation outstanding; explicitly deferred + concrete reason. Blank or planned is not done.
 
-| Requirement | Initial status |
+Verification available in this environment: backend 536 passed / 141 skipped, mypy and flake8 clean; frontend 35 suites / 355 tests, tsc, eslint and the build-budget gate clean. Docker was NOT available, so the 141 live HTTP and MongoDB tests skipped locally and run only in CI. No claim below rests on a skipped test.
+
+| Requirement | Status |
 |---|---|
-| R1 manual gate | Planned |
-| R2 scanner recovery | Planned |
-| R3 server identity | Planned |
-| R4 desk recovery | Planned |
-| R5 concurrency / dirty drafts | Planned |
-| R6 mutation recovery | Planned |
-| R7 loading / errors | Planned |
-| R8 printing / app resilience | Planned |
-| R9 reporting work | Planned |
-| R10 SMS outcomes / throughput | Planned; outbox scope must be made explicit |
-| R11 deployment | Requires authenticated VPS access and post-deploy evidence |
-| Visual, phone, printer, carrier and target-host load acceptance | External validation outstanding |
+| R1 manual gate | Not started. The three-failure staff-only manual gate is unimplemented. The scan payload is also not cleared on camp change at the door, which R1 requires; clearing it alone would break `confirmMismatch`, so it belongs with R1. |
+| R2 scanner recovery | Implemented. Stall recovery gates on an accepted Aadhaar card rather than any detected barcode, and an attempt counter retires late detect and decode results. Real-phone success rate remains unmeasured. |
+| R3 server identity | Implemented. Assisted registration derives identity from a server-side decode; XML parsing requires a `PrintLetterBarcodeData` root, a 4 or 12 digit uid and a possible age, and the regex attribute fallback is deleted. `Desk.js` threads the payload to both call sites. ADR 0043 records that nothing here verifies a UIDAI signature. |
+| R4 desk recovery | Partially implemented. The unbounded numeric lookup now answers 400 instead of 500. Candidate selection for an ambiguous scan, the stable walk-in registration ID and the active-camp scope on scan-confirm are NOT done. |
+| R5 concurrency / dirty drafts | Implemented. Draft writes are one conditional update; a stale write gets 409 `draft_version_conflict`; the clinical page echoes the version, preserves typed input on conflict and confirms before discarding dirty work. `expected_draft_version` is optional: a client that sends none keeps last-writer-wins rather than being locked out, and every accepted save still increments the version. |
+| R6 mutation recovery | Not started. Correction and undo remain non-resumable across a partial write. |
+| R7 loading / errors | Not started, except that R8's error boundary covers a render or lazy-chunk failure. |
+| R8 printing / app resilience | Implemented. Optional sponsor logos no longer block the prescription; loading and error scaffolds are excluded from print; one error boundary offers a deliberate retry. Physical print quality remains an operator check. |
+| R9 reporting work | Implemented. Leaderboard database calls go from 123 to 6 and stay flat at 3, 50 and 200 volunteers. Query count only: no elapsed time was measured, and the real-Mongo index plan is unverified without Docker. |
+| R10 SMS outcomes / throughput | Partially implemented. Provider acceptance now requires a success type and a non-empty request id; the silent 10,000 truncation is replaced by pagination with an explicit completion flag; uncertain sends are never auto-resent. NOT implemented: a durable outbox. The failure path is also unbounded, since the send budget counts accepted sends only. |
+| R11 deployment | Blocked. Deployment needs authenticated VPS access; the documented SSH key is on the owner's Windows machine and no key or agent is present in this environment. Nothing was deployed. |
+| R12-R17 | Not started. |
+| Visual, phone, printer, carrier and target-host load acceptance | External validation outstanding. None of it can be performed in this environment. |
+
+### Defects found while implementing
+
+- Six fulfilment tests passed only by wall-clock luck. `routes_clinical` binds `now_ist` through a direct import, so patching `helpers.now_ist` never reached it, and the tests began failing once real time passed their hardcoded 2026-09-20 fixture day. Both `_mock` helpers now freeze `routes_clinical.now_ist`.
+- Enforcing `expected_draft_version` with a default of 0 locked a lone operator out of completing a prescription: the draft version had already advanced past 0, so completion answered 409. Reproduced, then fixed by making the claim opt-in. Regression tests cover it.
+- Making that field optional initially disabled the `locked` and clinical-write-token guards, because they sat inside the version branch. Two existing safety tests caught it; the guards now apply to every client draft write.
