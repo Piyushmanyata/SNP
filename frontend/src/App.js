@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth, roleHome } from "./context/AuthContext";
 import { ADMIN_ROLES, DESK_ROLES, CLINICAL_ROLES, LEAD_ROLES } from "./constants/roles";
 import { Spinner } from "./components/ui";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Login from "./pages/Login";
 const SelfRegister = lazy(() => import("./pages/SelfRegister"));
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
@@ -15,7 +16,7 @@ const Team = lazy(() => import("./pages/Team"));
 
 function FullLoader() {
   return (
-    <div className="min-h-screen flex items-center justify-center">
+    <div className="no-print min-h-screen flex items-center justify-center">
       <Spinner className="w-8 h-8 text-emerald-500" />
     </div>
   );
@@ -38,8 +39,9 @@ function HomeRedirect() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <BrowserRouter>
+    <ErrorBoundary>
+      <AuthProvider>
+        <BrowserRouter>
         <Suspense fallback={<FullLoader />}>
         <Routes>
           <Route path="/" element={<HomeRedirect />} />
@@ -56,7 +58,8 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         </Suspense>
-      </BrowserRouter>
-    </AuthProvider>
+        </BrowserRouter>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }

@@ -266,6 +266,106 @@ describe("createLiveScanEngine", () => {
     }
   );
 
+  test("a result arriving after stop and restart belongs to no attempt",
+    async () => {
+      const { engine, detectNative, decode, onLock, onFailure } = makeEngine();
+      const held = deferred();
+      detectNative.mockResolvedValue("payload-1");
+      decode.mockReturnValueOnce(held.promise);
+      engine.start();
+      const stale = engine.tick(frame);
+      for (let i = 0; i < 20 && !engine.getState().softHold; i += 1) {
+        await Promise.resolve();
+      }
+      engine.stop();
+      engine.start();
+      held.resolve({ outcome: "card", data: { full_name: "Stale" } });
+      await stale;
+      expect(onLock).not.toHaveBeenCalled();
+      expect(onFailure).not.toHaveBeenCalled();
+      expect(engine.getState().frozen).toBe(false);
+      expect(engine.getState().inFlight).toBe(false);
+
+      decode.mockResolvedValue({ outcome: "card", data: { full_name: "Fresh" } });
+      await engine.tick(frame);
+      expect(onLock).toHaveBeenCalledTimes(1);
+      expect(onLock).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { full_name: "Fresh" } })
+      );
+    }
+  );
+
+  test("a detect arriving after stop and restart neither locks nor counts as a miss",
+    async () => {
+      const { engine, detectNative, decode, onLock } = makeEngine();
+      const held = deferred();
+      detectNative.mockReturnValueOnce(held.promise);
+      engine.start();
+      const stale = engine.tick(frame);
+      engine.stop();
+      engine.start();
+      held.resolve("payload-1");
+      await stale;
+      expect(decode).not.toHaveBeenCalled();
+      expect(onLock).not.toHaveBeenCalled();
+      expect(engine.getState().nativeMisses).toBe(0);
+    }
+  );
+
+  test("a reader failure permits a fresh attempt after restart",
+    async () => {
+      const onError = jest.fn();
+      const loadWasm = jest.fn().mockRejectedValueOnce(new Error("Worker unavailable")).mockResolvedValue();
+      const { engine, detectWasm, decode, onLock } = makeEngine({ hasNativeDetector: false, loadWasm, onError });
+      engine.start();
+      await engine.tick(frame);
+      expect(onError).toHaveBeenCalledTimes(1);
+
+      detectWasm.mockResolvedValue("payload-1");
+      decode.mockResolvedValue({ outcome: "card", data: { full_name: "After retry" } });
+      engine.start();
+      await engine.tick(frame);
+      expect(onLock).toHaveBeenCalledTimes(1);
+      expect(engine.getState().inFlight).toBe(false);
+    }
+  );
+
+  test("never decodes while a detect is running",
+    async () => {
+      const { engine, detectNative, decode } = makeEngine();
+      let detecting = 0;
+      let decoding = 0;
+      let overlap = 0;
+      let seq = 0;
+      detectNative.mockImplementation(async () => {
+        detecting += 1;
+        if (decoding) overlap += 1;
+        await Promise.resolve();
+        detecting -= 1;
+        seq += 1;
+        return `payload-${seq}`;
+      });
+      decode.mockImplementation(async () => {
+        decoding += 1;
+        if (detecting) overlap += 1;
+        await Promise.resolve();
+        await Promise.resolve();
+        decoding -= 1;
+        return { outcome: "not-aadhaar" };
+      });
+      engine.start();
+      const runs = [];
+      for (let i = 0; i < 6; i += 1) {
+        runs.push(engine.tick(frame));
+        runs.push(engine.tick(frame));
+        await Promise.resolve();
+      }
+      await Promise.all(runs);
+      expect(decode).toHaveBeenCalled();
+      expect(overlap).toBe(0);
+    }
+  );
+
   test("restarting live scan resets to native-first",
     async () => {
       const { engine, loadWasm, detectNative, advance } = makeEngine();
@@ -318,19 +418,72 @@ describe("Scan stall", () => {
     }
   );
 
-  test("a camera that detects something never stalls, even if decode fails",
+  test("an unrelated QR followed by the twenty second timeout still reveals the recovery path",
     async () => {
-      const detectNative = jest.fn().mockResolvedValue("some-payload");
-      const decode = jest.fn().mockResolvedValue({ outcome: "garbage" });
-      const { engine, onScanStall, onFailure, advance } = makeEngine({ detectNative, decode });
+      jest.useFakeTimers();
+      try {
+        const detectNative = jest.fn().mockResolvedValue("UPI-QR");
+        const detectWasm = jest.fn().mockResolvedValue("UPI-QR");
+        const decode = jest.fn().mockResolvedValue({ outcome: "not-aadhaar", message: "nope" });
+        const { engine, onScanStall, onFailure, onLock } = makeEngine({
+          now: () => Date.now(),
+          detectNative,
+          detectWasm,
+          decode,
+        });
+        engine.start();
+        await engine.tick(frame);
+        expect(onFailure).toHaveBeenCalledTimes(1);
+        expect(onScanStall).not.toHaveBeenCalled();
+
+        jest.advanceTimersByTime(SCAN_STALL_MS);
+        await engine.tick(frame);
+        expect(onScanStall).toHaveBeenCalledTimes(1);
+        expect(onLock).not.toHaveBeenCalled();
+        expect(engine.getState().frozen).toBe(false);
+      } finally {
+        jest.useRealTimers();
+      }
+    }
+  );
+
+  test("a throttled repeat of the same unrelated QR still reveals the recovery path",
+    async () => {
+      jest.useFakeTimers();
+      try {
+        const detectNative = jest.fn().mockResolvedValue("UPI-QR");
+        const detectWasm = jest.fn().mockResolvedValue("UPI-QR");
+        const decode = jest.fn().mockResolvedValue({ outcome: "not-aadhaar", message: "nope" });
+        const { engine, onScanStall } = makeEngine({ now: () => Date.now(), detectNative, detectWasm, decode });
+        engine.start();
+        jest.advanceTimersByTime(SCAN_STALL_MS - 100);
+        await engine.tick(frame);
+        expect(decode).toHaveBeenCalledTimes(1);
+        expect(onScanStall).not.toHaveBeenCalled();
+
+        jest.advanceTimersByTime(100);
+        await engine.tick(frame);
+        expect(decode).toHaveBeenCalledTimes(1);
+        expect(onScanStall).toHaveBeenCalledTimes(1);
+      } finally {
+        jest.useRealTimers();
+      }
+    }
+  );
+
+  test("an accepted Aadhaar identity is what holds the recovery path back",
+    async () => {
+      const { engine, detectNative, decode, onScanStall, onLock, advance } = makeEngine();
+      detectNative.mockResolvedValue("AADHAAR|ok");
+      decode.mockResolvedValue({ outcome: "card", data: { full_name: "Ramesh" } });
       engine.start();
       await engine.tick(frame);
-      expect(onFailure).toHaveBeenCalled();
+      expect(onLock).toHaveBeenCalledTimes(1);
+      expect(engine.getState().identityAccepted).toBe(true);
 
       advance(SCAN_STALL_MS * 2);
       await engine.tick(frame);
       expect(onScanStall).not.toHaveBeenCalled();
-      expect(engine.getState().detects).toBeGreaterThan(0);
     }
   );
 
@@ -344,7 +497,7 @@ describe("Scan stall", () => {
 
       engine.start();
       expect(engine.getState().stalled).toBe(false);
-      expect(engine.getState().detects).toBe(0);
+      expect(engine.getState().identityAccepted).toBe(false);
       await engine.tick(frame);
       expect(onScanStall).toHaveBeenCalledTimes(1);
     }

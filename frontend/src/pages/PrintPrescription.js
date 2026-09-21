@@ -22,19 +22,11 @@ export default function PrintPrescription() {
     let cancelled = false;
     setLoading(true);
     setError("");
+    setLogos([]);
     (async () => {
       try {
         const r = await api.get(`/desk/print/${id}`);
-        if (cancelled) return;
-        setRx(r.data.prescription);
-        try {
-          const t = await api.get(`/templates/logos?camp_id=${r.data.prescription.camp_id}`);
-          if (cancelled) return;
-          setLogos(t.data.logos || []);
-        } catch (e) {
-          logger.warn("Failed to fetch sponsor logos, printing without them:", e);
-          if (!cancelled) setLogos([]);
-        }
+        if (!cancelled) setRx(r.data.prescription);
       } catch (e) {
         if (!cancelled) setError(formatApiError(e));
       } finally {
@@ -46,10 +38,26 @@ export default function PrintPrescription() {
     };
   }, [id]);
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center"><Spinner className="w-8 h-8 text-emerald-500" /></div>;
+  useEffect(() => {
+    if (!rx?.camp_id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const t = await api.get(`/templates/logos?camp_id=${rx.camp_id}`);
+        if (!cancelled) setLogos(t.data.logos || []);
+      } catch (e) {
+        logger.warn("Failed to fetch sponsor logos, printing without them:", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [rx]);
+
+  if (loading) return <div className="no-print min-h-screen flex items-center justify-center"><Spinner className="w-8 h-8 text-emerald-500" /></div>;
 
   if (error || !rx) return (
-    <div className="max-w-md mx-auto p-6">
+    <div className="no-print max-w-md mx-auto p-6">
       <Alert className="mb-4">{error || "Prescription not found."}</Alert>
       <Button variant="outline" onClick={() => navigate(-1)}><ArrowLeft className="w-4 h-4" /> Back to desk</Button>
     </div>

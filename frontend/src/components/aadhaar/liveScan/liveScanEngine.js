@@ -38,8 +38,9 @@ export function createLiveScanEngine({
   let frozen = false;
   let softHold = false;
   let fallbackHinted = false;
-  let detects = 0;
+  let identityAccepted = false;
   let stalled = false;
+  let attempt = 0;
   const ignoredUntil = new Map();
 
   function getState() {
@@ -52,7 +53,7 @@ export function createLiveScanEngine({
       nativeMisses,
       nextRegion,
       started,
-      detects,
+      identityAccepted,
       stalled,
     };
   }
@@ -89,8 +90,7 @@ export function createLiveScanEngine({
   }
 
   function checkStall() {
-    if (stalled || frozen || !started) return;
-    if (detects > 0) return;
+    if (stalled || identityAccepted || !started) return;
     if (now() - sessionStart < SCAN_STALL_MS) return;
     stalled = true;
     if (onScanStall) onScanStall();
@@ -106,6 +106,7 @@ export function createLiveScanEngine({
 
   async function tick(frame) {
     if (!started || frozen || softHold || inFlight) return { skipped: true };
+    const mine = attempt;
     inFlight = true;
     try {
       if (decoder === "wasm") {
@@ -113,11 +114,12 @@ export function createLiveScanEngine({
       } else if (shouldPromote()) {
         await promote();
       }
+      if (mine !== attempt) return { skipped: true };
       const region = nextRegion;
       nextRegion = region === "roi" ? "full" : "roi";
       const detect = decoder === "native" ? detectNative : detectWasm;
       const payload = await detect(frame, region);
-      if (!started || frozen) return { skipped: true };
+      if (mine !== attempt) return { skipped: true };
       if (!payload) {
         if (decoder === "native") nativeMisses += 1;
         if (shouldPromote()) await promote();
@@ -125,12 +127,15 @@ export function createLiveScanEngine({
         checkStall();
         return { miss: true };
       }
-      detects += 1;
-      if (isIgnored(payload)) return { ignored: true };
+      if (isIgnored(payload)) {
+        checkStall();
+        return { ignored: true };
+      }
       softHold = true;
       const result = await decode(payload);
-      if (!started) return { skipped: true };
+      if (mine !== attempt) return { skipped: true };
       if (result && result.outcome === "card") {
+        identityAccepted = true;
         frozen = true;
         softHold = false;
         if (onLock) onLock(result);
@@ -138,19 +143,21 @@ export function createLiveScanEngine({
       }
       ignoredUntil.set(payload, now() + PAYLOAD_IGNORE_MS);
       softHold = false;
+      checkStall();
       if (onFailure) onFailure(result);
       return { failure: true };
     } catch {
-      if (!started) return { skipped: true };
+      if (mine !== attempt) return { skipped: true };
       stop();
       if (onError) onError("QR reader unavailable. Retry the camera, upload a photo, or use a USB scanner.");
       return { error: true };
     } finally {
-      inFlight = false;
+      if (mine === attempt) inFlight = false;
     }
   }
 
   function start() {
+    attempt += 1;
     started = true;
     frozen = false;
     softHold = false;
@@ -159,14 +166,16 @@ export function createLiveScanEngine({
     nextRegion = "roi";
     sessionStart = now();
     fallbackHinted = false;
-    detects = 0;
+    identityAccepted = false;
     stalled = false;
     ignoredUntil.clear();
+    if (!wasmLoaded) wasmLoadPromise = null;
     decoder = hasNativeDetector ? "native" : "wasm";
     if (decoder === "wasm") ensureWasm().catch(() => {});
   }
 
   function stop() {
+    attempt += 1;
     started = false;
     frozen = true;
     softHold = false;
