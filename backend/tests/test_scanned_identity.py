@@ -1,0 +1,201 @@
+import sys
+from pathlib import Path
+
+backend_dir = Path(__file__).resolve().parents[1]
+if str(backend_dir) not in sys.path:
+    sys.path.insert(0, str(backend_dir))
+
+import asyncio
+
+import pytest
+from bson import ObjectId
+from fastapi import HTTPException
+
+import helpers
+import routes_desk
+import sms
+from models import QrLookupBody, RegisterBody
+from routes_desk import lookup
+from routes_registration import desk_register
+from test_adversarial_challenger import setup_mock_db
+from test_aadhaar_unit import SAMPLE, build_secure_qr
+
+ACTOR = {"_id": ObjectId(), "role": "volunteer"}
+TODAY = helpers.today_ist_str()
+
+LEGACY_CARD = ('<PrintLetterBarcodeData name="Sunita Devi" gender="F" dob="1975-06-14" '
+               'uid="123456781234" street="12 Station Road Sikar"/>')
+SECURE_CARD = build_secure_qr(SAMPLE)
+UNKNOWN_ROOT = ('<anything name="Not Aadhaar" gender="F" dob="1975-06-14" '
+                'uid="123456781234" street="12 Station Road Sikar"/>')
+TRUNCATED = '<PrintLetterBarcodeData name="Sunita Devi" gender="F" dob="1975-06-14" uid="12345678'
+FUTURE_DOB = ('<PrintLetterBarcodeData name="Sunita Devi" gender="F" dob="2099-06-14" '
+              'uid="123456781234" street="12 Station Road Sikar"/>')
+BAD_UID = ('<PrintLetterBarcodeData name="Sunita Devi" gender="F" dob="1975-06-14" '
+           'uid="12345" street="12 Station Road Sikar"/>')
+
+
+class _Request:
+    client = None
+
+
+def _mock(monkeypatch):
+    mock_db = setup_mock_db(monkeypatch)
+    monkeypatch.setattr(routes_desk, "get_db", lambda: mock_db)
+    monkeypatch.setattr(sms, "get_db", lambda: mock_db, raising=False)
+    return mock_db
+
+
+async def _seed(mock_db, seat_limit=10):
+    camp_id = ObjectId()
+    await mock_db.camps.insert_one({
+        "_id": camp_id, "name": "Sikar Camp", "venue": "Sikar Bhawan", "is_active": True,
+    })
+    day_id = ObjectId()
+    await mock_db.camp_days.insert_one({
+        "_id": day_id, "camp_id": camp_id, "day_date": TODAY,
+        "seat_limit": seat_limit, "booked": 0, "printing_open": True,
+    })
+    return camp_id, day_id
+
+
+async def _register(day_id, **fields):
+    body = RegisterBody(
+        full_name=fields.pop("full_name", "Sunita Devi"),
+        age=fields.pop("age", 51),
+        phone=fields.pop("phone", "9876500001"),
+        camp_day_id=str(day_id),
+        **fields,
+    )
+    return await desk_register(body, _Request(), actor=ACTOR, background_tasks=None)
+
+
+async def _assert_nothing_written(mock_db, day_id):
+    assert mock_db.patients.docs == []
+    assert mock_db.persons.docs == []
+    day = await mock_db.camp_days.find_one({"_id": day_id})
+    assert not day.get("booked")
+
+
+class TestStaffScannedIdentityIsServerDerived:
+    def test_scanned_claim_without_qr_payload_is_rejected(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            _camp_id, day_id = await _seed(mock_db)
+            with pytest.raises(HTTPException) as exc:
+                await _register(day_id, gender="F", dob="1975-06-14",
+                                aadhaar_last4="1234", aadhaar_scanned=True)
+            assert exc.value.status_code == 400
+            assert exc.value.detail["code"] == "AADHAAR_QR_REQUIRED"
+            await _assert_nothing_written(mock_db, day_id)
+        asyncio.run(run())
+
+    def test_tampered_identity_fields_are_replaced_by_the_card(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            _camp_id, day_id = await _seed(mock_db)
+            result = await _register(
+                day_id, full_name="Attacker Name", gender="M", dob="1999-01-01",
+                age=26, address="Somewhere Else", aadhaar_last4="9999",
+                aadhaar_scanned=True, qr_payload=LEGACY_CARD,
+            )
+            stored = await mock_db.patients.find_one(
+                {"_id": ObjectId(result["registration"]["id"])},
+            )
+            assert stored["full_name"] == "Sunita Devi"
+            assert stored["gender"] == "F"
+            assert stored["dob"] == "1975-06-14"
+            assert stored["aadhaar_last4"] == "1234"
+            assert stored["address"] == "12 Station Road Sikar"
+            assert stored["age"] == helpers.age_from_dob("1975-06-14")
+            assert stored["aadhaar_scanned"] is True
+            assert stored["manual_entry"] is False
+        asyncio.run(run())
+
+    def test_manual_claim_cannot_be_smuggled_in_with_a_card(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            _camp_id, day_id = await _seed(mock_db)
+            result = await _register(
+                day_id, aadhaar_scanned=True, qr_payload=LEGACY_CARD,
+                manual_entry=True, manual_exception=True,
+            )
+            stored = await mock_db.patients.find_one(
+                {"_id": ObjectId(result["registration"]["id"])},
+            )
+            assert stored["manual_entry"] is False
+            assert stored["manual_exception"] is None
+            assert stored["identity_recheck_required"] is False
+        asyncio.run(run())
+
+    @pytest.mark.parametrize("payload", [LEGACY_CARD, SECURE_CARD])
+    def test_valid_cards_still_register(self, monkeypatch, payload):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            _camp_id, day_id = await _seed(mock_db)
+            result = await _register(day_id, aadhaar_scanned=True, qr_payload=payload)
+            assert result["created"] is True
+            assert result["registration"]["aadhaar_scanned"] is True
+            assert len(mock_db.patients.docs) == 1
+            assert len(mock_db.persons.docs) == 1
+        asyncio.run(run())
+
+    @pytest.mark.parametrize("payload", [
+        UNKNOWN_ROOT, TRUNCATED, FUTURE_DOB, BAD_UID, "", "not a card at all",
+    ])
+    def test_unreadable_cards_write_nothing(self, monkeypatch, payload):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            _camp_id, day_id = await _seed(mock_db)
+            with pytest.raises(HTTPException) as exc:
+                await _register(day_id, aadhaar_scanned=True, qr_payload=payload)
+            assert exc.value.status_code == 400
+            assert exc.value.detail["code"] == "AADHAAR_QR_REQUIRED"
+            await _assert_nothing_written(mock_db, day_id)
+        asyncio.run(run())
+
+    def test_manual_registration_is_still_accepted(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            _camp_id, day_id = await _seed(mock_db)
+            result = await _register(
+                day_id, manual_entry=True, manual_reason="Card not readable",
+                failed_scan_attempts=3,
+            )
+            stored = await mock_db.patients.find_one(
+                {"_id": ObjectId(result["registration"]["id"])},
+            )
+            assert result["created"] is True
+            assert stored["aadhaar_scanned"] is False
+            assert stored["manual_entry"] is True
+            assert stored["identity_recheck_required"] is True
+        asyncio.run(run())
+
+
+class TestDeskNumericLookupBound:
+    def test_oversized_numeric_lookup_is_a_client_error(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            await _seed(mock_db)
+            with pytest.raises(HTTPException) as exc:
+                await lookup(QrLookupBody(value="9" * 400), actor=ACTOR)
+            assert exc.value.status_code == 400
+        asyncio.run(run())
+
+    def test_non_decimal_digits_do_not_reach_the_int_conversion(self, monkeypatch):
+        async def run():
+            _mock(monkeypatch)
+            with pytest.raises(HTTPException) as exc:
+                await lookup(QrLookupBody(value="²²²"), actor=ACTOR)
+            assert exc.value.status_code == 404
+        asyncio.run(run())
+
+    def test_ordinary_registration_number_still_resolves(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            _camp_id, day_id = await _seed(mock_db)
+            result = await _register(day_id, aadhaar_scanned=True, qr_payload=LEGACY_CARD)
+            reg_no = result["registration"]["reg_no"]
+            found = await lookup(QrLookupBody(value=str(reg_no)), actor=ACTOR)
+            assert found["registration"]["id"] == result["registration"]["id"]
+        asyncio.run(run())

@@ -30,6 +30,14 @@ async def kpis(actor: dict = Depends(require_any)) -> Dict[str, Any]:
     }
 
 
+async def _counts_by(collection: Any, match: Dict[str, Any], field: str) -> Dict[str, int]:
+    rows = await collection.aggregate([
+        {"$match": match},
+        {"$group": {"_id": f"${field}", "count": {"$sum": 1}}},
+    ]).to_list(None)
+    return {row["_id"]: row["count"] for row in rows if row["_id"]}
+
+
 @router.get("/leaderboard")
 async def leaderboard(actor: dict = Depends(require_staff)) -> Dict[str, Any]:
     db = get_db()
@@ -37,51 +45,40 @@ async def leaderboard(actor: dict = Depends(require_staff)) -> Dict[str, Any]:
     if not camp:
         return {"volunteers": [], "team_leads": []}
 
+    registered = {"camp_id": camp["_id"]}
     completed = {
-        "camp_id": camp["_id"],
+        **registered,
         "committed_revision_id": {"$ne": None},
         "is_self_registered": {"$ne": True},
     }
-    vol_docs = await db.users.find({"role": "volunteer"}).to_list(1000)
-    volunteers = []
-    for v in vol_docs:
-        vid = str(v["_id"])
-        registrations = await db.patients.count_documents(
-            {"camp_id": camp["_id"], "created_by": vid}
-        )
-        doctor_seen = await db.patients.count_documents({**completed, "created_by": vid})
-        volunteers.append({
-            "id": vid,
-            "name": v["name"],
-            "registrations": registrations,
-            "doctor_seen": doctor_seen,
-            "arrivals": doctor_seen,
-            "points": doctor_seen,
-            "team_lead_id": v.get("team_lead_id"),
-        })
+    staff, registrations, points, team_registrations, team_points = await asyncio.gather(
+        db.users.find({"role": {"$in": ["volunteer", "team_lead"]}}).to_list(None),
+        _counts_by(db.patients, registered, "created_by"),
+        _counts_by(db.patients, completed, "created_by"),
+        _counts_by(db.patients, registered, "registrar_team_lead_id"),
+        _counts_by(db.patients, completed, "registrar_team_lead_id"),
+    )
+
+    volunteers = [{
+        "id": str(u["_id"]),
+        "name": u["name"],
+        "registrations": registrations.get(str(u["_id"]), 0),
+        "doctor_seen": points.get(str(u["_id"]), 0),
+        "arrivals": points.get(str(u["_id"]), 0),
+        "points": points.get(str(u["_id"]), 0),
+        "team_lead_id": u.get("team_lead_id"),
+    } for u in staff if u.get("role") == "volunteer"]
     volunteers.sort(key=lambda x: (-x["points"], x["name"]))
 
-    lead_docs = await db.users.find({"role": "team_lead"}).to_list(200)
-    team_leads = []
-    for l in lead_docs:
-        lid = str(l["_id"])
-        personal_registrations = await db.patients.count_documents(
-            {"camp_id": camp["_id"], "created_by": lid}
-        )
-        personal_points = await db.patients.count_documents({**completed, "created_by": lid})
-        team_registrations = await db.patients.count_documents(
-            {"camp_id": camp["_id"], "registrar_team_lead_id": lid}
-        )
-        team_points = await db.patients.count_documents({**completed, "registrar_team_lead_id": lid})
-        team_leads.append({
-            "id": lid,
-            "name": l["name"],
-            "personal_registrations": personal_registrations,
-            "personal_points": personal_points,
-            "registrations": team_registrations,
-            "doctor_seen": team_points,
-            "points": team_points,
-        })
+    team_leads = [{
+        "id": str(u["_id"]),
+        "name": u["name"],
+        "personal_registrations": registrations.get(str(u["_id"]), 0),
+        "personal_points": points.get(str(u["_id"]), 0),
+        "registrations": team_registrations.get(str(u["_id"]), 0),
+        "doctor_seen": team_points.get(str(u["_id"]), 0),
+        "points": team_points.get(str(u["_id"]), 0),
+    } for u in staff if u.get("role") == "team_lead"]
     team_leads.sort(key=lambda x: (-x["points"], x["name"]))
 
     return {"volunteers": volunteers, "team_leads": team_leads}

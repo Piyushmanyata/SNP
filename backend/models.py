@@ -139,7 +139,7 @@ class TranscriptionBody(BaseModel):
     ot_eye: Optional[str] = None
     ot_outcome: Optional[str] = None
     ot_notes: Optional[str] = None
-    expected_draft_version: int = 0
+    expected_draft_version: Optional[int] = Field(None, ge=0)
     operation_id: Optional[str] = None
 
 

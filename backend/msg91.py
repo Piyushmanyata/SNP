@@ -47,4 +47,9 @@ def send_dlt_sms(message_type: str, mobile: str, reg_no: int, event_date: str, v
     )
     with urllib.request.urlopen(req, timeout=20) as resp:
         body = json.loads(resp.read().decode() or "{}")
-    return str(body.get("message") or body.get("request_id") or "")
+    if not isinstance(body, dict) or body.get("type") != "success":
+        raise ValueError("MSG91 did not accept the message")
+    request_id = str(body.get("message") or body.get("request_id") or "").strip()
+    if not request_id:
+        raise ValueError("MSG91 accepted the message without a request id")
+    return request_id

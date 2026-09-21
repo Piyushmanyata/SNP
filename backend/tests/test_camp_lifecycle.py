@@ -8,6 +8,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from xml.etree.ElementTree import Element, tostring
 from zoneinfo import ZoneInfo
 
 backend_dir = Path(__file__).resolve().parents[1]
@@ -113,6 +114,11 @@ async def _register(day_id, **fields):
         camp_day_id=str(day_id),
         **fields,
     )
+    if body.aadhaar_scanned and not body.qr_payload:
+        body.qr_payload = tostring(Element(
+            "PrintLetterBarcodeData", name=body.full_name, gender=body.gender or "",
+            dob=body.dob or "", uid=body.aadhaar_last4 or "", street=body.address or "",
+        ), encoding="unicode")
     result = await desk_register(body, _Request(), actor=ACTOR, background_tasks=None)
     return result["registration"]
 

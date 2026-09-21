@@ -428,6 +428,25 @@ async def _confirm_registration(patient: Dict[str, Any], skip_if_today: bool = F
     await sms.send_patient_sms(db, row, "registration", day["day_date"], camp["venue"])
 
 
+def _apply_scanned_identity(body: RegisterBody, message: str) -> None:
+    decoded = decode_aadhaar(body.qr_payload or "")
+    card = decoded["data"] if decoded.get("outcome") == "card" else None
+    if not card:
+        raise HTTPException(status_code=400, detail={
+            "code": "AADHAAR_QR_REQUIRED",
+            "message": message,
+        })
+    body.full_name = card.get("full_name") or ""
+    body.gender = card.get("gender")
+    body.dob = card.get("dob")
+    body.age = card.get("age")
+    body.aadhaar_last4 = card.get("aadhaar_last4")
+    body.address = card.get("address")
+    body.aadhaar_scanned = True
+    body.manual_entry = False
+    body.manual_exception = False
+
+
 def _validate_manual_identity(body: RegisterBody, now) -> None:
     body.full_name = (body.full_name or '').strip()
     if not body.full_name or len(body.full_name) > 120:
@@ -456,9 +475,11 @@ async def desk_register(
     background_tasks: BackgroundTasks,
     actor: dict = Depends(require_staff),
 ) -> Dict[str, Any]:
-    if not body.full_name or not body.full_name.strip():
-        raise HTTPException(status_code=400, detail="Full name is required")
-    if not body.aadhaar_scanned:
+    if body.aadhaar_scanned:
+        _apply_scanned_identity(
+            body, "We could not read that Aadhaar QR. Scan the card again, or register manually.",
+        )
+    else:
         _validate_manual_identity(body, now_utc())
     phone_norm = normalize_phone(body.phone)
     if not phone_norm or is_dummy_phone(phone_norm):
@@ -487,23 +508,9 @@ async def self_register(body: RegisterBody, request: Request, background_tasks: 
         raise HTTPException(status_code=429, detail="Too many attempts. Please try again later.")
     window.append(now)
 
-    decoded = decode_aadhaar(body.qr_payload or "")
-    if decoded.get("outcome") == "card" and decoded.get("data"):
-        card = decoded["data"]
-        body.full_name = card.get("full_name") or ""
-        body.gender = card.get("gender")
-        body.dob = card.get("dob")
-        body.age = card.get("age")
-        body.aadhaar_last4 = card.get("aadhaar_last4")
-        body.address = card.get("address")
-        body.aadhaar_scanned = True
-        body.manual_entry = False
-        body.manual_exception = False
-    else:
-        raise HTTPException(status_code=400, detail={
-            "code": "AADHAAR_QR_REQUIRED",
-            "message": "We could not read the QR code on this Aadhaar card. Please register at the camp desk.",
-        })
+    _apply_scanned_identity(
+        body, "We could not read the QR code on this Aadhaar card. Please register at the camp desk.",
+    )
     body.is_self_registered = True
     try:
         patient, created = await _create_registration(body, None, True, request)
