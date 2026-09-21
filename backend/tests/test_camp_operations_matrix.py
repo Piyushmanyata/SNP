@@ -74,6 +74,7 @@ def _mock(monkeypatch):
     monkeypatch.setattr(helpers, "today_ist_str", lambda: TODAY)
     monkeypatch.setattr(routes_camps, "now_utc", lambda: FROZEN_IST.astimezone(_tz.utc))
     monkeypatch.setattr(routes_camps, "today_ist_str", lambda: TODAY)
+    monkeypatch.setattr(routes_clinical, "now_ist", lambda: FROZEN_IST)
     return mock_db
 
 

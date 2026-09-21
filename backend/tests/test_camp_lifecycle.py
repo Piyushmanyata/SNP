@@ -68,8 +68,10 @@ def _mock(monkeypatch):
     monkeypatch.setattr(helpers, "now_ist", lambda: FROZEN_IST)
     monkeypatch.setattr(helpers, "today_ist_str", lambda: TODAY)
     import routes_camps
+    import routes_clinical
     monkeypatch.setattr(routes_camps, "now_utc", lambda: FROZEN_IST.astimezone(timezone.utc), raising=False)
     monkeypatch.setattr(routes_camps, "today_ist_str", lambda: TODAY, raising=False)
+    monkeypatch.setattr(routes_clinical, "now_ist", lambda: FROZEN_IST, raising=False)
     return mock_db
 
 

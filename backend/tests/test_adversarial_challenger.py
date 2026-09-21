@@ -751,7 +751,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 "venue": "District Hospital", "start_time": "09:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
             })
             await mock_db.specs_collection_days.insert_one({
-                "_id": day2, "camp_id": ObjectId(), "day_date": "2026-09-20",
+                "_id": day2, "camp_id": ObjectId(), "day_date": SCHEDULE_DAY_2,
                 "venue": "Community Health Center", "start_time": "09:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
             })
 
@@ -794,7 +794,7 @@ class TestFulfilmentDecomposedAndInvariants:
             )
             res2 = await record_fulfilment(update_body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
             assert res2["slip"]["version"] == 2
-            assert res2["slip"]["collection_date"] == "2026-09-20"
+            assert res2["slip"]["collection_date"] == SCHEDULE_DAY_2
 
             active_slips = [s for s in mock_db.deferred_slips.docs if s["active"]]
             cancelled_slips = [s for s in mock_db.deferred_slips.docs if s["cancelled"]]
