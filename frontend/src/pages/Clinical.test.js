@@ -848,6 +848,40 @@ describe("Clinical draft version and dirty-draft protection", () => {
     expect(api.post).toHaveBeenCalledTimes(2);
   });
 
+  test("a completion refused as stale retries under a new operation id after reloading", async () => {
+    await openDraft(3);
+    api.post.mockResolvedValueOnce(savedDraft(4));
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
+    await act(async () => container.querySelector('[data-testid="none-prescribed"]').click());
+    api.post.mockResolvedValueOnce(savedDraft(5));
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
+    await act(async () => container.querySelector('[data-testid="full-transcription-confirmed"]').click());
+
+    api.post.mockRejectedValueOnce(conflictError);
+    await act(async () => container.querySelector('[data-testid="complete-prescription-button"]').click());
+    const refused = api.post.mock.calls.at(-1)[1].operation_id;
+    expect(refused).toBeTruthy();
+
+    api.post.mockResolvedValueOnce({ data: {
+      registration: { id: "reg-1", reg_no: "1001", full_name: "Draft Patient" },
+      person: { id: "p-1" },
+      transcription: { id: "tx-1", locked: false, draft_version: 9 },
+      fulfilments: [],
+      slips: [],
+    } });
+    await act(async () => container.querySelector('[data-testid="draft-conflict-reload"]').click());
+
+    const confirm = container.querySelector('[data-testid="full-transcription-confirmed"]');
+    if (confirm && !confirm.checked) await act(async () => confirm.click());
+    api.post.mockResolvedValueOnce({ data: {
+      registration: { id: "reg-1", reg_no: "1001", full_name: "Draft Patient", clinical_generation: 1 },
+      revision: { id: "rev-2", prescribed_lines: [] },
+      transcription: { id: "tx-1", locked: true, draft_version: 12 },
+    } });
+    await act(async () => container.querySelector('[data-testid="complete-prescription-button"]').click());
+    expect(api.post.mock.calls.at(-1)[1].operation_id).not.toBe(refused);
+  });
+
   test("reloading after a conflict replaces the draft with the saved prescription", async () => {
     await openDraft(2);
     typeOther("Mine");

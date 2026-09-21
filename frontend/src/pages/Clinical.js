@@ -230,6 +230,7 @@ export default function Clinical() {
       setDraftVersion(resData.transcription?.draft_version ?? 0);
       setDirty(false);
       setConflict(false);
+      completeOpRef.current = null;
     } catch (err) {
       logger.warn("Failed to reload clinical data:", err);
     }

@@ -271,7 +271,7 @@ async def _upsert_transcription(
             "camp_id": patient["camp_id"],
             "created_by": str(actor["_id"]),
             "created_at": now_utc(),
-            "draft_version": 0,
+            "draft_version": 1,
             **fields,
         }
         try:
@@ -350,6 +350,7 @@ async def complete_prescription(
         db, p, actor, content, lines, none, body.operation_id, "complete", None, None,
     )
     transcription = await db.transcriptions.find_one({"patient_id": p["_id"]})
+    drafted_here = transcription is None
     if not transcription:
         transcription = await _upsert_transcription(
             db, p, actor, content, locked=False, expected_version=body.expected_draft_version,
@@ -362,7 +363,7 @@ async def complete_prescription(
                 raise conflict("stale_generation", "The prescription changed; reload and retry.")
             committed = current_patient
         else:
-            if body.expected_draft_version is not None and not await db.transcriptions.find_one_and_update(
+            if not drafted_here and body.expected_draft_version is not None and not await db.transcriptions.find_one_and_update(
                 {
                     "_id": transcription["_id"],
                     "draft_version": _draft_version_match(body.expected_draft_version),

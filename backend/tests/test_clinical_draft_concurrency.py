@@ -54,16 +54,16 @@ def test_second_operator_at_the_same_version_gets_a_draft_conflict(monkeypatch):
         created = await _save_draft(patient, 0, "110/70")
         loaded = (await _save_draft(patient, created["transcription"]["draft_version"], "120/80"))
         version = loaded["transcription"]["draft_version"]
-        assert version == 1
+        assert version == 2
         first = await _save_draft(patient, version, "130/90")
-        assert first["transcription"]["draft_version"] == 2
+        assert first["transcription"]["draft_version"] == 3
         with pytest.raises(HTTPException) as exc:
             await _save_draft(patient, version, "999/99")
         assert exc.value.status_code == 409
         assert exc.value.detail["code"] == "draft_version_conflict"
         current = await db.transcriptions.find_one({"patient_id": patient["_id"]})
         assert current["bp"] == "130/90"
-        assert current["draft_version"] == 2
+        assert current["draft_version"] == 3
 
     asyncio.run(run())
 
@@ -121,7 +121,7 @@ def test_late_initial_save_cannot_overwrite_a_completed_prescription(monkeypatch
         await entered.wait()
         await _save_draft(patient, 0, "120/80")
         done = await routes_clinical.complete_prescription(
-            _complete_body(patient["_id"], "complete", expected_draft_version=0), actor=CLINICAL,
+            _complete_body(patient["_id"], "complete", expected_draft_version=1), actor=CLINICAL,
         )
         assert done["transcription"]["locked"] is True
         proceed.set()
@@ -142,7 +142,7 @@ def test_completion_cannot_apply_a_stale_draft_over_a_newer_save(monkeypatch):
         db = _mock(monkeypatch)
         _, _, patient = await _printed_patient(db)
         await _save_draft(patient, 0, "110/70")
-        await _save_draft(patient, 0, "120/80")
+        await _save_draft(patient, 1, "120/80")
         with pytest.raises(HTTPException) as exc:
             await routes_clinical.complete_prescription(
                 _complete_body(patient["_id"], "stale", expected_draft_version=0, bp="90/60"),
@@ -157,7 +157,7 @@ def test_completion_cannot_apply_a_stale_draft_over_a_newer_save(monkeypatch):
         assert draft["locked"] is False
         assert draft.get("clinical_write_token") is None
         done = await routes_clinical.complete_prescription(
-            _complete_body(patient["_id"], "fresh", expected_draft_version=1), actor=CLINICAL,
+            _complete_body(patient["_id"], "fresh", expected_draft_version=2), actor=CLINICAL,
         )
         assert done["registration"]["clinical_generation"] == 1
         assert done["transcription"]["locked"] is True
@@ -179,7 +179,7 @@ def test_a_lone_operator_can_edit_then_complete_without_sending_a_version(monkey
             TranscriptionBody(patient_id=pid, diagnosis_options=["Cataract"], bp="120/80"),
             actor=CLINICAL,
         )
-        assert (await db.transcriptions.find_one({}))["draft_version"] == 1
+        assert (await db.transcriptions.find_one({}))["draft_version"] == 2
 
         done = await routes_clinical.complete_prescription(
             _complete_body(pid, "op-lone-operator"), actor=CLINICAL,
@@ -240,5 +240,23 @@ def test_a_draft_predating_the_version_field_can_still_be_saved(monkeypatch):
             actor=CLINICAL,
         )
         assert saved["transcription"]["draft_version"] == 1
+
+    asyncio.run(run())
+
+
+def test_two_operators_who_opened_a_patient_with_no_draft_cannot_overwrite_each_other(monkeypatch):
+    async def run():
+        db = _mock(monkeypatch)
+        _, _, patient = await _printed_patient(db)
+        first = await _save_draft(patient, 0, "110/70")
+        assert first["transcription"]["draft_version"] == 1
+
+        with pytest.raises(HTTPException) as exc:
+            await _save_draft(patient, 0, "999/99")
+        assert exc.value.status_code == 409
+        assert exc.value.detail["code"] == "draft_version_conflict"
+
+        current = await db.transcriptions.find_one({"patient_id": patient["_id"]})
+        assert current["bp"] == "110/70"
 
     asyncio.run(run())
