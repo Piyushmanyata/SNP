@@ -15,7 +15,7 @@ import {
   HistoryModal,
   ReadOnlyPrescription,
 } from "../components/clinical";
-import { Button, Badge } from "../components/ui";
+import { Alert, Badge, Button, Modal } from "../components/ui";
 
 const PATIENT_CODE_PAYLOAD_LENGTH = "SNP:".length + 8;
 
@@ -77,6 +77,10 @@ export default function Clinical() {
   const [editing, setEditing] = useState(false);
   const [showCorrection, setShowCorrection] = useState(false);
   const [history, setHistory] = useState(null);
+  const [draftVersion, setDraftVersion] = useState(0);
+  const [dirty, setDirty] = useState(false);
+  const [conflict, setConflict] = useState(false);
+  const [pending, setPending] = useState(null);
   const firstFieldRef = useRef(null);
   const lookupRef = useRef(null);
   const lookupSequence = useRef(0);
@@ -100,6 +104,13 @@ export default function Clinical() {
   }, [user]);
 
   useEffect(() => { completeOpRef.current = null; }, [patientId]);
+
+  useEffect(() => {
+    if (!dirty) return undefined;
+    const warn = (e) => { e.preventDefault(); e.returnValue = true; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
 
   const pickLine = useCallback((key) => {
     writeSessionLine(key);
@@ -158,6 +169,8 @@ export default function Clinical() {
     setData(null);
     setEditing(false);
     setResults(null);
+    setDirty(false);
+    setConflict(false);
     try {
       if (byName) {
         const { data: found } = await api.get(`/clinical/search?q=${encodeURIComponent(value)}`);
@@ -168,6 +181,7 @@ export default function Clinical() {
       if (request !== lookupSequence.current) return false;
       setData(resData);
       setRx(rxFromTranscription(resData.transcription));
+      setDraftVersion(resData.transcription?.draft_version ?? 0);
       return true;
     } catch (err) {
       if (request !== lookupSequence.current) return false;
@@ -178,18 +192,27 @@ export default function Clinical() {
   }, [busy]);
 
   const openPatient = useCallback((value) => {
+    if (dirty) {
+      setPending({ value: value.trim(), byName: false });
+      return false;
+    }
     setLookup(value);
     return find(value.trim());
-  }, [find]);
+  }, [dirty, find]);
 
   const doLookup = useCallback((e) => {
     e?.preventDefault();
     const value = lookup.trim();
-    find(value, !/^\d+$/.test(value) && !/^snp:/i.test(value));
-  }, [lookup, find]);
+    const byName = !/^\d+$/.test(value) && !/^snp:/i.test(value);
+    if (dirty) {
+      setPending({ value, byName });
+      return;
+    }
+    find(value, byName);
+  }, [lookup, find, dirty]);
 
   useWedgeBurst({
-    enabled: !picking && !busy && !showCorrection,
+    enabled: !picking && !busy && !showCorrection && !pending,
     minLength: PATIENT_CODE_PAYLOAD_LENGTH,
     onBurst: openPatient,
   });
@@ -204,6 +227,9 @@ export default function Clinical() {
       if (request !== lookupSequence.current) return;
       setData(resData);
       setRx(rxFromTranscription(resData.transcription));
+      setDraftVersion(resData.transcription?.draft_version ?? 0);
+      setDirty(false);
+      setConflict(false);
     } catch (err) {
       logger.warn("Failed to reload clinical data:", err);
     }
@@ -214,18 +240,23 @@ export default function Clinical() {
     setBusy(true);
     setError("");
     try {
-      await api.post("/clinical/transcription", {
+      const { data: saved } = await api.post("/clinical/transcription", {
         patient_id: data.registration.id,
         ...rx,
+        expected_draft_version: draftVersion,
       });
+      setDraftVersion(saved?.transcription?.draft_version ?? 0);
+      setDirty(false);
+      setConflict(false);
       return true;
     } catch (err) {
-      setError(formatApiError(err));
+      if (errorPayload(err)?.code === "draft_version_conflict") setConflict(true);
+      else setError(formatApiError(err));
       return false;
     } finally {
       setBusy(false);
     }
-  }, [data?.registration?.id, rx]);
+  }, [data?.registration?.id, draftVersion, rx]);
 
   const completeRx = useCallback(async () => {
     if (!data?.registration?.id) return;
@@ -240,8 +271,12 @@ export default function Clinical() {
         expected_generation: data.clinical_generation ?? data.registration.clinical_generation ?? 0,
         operation_id: completeOpRef.current,
         ...rx,
+        expected_draft_version: draftVersion,
       });
       completeOpRef.current = null;
+      setDraftVersion(result.transcription?.draft_version ?? 0);
+      setDirty(false);
+      setConflict(false);
       setData((current) => current?.registration?.id === patientId ? {
         ...current,
         registration: result.registration,
@@ -252,20 +287,41 @@ export default function Clinical() {
       setEditing(false);
       setBanner("Prescription completed. Patient is marked seen.");
     } catch (err) {
-      setError(formatApiError(err));
+      if (errorPayload(err)?.code === "draft_version_conflict") setConflict(true);
+      else setError(formatApiError(err));
     } finally {
       setBusy(false);
     }
-  }, [data?.registration?.id, data?.registration?.clinical_generation, data?.clinical_generation, patientId, rx]);
+  }, [data?.registration?.id, data?.registration?.clinical_generation, data?.clinical_generation, draftVersion, patientId, rx]);
+
+  const editRx = useCallback((next) => {
+    setDirty(true);
+    setRx(next);
+  }, []);
+
+  const confirmDiscard = useCallback(() => {
+    const next = pending;
+    setPending(null);
+    setDirty(false);
+    setConflict(false);
+    if (!next) return;
+    if (next.line) {
+      setRx(rxFromTranscription(data?.transcription));
+      setPicking(true);
+      return;
+    }
+    setLookup(next.value);
+    find(next.value, next.byName);
+  }, [pending, find, data?.transcription]);
 
   const toggleDiag = useCallback((opt) => {
-    setRx((r) => ({
+    editRx((r) => ({
       ...r,
       diagnosis_options: r.diagnosis_options.includes(opt)
         ? r.diagnosis_options.filter((o) => o !== opt)
         : [...r.diagnosis_options, opt],
     }));
-  }, []);
+  }, [editRx]);
 
   const openHistory = useCallback(async () => {
     if (!data?.person?.id) return;
@@ -287,6 +343,8 @@ export default function Clinical() {
     setHistory(null);
     setRx(emptyRx);
     setEditing(false);
+    setDirty(false);
+    setConflict(false);
   }, []);
 
   if (picking || !line) {
@@ -317,7 +375,7 @@ export default function Clinical() {
     <Layout title="Clinical Desk">
       <div className="flex items-center gap-2 mb-4" data-testid="line-chip">
         <Badge tone="emerald">{lineLabel(line)}</Badge>
-        <Button size="sm" variant="ghost" disabled={busy} onClick={() => setPicking(true)} data-testid="line-change-button">
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => (dirty ? setPending({ line: true }) : setPicking(true))} data-testid="line-change-button">
           Change
         </Button>
       </div>
@@ -342,10 +400,26 @@ export default function Clinical() {
             openHistory={openHistory}
           />
 
+          {conflict && (
+            <div className="mb-5" data-testid="draft-conflict">
+              <Alert tone="amber">
+                Another operator saved this prescription. Your entries are kept below — reload the saved version or review yours before saving again.
+              </Alert>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Button variant="outline" disabled={busy} onClick={reload} data-testid="draft-conflict-reload">
+                  Reload saved prescription
+                </Button>
+                <Button variant="outline" disabled={busy} onClick={() => setConflict(false)} data-testid="draft-conflict-review">
+                  Review my entries
+                </Button>
+              </div>
+            </div>
+          )}
+
           {!locked && (!data.transcription || editing) && (
               <PrescriptionWizard
                 rx={rx}
-                setRx={setRx}
+                setRx={editRx}
                 diagOpts={diagOpts}
                 medicines={medicines}
                 powers={powers}
@@ -408,6 +482,16 @@ export default function Clinical() {
           setBanner("Correction added.");
         }}
       />
+
+      <Modal open={!!pending} onClose={() => setPending(null)} title="Discard unsaved prescription?" size="sm">
+        <p className="text-sm text-slate-900 mb-4">
+          This patient has entries that were never saved. Continuing discards them.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setPending(null)} data-testid="discard-cancel">Keep editing</Button>
+          <Button variant="danger" onClick={confirmDiscard} data-testid="discard-confirm">Discard and continue</Button>
+        </div>
+      </Modal>
 
       <HistoryModal
         open={!!history}
