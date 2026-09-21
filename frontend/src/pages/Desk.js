@@ -89,11 +89,13 @@ export default function Desk() {
     });
   }, [doorPhone]);
 
+  const clearScan = useCallback(() => { setScanResult(null); setScanPayload(""); }, []);
+
   const onScanned = useCallback(async (_card, payload) => {
     if (busy) return;
     const request = ++findSequence.current;
     setBanner(""); setError(""); setSearchResults(null); setFound(null);
-    setScanResult(null);
+    clearScan();
     fillDoorForm(_card);
     setScanPayload(payload);
     setScanning(true);
@@ -109,12 +111,12 @@ export default function Desk() {
       }
     } catch (err) {
       if (request !== findSequence.current) return;
-      setScanResult(null);
+      clearScan();
       setError(formatApiError(err));
     } finally {
       if (request === findSequence.current) setScanning(false);
     }
-  }, [load, fillDoorForm, busy]);
+  }, [load, fillDoorForm, busy, clearScan]);
 
   const confirmMismatch = useCallback(async () => {
     if (!scanResult?.registration || busy || scanning) return;
@@ -137,7 +139,8 @@ export default function Desk() {
   const lookupValue = useCallback(async (value) => {
     const request = ++findSequence.current;
     setScanning(false);
-    setBanner(""); setError(""); setSearchResults(null); setScanResult(null); setFound(null);
+    setBanner(""); setError(""); setSearchResults(null); setFound(null);
+    clearScan();
     try {
       const { data } = await api.post("/desk/lookup", { value });
       if (request !== findSequence.current) return false;
@@ -149,7 +152,7 @@ export default function Desk() {
       setError(formatApiError(err));
       return false;
     }
-  }, []);
+  }, [clearScan]);
 
   const doFind = useCallback(async (e) => {
     e?.preventDefault();
@@ -160,7 +163,8 @@ export default function Desk() {
       return;
     }
     const request = ++findSequence.current;
-    setBanner(""); setError(""); setFound(null); setSearchResults(null); setScanResult(null);
+    setBanner(""); setError(""); setFound(null); setSearchResults(null);
+    clearScan();
     setScanning(false);
     try {
       const { data } = await api.get(`/patients/search?q=${encodeURIComponent(value)}`);
@@ -170,7 +174,7 @@ export default function Desk() {
       if (request !== findSequence.current) return;
       setError(formatApiError(err));
     }
-  }, [findVal, lookupValue]);
+  }, [findVal, lookupValue, clearScan]);
 
   const print = useCallback(async (reg) => {
     setError("");
@@ -184,7 +188,8 @@ export default function Desk() {
 
   const openPreReg = useCallback(() => { setShowReg(true); }, []);
 
-  const submitRegister = useCallback(async ({ form, scanned, dayId, reqId, walkIn: asWalkIn }) => {
+  const submitRegister = useCallback(async ({ form, qrPayload, dayId, reqId, walkIn: asWalkIn }) => {
+    const scanned = Boolean(qrPayload);
     const { data } = await api.post("/register", {
       full_name: form.full_name,
       age: form.age ? Number(form.age) : null,
@@ -194,6 +199,7 @@ export default function Desk() {
       aadhaar_last4: form.aadhaar_last4 || null,
       dob: form.dob || null,
       aadhaar_scanned: scanned,
+      qr_payload: qrPayload || null,
       camp_day_id: dayId,
       registration_request_id: reqId,
       manual_entry: !scanned,
@@ -225,12 +231,12 @@ export default function Desk() {
           aadhaar_last4: card.aadhaar_last4,
           dob: card.dob,
         },
-        scanned: true,
+        qrPayload: scanPayload,
         dayId: operatingDayId,
         reqId: v4(),
         walkIn: true,
       });
-      setScanResult(null);
+      clearScan();
       setFound(reg);
       setBanner(`Registered and arrived: #${reg.reg_no} — ${reg.full_name}`);
       setDoorPhone("");
@@ -243,7 +249,7 @@ export default function Desk() {
         setError(formatApiError(err));
       }
     } finally { setBusy(false); }
-  }, [scanResult, operatingDayId, doorPhone, submitRegister, load]);
+  }, [scanResult, scanPayload, operatingDayId, doorPhone, submitRegister, load, clearScan]);
 
   const submitDoorManual = useCallback(async () => {
     const dayId = operatingDayId || todayDay?.id || days[0]?.id;
@@ -253,7 +259,6 @@ export default function Desk() {
       const asWalkIn = Boolean(printingOpen);
       const reg = await submitRegister({
         form: doorForm,
-        scanned: false,
         dayId,
         reqId: doorReqId,
         walkIn: asWalkIn,
@@ -329,7 +334,7 @@ export default function Desk() {
         submitDoorManual={submitDoorManual}
         scanning={scanning}
         doorManualEntry={Boolean(camp?.door_manual_entry)}
-        clearScan={() => setScanResult(null)}
+        clearScan={clearScan}
       />}
 
       <Card className="mb-5" data-desk-card="find" data-testid="desk-card-find">
@@ -486,7 +491,7 @@ export function PatientRow({ p, onPrint, printingOpen }) {
 
 export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, onRegistered }) {
   const [form, setForm] = useState(EMPTY_REG_FORM);
-  const [scanned, setScanned] = useState(false);
+  const [qrPayload, setQrPayload] = useState("");
   const [manualMode, setManualMode] = useState(false);
   const [dayId, setDayId] = useState("");
   const scanRequest = useRef(0);
@@ -504,7 +509,7 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
   useEffect(() => {
     if (open && !prevOpenRef.current) {
       setForm(EMPTY_REG_FORM);
-      setScanned(false);
+      setQrPayload("");
       setManualMode(false);
       setFailures(0);
       setError("");
@@ -518,7 +523,9 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
     prevOpenRef.current = open;
   }, [open, days, dayId]);
 
-  const onScan = useCallback((data) => {
+  const scanned = Boolean(qrPayload);
+
+  const onScan = useCallback((data, payload) => {
     setForm((prev) => ({
       full_name: data.full_name,
       age: data.age ?? "",
@@ -528,7 +535,7 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
       aadhaar_last4: data.aadhaar_last4,
       dob: data.dob,
     }));
-    setScanned(true);
+    setQrPayload(payload || "");
     setManualMode(false);
     setReqId(v4());
   }, []);
@@ -546,7 +553,7 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
       try {
         const { data } = await api.post("/aadhaar/decode", { payload });
         if (request !== scanRequest.current) return;
-        if (data.outcome === "card") onScan(data.data);
+        if (data.outcome === "card") onScan(data.data, payload);
         else onFailure(data.outcome);
       } catch {
         if (request === scanRequest.current) onFailure("garbage");
@@ -570,6 +577,7 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
         aadhaar_last4: form.aadhaar_last4 || null,
         dob: form.dob || null,
         aadhaar_scanned: scanned,
+        qr_payload: qrPayload || null,
         camp_day_id: dayId,
         registration_request_id: reqId,
         manual_entry: !scanned,
@@ -597,7 +605,7 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
         setError(formatApiError(err));
       }
     } finally { setBusy(false); }
-  }, [form, scanned, dayId, reqId, walkIn, onClose, onDone, onRegistered, setBanner]);
+  }, [form, qrPayload, scanned, dayId, reqId, walkIn, onClose, onDone, onRegistered, setBanner]);
 
   return (
     <Modal open={open} onClose={onClose} title={walkIn ? "Register walk-in" : "New Registration"} size="lg">
@@ -608,15 +616,15 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
           </p>
         )}
         <AadhaarScanner onScanned={onScan} onFailure={onFailure} onScanStall={onScanStall} disabled={busy || manualMode}
-          onCaptureStart={() => { scanRequest.current += 1; setScanned(false); setFailures(0); setForm((prev) => ({ ...EMPTY_REG_FORM, phone: prev.phone })); }}
+          onCaptureStart={() => { scanRequest.current += 1; setQrPayload(""); setFailures(0); setForm((prev) => ({ ...EMPTY_REG_FORM, phone: prev.phone })); }}
           onTranscribed={(details) => {
             setForm((prev) => ({ ...EMPTY_REG_FORM, ...details, phone: prev.phone }));
-            setScanned(false);
+            setQrPayload("");
             setManualMode(true);
             setReqId(v4());
           }} />
         <Button type="button" variant="outline" disabled={busy} data-testid="reg-manual-toggle" onClick={() => {
-          setScanned(false);
+          setQrPayload("");
           setManualMode(!manualMode);
         }}>{manualMode ? "Use scanner" : "Enter details manually"}</Button>
 

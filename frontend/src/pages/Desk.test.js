@@ -430,6 +430,7 @@ describe("Desk page", () => {
       age: 42,
       phone: "9876500001",
       aadhaar_scanned: true,
+      qr_payload: CARD_PAYLOAD,
       manual_entry: false,
       camp_day_id: "day-1",
     }));
@@ -477,6 +478,81 @@ describe("Desk page", () => {
 
     expect(api.post).not.toHaveBeenCalledWith("/desk/arrive/p-7");
     expect(container.textContent).toContain("SMS sent");
+  });
+
+  function preRegistrationMode() {
+    api.get.mockImplementation((url) => {
+      if (url === "/kpis") return Promise.resolve({ data: { registered: 45, seen: 0, pending: 0 } });
+      if (url === "/camps/active") {
+        return Promise.resolve({
+          data: {
+            camp: { id: "camp-1", name: "Howrah Eye Camp" },
+            days: [{ id: "day-1", day_date: "2026-08-27", is_today: true, printing_open: false }],
+          },
+        });
+      }
+      return Promise.resolve({ data: {} });
+    });
+    api.post.mockImplementation((url, body) => (url === "/register"
+      ? Promise.resolve({ data: { registration: { id: "p-7", reg_no: "107", full_name: body.full_name } } })
+      : Promise.resolve({ data: {} })));
+  }
+
+  function registerBodies() {
+    return api.post.mock.calls.filter((c) => c[0] === "/register").map((c) => c[1]);
+  }
+
+  function cancelRegistration() {
+    return [...document.body.querySelectorAll("button")].find((b) => b.textContent === "Cancel");
+  }
+
+  test("a scanned registration sends the card payload with the scanned claim", async () => {
+    preRegistrationMode();
+    await renderDesk();
+    act(() => { container.querySelector('[data-testid="new-registration-button"]').click(); });
+    act(() => { modalScanner("mock-scan-trigger").click(); });
+    act(() => { setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "9876500001"); });
+    await act(async () => { document.body.querySelector('[data-testid="patient-register-submit"]').click(); });
+
+    expect(registerBodies()).toHaveLength(1);
+    expect(registerBodies()[0].aadhaar_scanned).toBe(true);
+    expect(registerBodies()[0].qr_payload).toBe(CARD_PAYLOAD);
+  });
+
+  test("a manual registration claims no scan and carries no card payload", async () => {
+    preRegistrationMode();
+    await renderDesk();
+    act(() => { container.querySelector('[data-testid="new-registration-button"]').click(); });
+    act(() => { modalScanner("reg-manual-toggle").click(); });
+    act(() => { setInput(document.body.querySelector('[data-testid="reg-fullname-input"]'), "Manual Patient"); });
+    act(() => { setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "9876500002"); });
+    await act(async () => { document.body.querySelector('[data-testid="patient-register-submit"]').click(); });
+
+    expect(registerBodies()).toHaveLength(1);
+    expect(registerBodies()[0].aadhaar_scanned).toBe(false);
+    expect(registerBodies()[0].qr_payload).toBeFalsy();
+  });
+
+  test("a reopened registration cannot reuse the previous patient's card payload", async () => {
+    preRegistrationMode();
+    await renderDesk();
+    act(() => { container.querySelector('[data-testid="new-registration-button"]').click(); });
+    act(() => { modalScanner("mock-scan-trigger").click(); });
+    await act(async () => { cancelRegistration().click(); });
+
+    act(() => { container.querySelector('[data-testid="new-registration-button"]').click(); });
+    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
+    act(() => { modalScanner("mock-failure-trigger").click(); });
+    act(() => { modalScanner("mock-failure-trigger").click(); });
+    act(() => { modalScanner("mock-failure-trigger").click(); });
+    act(() => { setInput(document.body.querySelector('[data-testid="reg-fullname-input"]'), "Second Patient"); });
+    act(() => { setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "9876500003"); });
+    await act(async () => { document.body.querySelector('[data-testid="patient-register-submit"]').click(); });
+
+    expect(registerBodies()).toHaveLength(1);
+    expect(registerBodies()[0].full_name).toBe("Second Patient");
+    expect(registerBodies()[0].aadhaar_scanned).toBe(false);
+    expect(registerBodies()[0].qr_payload).toBeFalsy();
   });
 
   test("desk does not offer independent mark seen", async () => {
