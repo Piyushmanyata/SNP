@@ -213,3 +213,32 @@ def test_an_unversioned_save_still_advances_the_version_for_versioned_clients(mo
         assert exc.value.detail["code"] == "draft_version_conflict"
 
     asyncio.run(run())
+
+
+def test_a_draft_predating_the_version_field_can_still_be_saved(monkeypatch):
+    async def run():
+        db = _mock(monkeypatch)
+        _camp, _day, patient = await _printed_patient(db)
+        pid = str(patient["_id"])
+
+        await db.transcriptions.insert_one({
+            "patient_id": patient["_id"],
+            "camp_id": patient["camp_id"],
+            "diagnosis_options": ["Cataract"],
+            "locked": False,
+        })
+        legacy = await db.transcriptions.find_one({})
+        assert "draft_version" not in legacy
+
+        served = routes_clinical.ser_trans(legacy)
+        assert served["draft_version"] == 0
+
+        saved = await routes_clinical.create_transcription(
+            TranscriptionBody(
+                patient_id=pid, diagnosis_options=["Glaucoma"], expected_draft_version=0,
+            ),
+            actor=CLINICAL,
+        )
+        assert saved["transcription"]["draft_version"] == 1
+
+    asyncio.run(run())
