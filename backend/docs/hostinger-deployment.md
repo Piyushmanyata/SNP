@@ -5,9 +5,9 @@
 - Application domain: `sikarkolkata.io`.
 - VPS: `82.112.234.39`, Ubuntu 24.04.4 LTS, 2 CPUs, 8 GB RAM.
 - Runtime: Docker Engine 29.8.0 and Docker Compose 5.5.1.
-- Application release: `f2e4592f0dcee138f77c4630964ba92dfb37e664` (approved DLT SMS copy, camp number and multi-day specs window, 22 September 2026).
-- Release directory: `/opt/snp/releases/f2e4592f0dcee138f77c4630964ba92dfb37e664`.
-- Previous releases kept for rollback: `68c978b860edaf9db0dc093740a2228f8ca45ec6`, `730112cb5a122f99b592cce50bb8faf082b3eece`, `13854767e93b1f95bda958680ef27aff387bd36e`, `6f5ab0cb4bd7e58bbf1aacefbaf54db97ff0f3e7`, `ac60bdfe2ecb13555ae449a7d299229ca8758afd`, `7eaed607ba0946c04dd32a405920a49db5e96fe7`, `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`, `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
+- Application release: `a889edb77b887fa12d084b114f910c7b8b7e3c69` (SMS copy names Sikar Zilla Welfare Trust for DLT approval, 22 September 2026).
+- Release directory: `/opt/snp/releases/a889edb77b887fa12d084b114f910c7b8b7e3c69`.
+- Previous releases kept for rollback: `f2e4592f0dcee138f77c4630964ba92dfb37e664`, `68c978b860edaf9db0dc093740a2228f8ca45ec6`, `730112cb5a122f99b592cce50bb8faf082b3eece`, `13854767e93b1f95bda958680ef27aff387bd36e`, `6f5ab0cb4bd7e58bbf1aacefbaf54db97ff0f3e7`, `ac60bdfe2ecb13555ae449a7d299229ca8758afd`, `7eaed607ba0946c04dd32a405920a49db5e96fe7`, `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`, `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
 - Current release link: `/opt/snp/current`.
 - Production Compose project: `snp`.
 - Production environment: `/opt/snp/.env.production`, readable only by root.
@@ -148,6 +148,24 @@ Post-deployment checks against the live host:
 - The backend log showed no errors after the restart.
 
 PR CI run [35708043135](https://github.com/Piyushmanyata/SNP/actions/runs/35708043135) and main CI run [35708357250](https://github.com/Piyushmanyata/SNP/actions/runs/35708357250) passed every check: backend, frontend, dependencies, workflow and verify.
+
+## DLT brand name release
+
+The second 22 September 2026 release deploys [PR 41](https://github.com/Piyushmanyata/SNP/pull/41). SmartPing rejected all six DLT content templates because the entity or brand name was missing from the text. Every message now says "Sikar Zilla Welfare Trust के" where it said "SNP के". See ADR 0047. The six templates were re-submitted on SmartPing with this exact text on header SZWTRT, and approval is pending. MSG91 remains unconfigured.
+
+No database migration was required. This release changes message text only.
+
+Images for `f2e4592f0dcee138f77c4630964ba92dfb37e664` were tagged `snp-backend:rollback-f2e4592f…`, `snp-frontend:rollback-f2e4592f…` and `snp-reminders:rollback-f2e4592f…` before rebuilding. A pre-deployment archive, `snp_camps-20260922T121200Z.archive.gz`, was taken by restarting the backup container. Only backend, frontend and reminders were recreated. MongoDB stayed up throughout.
+
+Post-deployment checks against the live host:
+
+- All six containers reported healthy or running.
+- `/api/health` returned `{"status":"ok"}`, the homepage returned 200, and HTTP redirected with 308.
+- In the deployed backend, each of the six messages contains "Sikar Zilla Welfare Trust के" once and "SNP के" nowhere.
+- The served `AdminDashboard-BBQyw4kq.js` carries the new camp-number hint.
+- The backend log showed no errors after the restart.
+
+PR CI run [35725192959](https://github.com/Piyushmanyata/SNP/actions/runs/35725192959) passed every check: backend, frontend, dependencies, workflow and verify.
 
 ## Access and operation
 
