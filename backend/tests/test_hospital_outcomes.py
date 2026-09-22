@@ -14,6 +14,7 @@ import pytest
 from bson import ObjectId
 from fastapi import HTTPException
 
+import routes_clinical
 import sms
 from models import CorrectionBody, RegisterBody
 from routes_clinical import (
@@ -25,7 +26,7 @@ from routes_reports import _empty_board, export_camp_records
 from test_adversarial_challenger import FIXED_POWER, MEDICINE
 from test_camp_lifecycle import _Request, _recorder
 from test_camp_operations_matrix import (
-    ADMIN, CLINICAL, RX, VOLUNTEER, _complete_body, _issue_body, _mock, _printed_patient,
+    ADMIN, CLINICAL, RX, VOLUNTEER, _complete_body, _identity_checked, _issue_body, _mock, _printed_patient,
 )
 
 OT_DATE = "2026-10-02"
@@ -91,6 +92,7 @@ async def _register_printed(day_id, full_name, phone, arrived=True, printed=True
     if arrived:
         await arrive(pid, actor=VOLUNTEER)
     if printed:
+        await _identity_checked(pid)
         await print_prescription(pid, actor=VOLUNTEER)
     return pid
 
@@ -303,6 +305,31 @@ class TestHospitalStation:
             await _record(done, "decline", "declined")
             corrected = await add_correction(CorrectionBody(**{**body, "operation_id": "corr-after"}), actor=CLINICAL)
             assert corrected["revision"]["prescribed_lines"] == change["prescribed_lines"]
+        asyncio.run(run())
+
+    def test_a_surgery_scheduled_while_a_correction_is_prepared_still_blocks_it(self, monkeypatch):
+        async def run():
+            db = _mock(monkeypatch)
+            camp_id, _day, patient = await _printed_patient(db)
+            done = await _complete(patient, **_lines(["ot"]))
+            day_id = await _ot_day(db, camp_id)
+            original = routes_clinical.prepare_revision
+
+            async def schedule_first(*args, **kwargs):
+                await _record(done, "schedule", "deferred", day_id)
+                return await original(*args, **kwargs)
+
+            monkeypatch.setattr(routes_clinical, "prepare_revision", schedule_first)
+            body = CorrectionBody(
+                patient_id=str(patient["_id"]), reason="Doctor wrote referral", expected_generation=1,
+                operation_id="corr-race", full_transcription_confirmed=True,
+                prescribed_lines=["ot"], ot_outcome="referral", ot_eye=None,
+            )
+            with pytest.raises(HTTPException) as exc:
+                await add_correction(body, actor=CLINICAL)
+            assert _refusal(exc)[1]["code"] == "surgery_scheduled"
+            current = await db.patients.find_one({"_id": patient["_id"]})
+            assert str(current["committed_revision_id"]) == done["revision"]["id"]
         asyncio.run(run())
 
     @pytest.mark.parametrize("status", ["deferred", "declined"])

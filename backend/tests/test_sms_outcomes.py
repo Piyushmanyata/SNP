@@ -3,7 +3,7 @@ import json
 import os
 import sys
 from contextlib import nullcontext
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -270,6 +270,108 @@ class TestBoundedDispatch:
             "ok": True, "sent": 0, "complete": True, "reason": "msg91_unconfigured",
         }
         assert mock_db.reminder_ledger.docs == []
+
+
+def _flaky_provider(monkeypatch, failures):
+    calls = []
+
+    def fake_send(message_type, mobile, reg_no, event_date, venue):
+        calls.append({"type": message_type, "reg_no": reg_no, "date": event_date})
+        if len(calls) <= failures:
+            raise RuntimeError("carrier down")
+        return f"id-{len(calls)}"
+
+    monkeypatch.setattr(msg91, "send_dlt_sms", fake_send)
+    monkeypatch.setattr(msg91, "configured", lambda: True)
+    return calls
+
+
+def _later(mock_db):
+    for row in mock_db.reminder_ledger.docs:
+        row["created_at"] -= routes_reminders.sms.RETRY_AFTER + timedelta(minutes=1)
+
+
+class TestFailedRemindersRetryOnALaterRun:
+    def test_a_failure_is_retried_only_after_the_retry_interval(self, monkeypatch):
+        mock_db = setup_mock_db(monkeypatch)
+        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
+        calls = _flaky_provider(monkeypatch, failures=1)
+        client = _client(monkeypatch, mock_db)
+
+        first = _post(client).json()
+        assert (first["sent"], first["failed"], first["ok"]) == (0, 1, False)
+        assert _post(client).json()["sent"] == 0
+        assert len(calls) == 1
+
+        _later(mock_db)
+        third = _post(client).json()
+        assert (third["sent"], third["failed"], third["ok"]) == (1, 0, True)
+        assert len(calls) == 2
+
+    def test_three_spaced_failures_are_abandoned_and_stay_reported(self, monkeypatch):
+        mock_db = setup_mock_db(monkeypatch)
+        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
+        calls = _flaky_provider(monkeypatch, failures=99)
+        client = _client(monkeypatch, mock_db)
+
+        for _ in range(4):
+            result = _post(client).json()
+            _later(mock_db)
+
+        assert len(calls) == 3
+        assert mock_db.reminder_ledger.docs[0]["status"] == "abandoned"
+        assert (result["failed"], result["ok"]) == (1, False)
+
+    def test_a_retry_skips_a_surgery_cancelled_after_the_failure(self, monkeypatch):
+        mock_db = setup_mock_db(monkeypatch)
+
+        async def seed():
+            pid = ObjectId()
+            await mock_db.patients.insert_one({
+                "_id": pid, "camp_id": ObjectId(), "camp_day_id": ObjectId(), "reg_no": 7,
+                "phone": HOUSEHOLD, "phone_normalized": HOUSEHOLD,
+            })
+            await mock_db.deferred_slips.insert_one({
+                "patient_id": pid, "item_type": "ot", "active": True, "cancelled": False,
+                "collection_date": TOMORROW, "collection_venue": "OT Theatre", "version": 1,
+            })
+
+        asyncio.run(seed())
+        calls = _flaky_provider(monkeypatch, failures=1)
+        client = _client(monkeypatch, mock_db)
+        _post(client)
+        slip = mock_db.deferred_slips.docs[0]
+        slip["active"], slip["cancelled"] = False, True
+        _later(mock_db)
+
+        _post(client)
+
+        assert len(calls) == 1
+
+    def test_a_specs_retry_keeps_its_collection_window(self, monkeypatch):
+        mock_db = setup_mock_db(monkeypatch)
+
+        async def seed():
+            pid = ObjectId()
+            await mock_db.patients.insert_one({
+                "_id": pid, "camp_id": ObjectId(), "camp_day_id": ObjectId(), "reg_no": 42,
+                "phone": HOUSEHOLD, "phone_normalized": HOUSEHOLD,
+            })
+            await mock_db.deferred_slips.insert_one({
+                "patient_id": pid, "item_type": "specs_made", "active": True, "cancelled": False,
+                "collection_date": TOMORROW, "collection_venue": "Token Hall",
+                "collection_start_time": "10:00", "collection_end_time": "12:00", "version": 1,
+            })
+
+        asyncio.run(seed())
+        calls = _flaky_provider(monkeypatch, failures=1)
+        client = _client(monkeypatch, mock_db)
+        _post(client)
+        _later(mock_db)
+
+        _post(client)
+
+        assert [c["date"] for c in calls] == ["02-09-2026, समय 10:00–12:00"] * 2
 
 
 class TestWorkerFollowsThrough:

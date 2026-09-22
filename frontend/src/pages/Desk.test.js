@@ -434,7 +434,6 @@ describe("Desk page", () => {
       phone: "9876500001",
       aadhaar_scanned: true,
       qr_payload: CARD_PAYLOAD,
-      manual_entry: false,
       camp_day_id: "day-1",
     }));
     expect(api.post).toHaveBeenCalledWith("/desk/arrive/p-9");
@@ -1101,13 +1100,73 @@ describe("Desk page", () => {
     expect(api.post).toHaveBeenCalledWith("/register", expect.objectContaining({
       full_name: "Manual Patient",
       camp_day_id: "day-2",
-      manual_entry: true,
       at_door: true,
       failed_scan_attempts: 3,
       manual_reason: "Scanners are down",
     }));
     expect(api.post).toHaveBeenCalledWith("/desk/arrive/p-8");
     expect(container.textContent).toContain("Registered and arrived: #108");
+  });
+
+  test("a typed door entry never carries the card details of an earlier scan", async () => {
+    api.post.mockImplementation((url, body) => {
+      if (url === "/desk/scan") {
+        return Promise.resolve({ data: { outcome: "no_match", card: { full_name: "Aadhaar Scanned User", aadhaar_last4: "8888", dob: "1984-05-12" } } });
+      }
+      if (url === "/register") {
+        return Promise.resolve({ data: { registration: { id: "p-9", reg_no: "109", full_name: body.full_name } } });
+      }
+      return Promise.resolve({ data: { registration: { ...ARRIVED, id: "p-9", reg_no: "109" } } });
+    });
+    await renderDesk({ door_manual_entry: true });
+    await scanAtDoor();
+    for (let i = 0; i < 3; i += 1) {
+      act(() => { container.querySelector('[data-testid="mock-stall-trigger"]').click(); });
+    }
+    act(() => {
+      setInput(container.querySelector('[data-testid="reg-fullname-input"]'), "Different Person");
+      setInput(container.querySelector('[data-testid="reg-age-input"]'), "60");
+      setInput(container.querySelector('[data-testid="reg-phone-input"]'), "9876500003");
+      setInput(container.querySelector('[data-testid="door-manual-reason"]'), "Card will not scan");
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="door-manual-submit"]').click();
+    });
+    const register = api.post.mock.calls.find(([url]) => url === "/register")[1];
+    expect(register).toEqual(expect.objectContaining({
+      full_name: "Different Person", aadhaar_last4: null, dob: null, gender: null, address: null,
+    }));
+  });
+
+  test.each([
+    ["team_lead", false],
+    ["admin", true],
+  ])("a %s sees the identity hold instead of print", async (role, canConfirm) => {
+    mockAuth.user = { id: "u1", name: "Staff", role };
+    const held = { ...ARRIVED, identity_recheck_required: true };
+    api.post.mockImplementation((url) => {
+      if (url === "/desk/lookup") return Promise.resolve({ data: { registration: held } });
+      if (url === "/desk/identity-check") {
+        return Promise.resolve({ data: { registration: { ...held, identity_recheck_required: false } } });
+      }
+      return Promise.resolve({ data: {} });
+    });
+    await renderDesk();
+    await act(async () => {
+      container.querySelector('[data-testid="mock-patient-code-trigger"]').click();
+    });
+    expect(container.querySelector('[data-testid="print-button-101"]')).toBeNull();
+    expect(container.querySelector('[data-testid="identity-hold-101"]')).not.toBeNull();
+    const confirm = container.querySelector('[data-testid="identity-check-101"]');
+    expect(Boolean(confirm)).toBe(canConfirm);
+    if (!canConfirm) return;
+    act(() => { confirm.click(); });
+    act(() => { setInput(container.querySelector('[data-testid="identity-reason-101"]'), "Voter ID seen"); });
+    await act(async () => {
+      container.querySelector('[data-testid="identity-submit-101"]').click();
+    });
+    expect(api.post).toHaveBeenCalledWith("/desk/identity-check", { patient_id: "p-1", reason: "Voter ID seen" });
+    expect(container.querySelector('[data-testid="print-button-101"]')).not.toBeNull();
   });
 
   test("camp-day mode hides Pre-registration and shows the full KPI strip", async () => {

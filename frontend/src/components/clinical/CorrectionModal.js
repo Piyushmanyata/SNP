@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import api, { formatApiError } from "../../lib/api";
+import { v4 } from "../../lib/uuid";
 import { Modal, Field, Input, Alert, Button } from "../ui";
 import { SpecsMeasurementsGrid } from "./SpecsMeasurementsGrid";
 import { MedicinePicker } from "./MedicinePicker";
@@ -71,18 +72,19 @@ export function CorrectionForm({
     setBusy(true);
     setError("");
     try {
-      if (!opRef.current) {
-        opRef.current = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`;
-      }
-      await api.post("/clinical/correction", {
+      const request = {
         transcription_id: transcription.id,
         patient_id: patientId,
         reason: reason.trim(),
         changes,
         expected_generation: expectedGeneration,
         prescribed_lines: rx.prescribed_lines,
-        operation_id: opRef.current,
-      });
+      };
+      const key = JSON.stringify(request);
+      if (opRef.current?.key !== key) {
+        opRef.current = { key, id: v4() };
+      }
+      await api.post("/clinical/correction", { ...request, operation_id: opRef.current.id });
       opRef.current = null;
       onDone();
     } catch (err) {

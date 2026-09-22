@@ -295,7 +295,7 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
                 bucket[status] += f["count"]
 
     sms_rows = await db.reminder_ledger.aggregate([
-        {"$match": {"status": "failed", "created_at": {"$gte": start, "$lt": end}}},
+        {"$match": {"status": {"$in": ["failed", "abandoned"]}, "created_at": {"$gte": start, "$lt": end}}},
         {"$group": {"_id": "$patient_id", "count": {"$sum": 1}}},
     ]).to_list(None)
     sms_patient_ids = [r["_id"] for r in sms_rows if r["_id"]]

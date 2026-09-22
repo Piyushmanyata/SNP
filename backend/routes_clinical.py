@@ -985,10 +985,12 @@ async def add_correction(
     if p.get("issue_auth_op"):
         raise conflict("issue_pending", "Another issue is already in progress for this patient.")
     op_id = body.operation_id or str(ObjectId())
-    existing_revision = await db.prescription_revisions.find_one({"operation_id": op_id})
-    if not p.get("committed_revision_id") and not existing_revision:
+    base_id = p.get("committed_revision_id")
+    if not base_id:
         raise conflict("not_completed", "There is no current completion to correct.")
-    base_id = existing_revision.get("predecessor_id") if existing_revision else p.get("committed_revision_id")
+    own_commit = await db.prescription_revisions.find_one({"_id": base_id, "operation_id": op_id})
+    if own_commit:
+        base_id = own_commit.get("predecessor_id")
     current = await db.prescription_revisions.find_one({"_id": base_id}) or {}
     merged = {field: current.get(field) for field in CONTENT_FIELDS}
     for field in ("diagnosis_options", "prescribed_medicines"):
@@ -1024,10 +1026,8 @@ async def add_correction(
     if existing_op and existing_op.get("status") == "committed" and existing_op.get("result"):
         return existing_op["result"]
     still_iol = "ot" in lines and content.get("ot_outcome") == "iol_surgery"
-    if t and not still_iol and await db.fulfilments.find_one(
-        {"transcription_id": t["_id"], "item_type": "ot", "status": "deferred"},
-    ):
-        raise conflict("surgery_scheduled", "Record Surgery declined at the Hospital station before changing a scheduled IOL surgery.")
+    if not own_commit and generation_of(p) != body.expected_generation:
+        raise conflict("stale_generation", "The prescription changed; reload and retry.")
     revision = await prepare_revision(
         db, p, actor, content, lines, none, op_id, "correct", body.reason.strip(),
         base_id,
@@ -1041,20 +1041,24 @@ async def add_correction(
                 raise conflict("stale_generation", "The prescription changed; reload and retry.")
             committed = current_patient
         else:
+            if t and not still_iol and await db.fulfilments.find_one(
+                {"transcription_id": t["_id"], "item_type": "ot", "status": "deferred"},
+            ):
+                raise conflict("surgery_scheduled", "Record Surgery declined at the Hospital station before changing a scheduled IOL surgery.")
             committed = await commit_correction(db, current_patient, revision, actor, body.expected_generation)
             if not committed:
                 raise conflict("stale_generation", "The prescription changed; reload and retry.")
         trans = await _upsert_transcription(db, committed, actor, content, locked=True)
-    if not await db.corrections.find_one({"revision_id": revision["_id"]}):
-        await db.corrections.insert_one({
-            "transcription_id": trans["_id"],
-            "patient_id": p["_id"],
-            "reason": body.reason,
-            "changes": body.changes,
-            "revision_id": revision["_id"],
-            "created_by": str(actor["_id"]),
-            "created_at": now_utc(),
-        })
+        if not await db.corrections.find_one({"revision_id": revision["_id"]}):
+            await db.corrections.insert_one({
+                "transcription_id": trans["_id"],
+                "patient_id": p["_id"],
+                "reason": body.reason,
+                "changes": body.changes,
+                "revision_id": revision["_id"],
+                "created_by": str(actor["_id"]),
+                "created_at": now_utc(),
+            })
     result = _clinical_result(committed, revision, trans)
     result["correction_id"] = str(revision["_id"])
     await save_operation(db, {

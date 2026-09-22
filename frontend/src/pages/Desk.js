@@ -79,19 +79,6 @@ export default function Desk() {
   useEffect(() => { load(); }, [load]);
   useEffect(() => () => { findSequence.current += 1; }, []);
 
-  const fillDoorForm = useCallback((card) => {
-    if (!card) return;
-    setDoorForm({
-      full_name: card.full_name || "",
-      age: card.age ?? "",
-      phone: doorPhone,
-      gender: card.gender || "",
-      address: card.address || "",
-      aadhaar_last4: card.aadhaar_last4 || "",
-      dob: card.dob || "",
-    });
-  }, [doorPhone]);
-
   const clearScan = useCallback(() => { setScanResult(null); setScanPayload(""); }, []);
 
   const onScanned = useCallback(async (_card, payload) => {
@@ -99,14 +86,12 @@ export default function Desk() {
     const request = ++findSequence.current;
     setBanner(""); setError(""); setSearchResults(null); setFound(null);
     clearScan();
-    fillDoorForm(_card);
     setScanPayload(payload);
     setScanning(true);
     try {
       const { data } = await api.post("/desk/scan", { payload });
       if (request !== findSequence.current) return;
       setScanResult(data);
-      if (data.card) fillDoorForm(data.card);
       if (data.outcome === "arrived") {
         const extra = data.overwritten ? " (card details updated)" : "";
         setBanner(`Arrived: #${data.registration.reg_no} — ${data.registration.full_name}${extra}`);
@@ -119,7 +104,7 @@ export default function Desk() {
     } finally {
       if (request === findSequence.current) setScanning(false);
     }
-  }, [load, fillDoorForm, busy, clearScan]);
+  }, [load, busy, clearScan]);
 
   const confirmPatient = useCallback(async (patientId) => {
     if (!patientId || busy || scanning) return;
@@ -193,6 +178,21 @@ export default function Desk() {
     }
   }, [navigate]);
 
+  const confirmIdentity = useCallback(async (reg, reason) => {
+    setError("");
+    try {
+      const { data } = await api.post("/desk/identity-check", { patient_id: reg.id, reason });
+      const checked = data.registration;
+      setFound((current) => (current?.id === checked.id ? checked : current));
+      setSearchResults((current) => current && current.map((row) => (row.id === checked.id ? checked : row)));
+      return true;
+    } catch (err) {
+      setError(formatApiError(err));
+      return false;
+    }
+  }, []);
+  const onConfirmIdentity = user?.role === "admin" ? confirmIdentity : undefined;
+
   const openPreReg = useCallback(() => { setShowReg(true); }, []);
 
   const submitRegister = useCallback(async ({ form, qrPayload, dayId, reqId, walkIn: asWalkIn, manualReason, failedAttempts, atDoor }) => {
@@ -209,7 +209,6 @@ export default function Desk() {
       qr_payload: qrPayload || null,
       camp_day_id: dayId,
       registration_request_id: reqId,
-      manual_entry: !scanned,
       manual_reason: scanned ? null : (manualReason || null),
       failed_scan_attempts: scanned ? 0 : (failedAttempts || 0),
       at_door: Boolean(atDoor) && !scanned,
@@ -379,7 +378,7 @@ export default function Desk() {
 
         {found && (
           <div className="mt-4" data-testid="desk-found-patient">
-            <PatientRow p={found} onPrint={print} printingOpen={printingOpen} />
+            <PatientRow p={found} onPrint={print} printingOpen={printingOpen} onConfirmIdentity={onConfirmIdentity} />
           </div>
         )}
 
@@ -391,7 +390,7 @@ export default function Desk() {
             </div>
             <div className="space-y-2" data-testid="desk-search-results">
               {searchResults.map((p) => (
-                <PatientRow key={p.id} p={p} onPrint={print} printingOpen={printingOpen} />
+                <PatientRow key={p.id} p={p} onPrint={print} printingOpen={printingOpen} onConfirmIdentity={onConfirmIdentity} />
               ))}
             </div>
           </div>
@@ -488,10 +487,20 @@ function DoorScanCard({
   );
 }
 
-export function PatientRow({ p, onPrint, printingOpen }) {
-  const needsDoorScan = !p.arrived_at && !p.aadhaar_scanned;
+export function PatientRow({ p, onPrint, printingOpen, onConfirmIdentity }) {
+  const [checking, setChecking] = useState(false);
+  const [reason, setReason] = useState("");
+  const needsDoorScan = !p.arrived_at && !p.aadhaar_scanned && !p.identity_checked;
+  const identityHold = Boolean(p.identity_recheck_required) && !p.printed_at && p.queue_status !== "seen";
   const windowShut = !printingOpen && !p.printed_at;
-  const canPrint = p.queue_status !== "seen" && !needsDoorScan && !windowShut;
+  const canPrint = p.queue_status !== "seen" && !needsDoorScan && !windowShut && !identityHold;
+  const submitCheck = async (e) => {
+    e.preventDefault();
+    if (await onConfirmIdentity(p, reason.trim())) {
+      setChecking(false);
+      setReason("");
+    }
+  };
   return (
     <div
       id={`row-${p.id}`}
@@ -512,7 +521,12 @@ export function PatientRow({ p, onPrint, printingOpen }) {
           Scan their Aadhaar at the door to print
         </span>
       )}
-      {!needsDoorScan && p.queue_status !== "seen" && windowShut && (
+      {!needsDoorScan && identityHold && (
+        <span className="text-xs text-amber-800" data-testid={`identity-hold-${p.reg_no}`}>
+          Typed entry. An admin must confirm identity before printing.
+        </span>
+      )}
+      {!needsDoorScan && !identityHold && p.queue_status !== "seen" && windowShut && (
         <span className="text-xs text-slate-500" data-testid={`print-window-closed-${p.reg_no}`}>
           The print window is closed.
         </span>
@@ -523,7 +537,26 @@ export function PatientRow({ p, onPrint, printingOpen }) {
             <Printer className="w-4 h-4" /> Print
           </Button>
         )}
+        {identityHold && onConfirmIdentity && !checking && (
+          <Button size="sm" variant="outline" onClick={() => setChecking(true)} data-testid={`identity-check-${p.reg_no}`}>
+            Confirm identity
+          </Button>
+        )}
       </div>
+      {checking && (
+        <form onSubmit={submitCheck} className="w-full flex gap-2">
+          <Input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="ID seen, e.g. voter ID card"
+            aria-label="Identity evidence seen"
+            data-testid={`identity-reason-${p.reg_no}`}
+          />
+          <Button size="sm" type="submit" disabled={!reason.trim()} data-testid={`identity-submit-${p.reg_no}`}>
+            Confirm
+          </Button>
+        </form>
+      )}
     </div>
   );
 }
@@ -620,7 +653,6 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
         qr_payload: qrPayload || null,
         camp_day_id: dayId,
         registration_request_id: reqId,
-        manual_entry: !scanned,
         manual_reason: scanned ? null : manualReason.trim(),
         failed_scan_attempts: scanned ? 0 : failures,
         at_door: false,

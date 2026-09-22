@@ -97,6 +97,7 @@ class TestPrintWindowNoCalendar:
         assert r.status_code == 200, r.text
         pid = r.json()["registration"]["id"]
         _arrive(admin, pid)
+        admin.post(f"{API}/desk/identity-check", json={"patient_id": pid, "reason": "Voter ID seen"}, timeout=30)
         p = admin.post(f"{API}/desk/print/{pid}", timeout=30)
         assert p.status_code == 200, p.text
         assert p.json()["registration"]["printed_at"]

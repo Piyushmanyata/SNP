@@ -90,7 +90,7 @@ async def _send_each(
                 break
             outcome = await sms.deliver_patient_sms(
                 db, patient, message_type, event_date, venue,
-                start_time=start, end_time=end, retry_failed=False,
+                start_time=start, end_time=end, retry_after=sms.RETRY_AFTER,
             )
             if outcome == "skipped":
                 continue
@@ -100,33 +100,6 @@ async def _send_each(
     finally:
         await targets.aclose()
     return sent, used, complete
-
-
-async def _retry_failed(db: AsyncIOMotorDatabase, event_date: str, budget: int) -> Tuple[int, int, bool]:
-    sent = 0
-    used = 0
-    query = {
-        "event_date": event_date,
-        "status": "failed",
-        "message_type": {"$in": ["camp", "ot", "specs"]},
-    }
-    async for page in _pages(db.reminder_ledger, query):
-        for row in page:
-            if used >= budget:
-                return sent, used, False
-            patient = await db.patients.find_one({"_id": row["patient_id"]})
-            if not patient:
-                continue
-            outcome = await sms.deliver_patient_sms(
-                db, patient, row["message_type"], event_date, row.get("venue") or "",
-                retry_failed=True,
-            )
-            if outcome == "skipped":
-                continue
-            used += 1
-            if outcome in ("sent", "uncertain"):
-                sent += 1
-    return sent, used, True
 
 
 async def send_d1_reminders() -> Dict[str, Any]:
@@ -150,12 +123,9 @@ async def send_d1_reminders() -> Dict[str, Any]:
         )
         sent += dispatched
         used += attempted
-    if complete and used < SEND_LIMIT:
-        retried, attempted, complete = await _retry_failed(db, tomorrow, SEND_LIMIT - used)
-        sent += retried
-        used += attempted
     failed = await db.reminder_ledger.count_documents({
-        "event_date": tomorrow, "message_type": {"$in": ["camp", "ot", "specs"]}, "status": "failed",
+        "event_date": tomorrow, "message_type": {"$in": ["camp", "ot", "specs"]},
+        "status": {"$in": ["failed", "abandoned"]},
     })
     return {
         "ok": failed == 0, "sent": sent, "failed": failed, "complete": complete,

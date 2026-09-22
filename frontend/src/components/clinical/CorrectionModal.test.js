@@ -177,6 +177,24 @@ test("corrections preserve existing powers and diagnosis when changing other fie
   expect(body.changes).not.toHaveProperty("remarks");
 });
 
+test("a failed correction is retried under the same operation id only while the request is unchanged", async () => {
+  await act(async () => root.render(<CorrectionForm transcription={{ id: "tx-8" }} onDone={jest.fn()} />));
+  act(() => {
+    setInput(container.querySelector('[data-testid="remarks-input"]'), "Changed");
+    setInput(container.querySelector('[data-testid="correction-reason-input"]'), "From paper");
+  });
+  const save = () => act(async () => container.querySelector('[data-testid="save-transcription-button"]').click());
+  api.post.mockRejectedValueOnce(new Error("Network Error"));
+  await save();
+  api.post.mockRejectedValueOnce(new Error("Network Error"));
+  await save();
+  act(() => setInput(container.querySelector('[data-testid="correction-reason-input"]'), "From the doctor's paper"));
+  await save();
+  const ids = api.post.mock.calls.map(([, body]) => body.operation_id);
+  expect(ids[1]).toBe(ids[0]);
+  expect(ids[2]).not.toBe(ids[0]);
+});
+
 test("unchanged prescriptions and blank audit reasons cannot be submitted", async () => {
   await act(async () => root.render(<CorrectionForm transcription={{ id: "tx-3" }} onDone={jest.fn()} />));
   act(() => setInput(container.querySelector('[data-testid="correction-reason-input"]'), "Reason only"));

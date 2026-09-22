@@ -33,6 +33,7 @@ def ser_patient(p: dict) -> dict:
         "registrar_team_lead_id": p.get("registrar_team_lead_id"),
         "manual_exception": p.get("manual_exception"),
         "identity_recheck_required": bool(p.get("identity_recheck_required")),
+        "identity_checked": bool(p.get("identity_alt_check")),
         "committed_revision_id": str(p["committed_revision_id"]) if p.get("committed_revision_id") else None,
         "clinical_generation": int(p.get("clinical_generation") or 0),
         "created_at": iso(p.get("created_at")),

@@ -332,6 +332,50 @@ def test_correction_retry_applies_one_generation(monkeypatch, failure_stage):
     asyncio.run(run())
 
 
+def test_a_stale_correction_retry_cannot_replace_a_newer_correction(monkeypatch):
+    async def run():
+        db = _mock(monkeypatch)
+        _, _, patient = await _printed_patient(db)
+        done = await routes_clinical.complete_prescription(
+            _complete_body(patient["_id"], "complete"), actor=CLINICAL,
+        )
+        generation = done["registration"]["clinical_generation"]
+        stale = CorrectionBody(
+            patient_id=str(patient["_id"]), reason="Correct pressure", operation_id="stale",
+            expected_generation=generation, full_transcription_confirmed=True, bp="130/85",
+        )
+        newer = CorrectionBody(
+            patient_id=str(patient["_id"]), reason="Correct sugar", operation_id="newer",
+            expected_generation=generation, full_transcription_confirmed=True, blood_sugar="140",
+        )
+        original = routes_clinical.prepare_revision
+
+        async def lose_the_race(*args, **kwargs):
+            prepared = await original(*args, **kwargs)
+            monkeypatch.setattr(routes_clinical, "prepare_revision", original)
+            await routes_clinical.add_correction(newer, actor=CLINICAL)
+            return prepared
+
+        monkeypatch.setattr(routes_clinical, "prepare_revision", lose_the_race)
+        with pytest.raises(HTTPException) as exc:
+            await routes_clinical.add_correction(stale, actor=CLINICAL)
+        assert exc.value.detail["code"] == "stale_generation"
+        with pytest.raises(HTTPException) as exc:
+            await routes_clinical.add_correction(stale, actor=CLINICAL)
+        assert exc.value.detail["code"] == "stale_generation"
+
+        retry = stale.model_copy(update={"expected_generation": generation + 1})
+        with pytest.raises(HTTPException) as exc:
+            await routes_clinical.add_correction(retry, actor=CLINICAL)
+        assert exc.value.detail["code"] == "operation_conflict"
+        current = await db.patients.find_one({"_id": patient["_id"]})
+        committed = await db.prescription_revisions.find_one({"_id": current["committed_revision_id"]})
+        assert committed["operation_id"] == "newer"
+        assert committed["blood_sugar"] == "140"
+
+    asyncio.run(run())
+
+
 def test_undo_retry_clears_one_completion(monkeypatch):
     async def run():
         db = _mock(monkeypatch)

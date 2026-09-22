@@ -1,8 +1,10 @@
 import asyncio
 import logging
+from datetime import timedelta
 from typing import Any, Dict, Optional
 
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.errors import DuplicateKeyError
 
 import helpers
 import msg91
@@ -24,6 +26,7 @@ MESSAGE_COPY = {
     "specs_token": SPECS_TOKEN,
     "specs": SPECS_REMINDER,
 }
+RETRY_AFTER = timedelta(minutes=10)
 
 
 def valid_phone(raw: Optional[str]) -> Optional[str]:
@@ -41,7 +44,7 @@ async def _claim(
     number: str,
     venue: str,
     copy: str,
-    retry_failed: bool = True,
+    retry_after: Optional[timedelta] = None,
 ) -> Optional[Dict[str, Any]]:
     existing = await db.reminder_ledger.find_one({
         "patient_id": patient_id,
@@ -51,8 +54,6 @@ async def _claim(
     if existing:
         if existing.get("status") != "failed":
             return None
-        if not retry_failed:
-            return None
         attempts = int(existing.get("attempts") or 1)
         if attempts >= 3:
             await db.reminder_ledger.update_one(
@@ -60,8 +61,11 @@ async def _claim(
                 {"$set": {"status": "abandoned"}},
             )
             return None
+        retryable: Dict[str, Any] = {"_id": existing["_id"], "status": "failed"}
+        if retry_after:
+            retryable["created_at"] = {"$lte": helpers.now_utc() - retry_after}
         return await db.reminder_ledger.find_one_and_update(
-            {"_id": existing["_id"], "status": "failed"},
+            retryable,
             {"$set": {"status": "pending", "attempts": attempts + 1, "created_at": helpers.now_utc(),
                       "copy": copy, "number": number, "venue": venue}},
             return_document=True,
@@ -78,7 +82,10 @@ async def _claim(
         "provider_id": None,
         "created_at": helpers.now_utc(),
     }
-    res = await db.reminder_ledger.insert_one(doc)
+    try:
+        res = await db.reminder_ledger.insert_one(doc)
+    except DuplicateKeyError:
+        return None
     doc["_id"] = res.inserted_id
     return doc
 
@@ -97,7 +104,7 @@ async def deliver_patient_sms(
     venue: str,
     start_time: Optional[str] = None,
     end_time: Optional[str] = None,
-    retry_failed: bool = True,
+    retry_after: Optional[timedelta] = None,
 ) -> str:
     """Returns sent, failed, uncertain, or skipped. Never raises."""
     row = None
@@ -115,7 +122,7 @@ async def deliver_patient_sms(
         copy = MESSAGE_COPY[message_type].format(**fields)
         row = await _claim(
             db, patient["_id"], message_type, event_date, number, venue, copy,
-            retry_failed=retry_failed,
+            retry_after=retry_after,
         )
         if not row:
             return "skipped"
