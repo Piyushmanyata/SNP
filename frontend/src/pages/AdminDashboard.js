@@ -198,7 +198,7 @@ function Camps() {
           <Field label="Camp name" required><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} data-testid="camp-name-input" /></Field>
           <Field label="Venue" required hint="Sent in the registration and camp-reminder SMS."><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="camp-venue-input" /></Field>
           <Field label="Camp date" required><Input type="date" value={form.camp_date} onChange={(e) => setForm({ ...form, camp_date: e.target.value })} data-testid="camp-date-input" /></Field>
-          <Field label="Camp number" required hint="The SMS reads “SNP के 162वें नेत्र शिविर”."><Input type="number" min="1" step="1" inputMode="numeric" value={form.camp_number} onChange={(e) => setForm({ ...form, camp_number: e.target.value })} data-testid="camp-number-input" /></Field>
+          <Field label="Camp number" required hint="The SMS reads “Sikar Zilla Welfare Trust के 162वें नेत्र शिविर”."><Input type="number" min="1" step="1" inputMode="numeric" value={form.camp_number} onChange={(e) => setForm({ ...form, camp_number: e.target.value })} data-testid="camp-number-input" /></Field>
           <Button className="w-full" onClick={saveCamp} disabled={!form.name || !form.venue || !form.camp_date || !(Number.isInteger(campNumber) && campNumber > 0)} data-testid="camp-create-submit">{editing ? "Save" : "Create"}</Button>
         </div>
       </Modal>

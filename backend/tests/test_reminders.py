@@ -125,12 +125,12 @@ def _post(client, secret=SECRET):
 
 class TestMessageCopy:
     def test_six_approved_devanagari_strings(self):
-        assert REGISTRATION_CONFIRMATION == "SNP के {camp_no}वें नेत्र शिविर में आपका पंजीकरण हो गया है। क्रमांक: {reg_no} दिनांक: {date} शिविर स्थल: {venue}। कृपया शिविर के दिन अपना आधार कार्ड अवश्य साथ लाएँ।"
-        assert CAMP_REMINDER == "कल ({date}) को SNP के {camp_no} वें नेत्र शिविर में आपका नेत्र परीक्षण है। कृपया समय पर {venue} पहुँचें। यह टोकन शिविर स्थल पर दिखाएँ। क्रमांक: {reg_no}। कृपया शिविर के दिन अपना आधार कार्ड अवश्य साथ लाएँ।"
-        assert OT_TOKEN == "SNP के {camp_no} वें नेत्र शिविर में आपका ऑपरेशन {date} को निर्धारित हुआ है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर अवश्य साथ लाएँ। स्थल: {venue}।"
-        assert OT_REMINDER == "कल ({date}) को SNP के {camp_no} वें नेत्र शिविर में आपका नेत्र ऑपरेशन निर्धारित है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ अवश्य लाएँ। स्थल: {venue}।"
-        assert SPECS_TOKEN == "SNP के {camp_no} वें नेत्र शिविर में आपको चश्मा {date} से {end_date} तक सुबह  {start_time} बजे से शाम {end_time} बजे तक {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर अवश्य आएँ।"
-        assert SPECS_REMINDER == "SNP के {camp_no} वे शिविर के चश्मे बनकर  तैयार है।  चश्में {date} से {end_date} तक सुबह  {start_time} बजे से शाम {end_time} बजे तक {venue} आकर ले जावें। टोकन क्रमांक {reg_no} अवश्य साथ लाएँ।"
+        assert REGISTRATION_CONFIRMATION == "Sikar Zilla Welfare Trust के {camp_no}वें नेत्र शिविर में आपका पंजीकरण हो गया है। क्रमांक: {reg_no} दिनांक: {date} शिविर स्थल: {venue}। कृपया शिविर के दिन अपना आधार कार्ड अवश्य साथ लाएँ।"
+        assert CAMP_REMINDER == "कल ({date}) को Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपका नेत्र परीक्षण है। कृपया समय पर {venue} पहुँचें। यह टोकन शिविर स्थल पर दिखाएँ। क्रमांक: {reg_no}। कृपया शिविर के दिन अपना आधार कार्ड अवश्य साथ लाएँ।"
+        assert OT_TOKEN == "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपका ऑपरेशन {date} को निर्धारित हुआ है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर अवश्य साथ लाएँ। स्थल: {venue}।"
+        assert OT_REMINDER == "कल ({date}) को Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपका नेत्र ऑपरेशन निर्धारित है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ अवश्य लाएँ। स्थल: {venue}।"
+        assert SPECS_TOKEN == "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपको चश्मा {date} से {end_date} तक सुबह  {start_time} बजे से शाम {end_time} बजे तक {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर अवश्य आएँ।"
+        assert SPECS_REMINDER == "Sikar Zilla Welfare Trust के {camp_no} वे शिविर के चश्मे बनकर  तैयार है।  चश्में {date} से {end_date} तक सुबह  {start_time} बजे से शाम {end_time} बजे तक {venue} आकर ले जावें। टोकन क्रमांक {reg_no} अवश्य साथ लाएँ।"
 
     def test_the_dlt_reference_registers_exactly_the_code_copy(self):
         doc = json.loads((backend_dir / "docs" / "msg91-templates.json").read_text(encoding="utf-8"))
@@ -342,7 +342,7 @@ class TestReminderCronHttp:
             "start_time": "10:00", "end_time": "05:00", "venue": "Token Hall",
         }]
         assert mock_db.reminder_ledger.docs[0]["copy"] == (
-            "SNP के 162 वे शिविर के चश्मे बनकर  तैयार है।  चश्में 02-09-2026 से 09-09-2026 तक "
+            "Sikar Zilla Welfare Trust के 162 वे शिविर के चश्मे बनकर  तैयार है।  चश्में 02-09-2026 से 09-09-2026 तक "
             "सुबह  10:00 बजे से शाम 05:00 बजे तक Token Hall आकर ले जावें। टोकन क्रमांक 42 अवश्य साथ लाएँ।"
         )
 
