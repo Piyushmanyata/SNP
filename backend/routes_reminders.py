@@ -79,22 +79,54 @@ async def _send_each(
     targets: AsyncGenerator[Target, None],
     event_date: str,
     budget: int,
-) -> Tuple[int, bool]:
+) -> Tuple[int, int, bool]:
     sent = 0
+    used = 0
     complete = True
     try:
         async for patient, venue, start, end in targets:
-            if sent >= budget:
+            if used >= budget:
                 complete = False
                 break
-            if await sms.send_patient_sms(
+            outcome = await sms.deliver_patient_sms(
                 db, patient, message_type, event_date, venue,
-                start_time=start, end_time=end,
-            ):
+                start_time=start, end_time=end, retry_failed=False,
+            )
+            if outcome == "skipped":
+                continue
+            used += 1
+            if outcome in ("sent", "uncertain"):
                 sent += 1
     finally:
         await targets.aclose()
-    return sent, complete
+    return sent, used, complete
+
+
+async def _retry_failed(db: AsyncIOMotorDatabase, event_date: str, budget: int) -> Tuple[int, int, bool]:
+    sent = 0
+    used = 0
+    query = {
+        "event_date": event_date,
+        "status": "failed",
+        "message_type": {"$in": ["camp", "ot", "specs"]},
+    }
+    async for page in _pages(db.reminder_ledger, query):
+        for row in page:
+            if used >= budget:
+                return sent, used, False
+            patient = await db.patients.find_one({"_id": row["patient_id"]})
+            if not patient:
+                continue
+            outcome = await sms.deliver_patient_sms(
+                db, patient, row["message_type"], event_date, row.get("venue") or "",
+                retry_failed=True,
+            )
+            if outcome == "skipped":
+                continue
+            used += 1
+            if outcome in ("sent", "uncertain"):
+                sent += 1
+    return sent, used, True
 
 
 async def send_d1_reminders() -> Dict[str, Any]:
@@ -104,6 +136,7 @@ async def send_d1_reminders() -> Dict[str, Any]:
     tomorrow = helpers.tomorrow_ist_str()
     db = get_db()
     sent = 0
+    used = 0
     complete = True
     for message_type, item_type in (("camp", None), ("ot", "ot"), ("specs", "specs_made")):
         if not complete:
@@ -112,10 +145,15 @@ async def send_d1_reminders() -> Dict[str, Any]:
             _camp_targets(db, tomorrow) if item_type is None
             else _token_targets(db, item_type, tomorrow)
         )
-        dispatched, complete = await _send_each(
-            db, message_type, targets, tomorrow, SEND_LIMIT - sent,
+        dispatched, attempted, complete = await _send_each(
+            db, message_type, targets, tomorrow, SEND_LIMIT - used,
         )
         sent += dispatched
+        used += attempted
+    if complete and used < SEND_LIMIT:
+        retried, attempted, complete = await _retry_failed(db, tomorrow, SEND_LIMIT - used)
+        sent += retried
+        used += attempted
     failed = await db.reminder_ledger.count_documents({
         "event_date": tomorrow, "message_type": {"$in": ["camp", "ot", "specs"]}, "status": "failed",
     })

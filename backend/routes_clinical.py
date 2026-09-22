@@ -404,21 +404,45 @@ async def undo_completion(
     async with _clinical_write(db, str(trans["_id"])) if trans else nullcontext():
         if await has_issue_history(db, p):
             raise conflict("undo_after_issue", "Completion cannot be undone after an issue or pending issue.")
+        p = await db.patients.find_one({"_id": p["_id"]})
+        if not p:
+            raise HTTPException(status_code=404, detail="Registration not found")
         digest = payload_hash("undo", {"patient_id": str(p["_id"]), "reason": body.reason.strip()})
         existing_op = await recover_operation(db, body.operation_id, "undo", digest)
         if existing_op and existing_op.get("status") == "committed" and existing_op.get("result"):
             return existing_op["result"]
-        if not p.get("committed_revision_id"):
-            raise conflict("not_completed", "There is no current completion to undo.")
-        prior_rev = await db.prescription_revisions.find_one({"_id": p["committed_revision_id"]})
-        updated = await commit_undo(db, p, body.expected_generation)
-        if not updated:
-            raise conflict("stale_generation", "The prescription changed; reload and retry.")
-        if prior_rev and prior_rev.get("operation_id"):
-            await db.clinical_operations.update_one(
-                {"operation_id": prior_rev["operation_id"]},
-                {"$set": {"status": "superseded"}},
-            )
+        expected = body.expected_generation
+        applied = (
+            p.get("last_undo_operation_id") == body.operation_id
+            and generation_of(p) == expected + 1
+            and not p.get("committed_revision_id")
+        )
+        if applied:
+            updated = p
+            prior_id = (existing_op or {}).get("predecessor_revision_id")
+        else:
+            if not p.get("committed_revision_id"):
+                raise conflict("not_completed", "There is no current completion to undo.")
+            prior_id = p["committed_revision_id"]
+            await save_operation(db, {
+                "operation_id": body.operation_id,
+                "kind": "undo",
+                "payload_hash": digest,
+                "patient_id": p["_id"],
+                "status": "pending",
+                "predecessor_revision_id": prior_id,
+                "created_at": now_utc(),
+            })
+            updated = await commit_undo(db, p, expected, body.operation_id)
+            if not updated:
+                raise conflict("stale_generation", "The prescription changed; reload and retry.")
+        if prior_id:
+            prior_rev = await db.prescription_revisions.find_one({"_id": prior_id})
+            if prior_rev and prior_rev.get("operation_id"):
+                await db.clinical_operations.update_one(
+                    {"operation_id": prior_rev["operation_id"]},
+                    {"$set": {"status": "superseded"}},
+                )
         trans = await db.transcriptions.find_one_and_update(
             {"patient_id": p["_id"]},
             {"$set": {"locked": False}},
@@ -435,6 +459,7 @@ async def undo_completion(
             "patient_id": p["_id"],
             "status": "committed",
             "result": result,
+            "predecessor_revision_id": prior_id,
             "created_at": now_utc(),
         })
         return result
@@ -959,9 +984,12 @@ async def add_correction(
         t = await db.transcriptions.find_one({"patient_id": p["_id"]})
     if p.get("issue_auth_op"):
         raise conflict("issue_pending", "Another issue is already in progress for this patient.")
-    if not p.get("committed_revision_id"):
+    op_id = body.operation_id or str(ObjectId())
+    existing_revision = await db.prescription_revisions.find_one({"operation_id": op_id})
+    if not p.get("committed_revision_id") and not existing_revision:
         raise conflict("not_completed", "There is no current completion to correct.")
-    current = await db.prescription_revisions.find_one({"_id": p["committed_revision_id"]}) or {}
+    base_id = existing_revision.get("predecessor_id") if existing_revision else p.get("committed_revision_id")
+    current = await db.prescription_revisions.find_one({"_id": base_id}) or {}
     merged = {field: current.get(field) for field in CONTENT_FIELDS}
     for field in ("diagnosis_options", "prescribed_medicines"):
         if merged[field] is None:
@@ -977,7 +1005,6 @@ async def add_correction(
     lines = list(body.prescribed_lines if "prescribed_lines" in body.model_fields_set else current.get("prescribed_lines") or [])
     none = body.none_prescribed if "none_prescribed" in body.model_fields_set else bool(current.get("none_prescribed") and not lines)
     confirmed = body.full_transcription_confirmed or bool(body.changes)
-    op_id = body.operation_id or str(ObjectId())
     try:
         view = CompletePrescriptionBody.model_validate({
             **merged, "patient_id": str(p["_id"]), "operation_id": op_id,
@@ -1003,22 +1030,31 @@ async def add_correction(
         raise conflict("surgery_scheduled", "Record Surgery declined at the Hospital station before changing a scheduled IOL surgery.")
     revision = await prepare_revision(
         db, p, actor, content, lines, none, op_id, "correct", body.reason.strip(),
-        p.get("committed_revision_id"),
+        base_id,
     )
     async with _clinical_write(db, str(t["_id"])) if t else nullcontext():
-        committed = await commit_correction(db, p, revision, actor, body.expected_generation)
-        if not committed:
-            raise conflict("stale_generation", "The prescription changed; reload and retry.")
-        trans = await _upsert_transcription(db, p, actor, content, locked=True)
-    await db.corrections.insert_one({
-        "transcription_id": trans["_id"],
-        "patient_id": p["_id"],
-        "reason": body.reason,
-        "changes": body.changes,
-        "revision_id": revision["_id"],
-        "created_by": str(actor["_id"]),
-        "created_at": now_utc(),
-    })
+        current_patient = await db.patients.find_one({"_id": p["_id"]})
+        if not current_patient:
+            raise HTTPException(status_code=404, detail="Registration not found")
+        if current_patient.get("committed_revision_id") == revision["_id"]:
+            if generation_of(current_patient) != body.expected_generation + 1:
+                raise conflict("stale_generation", "The prescription changed; reload and retry.")
+            committed = current_patient
+        else:
+            committed = await commit_correction(db, current_patient, revision, actor, body.expected_generation)
+            if not committed:
+                raise conflict("stale_generation", "The prescription changed; reload and retry.")
+        trans = await _upsert_transcription(db, committed, actor, content, locked=True)
+    if not await db.corrections.find_one({"revision_id": revision["_id"]}):
+        await db.corrections.insert_one({
+            "transcription_id": trans["_id"],
+            "patient_id": p["_id"],
+            "reason": body.reason,
+            "changes": body.changes,
+            "revision_id": revision["_id"],
+            "created_by": str(actor["_id"]),
+            "created_at": now_utc(),
+        })
     result = _clinical_result(committed, revision, trans)
     result["correction_id"] = str(revision["_id"])
     await save_operation(db, {

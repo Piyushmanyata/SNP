@@ -2,7 +2,7 @@
 
 Date: 21 September 2026. Repository: `Piyushmanyata/SNP`.
 Reviewed baseline: `0e1c9feb8211820f241df0b05e22f55bbba4c91f` (`main`, 19 September 2026).
-Status: PARTIALLY IMPLEMENTED. R2, R3, R4, R5, R8 and R9 are implemented with tests; R10 is implemented except for a durable outbox; R1, R6, R7 and R11-R17 are not started. See the completion ledger.
+Status: PARTIALLY IMPLEMENTED. R1, R2, R3, R5, R6, R7, R8 and R9 are implemented with tests. R4 blocks a wrong-camp confirm and chooses among ambiguous matches; a same-camp confirm that is not a scan hit is rejected after the existing duplicate check. R10 bounds provider attempts and retries a known failure at most three times. R11 is deployment of this release. R12-R17 are not started. See the completion ledger.
 
 ## Outcome and authority
 
@@ -234,16 +234,16 @@ Verification available in this environment: backend 536 passed / 141 skipped, my
 
 | Requirement | Status |
 |---|---|
-| R1 manual gate | Not started. The three-failure staff-only manual gate is unimplemented. The scan payload is also not cleared on camp change at the door, which R1 requires; clearing it alone would break `confirmMismatch`, so it belongs with R1. |
+| R1 manual gate | Implemented. Assisted manual entry is hidden until three terminal camera failures (a stall or a camera error, not a frame inside one attempt) and then requires a reason. The door also requires the admin gate. `/register` rejects an unscanned staff body below that threshold or without a reason, and a door body while the gate is shut. The client-supplied count is workflow evidence, not proof a camera was used. |
 | R2 scanner recovery | Implemented. Stall recovery gates on an accepted Aadhaar card rather than any detected barcode, and an attempt counter retires late detect and decode results. Real-phone success rate remains unmeasured. |
 | R3 server identity | Implemented. Assisted registration derives identity from a server-side decode; XML parsing requires a `PrintLetterBarcodeData` root, a 4 or 12 digit uid and a possible age, and the regex attribute fallback is deleted. `Desk.js` threads the payload to both call sites. ADR 0043 records that nothing here verifies a UIDAI signature. |
-| R4 desk recovery | Partially implemented. The unbounded numeric lookup now answers 400 instead of 500. Candidate selection for an ambiguous scan, the stable walk-in registration ID and the active-camp scope on scan-confirm are NOT done. |
+| R4 desk recovery | Implemented for the three named gaps. Ambiguous matches are buttons that confirm one registration. A walk-in keeps one registration request id and retries arrival after the registration succeeds. Scan confirm rejects another camp. A same-camp id that is not a hit for this card is not arrived: a person already in the camp is reported as a duplicate, and any other non-hit is reverted and answered `STALE_CANDIDATE`. |
 | R5 concurrency / dirty drafts | Implemented. Draft writes are one conditional update; a stale write gets 409 `draft_version_conflict`; the clinical page echoes the version, preserves typed input on conflict and confirms before discarding dirty work. `expected_draft_version` is optional: a client that sends none keeps last-writer-wins rather than being locked out, and every accepted save still increments the version. |
-| R6 mutation recovery | Not started. Correction and undo remain non-resumable across a partial write. |
-| R7 loading / errors | Not started, except that R8's error boundary covers a render or lazy-chunk failure. |
+| R6 mutation recovery | Implemented. Correction retries from the revision already stored for that operation id and does not increment generation twice. Undo stores the predecessor before clearing the completion and finishes the same operation on retry. A different payload for the same operation id conflicts. |
+| R7 loading / errors | Implemented for the named screens. Public registration shows loading, a retryable failure, or no active camp, and does not say there is no camp while the request is pending. Clinical reference failures name the capability, offer retry, and do not present a failed catalogue as an empty one. |
 | R8 printing / app resilience | Implemented. Optional sponsor logos no longer block the prescription; loading and error scaffolds are excluded from print; one error boundary offers a deliberate retry. Physical print quality remains an operator check. |
 | R9 reporting work | Implemented. Leaderboard database calls go from 123 to 6 and stay flat at 3, 50 and 200 volunteers. Query count only: no elapsed time was measured, and the real-Mongo index plan is unverified without Docker. |
-| R10 SMS outcomes / throughput | Partially implemented. Provider acceptance now requires a success type and a non-empty request id; the silent 10,000 truncation is replaced by pagination with an explicit completion flag; uncertain sends are never auto-resent. NOT implemented: a durable outbox. The failure path is also unbounded, since the send budget counts accepted sends only. |
+| R10 SMS outcomes / throughput | Implemented for the budget. Provider attempts, including known failures, consume the send limit; skipped rows (no phone, already sent, already pending) do not, so a later recipient is still reached. A known failure is retried on a later run and abandoned after three attempts. Uncertain acceptance is not auto-resent. NOT implemented: a durable outbox for clinical SMS that was only queued in process memory. |
 | R11 deployment | Blocked. Deployment needs authenticated VPS access; the documented SSH key is on the owner's Windows machine and no key or agent is present in this environment. Nothing was deployed. |
 | R12-R17 | Not started. |
 | Visual, phone, printer, carrier and target-host load acceptance | External validation outstanding. None of it can be performed in this environment. |

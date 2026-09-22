@@ -256,6 +256,30 @@ async def scan_confirm(
     patient = await db.patients.find_one({"_id": ObjectId(body.patient_id)})
     if not patient:
         raise HTTPException(status_code=404, detail="Registration not found")
+    if patient.get("camp_id") != camp["_id"]:
+        raise HTTPException(status_code=409, detail={
+            "code": "WRONG_CAMP",
+            "message": "That registration is not in this camp.",
+        })
+    hits = await _duplicate_hits(db, camp["_id"], _card_as_register_body(card), await _known_person(db, card))
+    if all(hit["_id"] != patient["_id"] for hit in hits):
+        snapshot = {field: patient.get(field) for field in OVERWRITTEN_FIELDS}
+        snapshot.update({
+            "aadhaar_scanned": patient.get("aadhaar_scanned", False),
+            "person_id": patient.get("person_id"),
+            "manual_entry": patient.get("manual_entry"),
+            "manual_exception": patient.get("manual_exception"),
+            "full_name_normalized": patient.get("full_name_normalized"),
+        })
+        try:
+            await _apply_overwrite(db, patient, card)
+        except HTTPException:
+            raise
+        await db.patients.update_one({"_id": patient["_id"]}, {"$set": snapshot})
+        raise HTTPException(status_code=409, detail={
+            "code": "STALE_CANDIDATE",
+            "message": "That registration does not match this card.",
+        })
     if not _is_manual(patient):
         raise HTTPException(status_code=409, detail={
             "code": "NOT_A_MANUAL_ENTRY",

@@ -233,6 +233,34 @@ class TestBoundedDispatch:
         assert [c["type"] for c in captured] == ["camp", "camp", "ot", "ot"]
         assert len(mock_db.reminder_ledger.docs) == 4
 
+    def test_failed_sends_consume_the_budget_and_the_next_run_reaches_later_recipients(self, monkeypatch):
+        mock_db = setup_mock_db(monkeypatch)
+        asyncio.run(_seed_camp_household(mock_db, n_patients=4))
+        monkeypatch.setattr(routes_reminders, "SEND_LIMIT", 2)
+        calls = []
+
+        def fake_send(message_type, mobile, reg_no, event_date, venue):
+            calls.append(reg_no)
+            if len(calls) <= 2:
+                raise RuntimeError("carrier down")
+            return f"id-{len(calls)}"
+
+        monkeypatch.setattr(msg91, "send_dlt_sms", fake_send)
+        monkeypatch.setattr(routes_reminders.sms.msg91, "send_dlt_sms", fake_send)
+        monkeypatch.setattr(msg91, "configured", lambda: True)
+        monkeypatch.setattr(routes_reminders.msg91, "configured", lambda: True)
+        monkeypatch.setattr(routes_reminders.sms.msg91, "configured", lambda: True)
+        client = _client(monkeypatch, mock_db)
+
+        first = _post(client).json()
+        second = _post(client).json()
+
+        assert first["sent"] == 0
+        assert first["complete"] is False
+        assert second["sent"] == 2
+        assert second["complete"] is True
+        assert calls == [1000, 1001, 1002, 1003]
+
     def test_provider_unconfigured_stays_visibly_skipped(self, monkeypatch):
         mock_db = setup_mock_db(monkeypatch)
         asyncio.run(_seed_camp_household(mock_db, n_patients=2))

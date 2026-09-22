@@ -162,6 +162,8 @@ export function PrescriptionWizard({
   completeRx,
   setShowCorrection,
   firstFieldRef,
+  medicineUnavailable = false,
+  powerUnavailable = false,
 }) {
   const [index, setIndex] = useState(0);
   const steps = visibleSteps(rx);
@@ -235,6 +237,7 @@ export function PrescriptionWizard({
           selectedIds={rx.prescribed_medicine_ids || []}
           disabled={locked}
           onChange={(ids) => setRx({ ...rx, prescribed_medicine_ids: ids })}
+          unavailable={medicineUnavailable}
         />
       )}
 
@@ -245,6 +248,7 @@ export function PrescriptionWizard({
           valueL={rx.fixed_power_l}
           disabled={locked}
           onChange={(r, l) => setRx({ ...rx, fixed_power_r: r, fixed_power_l: l })}
+          unavailable={powerUnavailable}
         />
       )}
 

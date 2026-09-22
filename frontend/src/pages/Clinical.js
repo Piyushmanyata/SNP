@@ -69,6 +69,8 @@ export default function Clinical() {
   const [banner, setBanner] = useState("");
   const [diagOpts, setDiagOpts] = useState([]);
   const [medicines, setMedicines] = useState([]);
+  const [referenceError, setReferenceError] = useState("");
+  const [referenceTick, setReferenceTick] = useState(0);
   const [powers, setPowers] = useState([]);
   const [otDays, setOtDays] = useState([]);
   const [specsDays, setSpecsDays] = useState([]);
@@ -119,46 +121,25 @@ export default function Clinical() {
   }, []);
 
   useEffect(() => {
-    api
-      .get("/clinical/diagnosis-options")
-      .then((r) => setDiagOpts(r.data?.options || []))
-      .catch((err) => {
-        logger.warn("Failed to fetch diagnosis options:", err);
-        setDiagOpts([]);
-      });
-
-    api
-      .get("/catalogue/medicines")
-      .then((r) => setMedicines(r.data?.medicines || []))
-      .catch((err) => {
-        logger.warn("Failed to fetch medicines:", err);
-        setMedicines([]);
-      });
-
-    api
-      .get("/catalogue/powers")
-      .then((r) => setPowers(r.data?.powers || []))
-      .catch((err) => {
-        logger.warn("Failed to fetch fixed powers:", err);
-        setPowers([]);
-      });
-
-    api
-      .get("/clinical/ot-days")
-      .then((r) => setOtDays(r.data?.ot_days || []))
-      .catch((err) => {
-        logger.warn("Failed to fetch OT days:", err);
-        setOtDays([]);
-      });
-
-    api
-      .get("/clinical/specs-days")
-      .then((r) => setSpecsDays(r.data?.specs_days || []))
-      .catch((err) => {
-        logger.warn("Failed to fetch Specs collection days:", err);
-        setSpecsDays([]);
-      });
-  }, []);
+    let cancelled = false;
+    const failed = [];
+    const load = (url, apply, name) => api.get(url).then((r) => {
+      if (!cancelled) apply(r);
+    }).catch((err) => {
+      logger.warn(`Failed to fetch ${name}:`, err);
+      failed.push(name);
+    });
+    Promise.all([
+      load("/clinical/diagnosis-options", (r) => setDiagOpts(r.data?.options || []), "diagnosis options"),
+      load("/catalogue/medicines", (r) => setMedicines(r.data?.medicines || []), "medicines"),
+      load("/catalogue/powers", (r) => setPowers(r.data?.powers || []), "fixed powers"),
+      load("/clinical/ot-days", (r) => setOtDays(r.data?.ot_days || []), "OT days"),
+      load("/clinical/specs-days", (r) => setSpecsDays(r.data?.specs_days || []), "Specs collection days"),
+    ]).finally(() => {
+      if (!cancelled) setReferenceError(failed.length ? failed.join(", ") : "");
+    });
+    return () => { cancelled = true; };
+  }, [referenceTick]);
 
   const find = useCallback(async (value, byName = false) => {
     if (busy || !value) return false;
@@ -417,6 +398,13 @@ export default function Clinical() {
             </div>
           )}
 
+          {referenceError && (
+            <Alert className="mb-4">
+              <span data-testid="clinical-reference-error">Could not load {referenceError}. The empty list is not the camp catalogue.</span>
+              <Button className="mt-3" variant="outline" onClick={() => setReferenceTick((n) => n + 1)} data-testid="clinical-reference-retry">Retry</Button>
+            </Alert>
+          )}
+
           {!locked && (!data.transcription || editing) && (
               <PrescriptionWizard
                 rx={rx}
@@ -431,6 +419,8 @@ export default function Clinical() {
                 completeRx={completeRx}
                 setShowCorrection={setShowCorrection}
                 firstFieldRef={firstFieldRef}
+                medicineUnavailable={referenceError.includes("medicines")}
+                powerUnavailable={referenceError.includes("fixed powers")}
               />
           )}
           {editing && <p className="text-sm text-amber-800 mb-3">Save the prescription before issuing medicines, spectacles or a surgery token.</p>}

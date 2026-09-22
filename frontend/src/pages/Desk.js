@@ -44,6 +44,9 @@ export default function Desk() {
   const [doorPhone, setDoorPhone] = useState("");
   const [doorForm, setDoorForm] = useState(EMPTY_REG_FORM);
   const [doorReqId, setDoorReqId] = useState(v4());
+  const [doorCameraFailures, setDoorCameraFailures] = useState(0);
+  const [doorReason, setDoorReason] = useState("");
+  const walkAttempt = useRef({ key: "", reqId: "", patientId: "" });
   const [scanning, setScanning] = useState(false);
   const findSequence = useRef(0);
   const [printingOpen, setPrintingOpen] = useState(false);
@@ -118,12 +121,12 @@ export default function Desk() {
     }
   }, [load, fillDoorForm, busy, clearScan]);
 
-  const confirmMismatch = useCallback(async () => {
-    if (!scanResult?.registration || busy || scanning) return;
+  const confirmPatient = useCallback(async (patientId) => {
+    if (!patientId || busy || scanning) return;
     setBusy(true); setError("");
     try {
       const { data } = await api.post("/desk/scan/confirm", {
-        patient_id: scanResult.registration.id,
+        patient_id: patientId,
         payload: scanPayload,
       });
       setScanResult(data);
@@ -134,7 +137,11 @@ export default function Desk() {
     } finally {
       setBusy(false);
     }
-  }, [scanResult, scanPayload, load, busy, scanning]);
+  }, [scanPayload, load, busy, scanning]);
+
+  const confirmMismatch = useCallback(() => {
+    confirmPatient(scanResult?.registration?.id);
+  }, [confirmPatient, scanResult]);
 
   const lookupValue = useCallback(async (value) => {
     const request = ++findSequence.current;
@@ -188,7 +195,7 @@ export default function Desk() {
 
   const openPreReg = useCallback(() => { setShowReg(true); }, []);
 
-  const submitRegister = useCallback(async ({ form, qrPayload, dayId, reqId, walkIn: asWalkIn }) => {
+  const submitRegister = useCallback(async ({ form, qrPayload, dayId, reqId, walkIn: asWalkIn, manualReason, failedAttempts, atDoor }) => {
     const scanned = Boolean(qrPayload);
     const { data } = await api.post("/register", {
       full_name: form.full_name,
@@ -203,6 +210,9 @@ export default function Desk() {
       camp_day_id: dayId,
       registration_request_id: reqId,
       manual_entry: !scanned,
+      manual_reason: scanned ? null : (manualReason || null),
+      failed_scan_attempts: scanned ? 0 : (failedAttempts || 0),
+      at_door: Boolean(atDoor) && !scanned,
     });
     let reg = data.registration;
     if (asWalkIn) {
@@ -219,23 +229,35 @@ export default function Desk() {
       return;
     }
     setBusy(true); setError("");
+    const key = scanPayload || "";
+    if (walkAttempt.current.key !== key) {
+      walkAttempt.current = { key, reqId: v4(), patientId: "" };
+    }
     try {
       const card = scanResult.card;
-      const reg = await submitRegister({
-        form: {
-          full_name: card.full_name,
-          age: card.age ?? "",
-          phone: doorPhone,
-          gender: card.gender,
-          address: card.address,
-          aadhaar_last4: card.aadhaar_last4,
-          dob: card.dob,
-        },
-        qrPayload: scanPayload,
-        dayId: operatingDayId,
-        reqId: v4(),
-        walkIn: true,
-      });
+      let patientId = walkAttempt.current.patientId;
+      if (!patientId) {
+        const created = await submitRegister({
+          form: {
+            full_name: card.full_name,
+            age: card.age ?? "",
+            phone: doorPhone,
+            gender: card.gender,
+            address: card.address,
+            aadhaar_last4: card.aadhaar_last4,
+            dob: card.dob,
+          },
+          qrPayload: scanPayload,
+          dayId: operatingDayId,
+          reqId: walkAttempt.current.reqId,
+          walkIn: false,
+        });
+        patientId = created.id;
+        walkAttempt.current.patientId = patientId;
+      }
+      const arrived = await api.post(`/desk/arrive/${patientId}`);
+      const reg = arrived.data.registration;
+      walkAttempt.current = { key: "", reqId: "", patientId: "" };
       clearScan();
       setFound(reg);
       setBanner(`Registered and arrived: #${reg.reg_no} — ${reg.full_name}`);
@@ -262,6 +284,9 @@ export default function Desk() {
         dayId,
         reqId: doorReqId,
         walkIn: asWalkIn,
+        manualReason: doorReason,
+        failedAttempts: doorCameraFailures,
+        atDoor: true,
       });
       setFound(reg);
       setBanner(
@@ -270,6 +295,8 @@ export default function Desk() {
           : `Registered #${reg.reg_no} — ${reg.full_name}. SMS sent.`
       );
       setDoorForm(EMPTY_REG_FORM);
+      setDoorReason("");
+      setDoorCameraFailures(0);
       setDoorReqId(v4());
       await load();
     } catch (err) {
@@ -280,7 +307,7 @@ export default function Desk() {
         setError(formatApiError(err));
       }
     } finally { setBusy(false); }
-  }, [operatingDayId, printingOpen, todayDay, days, doorForm, doorReqId, submitRegister, load]);
+  }, [operatingDayId, printingOpen, todayDay, days, doorForm, doorReqId, doorReason, doorCameraFailures, submitRegister, load]);
 
   if (loadErr) return <Layout title="Desk"><ErrorCard message={loadErr} onRetry={load} /></Layout>;
 
@@ -326,6 +353,7 @@ export default function Desk() {
         busy={busy}
         print={print}
         confirmMismatch={confirmMismatch}
+        confirmPatient={confirmPatient}
         doorPhone={doorPhone}
         setDoorPhone={setDoorPhone}
         submitDoorWalkIn={submitDoorWalkIn}
@@ -334,6 +362,10 @@ export default function Desk() {
         submitDoorManual={submitDoorManual}
         scanning={scanning}
         doorManualEntry={Boolean(camp?.door_manual_entry)}
+        doorCameraFailures={doorCameraFailures}
+        onTerminalAttempt={() => setDoorCameraFailures((n) => n + 1)}
+        doorReason={doorReason}
+        setDoorReason={setDoorReason}
         clearScan={clearScan}
       />}
 
@@ -381,10 +413,11 @@ export default function Desk() {
 
 function DoorScanCard({
   noCamp, onScanned, onPatientCode, error, banner, scanResult, busy,
-  print, confirmMismatch, doorPhone, setDoorPhone, submitDoorWalkIn,
+  print, confirmMismatch, confirmPatient, doorPhone, setDoorPhone, submitDoorWalkIn,
   doorForm, setDoorForm, submitDoorManual, scanning,
-  doorManualEntry, clearScan,
+  doorManualEntry, doorCameraFailures, onTerminalAttempt, doorReason, setDoorReason, clearScan,
 }) {
+  const manualOpen = doorManualEntry && doorCameraFailures >= 3;
   return (
     <Card className="mb-5" data-desk-card="scan" data-testid="desk-card-scan">
       <div className="flex items-center gap-2 mb-3">
@@ -396,7 +429,8 @@ function DoorScanCard({
         onPatientCode={onPatientCode}
         disabled={noCamp || busy || scanning}
         onCaptureStart={clearScan}
-        onTranscribed={doorManualEntry ? (details) => {
+        onFailure={(kind) => { if (kind === "error") onTerminalAttempt(); }}
+        onTranscribed={manualOpen ? (details) => {
           clearScan();
           setDoorForm({ ...EMPTY_REG_FORM, ...details, phone: doorPhone });
         } : undefined}
@@ -418,13 +452,18 @@ function DoorScanCard({
           phone={doorPhone}
           setPhone={setDoorPhone}
           onWalkIn={submitDoorWalkIn}
+          onChoose={confirmPatient}
         />
       </div>
-      {doorManualEntry && (
+      {manualOpen && (
         <div className="mt-4 space-y-3" data-testid="door-manual-form">
           <p className="text-sm font-semibold text-amber-800" data-testid="manual-entry-note">
             Manual entry — an admin opened this because the scanners are down. It closes at the end of today.
+            Failed camera attempts: {doorCameraFailures}. मैनुअल एंट्री के लिए कारण लिखें।
           </p>
+          <Field label="Reason" required>
+            <Input value={doorReason} onChange={(e) => setDoorReason(e.target.value)} data-testid="door-manual-reason" />
+          </Field>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Field label="Full name" required>
               <Input value={doorForm.full_name} onChange={(e) => setDoorForm({ ...doorForm, full_name: e.target.value })} data-testid="reg-fullname-input" />
@@ -438,7 +477,7 @@ function DoorScanCard({
           </div>
           <Button
             onClick={submitDoorManual}
-            disabled={busy || scanning || !doorForm.full_name || !doorForm.age || !/^\d{10}$/.test(doorForm.phone || "")}
+            disabled={busy || scanning || !doorReason.trim() || !doorForm.full_name || !doorForm.age || !/^\d{10}$/.test(doorForm.phone || "")}
             data-testid="door-manual-submit"
           >
             Register
@@ -496,6 +535,7 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
   const [dayId, setDayId] = useState("");
   const scanRequest = useRef(0);
   const [failures, setFailures] = useState(0);
+  const [manualReason, setManualReason] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [reqId, setReqId] = useState(v4());
@@ -512,6 +552,7 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
       setQrPayload("");
       setManualMode(false);
       setFailures(0);
+      setManualReason("");
       setError("");
       setReqId(v4());
       const today = days.find((d) => d.is_today);
@@ -541,9 +582,7 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
   }, []);
 
   const onFailure = useCallback((outcome) => {
-    if (outcome === "garbage" || outcome === "not-aadhaar") {
-      setFailures((n) => n + 1);
-    }
+    if (outcome === "error") setFailures((n) => n + 1);
   }, []);
 
   useWedgeBurst({
@@ -563,7 +602,8 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
 
   const onScanStall = useCallback(() => {}, []);
 
-  const showForm = scanned || manualMode || failures >= 3;
+  const manualAllowed = !scanned && failures >= 3;
+  const showForm = scanned || manualMode;
 
   const submit = useCallback(async () => {
     setBusy(true); setError("");
@@ -581,6 +621,9 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
         camp_day_id: dayId,
         registration_request_id: reqId,
         manual_entry: !scanned,
+        manual_reason: scanned ? null : manualReason.trim(),
+        failed_scan_attempts: scanned ? 0 : failures,
+        at_door: false,
       });
       let reg = data.registration;
       if (walkIn) {
@@ -605,7 +648,7 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
         setError(formatApiError(err));
       }
     } finally { setBusy(false); }
-  }, [form, qrPayload, scanned, dayId, reqId, walkIn, onClose, onDone, onRegistered, setBanner]);
+  }, [form, qrPayload, scanned, dayId, reqId, walkIn, manualReason, failures, onClose, onDone, onRegistered, setBanner]);
 
   return (
     <Modal open={open} onClose={onClose} title={walkIn ? "Register walk-in" : "New Registration"} size="lg">
@@ -616,22 +659,34 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
           </p>
         )}
         <AadhaarScanner onScanned={onScan} onFailure={onFailure} onScanStall={onScanStall} disabled={busy || manualMode}
-          onCaptureStart={() => { scanRequest.current += 1; setQrPayload(""); setFailures(0); setForm((prev) => ({ ...EMPTY_REG_FORM, phone: prev.phone })); }}
+          onCaptureStart={() => { scanRequest.current += 1; setQrPayload(""); setForm((prev) => ({ ...EMPTY_REG_FORM, phone: prev.phone })); }}
           onTranscribed={(details) => {
             setForm((prev) => ({ ...EMPTY_REG_FORM, ...details, phone: prev.phone }));
             setQrPayload("");
             setManualMode(true);
             setReqId(v4());
           }} />
-        <Button type="button" variant="outline" disabled={busy} data-testid="reg-manual-toggle" onClick={() => {
-          setQrPayload("");
-          setManualMode(!manualMode);
-        }}>{manualMode ? "Use scanner" : "Enter details manually"}</Button>
+        {manualAllowed && (
+          <Button type="button" variant="outline" disabled={busy} data-testid="reg-manual-toggle" onClick={() => {
+            setQrPayload("");
+            setManualMode(!manualMode);
+          }}>{manualMode ? "Use scanner" : "Enter details manually"}</Button>
+        )}
+        {manualAllowed && (
+          <p className="text-sm text-slate-600" data-testid="manual-attempt-count">
+            Camera attempts failed: {failures}. Manual entry is unverified. तीन असफल कोशिशों के बाद ही मैनुअल एंट्री खुलती है।
+          </p>
+        )}
 
         {showForm && (
           <>
             {!scanned && (
-              <p className="text-sm font-semibold text-amber-800" data-testid="manual-entry-note">Manual entry</p>
+              <>
+                <p className="text-sm font-semibold text-amber-800" data-testid="manual-entry-note">Manual entry</p>
+                <Field label="Reason" required>
+                  <Input value={manualReason} onChange={(e) => setManualReason(e.target.value)} data-testid="manual-reason-input" />
+                </Field>
+              </>
             )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3" onChange={() => { if (!scanned) setManualMode(true); }}>
               <Field label="Full name" required>
@@ -668,7 +723,7 @@ export function RegisterModal({ open, walkIn, onClose, days, onDone, setBanner, 
         {showForm && (
           <div className="flex gap-2 justify-end pt-1">
             <Button variant="ghost" onClick={onClose}>Cancel</Button>
-            <Button onClick={submit} disabled={busy || !form.full_name || !dayId} data-testid="patient-register-submit">
+            <Button onClick={submit} disabled={busy || !form.full_name || !dayId || (!scanned && !manualReason.trim())} data-testid="patient-register-submit">
               {busy ? "Registering…" : "Register"}
             </Button>
           </div>

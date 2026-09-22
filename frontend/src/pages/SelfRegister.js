@@ -17,6 +17,7 @@ export default function SelfRegister() {
   const [busy, setBusy] = useState(false);
   const [receipt, setReceipt] = useState(null);
   const [loadErr, setLoadErr] = useState("");
+  const [loadingCamp, setLoadingCamp] = useState(true);
   const [reqId, setReqId] = useState("");
   const [readFailed, setReadFailed] = useState(false);
 
@@ -33,7 +34,9 @@ export default function SelfRegister() {
 
   const onFailure = useCallback(() => setReadFailed(true), []);
 
-  useEffect(() => {
+  const loadCamp = useCallback(() => {
+    setLoadingCamp(true);
+    setLoadErr("");
     api.get("/camps/active/public")
       .then((r) => {
         setCamp(r.data.camp);
@@ -42,8 +45,11 @@ export default function SelfRegister() {
         if (today) setDayId(today.id);
         else if (r.data.days?.length) setDayId(r.data.days[0].id);
       })
-      .catch((e) => setLoadErr(formatApiError(e)));
+      .catch((e) => setLoadErr(formatApiError(e)))
+      .finally(() => setLoadingCamp(false));
   }, []);
+
+  useEffect(() => { loadCamp(); }, [loadCamp]);
 
   const submit = useCallback(async () => {
     if (!scanned || !dayId || !reqId || !phone) return;
@@ -80,9 +86,17 @@ export default function SelfRegister() {
       </header>
 
       <div className="max-w-xl mx-auto px-4 py-6 animate-fade-up">
-        {loadErr && <Alert className="mb-4">{loadErr}</Alert>}
-        {!camp && !loadErr && (
-          <Card><p className="text-slate-500 text-center py-6">No active camp right now. Please check with the desk.</p></Card>
+        {loadingCamp && (
+          <p role="status" data-testid="self-camp-loading" className="text-slate-700 font-semibold py-6 text-center">Loading the camp… / कैंप लोड हो रहा है…</p>
+        )}
+        {loadErr && !loadingCamp && (
+          <Alert className="mb-4">
+            {loadErr}
+            <Button className="mt-3" onClick={loadCamp} data-testid="self-camp-retry">Retry / फिर कोशिश करें</Button>
+          </Alert>
+        )}
+        {!loadingCamp && !loadErr && !camp && (
+          <Card><p className="text-slate-500 text-center py-6" data-testid="self-no-camp">No active camp right now. Please check with the desk. अभी कोई कैंप चालू नहीं है। डेस्क से पूछें।</p></Card>
         )}
 
         {camp && !receipt && (
