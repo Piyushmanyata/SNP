@@ -1,13 +1,13 @@
-# Hostinger deployment — 17 September 2026
+# Hostinger deployment — 22 September 2026
 
 ## Deployment record
 
 - Application domain: `sikarkolkata.io`.
 - VPS: `82.112.234.39`, Ubuntu 24.04.4 LTS, 2 CPUs, 8 GB RAM.
 - Runtime: Docker Engine 29.8.0 and Docker Compose 5.5.1.
-- Application release: `68c978b860edaf9db0dc093740a2228f8ca45ec6` (SMS copy corrections and walk-in registration rules, 19 September 2026).
-- Release directory: `/opt/snp/releases/68c978b860edaf9db0dc093740a2228f8ca45ec6`.
-- Previous releases kept for rollback: `730112cb5a122f99b592cce50bb8faf082b3eece`, `13854767e93b1f95bda958680ef27aff387bd36e`, `6f5ab0cb4bd7e58bbf1aacefbaf54db97ff0f3e7`, `ac60bdfe2ecb13555ae449a7d299229ca8758afd`, `7eaed607ba0946c04dd32a405920a49db5e96fe7`, `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`, `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
+- Application release: `f2e4592f0dcee138f77c4630964ba92dfb37e664` (approved DLT SMS copy, camp number and multi-day specs window, 22 September 2026).
+- Release directory: `/opt/snp/releases/f2e4592f0dcee138f77c4630964ba92dfb37e664`.
+- Previous releases kept for rollback: `68c978b860edaf9db0dc093740a2228f8ca45ec6`, `730112cb5a122f99b592cce50bb8faf082b3eece`, `13854767e93b1f95bda958680ef27aff387bd36e`, `6f5ab0cb4bd7e58bbf1aacefbaf54db97ff0f3e7`, `ac60bdfe2ecb13555ae449a7d299229ca8758afd`, `7eaed607ba0946c04dd32a405920a49db5e96fe7`, `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`, `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
 - Current release link: `/opt/snp/current`.
 - Production Compose project: `snp`.
 - Production environment: `/opt/snp/.env.production`, readable only by root.
@@ -130,6 +130,24 @@ Images for `730112cb5a122f99b592cce50bb8faf082b3eece` were tagged `snp-backend:r
 Post-deployment checks against the live host: all six containers reported healthy, `/api/health` returned `{"status":"ok"}`, the homepage returned 200, and HTTP redirected with 308. The deployed backend container was read directly and returns the new surgery copy, naming राशन कार्ड and carrying no hospital name in its fixed text.
 
 CI run [35429981396](https://github.com/Piyushmanyata/SNP/actions/runs/35429981396) passed every check: backend, frontend, dependencies, workflow and verify.
+
+## Approved DLT SMS copy release
+
+The 22 September 2026 release deploys two merged pull requests together. [PR 39](https://github.com/Piyushmanyata/SNP/pull/39) closes deep-review findings. [PR 40](https://github.com/Piyushmanyata/SNP/pull/40) sends the six SMS in the wording approved for DLT registration. Every message names the camp by an admin-set camp number (`camp_no`). A Specs collection day now runs from `day_date` to `end_date`. Specs hours must run from a morning start to an evening end, and the SMS sends both in 12-hour form. See ADR 0046. The text to register on the DLT portal is `dlt_portal_body` in `backend/docs/msg91-templates.json`.
+
+No database migration was required. `camp_number`, a Specs collection day's `end_date` and a Token's `collection_end_date` are all optional. Documents without an end date read it as the first day. `server.py` calls the idempotent `init_indexes()` on startup, and this release adds no index. At deployment the production data was test data only. The active camp, "SNP test", had no camp number, so it sends no SMS until an admin sets one on the Camps tab. Its one specs day, 13:20–15:20, predates the hours rule. It now shows as needing a window until it is re-saved with morning-to-evening hours. MSG91 remains unconfigured.
+
+Images for `68c978b860edaf9db0dc093740a2228f8ca45ec6` were tagged `snp-backend:rollback-68c978b8…`, `snp-frontend:rollback-68c978b8…` and `snp-reminders:rollback-68c978b8…` before rebuilding. A pre-deployment archive, `snp_camps-20260922T090533Z.archive.gz`, was taken by restarting the backup container. MongoDB was not recreated and its container stayed up throughout, so the data volume never detached.
+
+Post-deployment checks against the live host:
+
+- All six containers reported healthy.
+- `/api/health` returned `{"status":"ok"}`, the homepage returned 200, and HTTP redirected with 308.
+- The deployed backend container returns the new copy, and it renders 17:00 as 05:00.
+- The served `AdminDashboard-D_mxvN3i.js` carries `camp-number-input` and `specs-end-date-input`.
+- The backend log showed no errors after the restart.
+
+PR CI run [35708043135](https://github.com/Piyushmanyata/SNP/actions/runs/35708043135) and main CI run [35708357250](https://github.com/Piyushmanyata/SNP/actions/runs/35708357250) passed every check: backend, frontend, dependencies, workflow and verify.
 
 ## Access and operation
 
