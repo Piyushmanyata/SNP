@@ -1026,6 +1026,8 @@ async def add_correction(
     if existing_op and existing_op.get("status") == "committed" and existing_op.get("result"):
         return existing_op["result"]
     still_iol = "ot" in lines and content.get("ot_outcome") == "iol_surgery"
+    if not own_commit and generation_of(p) != body.expected_generation:
+        raise conflict("stale_generation", "The prescription changed; reload and retry.")
     revision = await prepare_revision(
         db, p, actor, content, lines, none, op_id, "correct", body.reason.strip(),
         base_id,

@@ -360,6 +360,9 @@ def test_a_stale_correction_retry_cannot_replace_a_newer_correction(monkeypatch)
         with pytest.raises(HTTPException) as exc:
             await routes_clinical.add_correction(stale, actor=CLINICAL)
         assert exc.value.detail["code"] == "stale_generation"
+        with pytest.raises(HTTPException) as exc:
+            await routes_clinical.add_correction(stale, actor=CLINICAL)
+        assert exc.value.detail["code"] == "stale_generation"
 
         retry = stale.model_copy(update={"expected_generation": generation + 1})
         with pytest.raises(HTTPException) as exc:
