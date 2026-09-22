@@ -405,6 +405,8 @@ async def undo_completion(
         if await has_issue_history(db, p):
             raise conflict("undo_after_issue", "Completion cannot be undone after an issue or pending issue.")
         p = await db.patients.find_one({"_id": p["_id"]})
+        if not p:
+            raise HTTPException(status_code=404, detail="Registration not found")
         digest = payload_hash("undo", {"patient_id": str(p["_id"]), "reason": body.reason.strip()})
         existing_op = await recover_operation(db, body.operation_id, "undo", digest)
         if existing_op and existing_op.get("status") == "committed" and existing_op.get("result"):
@@ -1032,6 +1034,8 @@ async def add_correction(
     )
     async with _clinical_write(db, str(t["_id"])) if t else nullcontext():
         current_patient = await db.patients.find_one({"_id": p["_id"]})
+        if not current_patient:
+            raise HTTPException(status_code=404, detail="Registration not found")
         if current_patient.get("committed_revision_id") == revision["_id"]:
             if generation_of(current_patient) != body.expected_generation + 1:
                 raise conflict("stale_generation", "The prescription changed; reload and retry.")
