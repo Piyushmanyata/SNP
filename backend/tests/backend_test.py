@@ -211,6 +211,7 @@ class TestRegistration:
             "full_name": f"TESTPATIENT Alpha {TAG}", "age": 55, "gender": "M",
             "phone": "9876543210", "camp_day_id": STATE["day_id"],
             "registration_request_id": STATE["req_id"],
+            "failed_scan_attempts": 3, "manual_reason": "scanner unavailable",
         }, timeout=30)
         assert r.status_code == 200, r.text
         body = r.json()

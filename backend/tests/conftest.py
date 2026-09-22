@@ -1,10 +1,14 @@
 import os
 import re
+import sys
 from pathlib import Path
 
 import pytest
 
 def pytest_configure(config):
+    backend_dir = str(Path(__file__).resolve().parents[1])
+    if backend_dir not in sys.path:
+        sys.path.insert(0, backend_dir)
     os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
     os.environ.setdefault("DB_NAME", "snp_test")
     os.environ.setdefault("AADHAAR_HASH_PEPPER", "test-pepper")
