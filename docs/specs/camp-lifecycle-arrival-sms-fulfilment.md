@@ -183,7 +183,7 @@ Split the patient lifecycle into a booking and a presence, tell every patient th
 
 ### SMS
 
-- The DLT send function takes `reg_no`, event date, and venue as template variables, not venue alone. Six template identifiers are configured, one per message type.
+- The DLT send function takes `camp_no`, `reg_no`, event date, and venue as template variables, and the specs templates add the window's end date and hours (ADR 0046). Six template identifiers are configured, one per message type.
 - The send ledger is keyed on patient, message type, and event date. It is no longer keyed on phone number, so household deduplication is removed.
 - Registration confirmation is sent on the registration create path, from both the volunteer and self-register routes. A send failure must not fail the registration; the registration is the durable outcome and the message is best-effort with a ledger row recording the attempt.
 - OT Token SMS and Specs Token SMS are sent on the deferral path at the moment the Token is created, under the same best-effort rule.

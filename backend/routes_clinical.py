@@ -107,6 +107,7 @@ def ser_slip(s: dict) -> Dict[str, Any]:
         "cancelled": s.get("cancelled", False),
         "collection_date": s.get("collection_date"),
         "collection_venue": s.get("collection_venue"),
+        "collection_end_date": s.get("collection_end_date"),
         "collection_start_time": s.get("collection_start_time"),
         "collection_end_time": s.get("collection_end_time"),
         "instructions": s.get("instructions"),
@@ -130,11 +131,12 @@ def ser_ot_day(d: dict) -> Dict[str, Any]:
 def ser_specs_day(d: dict) -> Dict[str, Any]:
     start = d.get("start_time")
     end = d.get("end_time")
-    complete = bool(start and end)
+    complete = sms.morning_to_evening(start, end)
     return {
         "id": str(d["_id"]),
         "camp_id": str(d["camp_id"]),
         "day_date": d["day_date"],
+        "end_date": d.get("end_date") or d["day_date"],
         "venue": d["venue"],
         "start_time": start,
         "end_time": end,
@@ -588,10 +590,10 @@ def _oid_or_400(raw: str) -> ObjectId:
 def _specs_window_selectable(day: dict) -> bool:
     start = day.get("start_time")
     end = day.get("end_time")
-    if not start or not end:
+    if not start or not end or not sms.morning_to_evening(start, end):
         return False
     try:
-        return ist_local_instant(day["day_date"], end) > now_ist()
+        return ist_local_instant(day.get("end_date") or day["day_date"], end) > now_ist()
     except (ValueError, TypeError):
         return False
 
@@ -642,10 +644,11 @@ async def _process_deferral(db: AsyncIOMotorDatabase, t: dict, body: FulfilmentB
     slip_kwargs = {cfg["slip_kwarg"]: day["_id"]}
     start = day.get("start_time") if body.item_type == "specs_made" else None
     end = day.get("end_time") if body.item_type == "specs_made" else None
+    end_date = (day.get("end_date") or day["day_date"]) if body.item_type == "specs_made" else None
     try:
         return await _make_slip(
             t, body.item_type, day["day_date"], day["venue"], cfg["instructions"],
-            venue_sms=day.get("venue_sms"),
+            venue_sms=day.get("venue_sms"), end_date=end_date,
             start_time=start, end_time=end, **slip_kwargs,
         )
     except Exception:
@@ -884,7 +887,7 @@ async def _finish_fulfilment(db, t: dict, patient: dict, doc: dict, slip: dict |
         args = (
             db, patient, DEFERRAL_CONFIG[doc["item_type"]]["message_type"],
             slip["collection_date"], slip.get("collection_venue_sms") or slip["collection_venue"],
-            slip.get("collection_start_time"), slip.get("collection_end_time"),
+            slip.get("collection_start_time"), slip.get("collection_end_time"), slip.get("collection_end_date"),
         )
         if background_tasks is not None:
             background_tasks.add_task(sms.send_patient_sms, *args)
@@ -909,6 +912,7 @@ async def _make_slip(
     specs_collection_day_id: Optional[ObjectId | str] = None,
     start_time: Optional[str] = None,
     end_time: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> dict:
     db = get_db()
     count = await db.deferred_slips.count_documents({"transcription_id": t["_id"], "item_type": item_type})
@@ -922,6 +926,7 @@ async def _make_slip(
         "collection_date": coll_date,
         "collection_venue": venue,
         "collection_venue_sms": venue_sms,
+        "collection_end_date": end_date,
         "collection_start_time": start_time,
         "collection_end_time": end_time,
         "ot_schedule_day_id": ot_schedule_day_id,
@@ -1161,7 +1166,7 @@ async def list_ot_days(actor: dict = Depends(require_any)) -> Dict[str, Any]:
     return {"ot_days": [ser_ot_day(d) for d in days]}
 
 
-def _validated_specs_window(body: SpecsScheduleBody) -> tuple[ObjectId, str, str, str, str]:
+def _validated_specs_window(body: SpecsScheduleBody) -> tuple[ObjectId, str, str, str, str, str]:
     venue = (body.venue or "").strip()
     if not venue:
         raise HTTPException(status_code=400, detail="Venue is required")
@@ -1169,31 +1174,38 @@ def _validated_specs_window(body: SpecsScheduleBody) -> tuple[ObjectId, str, str
         camp_oid = ObjectId(body.camp_id)
     except (InvalidId, TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Invalid camp id")
+    end_date = body.end_date or body.day_date
     try:
-        datetime.strptime(body.day_date, "%Y-%m-%d")
+        first_day = datetime.strptime(body.day_date, "%Y-%m-%d")
     except (TypeError, ValueError):
         raise HTTPException(status_code=400, detail="Invalid day_date")
+    try:
+        last_day = datetime.strptime(end_date, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid end_date")
+    if last_day < first_day:
+        raise HTTPException(status_code=400, detail="end_date must not be before day_date")
     try:
         start = parse_hhmm(body.start_time)
         end = parse_hhmm(body.end_time)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    if start >= end:
-        raise HTTPException(status_code=400, detail="start_time must be before end_time")
-    if ist_local_instant(body.day_date, end) <= now_ist():
+    if not sms.morning_to_evening(start, end):
+        raise HTTPException(status_code=400, detail="Specs hours must start before 12:00 and end at 12:00 or later")
+    if ist_local_instant(end_date, end) <= now_ist():
         raise HTTPException(status_code=400, detail="Window end must be after now")
-    return camp_oid, body.day_date, venue, start, end
+    return camp_oid, body.day_date, end_date, venue, start, end
 
 
 @router.post("/specs-days")
 async def create_specs_day(body: SpecsScheduleBody, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
-    camp_oid, day_date, venue, start, end = _validated_specs_window(body)
+    camp_oid, day_date, end_date, venue, start, end = _validated_specs_window(body)
     camp = await db.camps.find_one({"_id": camp_oid, "is_active": True})
     if not camp:
         raise HTTPException(status_code=400, detail="Camp is not active")
     existing = await db.specs_collection_days.find_one({"camp_id": camp_oid, "day_date": day_date})
-    fields = {"venue": venue, "start_time": start, "end_time": end}
+    fields = {"end_date": end_date, "venue": venue, "start_time": start, "end_time": end}
     if existing:
         await db.specs_collection_days.update_one({"_id": existing["_id"]}, {"$set": fields})
         d = await db.specs_collection_days.find_one({"_id": existing["_id"]})

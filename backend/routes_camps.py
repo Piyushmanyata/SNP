@@ -20,6 +20,7 @@ def ser_camp(c: dict) -> Dict[str, Any]:
         "name": c["name"],
         "venue": c["venue"],
         "camp_date": c["camp_date"],
+        "camp_number": c.get("camp_number"),
         "is_active": c.get("is_active", False),
         "door_manual_entry": door_manual_open(c),
         "created_at": iso(c.get("created_at")),
@@ -97,6 +98,7 @@ async def create_camp(body: CampBody, actor: dict = Depends(require_admin)) -> D
     else:
         doc = {
             "name": body.name, "venue": body.venue, "camp_date": camp_date,
+            "camp_number": body.camp_number,
             "is_active": False, "print_override": None,
             "created_at": now_utc(),
         }
@@ -202,7 +204,8 @@ async def active_camp_public() -> Dict[str, Any]:
 async def update_camp(camp_id: str, body: CampBody, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     await db.camps.update_one({"_id": ObjectId(camp_id)}, {"$set": {
-        "name": body.name, "venue": body.venue, "camp_date": body.camp_date}})
+        "name": body.name, "venue": body.venue, "camp_date": body.camp_date,
+        "camp_number": body.camp_number}})
     c = await db.camps.find_one({"_id": ObjectId(camp_id)})
     if not c:
         raise HTTPException(status_code=404, detail="Camp not found")

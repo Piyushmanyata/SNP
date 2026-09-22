@@ -15,7 +15,7 @@ router = APIRouter(prefix="/api", tags=["cron"])
 PAGE_SIZE = 500
 SEND_LIMIT = 200
 
-Target = Tuple[dict, str, str | None, str | None]
+Target = Tuple[dict, str, str | None, str | None, str | None]
 
 
 def _require_cron_secret(request: Request) -> None:
@@ -49,7 +49,7 @@ async def _camp_targets(db: AsyncIOMotorDatabase, event_date: str) -> AsyncGener
         venue = camp["venue"] if camp else ""
         async for page in _pages(db.patients, {"camp_day_id": day["_id"]}):
             for patient in page:
-                yield patient, venue, None, None
+                yield patient, venue, None, None, None
 
 
 async def _token_targets(
@@ -70,7 +70,8 @@ async def _token_targets(
                 day = await day_collection.find_one({"_id": s[day_field]})
                 if day:
                     venue = day.get("venue_sms") or day["venue"]
-            yield patient, venue, s.get("collection_start_time"), s.get("collection_end_time")
+            yield (patient, venue, s.get("collection_start_time"), s.get("collection_end_time"),
+                   s.get("collection_end_date"))
 
 
 async def _send_each(
@@ -84,13 +85,13 @@ async def _send_each(
     used = 0
     complete = True
     try:
-        async for patient, venue, start, end in targets:
+        async for patient, venue, start, end, end_date in targets:
             if used >= budget:
                 complete = False
                 break
             outcome = await sms.deliver_patient_sms(
                 db, patient, message_type, event_date, venue,
-                start_time=start, end_time=end, retry_after=sms.RETRY_AFTER,
+                start_time=start, end_time=end, end_date=end_date, retry_after=sms.RETRY_AFTER,
             )
             if outcome == "skipped":
                 continue

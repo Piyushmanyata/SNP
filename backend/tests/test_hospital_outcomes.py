@@ -427,21 +427,22 @@ class TestClinicalFind:
 
 
 class TestDisplayedDates:
-    @pytest.mark.parametrize("message_type,expected", [
-        ("registration", "17-09-2026"),
-        ("camp", "17-09-2026"),
-        ("ot_token", "17-09-2026"),
-        ("ot", "17-09-2026"),
-        ("specs_token", "17-09-2026, समय 09:00–17:00"),
-        ("specs", "17-09-2026, समय 09:00–17:00"),
-    ])
-    def test_every_sms_states_its_date_as_dd_mm_yyyy(self, monkeypatch, message_type, expected):
+    @pytest.mark.parametrize("message_type", ["registration", "camp", "ot_token", "ot", "specs_token", "specs"])
+    def test_every_sms_states_its_date_as_dd_mm_yyyy(self, monkeypatch, message_type):
         async def run():
             db = _mock(monkeypatch)
             sent = _recorder(monkeypatch)
-            patient = {"_id": ObjectId(), "phone": "9876500001", "reg_no": 7}
-            assert await sms.send_patient_sms(db, patient, message_type, "2026-09-17", "Hall", "09:00", "17:00")
-            assert sent[0]["date"] == expected
+            camp_id = ObjectId()
+            await db.camps.insert_one({"_id": camp_id, "name": "C", "venue": "Hall", "camp_number": 162})
+            patient = {"_id": ObjectId(), "camp_id": camp_id, "phone": "9876500001", "reg_no": 7}
+            assert await sms.send_patient_sms(
+                db, patient, message_type, "2026-09-17", "Hall", "09:00", "17:00", "2026-09-24",
+            )
+            assert sent[0]["date"] == "17-09-2026"
+            if message_type.startswith("specs"):
+                assert (sent[0]["end_date"], sent[0]["start_time"], sent[0]["end_time"]) == (
+                    "24-09-2026", "09:00", "05:00",
+                )
             ledger = await db.reminder_ledger.find_one({"patient_id": patient["_id"]})
             assert ledger["event_date"] == "2026-09-17"
             assert "17-09-2026" in ledger["copy"]

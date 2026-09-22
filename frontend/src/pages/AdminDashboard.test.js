@@ -62,7 +62,7 @@ beforeEach(() => {
         data: {
           camps: [
             { id: "c-1", name: "Active Nadia Camp", venue: "Krishnanagar Hall", camp_date: "2026-08-27", is_active: true },
-            { id: "c-2", name: "Inactive Camp", venue: "Ranaghat", camp_date: "2026-09-01", is_active: false },
+            { id: "c-2", name: "Inactive Camp", venue: "Ranaghat", camp_date: "2026-09-01", camp_number: 161, is_active: false },
           ],
         },
       });
@@ -121,7 +121,7 @@ beforeEach(() => {
       return Promise.resolve({
         data: {
           specs_days: [
-            { id: "sp-1", day_date: "2026-09-12", venue: "Base Optical", start_time: "10:00", end_time: "12:00" },
+            { id: "sp-1", day_date: "2026-09-12", end_date: "2026-09-19", venue: "Base Optical", start_time: "10:00", end_time: "12:00" },
           ],
         },
       });
@@ -184,6 +184,40 @@ describe("AdminDashboard component", () => {
 
     await act(async () => active.querySelector('[data-testid="door-manual-toggle"]').click());
     expect(api.post).toHaveBeenCalledWith("/camps/door-manual", { enabled: true });
+  });
+
+  test("a camp's SMS number is set at creation and can be corrected later", async () => {
+    api.post.mockResolvedValue({ data: {} });
+    api.patch.mockResolvedValue({ data: {} });
+    await act(async () => {
+      root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>);
+    });
+    await act(async () => container.querySelector('[data-testid="admin-tab-camps"]').click());
+
+    expect(container.querySelector('[data-testid="camp-number-missing-c-1"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="camp-number-c-2"]').textContent).toContain("161");
+
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    const type = (testid, value) => {
+      const input = document.querySelector(`[data-testid="${testid}"]`);
+      setter.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    const submit = () => document.querySelector('[data-testid="camp-create-submit"]');
+
+    await act(async () => container.querySelector('[data-testid="create-camp-button"]').click());
+    act(() => type("camp-date-input", "2026-10-10"));
+    expect(submit().disabled).toBe(true);
+    act(() => type("camp-number-input", "163"));
+    await act(async () => submit().click());
+    expect(api.post).toHaveBeenCalledWith("/camps", expect.objectContaining({ camp_date: "2026-10-10", camp_number: 163 }));
+
+    await act(async () => container.querySelector('[data-testid="edit-camp-c-1"]').click());
+    act(() => type("camp-number-input", "162"));
+    await act(async () => submit().click());
+    expect(api.patch).toHaveBeenCalledWith("/camps/c-1", {
+      name: "Active Nadia Camp", venue: "Krishnanagar Hall", camp_date: "2026-08-27", camp_number: 162,
+    });
   });
 
   test("has no Staff or Roster tab or content and links to Team once", async () => {
@@ -334,11 +368,13 @@ describe("AdminDashboard component", () => {
     });
 
     expect(container.textContent).toContain("Base Optical");
+    expect(container.textContent).toContain("12-09-2026 – 19-09-2026");
     expect(container.textContent).toContain("10:00–12:00");
     expect(container.querySelector('[data-testid="specs-seat-input"]')).toBeNull();
     expect(container.querySelector('[data-testid="specs-days-list"]')).not.toBeNull();
 
     const dateInput = container.querySelector('[data-testid="specs-date-input"]');
+    const untilInput = container.querySelector('[data-testid="specs-end-date-input"]');
     const venueInput = container.querySelector('[data-testid="specs-venue-input"]');
     const startInput = container.querySelector('[data-testid="specs-start-input"]');
     const endInput = container.querySelector('[data-testid="specs-end-input"]');
@@ -346,11 +382,13 @@ describe("AdminDashboard component", () => {
     act(() => {
       setter.call(dateInput, "2026-09-20");
       dateInput.dispatchEvent(new Event("input", { bubbles: true }));
+      setter.call(untilInput, "2026-09-27");
+      untilInput.dispatchEvent(new Event("input", { bubbles: true }));
       setter.call(venueInput, "New Optical");
       venueInput.dispatchEvent(new Event("input", { bubbles: true }));
-      setter.call(startInput, "09:00");
+      setter.call(startInput, "10:00");
       startInput.dispatchEvent(new Event("input", { bubbles: true }));
-      setter.call(endInput, "11:30");
+      setter.call(endInput, "17:00");
       endInput.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
@@ -363,9 +401,10 @@ describe("AdminDashboard component", () => {
       expect.objectContaining({
         camp_id: "c-1",
         day_date: "2026-09-20",
+        end_date: "2026-09-27",
         venue: "New Optical",
-        start_time: "09:00",
-        end_time: "11:30",
+        start_time: "10:00",
+        end_time: "17:00",
       })
     );
   });

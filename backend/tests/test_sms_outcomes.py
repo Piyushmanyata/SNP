@@ -188,7 +188,9 @@ class TestBoundedDispatch:
         mock_db = setup_mock_db(monkeypatch)
         camp_id = ObjectId()
         day_id = ObjectId()
-        mock_db.camps.docs.append({"_id": camp_id, "name": "Big Camp", "venue": "Hall A", "is_active": True})
+        mock_db.camps.docs.append({
+            "_id": camp_id, "name": "Big Camp", "venue": "Hall A", "is_active": True, "camp_number": 162,
+        })
         mock_db.camp_days.docs.append({"_id": day_id, "camp_id": camp_id, "day_date": TOMORROW})
         for i in range(10_050):
             mock_db.patients.docs.append({
@@ -239,8 +241,8 @@ class TestBoundedDispatch:
         monkeypatch.setattr(routes_reminders, "SEND_LIMIT", 2)
         calls = []
 
-        def fake_send(message_type, mobile, reg_no, event_date, venue):
-            calls.append(reg_no)
+        def fake_send(message_type, mobile, variables):
+            calls.append(variables["reg_no"])
             if len(calls) <= 2:
                 raise RuntimeError("carrier down")
             return f"id-{len(calls)}"
@@ -275,8 +277,8 @@ class TestBoundedDispatch:
 def _flaky_provider(monkeypatch, failures):
     calls = []
 
-    def fake_send(message_type, mobile, reg_no, event_date, venue):
-        calls.append({"type": message_type, "reg_no": reg_no, "date": event_date})
+    def fake_send(message_type, mobile, variables):
+        calls.append({"type": message_type, **variables})
         if len(calls) <= failures:
             raise RuntimeError("carrier down")
         return f"id-{len(calls)}"
@@ -284,6 +286,12 @@ def _flaky_provider(monkeypatch, failures):
     monkeypatch.setattr(msg91, "send_dlt_sms", fake_send)
     monkeypatch.setattr(msg91, "configured", lambda: True)
     return calls
+
+
+async def _numbered_camp(mock_db):
+    camp_id = ObjectId()
+    await mock_db.camps.insert_one({"_id": camp_id, "name": "C", "venue": "Hall A", "camp_number": 162})
+    return camp_id
 
 
 def _later(mock_db):
@@ -328,7 +336,7 @@ class TestFailedRemindersRetryOnALaterRun:
         async def seed():
             pid = ObjectId()
             await mock_db.patients.insert_one({
-                "_id": pid, "camp_id": ObjectId(), "camp_day_id": ObjectId(), "reg_no": 7,
+                "_id": pid, "camp_id": await _numbered_camp(mock_db), "camp_day_id": ObjectId(), "reg_no": 7,
                 "phone": HOUSEHOLD, "phone_normalized": HOUSEHOLD,
             })
             await mock_db.deferred_slips.insert_one({
@@ -354,7 +362,7 @@ class TestFailedRemindersRetryOnALaterRun:
         async def seed():
             pid = ObjectId()
             await mock_db.patients.insert_one({
-                "_id": pid, "camp_id": ObjectId(), "camp_day_id": ObjectId(), "reg_no": 42,
+                "_id": pid, "camp_id": await _numbered_camp(mock_db), "camp_day_id": ObjectId(), "reg_no": 42,
                 "phone": HOUSEHOLD, "phone_normalized": HOUSEHOLD,
             })
             await mock_db.deferred_slips.insert_one({
@@ -371,7 +379,9 @@ class TestFailedRemindersRetryOnALaterRun:
 
         _post(client)
 
-        assert [c["date"] for c in calls] == ["02-09-2026, समय 10:00–12:00"] * 2
+        assert [(c["date"], c["end_date"], c["start_time"], c["end_time"]) for c in calls] == [
+            ("02-09-2026", "02-09-2026", "10:00", "12:00"),
+        ] * 2
 
 
 class TestWorkerFollowsThrough:

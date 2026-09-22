@@ -32,7 +32,7 @@ from helpers import IST
 from routes_clinical import record_fulfilment
 from security import hash_pin
 from test_adversarial_challenger import setup_mock_db
-from test_camp_lifecycle import RX, _fulfil, _seen_patient_with_transcription
+from test_camp_lifecycle import RX, _fulfil, _recorder, _seen_patient_with_transcription
 
 
 def _async_noop():
@@ -250,9 +250,17 @@ def test_clinical_specs_picker_rejects_ended_cross_camp_legacy_and_malformed(mon
             "_id": legacy, "camp_id": camp_id, "day_date": future,
             "venue": "Needs Window",
         })
+        afternoon = ObjectId()
+        await mock_db.specs_collection_days.insert_one({
+            "_id": afternoon, "camp_id": camp_id, "day_date": future,
+            "venue": "Saved Before The Hours Rule", "start_time": "14:00", "end_time": "17:00",
+        })
+        assert routes_clinical.ser_specs_day(
+            await mock_db.specs_collection_days.find_one({"_id": afternoon}),
+        )["window_required"] is True
         await mock_db.specs_collection_days.insert_one({
             "_id": ObjectId(), "camp_id": other_camp, "day_date": future,
-            "venue": "Other Camp", "start_time": "09:00", "end_time": "11:00",
+            "venue": "Other Camp", "start_time": "09:00", "end_time": "13:00",
         })
         await mock_db.specs_collection_days.insert_one({
             "_id": valid, "camp_id": camp_id, "day_date": future,
@@ -260,7 +268,7 @@ def test_clinical_specs_picker_rejects_ended_cross_camp_legacy_and_malformed(mon
         })
         actor = {"_id": ObjectId(), "role": "clinical_desk_operator"}
 
-        for bad_id in (str(ended), str(legacy), "not-an-id"):
+        for bad_id in (str(ended), str(legacy), str(afternoon), "not-an-id"):
             with __import__("pytest").raises(__import__("fastapi").HTTPException) as exc:
                 await record_fulfilment(_fulfil(
                     trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",
@@ -323,4 +331,64 @@ def test_specs_token_snapshot_survives_later_schedule_edit(monkeypatch):
         if reprint.status_code == 200:
             assert reprint.json()["slip"]["collection_start_time"] == "10:00"
             assert reprint.json()["slip"]["collection_venue"] == "Optical Desk"
+    asyncio.run(run())
+
+
+def test_specs_window_spans_days_from_a_morning_start_to_an_evening_end(monkeypatch):
+    async def run():
+        mock_db = setup_mock_db(monkeypatch)
+        admin_id = await _admin(mock_db)
+        camp_id = await _active_camp(mock_db)
+        client = _client(monkeypatch, mock_db)
+        headers = _auth(admin_id, "admin", "admin")
+        start = _future_date()
+        until = (datetime.now(IST) + timedelta(days=14)).strftime("%Y-%m-%d")
+
+        def post(**overrides):
+            return client.post("/api/clinical/specs-days", json={
+                "camp_id": str(camp_id), "day_date": start, "end_date": until,
+                "venue": "SNP कार्यालय, देवघर", "start_time": "10:00", "end_time": "17:00", **overrides,
+            }, headers=headers)
+
+        before_start = (datetime.now(IST) + timedelta(days=6)).strftime("%Y-%m-%d")
+        assert post(end_date=before_start).status_code == 400
+        assert post(end_date="14-09-2026").status_code == 400
+        assert post(start_time="13:00").status_code == 400
+        assert post(end_time="11:30").status_code == 400
+        created = post()
+        assert created.status_code == 200, created.text
+        assert created.json()["specs_day"]["end_date"] == until
+        single = post(day_date=until, end_date=None)
+        assert single.status_code == 200, single.text
+        assert single.json()["specs_day"]["end_date"] == until
+    asyncio.run(run())
+
+
+def test_started_window_stays_selectable_and_token_sms_states_the_range(monkeypatch):
+    async def run():
+        mock_db = setup_mock_db(monkeypatch)
+        _patch_db(monkeypatch, mock_db)
+        sent = _recorder(monkeypatch)
+        camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db, RX)
+        await mock_db.camps.insert_one({
+            "_id": camp_id, "name": "Sikar Camp", "venue": "Sikar Bhawan", "is_active": True, "camp_number": 162,
+        })
+        yesterday = (datetime.now(IST) - timedelta(days=1)).strftime("%Y-%m-%d")
+        until = _future_date()
+        day_id = ObjectId()
+        await mock_db.specs_collection_days.insert_one({
+            "_id": day_id, "camp_id": camp_id, "day_date": yesterday, "end_date": until,
+            "venue": "SNP कार्यालय, देवघर", "start_time": "10:00", "end_time": "17:00",
+        })
+        out = await record_fulfilment(_fulfil(
+            trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",
+            specs_collection_day_id=str(day_id), operation_id="op-range",
+        ), actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
+        assert out["slip"]["collection_date"] == yesterday
+        assert out["slip"]["collection_end_date"] == until
+        assert sent == [{
+            "type": "specs_token", "mobile": "9876500001", "reg_no": 501, "camp_no": "162",
+            "date": helpers.display_date(yesterday), "end_date": helpers.display_date(until),
+            "start_time": "10:00", "end_time": "05:00", "venue": "SNP कार्यालय, देवघर",
+        }]
     asyncio.run(run())

@@ -1,6 +1,7 @@
 import json
 import os
 import urllib.request
+from typing import Any, Dict
 
 MSG91_FLOW_URL = "https://control.msg91.com/api/v5/flow"
 
@@ -24,15 +25,13 @@ def template_id(message_type: str) -> str:
     return os.environ[TEMPLATE_ENV[message_type]]
 
 
-def send_dlt_sms(message_type: str, mobile: str, reg_no: int, event_date: str, venue: str) -> str:
+def send_dlt_sms(message_type: str, mobile: str, variables: Dict[str, Any]) -> str:
     payload = {
         "template_id": template_id(message_type),
         "short_url": "0",
         "recipients": [{
             "mobiles": f"91{mobile}",
-            "reg_no": str(reg_no),
-            "date": event_date,
-            "venue": venue,
+            **{name: str(value) for name, value in variables.items()},
         }],
     }
     req = urllib.request.Request(

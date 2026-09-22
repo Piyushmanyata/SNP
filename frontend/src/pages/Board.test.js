@@ -47,7 +47,7 @@ const PAYLOAD = {
   quiet_count: 1,
   sms_failures: 1,
   next_ot: { day_date: "2026-09-02", venue: "OT Hall", seats_left: 7 },
-  next_specs: { day_date: "2026-09-05", venue: "Optical", start_time: "09:00", end_time: "12:00" },
+  next_specs: { day_date: "2026-09-05", end_date: "2026-09-12", venue: "Optical", start_time: "09:00", end_time: "12:00" },
 };
 
 let container = null;
@@ -95,7 +95,7 @@ describe("Camp-day board", () => {
     expect(container.querySelector('[data-testid="board-context"]').textContent).toContain("Sikar Camp");
     expect(container.querySelector('[data-testid="board-context"]').textContent).toContain("Sikar Camp · 01-09-2026 · as of 01-09-2026 15:30");
     expect(container.querySelector('[data-testid="board-next-ot"]').textContent).toContain("02-09-2026");
-    expect(container.querySelector('[data-testid="board-next-specs"]').textContent).toContain("05-09-2026");
+    expect(container.querySelector('[data-testid="board-next-specs"]').textContent).toContain("05-09-2026 – 12-09-2026");
     expect(container.querySelector('[data-testid="board-next-ot"]').textContent).toContain("7 seats");
     expect(container.querySelector('[data-testid="board-next-specs"]').textContent).toContain("09:00–12:00");
     expect(container.querySelector('[data-testid="board-ot-scheduled"]').textContent).toContain("3");

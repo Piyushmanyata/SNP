@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import api, { formatApiError } from "../lib/api";
-import { displayDate } from "../lib/dates";
+import { displayDateRange } from "../lib/dates";
 import { Button, Alert, Spinner } from "../components/ui";
 import { Printer, ArrowLeft } from "lucide-react";
 
@@ -65,7 +65,7 @@ export default function PrintSlip() {
         </div>
         <p className="text-sm mb-1"><span className="text-slate-500">नाम / Name</span> — {reg?.full_name}</p>
         <p className="text-lg font-bold mb-2">क्रमांक / Token — #{reg?.reg_no}</p>
-        <p className="text-sm mb-1"><span className="text-slate-500">तिथि / Date</span> — {displayDate(slip.collection_date)}</p>
+        <p className="text-sm mb-1"><span className="text-slate-500">तिथि / Date</span> — {displayDateRange(slip.collection_date, slip.collection_end_date)}</p>
         {slip.collection_start_time && slip.collection_end_time && (
           <p className="text-sm mb-1" data-testid="token-window">
             <span className="text-slate-500">समय / Time</span> — {slip.collection_start_time}–{slip.collection_end_time}

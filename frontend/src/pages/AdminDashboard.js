@@ -7,13 +7,14 @@ import {
 } from "../components/ui";
 import {
   Tent, Users, CalendarDays, Trophy, Download, Scissors, Glasses, Power, Trash2,
-  Plus, PrinterCheck, ClipboardList, Stethoscope, FileText, BarChart3, Pill,
+  Plus, PrinterCheck, ClipboardList, Stethoscope, FileText, BarChart3, Pill, Pencil,
 } from "lucide-react";
 import { formatPower } from "../components/clinical";
 import TemplateEditor from "../components/TemplateEditor";
-import { displayDate } from "../lib/dates";
+import { displayDate, displayDateRange } from "../lib/dates";
 
 const CAMP_VENUE = "Hansa Garden, Rohini Road in Baghmara, Jasidih, Deoghar - 814142";
+const NEW_CAMP = { name: "SNP नेत्र शिविर", venue: CAMP_VENUE, camp_date: "", camp_number: "" };
 const HOSPITAL_VENUE = "Vimla Ramkrishna Bajaj Eye Hospital, Near Canara Bank, Bilasi Mod, Deoghar 814112 (Jharkhand)";
 
 const TABS = [
@@ -96,24 +97,33 @@ function Camps() {
   const [camps, setCamps] = useState([]);
   const [err, setErr] = useState("");
   const [showCamp, setShowCamp] = useState(false);
-  const [form, setForm] = useState({ name: "SNP नेत्र शिविर", venue: CAMP_VENUE, camp_date: "" });
+  const [editing, setEditing] = useState(null);
+  const [form, setForm] = useState(NEW_CAMP);
   const [expand, setExpand] = useState(null);
+  const campNumber = Number(form.camp_number);
 
   const load = useCallback(() => {
     api.get("/camps").then((r) => setCamps(r.data.camps)).catch((e) => setErr(formatApiError(e)));
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const createCamp = useCallback(async () => {
+  const openCamp = (c) => {
+    setEditing(c ? c.id : null);
+    setForm(c ? { name: c.name, venue: c.venue, camp_date: c.camp_date, camp_number: c.camp_number ?? "" } : NEW_CAMP);
+    setShowCamp(true);
+  };
+
+  const saveCamp = useCallback(async () => {
     try {
-      await api.post("/camps", form);
+      const body = { ...form, camp_number: Number(form.camp_number) };
+      if (editing) await api.patch(`/camps/${editing}`, body);
+      else await api.post("/camps", body);
       setShowCamp(false);
-      setForm({ name: "SNP नेत्र शिविर", venue: CAMP_VENUE, camp_date: "" });
       load();
     } catch (e) {
       setErr(formatApiError(e));
     }
-  }, [form, load]);
+  }, [editing, form, load]);
 
   const activate = useCallback(async (id) => {
     try { await api.post(`/camps/${id}/activate`); load(); }
@@ -138,7 +148,7 @@ function Camps() {
   return (
     <div className="space-y-4">
       {err && <Alert>{err}</Alert>}
-      <Button onClick={() => setShowCamp(true)} data-testid="create-camp-button"><Plus className="w-4 h-4" /> New Camp</Button>
+      <Button onClick={() => openCamp(null)} data-testid="create-camp-button"><Plus className="w-4 h-4" /> New Camp</Button>
       {camps.map((c) => (
         <Card key={c.id} data-testid={`camp-card-${c.id}`}>
           <div className="flex flex-wrap items-center gap-3">
@@ -146,7 +156,11 @@ function Camps() {
             <div className="flex-1">
               <p className="font-display font-bold text-slate-900">{c.name} {c.is_active && <Badge tone="emerald">Active</Badge>}</p>
               <p className="text-xs text-slate-400">{c.venue} · {displayDate(c.camp_date)}</p>
+              {c.camp_number
+                ? <Badge className="mt-1" data-testid={`camp-number-${c.id}`}>SMS camp no. {c.camp_number}</Badge>
+                : <Badge tone="amber" className="mt-1" data-testid={`camp-number-missing-${c.id}`}>No camp number: SMS are not sent</Badge>}
             </div>
+            <Button size="sm" variant="outline" onClick={() => openCamp(c)} data-testid={`edit-camp-${c.id}`}><Pencil className="w-4 h-4" /> Edit</Button>
             {c.is_active ? (
               <Button size="sm" variant="ghost" onClick={() => deactivate(c.id)} data-testid={`deactivate-camp-${c.id}`}><Power className="w-4 h-4" /> Deactivate</Button>
             ) : (
@@ -179,12 +193,13 @@ function Camps() {
         </Card>
       ))}
 
-      <Modal open={showCamp} onClose={() => setShowCamp(false)} title="New Camp">
+      <Modal open={showCamp} onClose={() => setShowCamp(false)} title={editing ? "Edit Camp" : "New Camp"}>
         <div className="space-y-3">
           <Field label="Camp name" required><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} data-testid="camp-name-input" /></Field>
-          <Field label="Venue" required><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="camp-venue-input" /></Field>
+          <Field label="Venue" required hint="Sent in the registration and camp-reminder SMS."><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="camp-venue-input" /></Field>
           <Field label="Camp date" required><Input type="date" value={form.camp_date} onChange={(e) => setForm({ ...form, camp_date: e.target.value })} data-testid="camp-date-input" /></Field>
-          <Button className="w-full" onClick={createCamp} disabled={!form.name || !form.venue || !form.camp_date} data-testid="camp-create-submit">Create</Button>
+          <Field label="Camp number" required hint="The SMS reads “SNP के 162वें नेत्र शिविर”."><Input type="number" min="1" step="1" inputMode="numeric" value={form.camp_number} onChange={(e) => setForm({ ...form, camp_number: e.target.value })} data-testid="camp-number-input" /></Field>
+          <Button className="w-full" onClick={saveCamp} disabled={!form.name || !form.venue || !form.camp_date || !(Number.isInteger(campNumber) && campNumber > 0)} data-testid="camp-create-submit">{editing ? "Save" : "Create"}</Button>
         </div>
       </Modal>
     </div>
@@ -303,7 +318,7 @@ function SpecsCollectionDays() {
   const [days, setDays] = useState([]);
   const [camp, setCamp] = useState(null);
   const [err, setErr] = useState("");
-  const [form, setForm] = useState({ day_date: "", venue: "", start_time: "", end_time: "" });
+  const [form, setForm] = useState({ day_date: "", end_date: "", venue: "", start_time: "", end_time: "" });
 
   const load = useCallback(() => {
     Promise.all([api.get("/clinical/specs-days"), api.get("/camps/active")])
@@ -315,7 +330,11 @@ function SpecsCollectionDays() {
   const add = useCallback(async () => {
     setErr("");
     if (!camp) { setErr("Activate a camp first."); return; }
-    try { await api.post("/clinical/specs-days", { camp_id: camp.id, ...form }); setForm({ day_date: "", venue: "", start_time: "", end_time: "" }); load(); }
+    try {
+      await api.post("/clinical/specs-days", { camp_id: camp.id, ...form });
+      setForm({ day_date: "", end_date: "", venue: "", start_time: "", end_time: "" });
+      load();
+    }
     catch (e) { setErr(formatApiError(e)); }
   }, [camp, form, load]);
 
@@ -329,7 +348,7 @@ function SpecsCollectionDays() {
           {days.map((d) => (
             <div key={d.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50" data-testid={`specs-day-${d.id}`}>
               <Glasses className="w-4 h-4 text-emerald-600" />
-              <span className="font-medium text-slate-800 text-sm">{displayDate(d.day_date)}</span>
+              <span className="font-medium text-slate-800 text-sm">{displayDateRange(d.day_date, d.end_date)}</span>
               <span className="text-xs text-slate-400">{d.venue}</span>
               <Badge tone={d.window_required ? "amber" : "emerald"} className="ml-auto">
                 {d.start_time && d.end_time ? `${d.start_time}–${d.end_time}` : "window required"}
@@ -338,12 +357,14 @@ function SpecsCollectionDays() {
           ))}
         </div>
         <div className="flex flex-wrap gap-2 items-end pt-4 mt-3 border-t border-slate-100">
-          <Field label="Date"><Input type="date" value={form.day_date} onChange={(e) => setForm({ ...form, day_date: e.target.value })} data-testid="specs-date-input" /></Field>
+          <Field label="From"><Input type="date" value={form.day_date} onChange={(e) => setForm({ ...form, day_date: e.target.value })} data-testid="specs-date-input" /></Field>
+          <Field label="To"><Input type="date" value={form.end_date} min={form.day_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} data-testid="specs-end-date-input" /></Field>
           <Field label="Venue"><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="specs-venue-input" /></Field>
           <Field label="Start"><Input type="time" value={form.start_time} onChange={(e) => setForm({ ...form, start_time: e.target.value })} className="w-28" data-testid="specs-start-input" /></Field>
           <Field label="End"><Input type="time" value={form.end_time} onChange={(e) => setForm({ ...form, end_time: e.target.value })} className="w-28" data-testid="specs-end-input" /></Field>
           <Button size="sm" onClick={add} disabled={!form.day_date || !form.venue || !form.start_time || !form.end_time} data-testid="add-specs-day-button"><Plus className="w-4 h-4" /> Add</Button>
         </div>
+        <p className="text-xs text-slate-500 mt-2">Leave “To” empty for a single day. The SMS reads सुबह (start) से शाम (end), so start before 12:00 and end at 12:00 or later.</p>
       </Card>
     </div>
   );

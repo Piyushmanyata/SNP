@@ -125,6 +125,12 @@ def test_registration_retries_only_patient_code_collisions(monkeypatch, key):
     asyncio.run(run())
 
 
+async def _patient_of_a_numbered_camp(db):
+    camp_id = ObjectId()
+    await db.camps.insert_one({"_id": camp_id, "name": "C", "venue": "Hall", "camp_number": 162})
+    return {"_id": ObjectId(), "camp_id": camp_id, "phone": "9876543210", "reg_no": 42}
+
+
 @pytest.mark.parametrize("provider_succeeds", [True, False])
 def test_sms_ledger_failure_does_not_escape_or_resend_an_accepted_message(monkeypatch, provider_succeeds):
     async def run():
@@ -143,7 +149,7 @@ def test_sms_ledger_failure_does_not_escape_or_resend_an_accepted_message(monkey
 
         monkeypatch.setattr(sms.msg91, "send_dlt_sms", send)
         monkeypatch.setattr(db.reminder_ledger, "update_one", unavailable)
-        patient = {"_id": ObjectId(), "phone": "9876543210", "reg_no": 42}
+        patient = await _patient_of_a_numbered_camp(db)
         assert await sms.send_patient_sms(db, patient, "registration", "2026-09-12", "Hall") is provider_succeeds
         assert not await sms.send_patient_sms(db, patient, "registration", "2026-09-12", "Hall")
         assert len(calls) == 1
@@ -166,7 +172,7 @@ def test_accepted_sms_is_not_marked_failed_when_receipt_persistence_fails(monkey
             return await update(query, change)
 
         monkeypatch.setattr(db.reminder_ledger, "update_one", lose_receipt)
-        patient = {"_id": ObjectId(), "phone": "9876543210", "reg_no": 42}
+        patient = await _patient_of_a_numbered_camp(db)
         assert await sms.send_patient_sms(db, patient, "registration", "2026-09-12", "Hall")
         assert not await sms.send_patient_sms(db, patient, "registration", "2026-09-12", "Hall")
         assert len(calls) == 1

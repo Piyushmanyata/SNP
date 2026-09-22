@@ -240,14 +240,15 @@ describe("Fulfilment lines", () => {
       data: { transcription: { id: "tx-1", specs_measurements: RX }, registration: { id: "r" }, fulfilments: [] },
       specsDays: [
         { id: "sp-legacy", day_date: "2026-09-05", venue: "Old Optical", window_required: true },
-        { id: "sp-2", day_date: "2026-09-06", venue: "Optical", start_time: "09:00", end_time: "12:00" },
-        { id: "sp-3", day_date: "2026-09-07", venue: "Hall B", start_time: "14:00", end_time: "16:00" },
+        { id: "sp-2", day_date: "2026-09-06", end_date: "2026-09-06", venue: "Optical", start_time: "09:00", end_time: "12:00" },
+        { id: "sp-3", day_date: "2026-09-07", end_date: "2026-09-14", venue: "Hall B", start_time: "10:00", end_time: "16:00" },
       ],
     });
 
     const picker = container.querySelector('[data-testid="specs_collection_day_id-select"]');
     expect(picker.value).toBe("sp-2");
     expect(picker.textContent).toContain("06-09-2026 · Optical · 09:00–12:00");
+    expect(picker.textContent).toContain("07-09-2026 – 14-09-2026 · Hall B · 10:00–16:00");
     expect(picker.textContent).not.toContain("2026-09-06");
     expect(picker.textContent).not.toContain("Old Optical");
     expect(picker.textContent).not.toContain("full");
