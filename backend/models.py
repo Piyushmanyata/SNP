@@ -40,6 +40,7 @@ class CampBody(BaseModel):
     name: str
     venue: str
     camp_date: Optional[DateString] = None
+    camp_number: Optional[int] = Field(default=None, gt=0)
     days: Optional[List[CampSetupDay]] = None
     setup_request_id: Optional[str] = None
 
@@ -216,6 +217,7 @@ class OtScheduleBody(BaseModel):
 class SpecsScheduleBody(BaseModel):
     camp_id: str
     day_date: str
+    end_date: Optional[str] = None
     venue: str
     start_time: Optional[str] = None
     end_time: Optional[str] = None

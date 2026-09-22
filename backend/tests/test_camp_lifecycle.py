@@ -79,9 +79,8 @@ def _mock(monkeypatch):
 def _recorder(monkeypatch):
     sent = []
 
-    def fake_send(message_type, mobile, reg_no, event_date, venue):
-        sent.append({"type": message_type, "mobile": mobile, "reg_no": reg_no,
-                     "date": event_date, "venue": venue})
+    def fake_send(message_type, mobile, variables):
+        sent.append({"type": message_type, "mobile": mobile, **variables})
         return f"id-{len(sent)}"
 
     monkeypatch.setattr(msg91, "send_dlt_sms", fake_send)
@@ -93,7 +92,7 @@ def _recorder(monkeypatch):
 async def _seed_camp(mock_db, days=(TODAY,)):
     camp_id = ObjectId()
     await mock_db.camps.insert_one({
-        "_id": camp_id, "name": "Sikar Camp", "venue": "Sikar Bhawan", "is_active": True,
+        "_id": camp_id, "name": "Sikar Camp", "venue": "Sikar Bhawan", "is_active": True, "camp_number": 162,
     })
     day_ids = []
     for date in days:
@@ -539,6 +538,12 @@ async def _seen_patient_with_transcription(mock_db, measurements=None, fixed_pow
     return camp_id, patient_id, trans_id
 
 
+async def _number_camp(mock_db, camp_id, number=162):
+    await mock_db.camps.insert_one({
+        "_id": camp_id, "name": "Sikar Camp", "venue": "Sikar Bhawan", "is_active": True, "camp_number": number,
+    })
+
+
 class TestFulfilmentLines:
     def test_fixed_power_specs_needs_the_prescribed_power(self, monkeypatch):
         async def run():
@@ -653,17 +658,19 @@ class TestFulfilmentLines:
             mock_db = _mock(monkeypatch)
             sent = _recorder(monkeypatch)
             camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db, RX)
+            await _number_camp(mock_db, camp_id)
             specs_day = ObjectId()
             await mock_db.specs_collection_days.insert_one({
-                "_id": specs_day, "camp_id": camp_id, "day_date": "2026-09-20",
+                "_id": specs_day, "camp_id": camp_id, "day_date": "2026-09-20", "end_date": "2026-09-27",
                 "venue": "Optical Desk", "start_time": "09:00", "end_time": "17:00", "seat_limit": 2, "seats_taken": 0,
             })
             body = _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_made",
                            status="deferred", specs_collection_day_id=str(specs_day))
             out = await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
             assert out["slip"]["collection_date"] == "2026-09-20"
-            assert sent == [{"type": "specs_token", "mobile": "9876500001", "reg_no": 501,
-                             "date": "20-09-2026, समय 09:00–17:00", "venue": "Optical Desk"}]
+            assert sent == [{"type": "specs_token", "mobile": "9876500001", "reg_no": 501, "camp_no": "162",
+                             "date": "20-09-2026", "end_date": "27-09-2026",
+                             "start_time": "09:00", "end_time": "05:00", "venue": "Optical Desk"}]
         asyncio.run(run())
 
     def test_deferring_ot_sends_the_ot_token_sms(self, monkeypatch):
@@ -671,6 +678,7 @@ class TestFulfilmentLines:
             mock_db = _mock(monkeypatch)
             sent = _recorder(monkeypatch)
             camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db, RX)
+            await _number_camp(mock_db, camp_id)
             ot_day = ObjectId()
             await mock_db.ot_schedule_days.insert_one({
                 "_id": ot_day, "camp_id": camp_id, "day_date": "2026-10-02",
@@ -679,7 +687,7 @@ class TestFulfilmentLines:
             body = _fulfil(trans_id, mock_db.last_rev_id, item_type="ot",
                            status="deferred", ot_schedule_day_id=str(ot_day))
             await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
-            assert sent == [{"type": "ot_token", "mobile": "9876500001", "reg_no": 501,
+            assert sent == [{"type": "ot_token", "mobile": "9876500001", "reg_no": 501, "camp_no": "162",
                              "date": "02-10-2026", "venue": "OT Theatre"}]
         asyncio.run(run())
 

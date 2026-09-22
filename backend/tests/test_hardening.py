@@ -340,13 +340,15 @@ class TestSmsDoesNotBlockTheLoop:
             release = asyncio.Event()
             loop = asyncio.get_running_loop()
 
-            def slow_send(message_type, mobile, reg_no, event_date, venue):
+            def slow_send(message_type, mobile, variables):
                 loop.call_soon_threadsafe(started.set)
                 asyncio.run_coroutine_threadsafe(release.wait(), loop).result(5)
                 return "provider-1"
 
             monkeypatch.setattr(sms.msg91, "send_dlt_sms", slow_send)
-            patient = {"_id": ObjectId(), "phone_normalized": "9876500001", "reg_no": 7}
+            camp_id = ObjectId()
+            await mock_db.camps.insert_one({"_id": camp_id, "name": "Sikar", "venue": "Sikar", "camp_number": 162})
+            patient = {"_id": ObjectId(), "camp_id": camp_id, "phone_normalized": "9876500001", "reg_no": 7}
             task = asyncio.create_task(
                 sms.send_patient_sms(mock_db, patient, "registration", "2026-09-01", "Sikar")
             )

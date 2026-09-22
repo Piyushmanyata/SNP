@@ -4,58 +4,105 @@
   "sender_country": "IN",
   "language": "Hindi (Unicode)",
   "variables": {
+    "camp_no": "The camp's number as the admin set it on the camp (e.g. \"162\"). A camp without one sends no SMS (ADR 0046)",
     "reg_no": "Patient registration / token number",
-    "date": "Event date as sent by backend; for specs templates the time window is already appended (e.g. \"12/03/2026, समय 10:00–13:00\")",
-    "venue": "Camp, hospital or distribution venue name. For surgery this is the OT Schedule Day's venue_sms when set, else its full venue, which defaults to the 93-character HOSPITAL_VENUE string; the DLT variable must be registered long enough to hold that full address (ADR 0040)"
+    "date": "Event date as DD-MM-YYYY. For specs templates, the first day of the collection window",
+    "end_date": "Specs only: last day of the collection window as DD-MM-YYYY; equals date for a one-day window",
+    "start_time": "Specs only: window start in 12-hour HH:MM, read after the fixed word सुबह (the admin form requires it before 12:00)",
+    "end_time": "Specs only: window end in 12-hour HH:MM, read after the fixed word शाम (e.g. 17:00 is sent as 05:00)",
+    "venue": "Camp, hospital or distribution venue name. For surgery this is the OT Schedule Day's venue_sms when set, else its full venue (ADR 0040)"
   },
+  "dlt_portal_note": "dlt_portal_body is the text to register on the DLT portal; each {#var#} is filled in the order listed in variables. dlt_body is the same text in MSG91 flow syntax. Spacing, including the double spaces in the specs templates, is exactly as approved.",
   "templates": [
     {
       "key": "registration",
       "env_var": "MSG91_TEMPLATE_REGISTRATION",
       "purpose": "Sent at desk registration",
-      "variables": ["reg_no", "date", "venue"],
-      "body": "SNP नेत्र शिविर में आपका पंजीकरण हो गया है। क्रमांक: {reg_no} दिनांक: {date} शिविर स्थल: {venue}। कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।",
-      "dlt_body": "SNP नेत्र शिविर में आपका पंजीकरण हो गया है। क्रमांक: ##reg_no## दिनांक: ##date## शिविर स्थल: ##venue##। कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।"
+      "variables": [
+        "camp_no",
+        "reg_no",
+        "date",
+        "venue"
+      ],
+      "body": "SNP के {camp_no}वें नेत्र शिविर में आपका पंजीकरण हो गया है। क्रमांक: {reg_no} दिनांक: {date} शिविर स्थल: {venue}। कृपया शिविर के दिन अपना आधार कार्ड अवश्य साथ लाएँ।",
+      "dlt_body": "SNP के ##camp_no##वें नेत्र शिविर में आपका पंजीकरण हो गया है। क्रमांक: ##reg_no## दिनांक: ##date## शिविर स्थल: ##venue##। कृपया शिविर के दिन अपना आधार कार्ड अवश्य साथ लाएँ।",
+      "dlt_portal_body": "SNP के {#var#}वें नेत्र शिविर में आपका पंजीकरण हो गया है। क्रमांक: {#var#} दिनांक: {#var#} शिविर स्थल: {#var#}। कृपया शिविर के दिन अपना आधार कार्ड अवश्य साथ लाएँ।"
     },
     {
       "key": "camp",
       "env_var": "MSG91_TEMPLATE_CAMP",
       "purpose": "Day-before camp reminder",
-      "variables": ["reg_no", "date", "venue"],
-      "body": "कल ({date}) को SNP नेत्र शिविर में आपका नेत्र परीक्षण है। कृपया समय पर {venue} पहुँचें। यह टोकन शिविर स्थल पर दिखाएँ। क्रमांक: {reg_no}। कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।",
-      "dlt_body": "कल (##date##) को SNP नेत्र शिविर में आपका नेत्र परीक्षण है। कृपया समय पर ##venue## पहुँचें। यह टोकन शिविर स्थल पर दिखाएँ। क्रमांक: ##reg_no##। कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।"
+      "variables": [
+        "date",
+        "camp_no",
+        "venue",
+        "reg_no"
+      ],
+      "body": "कल ({date}) को SNP के {camp_no} वें नेत्र शिविर में आपका नेत्र परीक्षण है। कृपया समय पर {venue} पहुँचें। यह टोकन शिविर स्थल पर दिखाएँ। क्रमांक: {reg_no}। कृपया शिविर के दिन अपना आधार कार्ड अवश्य साथ लाएँ।",
+      "dlt_body": "कल (##date##) को SNP के ##camp_no## वें नेत्र शिविर में आपका नेत्र परीक्षण है। कृपया समय पर ##venue## पहुँचें। यह टोकन शिविर स्थल पर दिखाएँ। क्रमांक: ##reg_no##। कृपया शिविर के दिन अपना आधार कार्ड अवश्य साथ लाएँ।",
+      "dlt_portal_body": "कल ({#var#}) को SNP के {#var#} वें नेत्र शिविर में आपका नेत्र परीक्षण है। कृपया समय पर {#var#} पहुँचें। यह टोकन शिविर स्थल पर दिखाएँ। क्रमांक: {#var#}। कृपया शिविर के दिन अपना आधार कार्ड अवश्य साथ लाएँ।"
     },
     {
       "key": "ot_token",
       "env_var": "MSG91_TEMPLATE_OT_TOKEN",
       "purpose": "Surgery scheduled confirmation",
-      "variables": ["reg_no", "date", "venue"],
-      "body": "SNP नेत्र शिविर में आपका ऑपरेशन {date} को निर्धारित हुआ है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ लाएँ। स्थल: {venue}।",
-      "dlt_body": "SNP नेत्र शिविर में आपका ऑपरेशन ##date## को निर्धारित हुआ है। पर्चा, टोकन (##reg_no##), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ लाएँ। स्थल: ##venue##।"
+      "variables": [
+        "camp_no",
+        "date",
+        "reg_no",
+        "venue"
+      ],
+      "body": "SNP के {camp_no} वें नेत्र शिविर में आपका ऑपरेशन {date} को निर्धारित हुआ है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर अवश्य साथ लाएँ। स्थल: {venue}।",
+      "dlt_body": "SNP के ##camp_no## वें नेत्र शिविर में आपका ऑपरेशन ##date## को निर्धारित हुआ है। पर्चा, टोकन (##reg_no##), आधार कार्ड, राशन कार्ड और मोबाइल नंबर अवश्य साथ लाएँ। स्थल: ##venue##।",
+      "dlt_portal_body": "SNP के {#var#} वें नेत्र शिविर में आपका ऑपरेशन {#var#} को निर्धारित हुआ है। पर्चा, टोकन ({#var#}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर अवश्य साथ लाएँ। स्थल: {#var#}।"
     },
     {
       "key": "ot",
       "env_var": "MSG91_TEMPLATE_OT",
       "purpose": "Day-before surgery reminder",
-      "variables": ["reg_no", "date", "venue"],
-      "body": "कल ({date}) को आपका नेत्र ऑपरेशन निर्धारित है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ लाएँ। स्थल: {venue}।",
-      "dlt_body": "कल (##date##) को आपका नेत्र ऑपरेशन निर्धारित है। पर्चा, टोकन (##reg_no##), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ लाएँ। स्थल: ##venue##।"
+      "variables": [
+        "date",
+        "camp_no",
+        "reg_no",
+        "venue"
+      ],
+      "body": "कल ({date}) को SNP के {camp_no} वें नेत्र शिविर में आपका नेत्र ऑपरेशन निर्धारित है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ अवश्य लाएँ। स्थल: {venue}।",
+      "dlt_body": "कल (##date##) को SNP के ##camp_no## वें नेत्र शिविर में आपका नेत्र ऑपरेशन निर्धारित है। पर्चा, टोकन (##reg_no##), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ अवश्य लाएँ। स्थल: ##venue##।",
+      "dlt_portal_body": "कल ({#var#}) को SNP के {#var#} वें नेत्र शिविर में आपका नेत्र ऑपरेशन निर्धारित है। पर्चा, टोकन ({#var#}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ अवश्य लाएँ। स्थल: {#var#}।"
     },
     {
       "key": "specs_token",
       "env_var": "MSG91_TEMPLATE_SPECS_TOKEN",
       "purpose": "Spectacle collection scheduled",
-      "variables": ["reg_no", "date", "venue"],
-      "body": "SNP द्वारा आपका चश्मा {date} पर {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर आएँ।",
-      "dlt_body": "SNP द्वारा आपका चश्मा ##date## पर ##venue## में दिया जाएगा। कृपया चश्मे का टोकन (##reg_no##) लेकर आएँ।"
+      "variables": [
+        "camp_no",
+        "date",
+        "end_date",
+        "start_time",
+        "end_time",
+        "venue",
+        "reg_no"
+      ],
+      "body": "SNP के {camp_no} वें नेत्र शिविर में आपको चश्मा {date} से {end_date} तक सुबह  {start_time} बजे से शाम {end_time} बजे तक {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर अवश्य आएँ।",
+      "dlt_body": "SNP के ##camp_no## वें नेत्र शिविर में आपको चश्मा ##date## से ##end_date## तक सुबह  ##start_time## बजे से शाम ##end_time## बजे तक ##venue## में दिया जाएगा। कृपया चश्मे का टोकन (##reg_no##) लेकर अवश्य आएँ।",
+      "dlt_portal_body": "SNP के {#var#} वें नेत्र शिविर में आपको चश्मा {#var#} से {#var#} तक सुबह  {#var#} बजे से शाम {#var#} बजे तक {#var#} में दिया जाएगा। कृपया चश्मे का टोकन ({#var#}) लेकर अवश्य आएँ।"
     },
     {
       "key": "specs",
       "env_var": "MSG91_TEMPLATE_SPECS",
       "purpose": "Day-before spectacle collection reminder",
-      "variables": ["reg_no", "date", "venue"],
-      "body": "कल SNP से चश्मा लें। क्रमांक {reg_no}, दिनांक {date}, स्थान {venue}। टोकन साथ लाएँ।",
-      "dlt_body": "कल SNP से चश्मा लें। क्रमांक ##reg_no##, दिनांक ##date##, स्थान ##venue##। टोकन साथ लाएँ।"
+      "variables": [
+        "camp_no",
+        "date",
+        "end_date",
+        "start_time",
+        "end_time",
+        "venue",
+        "reg_no"
+      ],
+      "body": "SNP के {camp_no} वे शिविर के चश्मे बनकर  तैयार है।  चश्में {date} से {end_date} तक सुबह  {start_time} बजे से शाम {end_time} बजे तक {venue} आकर ले जावें। टोकन क्रमांक {reg_no} अवश्य साथ लाएँ।",
+      "dlt_body": "SNP के ##camp_no## वे शिविर के चश्मे बनकर  तैयार है।  चश्में ##date## से ##end_date## तक सुबह  ##start_time## बजे से शाम ##end_time## बजे तक ##venue## आकर ले जावें। टोकन क्रमांक ##reg_no## अवश्य साथ लाएँ।",
+      "dlt_portal_body": "SNP के {#var#} वे शिविर के चश्मे बनकर  तैयार है।  चश्में {#var#} से {#var#} तक सुबह  {#var#} बजे से शाम {#var#} बजे तक {#var#} आकर ले जावें। टोकन क्रमांक {#var#} अवश्य साथ लाएँ।"
     }
   ],
   "request_example": {
@@ -64,9 +111,13 @@
     "recipients": [
       {
         "mobiles": "919999999999",
+        "camp_no": "162",
         "reg_no": "142",
-        "date": "12/03/2026",
-        "venue": "Vimla Ramkrishna Bajaj Eye Hospital, Near Canara Bank, Bilasi Mod, Deoghar 814112 (Jharkhand)"
+        "date": "20-09-2026",
+        "end_date": "27-09-2026",
+        "start_time": "10:00",
+        "end_time": "05:00",
+        "venue": "SNP कार्यालय, देवघर"
       }
     ]
   }

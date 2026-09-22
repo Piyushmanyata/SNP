@@ -118,13 +118,14 @@ describe("Token print page", () => {
       id: "tok-2",
       item_type: "specs_made",
       collection_date: "2026-12-05",
+      collection_end_date: "2026-12-12",
       collection_venue: "Base Optical",
       collection_start_time: "10:00",
       collection_end_time: "12:00",
     });
 
     expect(surface.textContent).toContain("चश्मा / Spectacles");
-    expect(surface.textContent).toContain("05-12-2026");
+    expect(surface.textContent).toContain("05-12-2026 – 12-12-2026");
     expect(surface.textContent).toContain("10:00–12:00");
     expect(surface.textContent).toContain("Bring this token for collection.");
     expect(surface.textContent).not.toContain("IOL");

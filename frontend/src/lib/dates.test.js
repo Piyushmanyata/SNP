@@ -1,4 +1,10 @@
-import { displayDate, displayTimestamp } from "./dates";
+import { displayDate, displayDateRange, displayTimestamp } from "./dates";
+
+test("a date range reads as one date when it starts and ends on the same day", () => {
+  expect(displayDateRange("2026-09-20", "2026-09-27")).toBe("20-09-2026 – 27-09-2026");
+  expect(displayDateRange("2026-09-20", "2026-09-20")).toBe("20-09-2026");
+  expect(displayDateRange("2026-09-20", null)).toBe("20-09-2026");
+});
 
 test("an ISO date is displayed as DD-MM-YYYY", () => {
   expect(displayDate("2026-09-17")).toBe("17-09-2026");

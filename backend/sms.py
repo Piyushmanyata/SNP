@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import string
 from datetime import timedelta
 from typing import Any, Dict, Optional
 
@@ -11,12 +12,12 @@ import msg91
 
 logger = logging.getLogger(__name__)
 
-REGISTRATION_CONFIRMATION = "SNP नेत्र शिविर में आपका पंजीकरण हो गया है। क्रमांक: {reg_no} दिनांक: {date} शिविर स्थल: {venue}। कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।"
-CAMP_REMINDER = "कल ({date}) को SNP नेत्र शिविर में आपका नेत्र परीक्षण है। कृपया समय पर {venue} पहुँचें। यह टोकन शिविर स्थल पर दिखाएँ। क्रमांक: {reg_no}। कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।"
-OT_TOKEN = "SNP नेत्र शिविर में आपका ऑपरेशन {date} को निर्धारित हुआ है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ लाएँ। स्थल: {venue}।"
-OT_REMINDER = "कल ({date}) को आपका नेत्र ऑपरेशन निर्धारित है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ लाएँ। स्थल: {venue}।"
-SPECS_TOKEN = "SNP द्वारा आपका चश्मा {date}{window} पर {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर आएँ।"
-SPECS_REMINDER = "कल SNP से चश्मा लें। क्रमांक {reg_no}, दिनांक {date}{window}, स्थान {venue}। टोकन साथ लाएँ।"
+REGISTRATION_CONFIRMATION = "SNP के {camp_no}वें नेत्र शिविर में आपका पंजीकरण हो गया है। क्रमांक: {reg_no} दिनांक: {date} शिविर स्थल: {venue}। कृपया शिविर के दिन अपना आधार कार्ड अवश्य साथ लाएँ।"
+CAMP_REMINDER = "कल ({date}) को SNP के {camp_no} वें नेत्र शिविर में आपका नेत्र परीक्षण है। कृपया समय पर {venue} पहुँचें। यह टोकन शिविर स्थल पर दिखाएँ। क्रमांक: {reg_no}। कृपया शिविर के दिन अपना आधार कार्ड अवश्य साथ लाएँ।"
+OT_TOKEN = "SNP के {camp_no} वें नेत्र शिविर में आपका ऑपरेशन {date} को निर्धारित हुआ है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर अवश्य साथ लाएँ। स्थल: {venue}।"
+OT_REMINDER = "कल ({date}) को SNP के {camp_no} वें नेत्र शिविर में आपका नेत्र ऑपरेशन निर्धारित है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ अवश्य लाएँ। स्थल: {venue}।"
+SPECS_TOKEN = "SNP के {camp_no} वें नेत्र शिविर में आपको चश्मा {date} से {end_date} तक सुबह  {start_time} बजे से शाम {end_time} बजे तक {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर अवश्य आएँ।"
+SPECS_REMINDER = "SNP के {camp_no} वे शिविर के चश्मे बनकर  तैयार है।  चश्में {date} से {end_date} तक सुबह  {start_time} बजे से शाम {end_time} बजे तक {venue} आकर ले जावें। टोकन क्रमांक {reg_no} अवश्य साथ लाएँ।"
 
 MESSAGE_COPY = {
     "registration": REGISTRATION_CONFIRMATION,
@@ -90,10 +91,17 @@ async def _claim(
     return doc
 
 
-def _window_text(start_time: Optional[str], end_time: Optional[str]) -> str:
-    if start_time and end_time:
-        return f", समय {start_time}–{end_time}"
-    return ""
+def morning_to_evening(start_time: Optional[str], end_time: Optional[str]) -> bool:
+    return bool(start_time and end_time and start_time < "12:00" <= end_time)
+
+
+def _clock(hhmm: str) -> str:
+    hour, minute = hhmm.split(":")
+    return f"{(int(hour) - 1) % 12 + 1:02d}:{minute}"
+
+
+def _template_variables(template: str, values: Dict[str, Any]) -> Dict[str, Any]:
+    return {name: values[name] for _, name, _, _ in string.Formatter().parse(template) if name}
 
 
 async def deliver_patient_sms(
@@ -104,6 +112,7 @@ async def deliver_patient_sms(
     venue: str,
     start_time: Optional[str] = None,
     end_time: Optional[str] = None,
+    end_date: Optional[str] = None,
     retry_after: Optional[timedelta] = None,
 ) -> str:
     """Returns sent, failed, uncertain, or skipped. Never raises."""
@@ -116,19 +125,30 @@ async def deliver_patient_sms(
         reg_no = patient.get("reg_no")
         if not number or reg_no is None:
             return "skipped"
-        fields = {"reg_no": reg_no, "date": helpers.display_date(event_date), "venue": venue}
-        if "{window}" in MESSAGE_COPY[message_type]:
-            fields["window"] = _window_text(start_time, end_time)
-        copy = MESSAGE_COPY[message_type].format(**fields)
+        camp = await db.camps.find_one({"_id": patient["camp_id"]}) if patient.get("camp_id") else None
+        hours = morning_to_evening(start_time, end_time)
+        template = MESSAGE_COPY[message_type]
+        variables = _template_variables(template, {
+            "reg_no": reg_no,
+            "camp_no": str((camp or {}).get("camp_number") or ""),
+            "date": helpers.display_date(event_date),
+            "end_date": helpers.display_date(end_date or event_date),
+            "start_time": _clock(str(start_time)) if hours else "",
+            "end_time": _clock(str(end_time)) if hours else "",
+            "venue": venue,
+        })
+        missing = [name for name, value in variables.items() if value == ""]
+        if missing:
+            logger.warning("Patient SMS %s not sent: no %s", message_type, ", ".join(missing))
+            return "skipped"
+        copy = template.format(**variables)
         row = await _claim(
             db, patient["_id"], message_type, event_date, number, venue, copy,
             retry_after=retry_after,
         )
         if not row:
             return "skipped"
-        provider_id = await asyncio.to_thread(
-            msg91.send_dlt_sms, message_type, number, reg_no, fields["date"] + fields.get("window", ""), venue
-        )
+        provider_id = await asyncio.to_thread(msg91.send_dlt_sms, message_type, number, variables)
         accepted = True
         await db.reminder_ledger.update_one(
             {"_id": row["_id"]},
@@ -159,6 +179,7 @@ async def send_patient_sms(
     venue: str,
     start_time: Optional[str] = None,
     end_time: Optional[str] = None,
+    end_date: Optional[str] = None,
 ) -> bool:
     """Best-effort per-patient DLT send, recorded once per patient/type/event date.
 
@@ -166,5 +187,5 @@ async def send_patient_sms(
     True means the provider accepted the message, including an uncertain ledger write.
     """
     return (await deliver_patient_sms(
-        db, patient, message_type, event_date, venue, start_time, end_time,
+        db, patient, message_type, event_date, venue, start_time, end_time, end_date,
     )) in ("sent", "uncertain")

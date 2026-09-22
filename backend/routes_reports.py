@@ -309,7 +309,8 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
         sort=[("day_date", 1)],
     )
     specs_day = await db.specs_collection_days.find_one(
-        {"camp_id": camp["_id"], "day_date": {"$gte": today}, "start_time": {"$gt": ""}, "end_time": {"$gt": ""}},
+        {"camp_id": camp["_id"], "$or": [{"day_date": {"$gte": today}}, {"end_date": {"$gte": today}}],
+         "start_time": {"$gt": ""}, "end_time": {"$gt": ""}},
         sort=[("day_date", 1)],
     )
     next_ot = None
@@ -323,6 +324,7 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
     if specs_day:
         next_specs = {
             "day_date": specs_day["day_date"],
+            "end_date": specs_day.get("end_date") or specs_day["day_date"],
             "venue": specs_day.get("venue"),
             "start_time": specs_day["start_time"],
             "end_time": specs_day["end_time"],

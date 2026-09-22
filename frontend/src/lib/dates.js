@@ -3,6 +3,10 @@ export function displayDate(value) {
   return match ? `${match[3]}-${match[2]}-${match[1]}` : value || "";
 }
 
+export function displayDateRange(start, end) {
+  return end && end !== start ? `${displayDate(start)} – ${displayDate(end)}` : displayDate(start);
+}
+
 const IST_PARTS = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Asia/Kolkata",
   year: "numeric",

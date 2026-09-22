@@ -84,7 +84,7 @@ async def _seed_camp(mock_db, day_date=TODAY, printing_open=None):
     day_id = ObjectId()
     await mock_db.camps.insert_one({
         "_id": camp_id, "name": "Sikar Camp", "venue": "Sikar Bhawan",
-        "camp_date": day_date, "is_active": True, "print_override": None,
+        "camp_date": day_date, "camp_number": 162, "is_active": True, "print_override": None,
     })
     await mock_db.camp_days.insert_one({
         "_id": day_id, "camp_id": camp_id, "day_date": day_date,
@@ -921,6 +921,22 @@ class TestPrintingMatrix:
             assert len(mock_db.camp_days.docs) == 2
         asyncio.run(run())
 
+    def test_p07_camp_number_is_set_at_setup_and_editable(self, monkeypatch):
+        async def run():
+            _mock(monkeypatch)
+            out = await routes_camps.create_camp(
+                CampBody(name="SNP नेत्र शिविर", venue="Hall", camp_date=TODAY, camp_number=162), actor=ADMIN,
+            )
+            assert out["camp"]["camp_number"] == 162
+            edited = await routes_camps.update_camp(out["camp"]["id"], CampBody(
+                name="SNP नेत्र शिविर", venue="हंसा गार्डन, देवघर", camp_date=TODAY, camp_number=163,
+            ), actor=ADMIN)
+            assert edited["camp"]["camp_number"] == 163
+            assert edited["camp"]["venue"] == "हंसा गार्डन, देवघर"
+            with pytest.raises(ValueError):
+                CampBody(name="x", venue="y", camp_date=TODAY, camp_number=0)
+        asyncio.run(run())
+
     def test_p08_existing_arrival_no_second_booking(self, monkeypatch):
         async def run():
             mock_db = _mock(monkeypatch)
@@ -1078,8 +1094,8 @@ class TestScoringAndMessages:
 
     def test_m02_reminder_includes_aadhaar_hindi(self, monkeypatch):
         text = sms.REGISTRATION_CONFIRMATION + sms.CAMP_REMINDER
-        assert "कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।" in sms.REGISTRATION_CONFIRMATION
-        assert "कृपया शिविर के दिन अपना आधार कार्ड साथ लाएँ।" in sms.CAMP_REMINDER
+        assert "कृपया शिविर के दिन अपना आधार कार्ड अवश्य साथ लाएँ।" in sms.REGISTRATION_CONFIRMATION
+        assert "कृपया शिविर के दिन अपना आधार कार्ड अवश्य साथ लाएँ।" in sms.CAMP_REMINDER
         assert "{date}" in sms.CAMP_REMINDER
         assert "{venue}" in sms.CAMP_REMINDER
         assert "{reg_no}" in sms.REGISTRATION_CONFIRMATION
