@@ -16,6 +16,7 @@ from routes_registration import (
 router = APIRouter(prefix="/api/desk", tags=["desk"])
 
 OVERWRITTEN_FIELDS = ("full_name", "age", "gender", "dob", "aadhaar_last4", "address")
+MAX_REG_NO_DIGITS = 12
 
 
 async def _resolve(value: str) -> Optional[Dict[str, Any]]:
@@ -24,7 +25,9 @@ async def _resolve(value: str) -> Optional[Dict[str, Any]]:
     p = await db.patients.find_one({"patient_qr": v})
     if p:
         return p
-    if v.isdigit():
+    if v.isdecimal():
+        if len(v) > MAX_REG_NO_DIGITS:
+            raise HTTPException(status_code=400, detail="That is not a valid registration number")
         p = await db.patients.find_one({"reg_no": int(v)})
         if p:
             return p

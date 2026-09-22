@@ -8,6 +8,7 @@ import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from xml.etree.ElementTree import Element, tostring
 from zoneinfo import ZoneInfo
 
 backend_dir = Path(__file__).resolve().parents[1]
@@ -68,8 +69,10 @@ def _mock(monkeypatch):
     monkeypatch.setattr(helpers, "now_ist", lambda: FROZEN_IST)
     monkeypatch.setattr(helpers, "today_ist_str", lambda: TODAY)
     import routes_camps
+    import routes_clinical
     monkeypatch.setattr(routes_camps, "now_utc", lambda: FROZEN_IST.astimezone(timezone.utc), raising=False)
     monkeypatch.setattr(routes_camps, "today_ist_str", lambda: TODAY, raising=False)
+    monkeypatch.setattr(routes_clinical, "now_ist", lambda: FROZEN_IST, raising=False)
     return mock_db
 
 
@@ -111,6 +114,11 @@ async def _register(day_id, **fields):
         camp_day_id=str(day_id),
         **fields,
     )
+    if body.aadhaar_scanned and not body.qr_payload:
+        body.qr_payload = tostring(Element(
+            "PrintLetterBarcodeData", name=body.full_name, gender=body.gender or "",
+            dob=body.dob or "", uid=body.aadhaar_last4 or "", street=body.address or "",
+        ), encoding="unicode")
     result = await desk_register(body, _Request(), actor=ACTOR, background_tasks=None)
     return result["registration"]
 

@@ -17,6 +17,8 @@ from helpers import IST
 # decode cheap.
 MAX_SECURE_QR_DIGITS = 16000
 MAX_DECOMPRESSED_BYTES = 256 * 1024
+MAX_HUMAN_AGE = 130
+XML_QR_ROOT = "printletterbarcodedata"
 
 if hasattr(sys, "set_int_max_str_digits"):
     try:
@@ -141,7 +143,7 @@ def parse_secure_qr(qr: str) -> dict:
     gender = _normalize_gender(raw_gender)
     dob_iso = _to_iso_dob(fields.get("dob", ""))
     age = _calc_age(dob_iso)
-    if age is None or age < 0:
+    if age is None or not 0 <= age <= MAX_HUMAN_AGE:
         raise ValueError("Invalid Secure QR date of birth")
     addr_keys = ["house", "street", "landmark", "location", "postoffice", "vtc", "subdistrict", "district", "state", "pincode"]
     address = ", ".join(fields.get(k, "").strip() for k in addr_keys if fields.get(k, "").strip())
@@ -160,15 +162,11 @@ def _parse_xml_attributes(raw_xml: str) -> dict:
     cleaned = raw_xml.strip().lstrip("\ufeff")
     try:
         root = ET.fromstring(cleaned)
-        return {k.lower(): v for k, v in root.attrib.items()}
-    except Exception:
-        sanitized = re.sub(r"&(?!amp;|lt;|gt;|quot;|apos;)", "&amp;", cleaned)
-        try:
-            root = ET.fromstring(sanitized)
-            return {k.lower(): v for k, v in root.attrib.items()}
-        except Exception:
-            matches = re.findall(r'([a-zA-Z_:][a-zA-Z0-9._:-]*)\s*=\s*["\']([^"\']*)["\']', cleaned)
-            return {k.lower(): v for k, v in matches}
+    except ET.ParseError:
+        root = ET.fromstring(re.sub(r"&(?!amp;|lt;|gt;|quot;|apos;)", "&amp;", cleaned))
+    if root.tag.lower() != XML_QR_ROOT:
+        raise ValueError("Unsupported XML QR root")
+    return {k.lower(): v for k, v in root.attrib.items()}
 
 
 def _extract_xml_address(attrs: dict) -> str:
@@ -192,18 +190,20 @@ def parse_xml_qr(qr: str) -> dict:
     name = (attrs.get("name") or "").strip()
     if not name:
         raise ValueError("No name in XML QR")
-    gender = _normalize_gender(attrs.get("gender"))
     uid = (attrs.get("uid") or "").strip()
-    dob = attrs.get("dob") or attrs.get("yob") or ""
-    dob_iso = _to_iso_dob(dob)
-    address = _extract_xml_address(attrs)
+    if not re.fullmatch(r"[0-9]{4}|[0-9]{12}", uid):
+        raise ValueError("Invalid XML QR Aadhaar number")
+    dob_iso = _to_iso_dob(attrs.get("dob") or attrs.get("yob") or "")
+    age = _calc_age(dob_iso)
+    if age is None or not 0 <= age <= MAX_HUMAN_AGE:
+        raise ValueError("Invalid XML QR date of birth")
     return {
         "full_name": name,
-        "gender": gender,
+        "gender": _normalize_gender(attrs.get("gender")),
         "dob": dob_iso,
-        "age": _calc_age(dob_iso),
-        "aadhaar_last4": uid[-4:] if uid else "",
-        "address": address,
+        "age": age,
+        "aadhaar_last4": uid[-4:],
+        "address": _extract_xml_address(attrs),
     }
 
 

@@ -193,7 +193,7 @@ The single camp day currently selected for door check-in and printing. Automatic
 _Avoid_: calendar today, booked day (a patient may have booked a different day)
 
 **Manual entry**:
-A desk registration typed instead of scanned. Marked on the registration; camp-day identity rechecking is required. Registration reveals it after three Failures — permission denial, stall, cancel, frames, network and busy do not count. Scan at the door never reveals it by counting Failures; there it is behind the Door manual gate. Self-register has no typed path: without a readable QR the public endpoint refuses with `AADHAAR_QR_REQUIRED` and sends the patient to the desk. No client-supplied flag can mint a public registration without a Lock.
+A desk registration typed instead of scanned. Marked on the registration; camp-day identity rechecking is required. Registration reveals it after three Failures — permission denial, stall, cancel, frames, network and busy do not count. Scan at the door never reveals it by counting Failures; there it is behind the Door manual gate. Self-register has no typed path: without a readable QR the public endpoint refuses with `AADHAAR_QR_REQUIRED` and sends the patient to the desk. No client-supplied flag can mint a registration without a Lock: the desk and the public endpoint both re-decode the payload themselves and take name, age, gender, DOB, last-4 and address from that decode, so a registration that claims a scan and carries no payload is refused with `AADHAAR_QR_REQUIRED`.
 _Avoid_: permission fallback, two-failure unlock, public reviewed details
 
 **Door manual gate**:

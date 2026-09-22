@@ -366,3 +366,17 @@ def test_extract_xml_address_helper():
     }
     addr = _extract_xml_address(attrs)
     assert addr == "42, Main St, City, State, 123456"
+
+
+@pytest.mark.parametrize("xml", [
+    '<anything name="Not Aadhaar" gender="F" dob="1975-06-14" uid="123456781234"/>',
+    '<PrintLetterBarcodeData name="Sunita Devi" gender="F" dob="1975-06-14" uid="12345678',
+    '<PrintLetterBarcodeData name="Sunita Devi" gender="F" dob="2099-06-14" uid="123456781234"/>',
+    '<PrintLetterBarcodeData name="Sunita Devi" gender="F" dob="1975-06-14" uid="12345"/>',
+    '<PrintLetterBarcodeData name="Sunita Devi" gender="F" dob="1850-06-14" uid="123456781234"/>',
+    '<PrintLetterBarcodeData name="Sunita Devi" gender="F" uid="123456781234"/>',
+])
+def test_decode_xml_rejects_forged_or_impossible_cards(xml):
+    res = decode_aadhaar(xml)
+    assert res["outcome"] == "garbage"
+    assert "data" not in res

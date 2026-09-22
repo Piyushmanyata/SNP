@@ -243,7 +243,21 @@ async def _require_printed_patient(db, patient_id: str) -> dict:
     return p
 
 
-async def _upsert_transcription(db, patient: dict, actor: dict, content: dict, *, locked: bool) -> dict:
+def _draft_version_match(version: int) -> Any:
+    return {"$in": [None, 0]} if version <= 0 else version
+
+
+def _draft_conflict() -> HTTPException:
+    return conflict(
+        "draft_version_conflict",
+        "Another operator saved this prescription; reload before saving.",
+    )
+
+
+async def _upsert_transcription(
+    db, patient: dict, actor: dict, content: dict, *, locked: bool,
+    expected_version: Optional[int] = None,
+) -> dict:
     existing = await db.transcriptions.find_one({"patient_id": patient["_id"]})
     fields = {
         **content,
@@ -265,26 +279,22 @@ async def _upsert_transcription(db, patient: dict, actor: dict, content: dict, *
             doc["_id"] = res.inserted_id
             return doc
         except DuplicateKeyError:
-            existing = await db.transcriptions.find_one({"patient_id": patient["_id"]})
-            if not existing:
-                raise
-    version = (existing.get("draft_version") or 0) + 1
-    query = {"_id": existing["_id"]}
+            raise _draft_conflict()
+    query: Dict[str, Any] = {"_id": existing["_id"]}
     if not locked:
         query.update({
             "locked": {"$ne": True},
-            "draft_version": existing.get("draft_version"),
             "$or": [
                 {"clinical_write_token": None}, {"clinical_write_until": {"$lte": now_utc()}},
             ],
         })
+        if expected_version is not None:
+            query["draft_version"] = _draft_version_match(expected_version)
     t = await db.transcriptions.find_one_and_update(
-        query,
-        {"$set": {**fields, "draft_version": version}},
-        return_document=True,
+        query, {"$set": fields, "$inc": {"draft_version": 1}}, return_document=True,
     )
     if not t:
-        raise conflict("stale_draft", "The prescription changed; reload before saving the draft.")
+        raise _draft_conflict()
     return t
 
 
@@ -308,7 +318,9 @@ async def create_transcription(
         raise conflict("already_completed", "Use a correction to change a completed prescription.")
     await _apply_catalogue(db, body)
     content = _content_from_body(body)
-    t = await _upsert_transcription(db, p, actor, content, locked=False)
+    t = await _upsert_transcription(
+        db, p, actor, content, locked=False, expected_version=body.expected_draft_version,
+    )
     return {"transcription": ser_trans(t)}
 
 
@@ -338,8 +350,11 @@ async def complete_prescription(
         db, p, actor, content, lines, none, body.operation_id, "complete", None, None,
     )
     transcription = await db.transcriptions.find_one({"patient_id": p["_id"]})
+    drafted_here = transcription is None
     if not transcription:
-        transcription = await _upsert_transcription(db, p, actor, content, locked=False)
+        transcription = await _upsert_transcription(
+            db, p, actor, content, locked=False, expected_version=body.expected_draft_version,
+        )
     async with _clinical_write(db, str(transcription["_id"])):
         current_patient = await _require_printed_patient(db, body.patient_id)
         committed: dict | None
@@ -348,6 +363,14 @@ async def complete_prescription(
                 raise conflict("stale_generation", "The prescription changed; reload and retry.")
             committed = current_patient
         else:
+            if not drafted_here and body.expected_draft_version is not None and not await db.transcriptions.find_one_and_update(
+                {
+                    "_id": transcription["_id"],
+                    "draft_version": _draft_version_match(body.expected_draft_version),
+                },
+                {"$set": {"updated_at": now_utc()}},
+            ):
+                raise _draft_conflict()
             committed = await commit_completion(db, current_patient, revision, actor, body.expected_generation)
         if not committed:
             raise conflict("already_completed", "This patient already has a completed prescription.")

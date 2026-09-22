@@ -82,11 +82,8 @@ class MockCollection:
 
     def _matches(self, doc, query):
         for k, v in query.items():
-            if k == "_id":
-                if isinstance(v, dict) and "$in" in v:
-                    if doc.get("_id") not in v["$in"]:
-                        return False
-                elif doc.get("_id") != v:
+            if k == "_id" and not isinstance(v, dict):
+                if doc.get("_id") != v:
                     return False
             elif k == "$or":
                 if not any(self._matches(doc, subq) for subq in v):
@@ -228,6 +225,7 @@ class MockCollection:
             return sum(1 for d in self.docs if self._matches(d, query))
 
     def aggregate(self, pipeline):
+        self.db.query_count += 1
         docs = self.docs
         for stage in pipeline:
             if "$match" in stage:
@@ -378,14 +376,14 @@ class TestXmlAndAadhaarStress:
         with pytest.raises(ValueError, match="No name in XML QR"):
             parse_xml_qr(xml)
 
-    def test_xml_qr_fallback_regex_on_malformed_xml_syntax(self):
+    def test_xml_qr_malformed_syntax_is_rejected(self):
         broken_xml = '<PrintLetterBarcodeData uid="987654321098" name="Kavita Rao" gender="FEMALE" dob="1995-12-30" dist="Bengaluru" unclosed'
-        res = parse_xml_qr(broken_xml)
-        assert res["full_name"] == "Kavita Rao"
-        assert res["gender"] == "F"
-        assert res["dob"] == "1995-12-30"
-        assert res["aadhaar_last4"] == "1098"
-        assert "Bengaluru" in res["address"]
+        with pytest.raises((ValueError, ET.ParseError)):
+            parse_xml_qr(broken_xml)
+
+    def test_xml_qr_unknown_root_is_rejected(self):
+        with pytest.raises(ValueError, match="Unsupported XML QR root"):
+            parse_xml_qr('<anything uid="987654321098" name="Kavita Rao" gender="F" dob="1995-12-30"/>')
 
     def test_xml_qr_unicode_characters_and_hindi_script(self):
         xml = '<PrintLetterBarcodeData uid="555566667777" name="राजेश शर्मा" gender="M" yob="1982" dist="वाराणसी" pc="221001"/>'
@@ -395,18 +393,23 @@ class TestXmlAndAadhaarStress:
         assert res["dob"] == "1982-01-01"
         assert "वाराणसी" in res["address"]
 
-    def test_xml_qr_short_uid_handling(self):
-        xml = '<PrintLetterBarcodeData uid="12" name="Anil" gender="M"/>'
-        res = parse_xml_qr(xml)
-        assert res["aadhaar_last4"] == "12"
+    def test_xml_qr_short_uid_is_rejected(self):
+        xml = '<PrintLetterBarcodeData uid="12" name="Anil" gender="M" yob="1990"/>'
+        with pytest.raises(ValueError, match="Aadhaar number"):
+            parse_xml_qr(xml)
 
-    def test_xml_qr_no_uid(self):
-        xml = '<PrintLetterBarcodeData name="Sunita" gender="F"/>'
-        res = parse_xml_qr(xml)
-        assert res["aadhaar_last4"] == ""
+    def test_xml_qr_no_uid_is_rejected(self):
+        xml = '<PrintLetterBarcodeData name="Sunita" gender="F" yob="1990"/>'
+        with pytest.raises(ValueError, match="Aadhaar number"):
+            parse_xml_qr(xml)
+
+    def test_xml_qr_future_date_of_birth_is_rejected(self):
+        xml = '<PrintLetterBarcodeData uid="111122223333" name="Sunita" gender="F" dob="2099-01-01"/>'
+        with pytest.raises(ValueError, match="date of birth"):
+            parse_xml_qr(xml)
 
     def test_xml_qr_alternative_attribute_names(self):
-        xml = '<PrintLetterBarcodeData uid="111122223333" name="Mohan Lal" gender="Male" lm="Shiv Mandir" loc="Sector 2" village="Khed" subdist="Haveli" dist="Pune" pc="411001"/>'
+        xml = '<PrintLetterBarcodeData uid="111122223333" name="Mohan Lal" gender="Male" yob="1990" lm="Shiv Mandir" loc="Sector 2" village="Khed" subdist="Haveli" dist="Pune" pc="411001"/>'
         res = parse_xml_qr(xml)
         assert "Shiv Mandir" in res["address"]
         assert "Sector 2" in res["address"]
@@ -751,7 +754,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 "venue": "District Hospital", "start_time": "09:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
             })
             await mock_db.specs_collection_days.insert_one({
-                "_id": day2, "camp_id": ObjectId(), "day_date": "2026-09-20",
+                "_id": day2, "camp_id": ObjectId(), "day_date": SCHEDULE_DAY_2,
                 "venue": "Community Health Center", "start_time": "09:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
             })
 
@@ -794,7 +797,7 @@ class TestFulfilmentDecomposedAndInvariants:
             )
             res2 = await record_fulfilment(update_body, actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
             assert res2["slip"]["version"] == 2
-            assert res2["slip"]["collection_date"] == "2026-09-20"
+            assert res2["slip"]["collection_date"] == SCHEDULE_DAY_2
 
             active_slips = [s for s in mock_db.deferred_slips.docs if s["active"]]
             cancelled_slips = [s for s in mock_db.deferred_slips.docs if s["cancelled"]]

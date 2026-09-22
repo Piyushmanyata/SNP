@@ -9,6 +9,12 @@ from conftest import API
 TAG = uuid.uuid4().hex[:8]
 TODAY_IST = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d")
 FUTURE = (datetime.now(ZoneInfo("Asia/Kolkata")) + timedelta(days=40)).strftime("%Y-%m-%d")
+
+
+def _age_on_card(dob):
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date()
+    born = datetime.strptime(dob, "%Y-%m-%d").date()
+    return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
 PAST = (datetime.now(ZoneInfo("Asia/Kolkata")) - timedelta(days=40)).strftime("%Y-%m-%d")
 
 
@@ -54,6 +60,11 @@ def _reg(session, camp_day_id, **fields):
         "registration_request_id": fields.pop("registration_request_id", str(uuid.uuid4())),
     }
     body.update(fields)
+    if body.get("aadhaar_scanned"):
+        body["qr_payload"] = tostring(Element(
+            "PrintLetterBarcodeData", name=body["full_name"], gender=body["gender"],
+            dob=body["dob"], uid=body["aadhaar_last4"], street=body.get("address", ""),
+        ), encoding="unicode")
     return session.post(f"{API}/register", json=body, timeout=30)
 
 
@@ -226,7 +237,7 @@ class TestAadhaarOverwrite:
         assert reg["reg_no"] == orig["reg_no"]
         assert reg["id"] == orig["id"]
         assert reg["full_name"] == f"TEST Card Name {TAG}"
-        assert reg["age"] == 61
+        assert reg["age"] == _age_on_card("1965-07-07")
         assert reg["gender"] == "F"
         assert reg["dob"] == "1965-07-07"
         assert reg["aadhaar_last4"] == "8881"

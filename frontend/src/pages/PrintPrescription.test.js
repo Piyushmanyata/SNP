@@ -255,6 +255,76 @@ describe("PrintPrescription component", () => {
     expect(sheet).toMatchSnapshot();
   });
 
+  test("a sponsor logo request that never answers does not withhold the prescription", async () => {
+    api.get.mockImplementation((url) => {
+      if (url === "/desk/print/rx-7") {
+        return Promise.resolve({
+          data: {
+            prescription: {
+              id: "rx-7", camp_id: "camp-001", venue: "Community Center", reg_no: "1001",
+              patient_qr: "qr-1001", full_name: "Aparna Sen", age: 45, gender: "Female", date: "2026-08-27",
+            },
+          },
+        });
+      }
+      return new Promise(() => {});
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/print/rx/rx-7"]}>
+          <Routes><Route path="/print/rx/:id" element={<PrintPrescription />} /></Routes>
+        </MemoryRouter>
+      );
+    });
+
+    expect(container.querySelector('[data-testid="a4-prescription-sheet"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="print-a4-prescription-button"]')).not.toBeNull();
+    expect(container.textContent).toContain("Aparna Sen");
+    expect(container.querySelector('[data-testid="rx-sponsor-strip"]').children).toHaveLength(0);
+  });
+
+  test("a sponsor logo request that fails still leaves the prescription printable", async () => {
+    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => {});
+    api.get.mockImplementation((url) => {
+      if (url === "/desk/print/rx-8") {
+        return Promise.resolve({
+          data: { prescription: { id: "rx-8", camp_id: "camp-001", patient_qr: "qr-1", full_name: "Aparna Sen" } },
+        });
+      }
+      return Promise.reject(new Error("Template service unavailable"));
+    });
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/print/rx/rx-8"]}>
+          <Routes><Route path="/print/rx/:id" element={<PrintPrescription />} /></Routes>
+        </MemoryRouter>
+      );
+    });
+
+    expect(container.querySelector('[data-testid="print-a4-prescription-button"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="rx-sponsor-strip"]').children).toHaveLength(0);
+    warnSpy.mockRestore();
+  });
+
+  test.each(["loading", "error"])("the %s scaffold is never part of the printed page", async (stage) => {
+    api.get.mockImplementation(() => (stage === "loading"
+      ? new Promise(() => {})
+      : Promise.reject(new Error("Prescription not found"))));
+
+    await act(async () => {
+      root.render(
+        <MemoryRouter initialEntries={["/print/rx/rx-x"]}>
+          <Routes><Route path="/print/rx/:id" element={<PrintPrescription />} /></Routes>
+        </MemoryRouter>
+      );
+    });
+
+    expect(container.querySelector('[data-testid="a4-prescription-sheet"]')).toBeNull();
+    expect(container.firstElementChild.className).toContain("no-print");
+  });
+
   test("handles prescription loading error", async () => {
     api.get.mockRejectedValueOnce(new Error("Prescription not found"));
 

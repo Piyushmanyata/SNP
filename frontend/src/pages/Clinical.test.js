@@ -764,3 +764,227 @@ describe("Clinical page component", () => {
     jest.useRealTimers();
   });
 });
+
+describe("Clinical draft version and dirty-draft protection", () => {
+  beforeEach(() => api.post.mockReset());
+
+  const draftPatient = (draft_version) => ({ data: {
+    registration: { id: "reg-1", reg_no: "1001", full_name: "Draft Patient", queue_status: "arrived" },
+    person: { id: "p-1" },
+    transcription: { id: "tx-1", locked: false, draft_version, diagnosis_options: [] },
+    fulfilments: [],
+    slips: [],
+  } });
+
+  const savedDraft = (draft_version) => ({ data: { transcription: { id: "tx-1", draft_version } } });
+
+  const conflictError = { response: { status: 409, data: { detail: {
+    code: "draft_version_conflict",
+    message: "Another operator saved this prescription; reload before saving.",
+  } } } };
+
+  const openDraft = async (version) => {
+    api.post.mockResolvedValueOnce(draftPatient(version));
+    await renderPage();
+    typeLookup("1001");
+    await submitLookup();
+    await act(async () => container.querySelector('[data-testid="edit-transcription-button"]').click());
+  };
+
+  const typeOther = (value) => act(() => {
+    const input = container.querySelector('[data-testid="diagnosis-other-input"]');
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, value);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+
+  const otherValue = () => container.querySelector('[data-testid="diagnosis-other-input"]').value;
+
+  test("the draft save and the completion both carry the loaded draft version", async () => {
+    await openDraft(3);
+
+    api.post.mockResolvedValueOnce(savedDraft(4));
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
+    expect(api.post).toHaveBeenLastCalledWith(
+      "/clinical/transcription",
+      expect.objectContaining({ patient_id: "reg-1", expected_draft_version: 3 }),
+    );
+
+    await act(async () => container.querySelector('[data-testid="none-prescribed"]').click());
+    api.post.mockResolvedValueOnce(savedDraft(5));
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
+    expect(api.post).toHaveBeenLastCalledWith(
+      "/clinical/transcription",
+      expect.objectContaining({ expected_draft_version: 4 }),
+    );
+
+    await act(async () => container.querySelector('[data-testid="full-transcription-confirmed"]').click());
+    api.post.mockResolvedValueOnce({ data: {
+      registration: { id: "reg-1", reg_no: "1001", full_name: "Draft Patient", clinical_generation: 1 },
+      revision: { id: "rev-1", prescribed_lines: [] },
+      transcription: { id: "tx-1", locked: true, draft_version: 6 },
+    } });
+    await act(async () => container.querySelector('[data-testid="complete-prescription-button"]').click());
+    expect(api.post).toHaveBeenLastCalledWith(
+      "/clinical/transcription/complete",
+      expect.objectContaining({ expected_draft_version: 5 }),
+    );
+    expect(container.textContent).toContain("Prescription completed");
+  });
+
+  test("a draft version conflict keeps the typed entries and offers review instead of overwriting", async () => {
+    await openDraft(2);
+    typeOther("Pterygium left eye");
+    api.post.mockRejectedValueOnce(conflictError);
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
+
+    expect(container.querySelector('[data-testid="wizard-progress"]').textContent).toContain("Step 1 of");
+    expect(otherValue()).toBe("Pterygium left eye");
+    expect(container.querySelector('[data-testid="draft-conflict"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="draft-conflict-reload"]')).not.toBeNull();
+
+    await act(async () => container.querySelector('[data-testid="draft-conflict-review"]').click());
+    expect(container.querySelector('[data-testid="draft-conflict"]')).toBeNull();
+    expect(otherValue()).toBe("Pterygium left eye");
+    expect(api.post).toHaveBeenCalledTimes(2);
+  });
+
+  test("a completion refused as stale retries under a new operation id after reloading", async () => {
+    await openDraft(3);
+    api.post.mockResolvedValueOnce(savedDraft(4));
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
+    await act(async () => container.querySelector('[data-testid="none-prescribed"]').click());
+    api.post.mockResolvedValueOnce(savedDraft(5));
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
+    await act(async () => container.querySelector('[data-testid="full-transcription-confirmed"]').click());
+
+    api.post.mockRejectedValueOnce(conflictError);
+    await act(async () => container.querySelector('[data-testid="complete-prescription-button"]').click());
+    const refused = api.post.mock.calls.at(-1)[1].operation_id;
+    expect(refused).toBeTruthy();
+
+    api.post.mockResolvedValueOnce({ data: {
+      registration: { id: "reg-1", reg_no: "1001", full_name: "Draft Patient" },
+      person: { id: "p-1" },
+      transcription: { id: "tx-1", locked: false, draft_version: 9 },
+      fulfilments: [],
+      slips: [],
+    } });
+    await act(async () => container.querySelector('[data-testid="draft-conflict-reload"]').click());
+
+    const confirm = container.querySelector('[data-testid="full-transcription-confirmed"]');
+    if (confirm && !confirm.checked) await act(async () => confirm.click());
+    api.post.mockResolvedValueOnce({ data: {
+      registration: { id: "reg-1", reg_no: "1001", full_name: "Draft Patient", clinical_generation: 1 },
+      revision: { id: "rev-2", prescribed_lines: [] },
+      transcription: { id: "tx-1", locked: true, draft_version: 12 },
+    } });
+    await act(async () => container.querySelector('[data-testid="complete-prescription-button"]').click());
+    expect(api.post.mock.calls.at(-1)[1].operation_id).not.toBe(refused);
+  });
+
+  test("reloading after a conflict replaces the draft with the saved prescription", async () => {
+    await openDraft(2);
+    typeOther("Mine");
+    api.post.mockRejectedValueOnce(conflictError);
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
+
+    api.post.mockResolvedValueOnce({ data: {
+      registration: { id: "reg-1", reg_no: "1001", full_name: "Draft Patient" },
+      person: { id: "p-1" },
+      transcription: { id: "tx-1", locked: false, draft_version: 7, diagnosis_other: "Theirs" },
+      fulfilments: [],
+      slips: [],
+    } });
+    await act(async () => container.querySelector('[data-testid="draft-conflict-reload"]').click());
+    expect(api.post).toHaveBeenLastCalledWith("/clinical/lookup", { value: "1001" });
+    expect(container.querySelector('[data-testid="draft-conflict"]')).toBeNull();
+    expect(otherValue()).toBe("Theirs");
+    api.post.mockResolvedValueOnce(savedDraft(8));
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
+    expect(api.post).toHaveBeenLastCalledWith(
+      "/clinical/transcription",
+      expect.objectContaining({ expected_draft_version: 7 }),
+    );
+  });
+
+  test("a failed draft save keeps the entries and leaves no conflict prompt", async () => {
+    await openDraft(2);
+    typeOther("Kept after failure");
+    api.post.mockRejectedValueOnce(new Error("Draft save failed"));
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
+    expect(container.textContent).toContain("Draft save failed");
+    expect(container.querySelector('[data-testid="draft-conflict"]')).toBeNull();
+    expect(otherValue()).toBe("Kept after failure");
+  });
+
+  test("cancelling a discard stays on the same patient and confirming switches exactly once", async () => {
+    await openDraft(1);
+    typeOther("Unsaved work");
+
+    typeLookup("1002");
+    await submitLookup();
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("Draft Patient");
+
+    await act(async () => document.querySelector('[data-testid="discard-cancel"]').click());
+    expect(document.querySelector('[data-testid="discard-confirm"]')).toBeNull();
+    expect(container.textContent).toContain("Draft Patient");
+    expect(api.post).toHaveBeenCalledTimes(1);
+
+    await submitLookup();
+    api.post.mockResolvedValueOnce(patientFound("1002", "Second Patient"));
+    await act(async () => document.querySelector('[data-testid="discard-confirm"]').click());
+    expect(api.post).toHaveBeenCalledTimes(2);
+    expect(api.post).toHaveBeenLastCalledWith("/clinical/lookup", { value: "1002" });
+    expect(container.textContent).toContain("Second Patient");
+    expect(container.textContent).not.toContain("Draft Patient");
+  });
+
+  test("a background wedge scan does not silently change the patient while the draft is dirty", async () => {
+    let now = 0;
+    jest.spyOn(performance, "now").mockImplementation(() => now);
+    await openDraft(1);
+    typeOther("Unsaved work");
+
+    await act(async () => {
+      for (const key of [..."SNP:AB3K7T29", "Enter"]) {
+        now += 10;
+        document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      }
+    });
+
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("Draft Patient");
+    expect(document.querySelector('[data-testid="discard-confirm"]')).not.toBeNull();
+
+    api.post.mockResolvedValueOnce(patientFound("1002", "Scanned Patient"));
+    await act(async () => document.querySelector('[data-testid="discard-confirm"]').click());
+    expect(api.post).toHaveBeenLastCalledWith("/clinical/lookup", { value: "SNP:AB3K7T29" });
+  });
+
+  test("changing line asks before discarding a dirty draft", async () => {
+    await openDraft(1);
+    typeOther("Unsaved work");
+    await act(async () => container.querySelector('[data-testid="line-change-button"]').click());
+    expect(container.querySelector('[data-testid="line-picker"]')).toBeNull();
+    await act(async () => document.querySelector('[data-testid="discard-confirm"]').click());
+    expect(container.querySelector('[data-testid="line-picker"]')).not.toBeNull();
+  });
+
+  test("the unsaved-work warning is registered only while the draft is dirty", async () => {
+    await openDraft(1);
+    const warns = () => {
+      const event = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    expect(warns()).toBe(false);
+
+    typeOther("Unsaved work");
+    expect(warns()).toBe(true);
+
+    api.post.mockResolvedValueOnce(savedDraft(2));
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
+    expect(warns()).toBe(false);
+  });
+});

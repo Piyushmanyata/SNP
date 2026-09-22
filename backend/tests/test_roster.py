@@ -168,7 +168,7 @@ class TestAuthenticatedAttribution:
             camp_id, (day_id,) = await _seed_camp(mock_db)
             await desk_register(RegisterBody(
                 full_name="Sunita Devi", gender="F", dob="1975-06-14",
-                aadhaar_last4="1234", aadhaar_scanned=True, age=51,
+                aadhaar_last4="1234", aadhaar_scanned=True, age=51, qr_payload=CARD,
                 phone="9876500001", camp_day_id=str(day_id),
             ), _Request(), actor=VOLUNTEER, background_tasks=None)
             out = await scan(ScanBody(payload=CARD), actor=VOLUNTEER)
@@ -188,7 +188,7 @@ class TestAuthenticatedAttribution:
             camp_id, (day_id,) = await _seed_camp(mock_db)
             registered = await desk_register(RegisterBody(
                 full_name="Sunita Devi", gender="F", dob="1975-06-14",
-                aadhaar_last4="1234", aadhaar_scanned=True, age=51,
+                aadhaar_last4="1234", aadhaar_scanned=True, age=51, qr_payload=CARD,
                 phone="9876500001", camp_day_id=str(day_id),
             ), _Request(), actor=VOLUNTEER, background_tasks=None)
             await scan(ScanBody(payload=CARD), actor=VOLUNTEER)
@@ -250,7 +250,7 @@ class TestAuthenticatedAttribution:
             ), _Request(), actor=anita_user, background_tasks=None)
             await desk_register(RegisterBody(
                 full_name="Sunita Devi", gender="F", dob="1975-06-14",
-                aadhaar_last4="1234", aadhaar_scanned=True, age=51,
+                aadhaar_last4="1234", aadhaar_scanned=True, age=51, qr_payload=CARD,
                 phone="9876500002", camp_day_id=str(day_id),
             ), _Request(), actor=ramesh_user, background_tasks=None)
             await scan(ScanBody(payload=CARD), actor=ramesh_user)
