@@ -32,6 +32,7 @@ from models import (
     CompletePrescriptionBody,
     CorrectionBody,
     FulfilmentBody,
+    IdentityCheckBody,
     PrintWindowBody,
     RegisterBody,
     TranscriptionBody,
@@ -45,7 +46,7 @@ from routes_clinical import (
     record_fulfilment,
     undo_completion,
 )
-from routes_desk import arrive, mark_seen, preview_prescription, print_prescription
+from routes_desk import arrive, mark_seen, preview_prescription, print_prescription, record_identity_check
 from routes_registration import _create_registration, desk_register
 from test_adversarial_challenger import FIXED_POWER, MEDICINE, MEDICINE_ALT, setup_mock_db
 from test_camp_lifecycle import _Request
@@ -119,9 +120,16 @@ async def _printed_patient(mock_db, registrar=VOLUNTEER, **fields):
     result = await desk_register(body, _Request(), actor=registrar, background_tasks=None)
     pid = ObjectId(result["registration"]["id"])
     await arrive(str(pid), actor=registrar)
+    await _identity_checked(pid)
     await print_prescription(str(pid), actor=registrar)
     patient = await mock_db.patients.find_one({"_id": pid})
     return camp_id, day_id, patient
+
+
+async def _identity_checked(patient_id):
+    await record_identity_check(
+        IdentityCheckBody(patient_id=str(patient_id), reason="Voter ID seen"), actor=ADMIN,
+    )
 
 
 def _complete_body(patient_id, operation_id, **extra):
@@ -508,6 +516,7 @@ class TestFulfilmentMatrix:
                 _Request(), actor=VOLUNTEER,
              background_tasks=None)
             await arrive(other_reg["registration"]["id"], actor=VOLUNTEER)
+            await _identity_checked(other_reg["registration"]["id"])
             await print_prescription(other_reg["registration"]["id"], actor=VOLUNTEER)
             other = await mock_db.patients.find_one({"_id": ObjectId(other_reg["registration"]["id"])})
             done = await complete_prescription(_complete_body(patient["_id"], "op-f02a"), actor=CLINICAL)
@@ -664,6 +673,7 @@ class TestFulfilmentMatrix:
                  background_tasks=None)
                 pid = result["registration"]["id"]
                 await arrive(pid, actor=VOLUNTEER)
+                await _identity_checked(pid)
                 await print_prescription(pid, actor=VOLUNTEER)
                 patients.append(await mock_db.patients.find_one({"_id": ObjectId(pid)}))
             ot_day = ObjectId()

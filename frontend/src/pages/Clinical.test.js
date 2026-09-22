@@ -842,10 +842,51 @@ describe("Clinical draft version and dirty-draft protection", () => {
     expect(container.querySelector('[data-testid="draft-conflict"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="draft-conflict-reload"]')).not.toBeNull();
 
+    api.post.mockResolvedValueOnce({ data: {
+      ...draftPatient(7).data,
+      transcription: { id: "tx-1", locked: false, draft_version: 7, diagnosis_options: [], diagnosis_other: "Theirs" },
+    } });
     await act(async () => container.querySelector('[data-testid="draft-conflict-review"]').click());
     expect(container.querySelector('[data-testid="draft-conflict"]')).toBeNull();
     expect(otherValue()).toBe("Pterygium left eye");
-    expect(api.post).toHaveBeenCalledTimes(2);
+
+    api.post.mockResolvedValueOnce(savedDraft(8));
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
+    expect(api.post).toHaveBeenLastCalledWith(
+      "/clinical/transcription",
+      expect.objectContaining({ expected_draft_version: 7, diagnosis_other: "Pterygium left eye" }),
+    );
+    expect(container.querySelector('[data-testid="draft-conflict"]')).toBeNull();
+  });
+
+  test("a completion retry reuses its operation id only while the request is unchanged", async () => {
+    await openDraft(3);
+    api.post.mockResolvedValueOnce(savedDraft(4));
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
+    await act(async () => container.querySelector('[data-testid="none-prescribed"]').click());
+    api.post.mockResolvedValueOnce(savedDraft(5));
+    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
+    await act(async () => container.querySelector('[data-testid="full-transcription-confirmed"]').click());
+    const complete = () => act(async () => container.querySelector('[data-testid="complete-prescription-button"]').click());
+    const ids = () => api.post.mock.calls
+      .filter(([url]) => url === "/clinical/transcription/complete")
+      .map(([, body]) => body.operation_id);
+
+    api.post.mockRejectedValueOnce(new Error("Network Error"));
+    await complete();
+    api.post.mockRejectedValueOnce(new Error("Network Error"));
+    await complete();
+    expect(ids()[1]).toBe(ids()[0]);
+
+    await act(async () => container.querySelector('[data-testid="add-vitals-button"]').click());
+    act(() => {
+      const bp = container.querySelector('[data-testid="bp-input"]');
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(bp, "130/80");
+      bp.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    api.post.mockRejectedValueOnce(new Error("Network Error"));
+    await complete();
+    expect(ids()[2]).not.toBe(ids()[0]);
   });
 
   test("a completion refused as stale retries under a new operation id after reloading", async () => {

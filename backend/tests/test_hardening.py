@@ -160,7 +160,8 @@ class TestConflictsAreNotCrashes:
             manual_id = ObjectId()
             await mock_db.patients.insert_one({
                 "_id": manual_id, "camp_id": camp_id, "camp_day_id": ObjectId(),
-                "reg_no": 1, "full_name": "Sunita", "manual_entry": True,
+                "reg_no": 1, "full_name": "Sunita Devi", "full_name_normalized": "sunita devi",
+                "aadhaar_last4": "1234", "manual_entry": True, "person_id": None,
                 "queue_status": "registered", "patient_qr": "qr-1",
             })
             holder_id = ObjectId()

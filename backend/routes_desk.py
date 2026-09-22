@@ -186,6 +186,7 @@ async def _apply_overwrite(db: AsyncIOMotorDatabase, patient: dict, card: dict) 
             "person_id": person["_id"] if person else None,
             "manual_entry": False,
             "manual_exception": None,
+            "identity_recheck_required": False,
         }}, return_document=True)
     except DuplicateKeyError:
         if person:
@@ -261,21 +262,12 @@ async def scan_confirm(
             "code": "WRONG_CAMP",
             "message": "That registration is not in this camp.",
         })
-    hits = await _duplicate_hits(db, camp["_id"], _card_as_register_body(card), await _known_person(db, card))
+    person = await _known_person(db, card)
+    hits = await _duplicate_hits(db, camp["_id"], _card_as_register_body(card), person)
     if all(hit["_id"] != patient["_id"] for hit in hits):
-        snapshot = {field: patient.get(field) for field in OVERWRITTEN_FIELDS}
-        snapshot.update({
-            "aadhaar_scanned": patient.get("aadhaar_scanned", False),
-            "person_id": patient.get("person_id"),
-            "manual_entry": patient.get("manual_entry"),
-            "manual_exception": patient.get("manual_exception"),
-            "full_name_normalized": patient.get("full_name_normalized"),
-        })
-        try:
-            await _apply_overwrite(db, patient, card)
-        except HTTPException:
-            raise
-        await db.patients.update_one({"_id": patient["_id"]}, {"$set": snapshot})
+        holder = next((hit for hit in hits if person and hit.get("person_id") == person["_id"]), None)
+        if holder:
+            raise _dup_409(holder)
         raise HTTPException(status_code=409, detail={
             "code": "STALE_CANDIDATE",
             "message": "That registration does not match this card.",

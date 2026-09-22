@@ -196,6 +196,9 @@ class TestRegistration:
         assert reg["arrived_at"] is None
         assert reg["patient_qr"]
         assert isinstance(reg["reg_no"], int)
+        assert reg["manual_entry"] is True
+        assert reg["identity_recheck_required"] is True
+        _identity_checked(admin, reg["id"])
         STATE["p1"] = reg
 
         # verify persistence via lookup; there is no patient list on the desk
@@ -239,6 +242,7 @@ class TestRegistration:
         }, timeout=30)
         assert r.status_code == 200, r.text
         STATE["p2"] = r.json()["registration"]
+        _identity_checked(admin, STATE["p2"]["id"])
 
     def test_self_register_requires_aadhaar(self, anon):
         r = anon.post(f"{API}/self-register", json={
@@ -429,8 +433,15 @@ def _arrived_printed(admin, label, phone):
     assert r.status_code == 200, r.text
     patient = r.json()["registration"]
     assert admin.post(f"{API}/desk/arrive/{patient['id']}", timeout=30).status_code == 200
+    _identity_checked(admin, patient["id"])
     assert admin.post(f"{API}/desk/print/{patient['id']}", timeout=30).status_code == 200
     return patient
+
+
+def _identity_checked(admin, patient_id):
+    r = admin.post(f"{API}/desk/identity-check",
+                   json={"patient_id": patient_id, "reason": "Voter ID seen"}, timeout=30)
+    assert r.status_code == 200, r.text
 
 
 def _defer(client, transcription_id, revision_id, generation, operation_id, **extra):
@@ -936,6 +947,7 @@ class TestFixRegressions:
         assert r.status_code == 200, r.text
         pid = r.json()["registration"]["id"]
         assert admin.post(f"{API}/desk/arrive/{pid}", timeout=30).status_code == 200
+        _identity_checked(admin, pid)
         pr = admin.post(f"{API}/desk/print/{pid}", timeout=30)
         assert pr.status_code == 200, pr.text
         printed_at = pr.json()["registration"]["printed_at"]

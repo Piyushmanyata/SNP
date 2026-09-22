@@ -325,7 +325,7 @@ async def toggle_print_window(day_id: str, body: PrintWindowBody, actor: dict = 
 async def delete_day(day_id: str, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     oid = ObjectId(day_id)
-    if await db.patients.find_one({"booked_camp_day_id": oid}):
+    if await db.patients.find_one({"$or": [{"booked_camp_day_id": oid}, {"camp_day_id": oid}]}):
         raise HTTPException(status_code=409, detail="Day has registrations; cannot delete")
     await db.camp_days.delete_one({"_id": oid})
     return {"ok": True}

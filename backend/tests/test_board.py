@@ -233,6 +233,10 @@ class TestCampDayBoard:
                 "status": "failed", "created_at": NOW - timedelta(minutes=1),
                 "patient_id": ObjectId(),
             })
+            await mock_db.reminder_ledger.insert_one({
+                "status": "abandoned", "created_at": NOW - timedelta(minutes=1),
+                "patient_id": p_seen,
+            })
             out = await camp_day_board(actor=ADMIN)
             assert out["state"] == "current"
             assert out["as_of"]
@@ -252,7 +256,7 @@ class TestCampDayBoard:
             assert out["next_ot"]["venue"] == "OT Hall"
             assert out["next_specs"]["start_time"] == "09:00"
             assert "seats_left" not in out["next_specs"]
-            assert out["sms_failures"] == 1
+            assert out["sms_failures"] == 2
             blob = " ".join(_walk_strings(out))
             assert "Sunita" not in blob
             assert "Ramesh" not in blob

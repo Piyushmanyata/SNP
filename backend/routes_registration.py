@@ -196,6 +196,7 @@ async def _overwrite_manual(
         "person_id": person["_id"] if person else None,
         "manual_entry": False,
         "manual_exception": None,
+        "identity_recheck_required": False,
     }
     try:
         p = await db.patients.find_one_and_update(
@@ -229,7 +230,7 @@ def _build_patient_document(
     registrar_team_lead_id: Optional[str] = None,
 ) -> dict:
     norm = normalize_name(body.full_name)
-    is_manual = (body.manual_entry or body.manual_exception) and not body.aadhaar_scanned
+    is_manual = not body.aadhaar_scanned
 
     return {
         "person_id": person_id,
@@ -453,8 +454,6 @@ def _apply_scanned_identity(body: RegisterBody, message: str) -> None:
     body.aadhaar_last4 = card.get("aadhaar_last4")
     body.address = card.get("address")
     body.aadhaar_scanned = True
-    body.manual_entry = False
-    body.manual_exception = False
 
 
 def _validate_manual_identity(body: RegisterBody, now) -> None:
@@ -489,8 +488,6 @@ def _reject_unscanned_staff_entry(body: RegisterBody, camp: dict) -> None:
             "message": "Scan the Aadhaar card. Manual entry opens after three failed camera attempts, and it needs a reason.",
         })
     body.manual_reason = reason
-    if body.at_door:
-        body.manual_entry = True
     if body.at_door and not door_manual_open(camp):
         raise HTTPException(status_code=403, detail={
             "code": "DOOR_MANUAL_SHUT",

@@ -156,6 +156,7 @@ class TestReminderCronHttp:
         assert first["ok"] is False
         assert first["failed"] == 1
         monkeypatch.setattr(msg91, "send_dlt_sms", provider)
+        mock_db.reminder_ledger.docs[0]["created_at"] -= sms.RETRY_AFTER
         retry = _post(client).json()
         assert retry["ok"] is True
         assert retry["sent"] == 1

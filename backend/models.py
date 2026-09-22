@@ -79,8 +79,6 @@ class RegisterBody(BaseModel):
     camp_day_id: str
     registration_request_id: Optional[str] = None
     is_self_registered: bool = False
-    manual_entry: bool = False
-    manual_exception: bool = False
     manual_reason: Optional[str] = None
     failed_scan_attempts: int = 0
     at_door: bool = False

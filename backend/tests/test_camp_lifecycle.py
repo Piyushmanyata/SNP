@@ -139,11 +139,27 @@ class TestArrival:
             assert exc.value.detail["code"] == "NOT_ARRIVED"
         asyncio.run(run())
 
+    def test_a_day_that_received_an_arrival_cannot_be_deleted(self, monkeypatch):
+        async def run():
+            import routes_camps
+            mock_db = _mock(monkeypatch)
+            monkeypatch.setattr(routes_camps, "get_db", lambda: mock_db)
+            _camp_id, (booked_day, operating_day) = await _seed_camp(mock_db, days=(OTHER_DAY, TODAY))
+            reg = await _register(booked_day, aadhaar_scanned=True, qr_payload=CARD)
+            await arrive(reg["id"], actor=ACTOR)
+            stored = await mock_db.patients.find_one({"_id": ObjectId(reg["id"])})
+            assert stored["camp_day_id"] == operating_day
+            with pytest.raises(HTTPException) as exc:
+                await routes_camps.delete_day(str(operating_day), actor=ACTOR)
+            assert exc.value.status_code == 409
+            assert await mock_db.camp_days.find_one({"_id": operating_day})
+        asyncio.run(run())
+
     def test_arrival_then_print_then_seen(self, monkeypatch):
         async def run():
             mock_db = _mock(monkeypatch)
             _camp_id, (day_id,) = await _seed_camp(mock_db)
-            reg = await _register(day_id)
+            reg = await _register(day_id, aadhaar_scanned=True, qr_payload=CARD)
             arrived = (await arrive(reg["id"], actor=ACTOR))["registration"]
             assert arrived["queue_status"] == "arrived"
             assert arrived["arrived_at"]

@@ -16,7 +16,7 @@ os.environ.setdefault("AADHAAR_HASH_PEPPER", "test-pepper")
 from bson import ObjectId
 
 from models import RegisterBody, ScanBody
-from routes_desk import _material_diff, scan
+from routes_desk import _material_diff, print_prescription, scan
 from routes_registration import desk_register
 from test_camp_lifecycle import ACTOR, _Request, _mock, _seed_camp
 
@@ -115,6 +115,36 @@ class TestMaterialDiffUnit:
         assert [d["field"] for d in diff] == ["dob"]
         diff = _material_diff(card_dict(), {**card_dict(), "aadhaar_last4": "9999"})
         assert [d["field"] for d in diff] == ["aadhaar_last4"]
+
+
+class TestCardClearsTheIdentityHold:
+    def test_a_door_scan_that_overwrites_a_manual_entry_can_print(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            _camp_id, (day_id,) = await _seed_camp(mock_db)
+            reg = await _manual(day_id, aadhaar_last4="1234", dob=CARD_DOB, gender="F")
+            assert reg["identity_recheck_required"] is True
+            out = await scan(ScanBody(payload=payload()), actor=ACTOR)
+            assert out["overwritten"] is True
+            assert out["registration"]["identity_recheck_required"] is False
+            printed = await print_prescription(reg["id"], actor=ACTOR)
+            assert printed["registration"]["printed_at"]
+        asyncio.run(run())
+
+    def test_a_desk_registration_that_overwrites_a_manual_entry_clears_the_hold(self, monkeypatch):
+        async def run():
+            mock_db = _mock(monkeypatch)
+            _camp_id, (day_id,) = await _seed_camp(mock_db)
+            reg = await _manual(day_id, aadhaar_last4="1234", dob=CARD_DOB, gender="F")
+            result = await desk_register(RegisterBody(
+                full_name=CARD_NAME, phone="9876500001", camp_day_id=str(day_id),
+                aadhaar_scanned=True, qr_payload=payload(),
+            ), _Request(), actor=ACTOR, background_tasks=None)
+            assert result["registration"]["id"] == reg["id"]
+            stored = await mock_db.patients.find_one({"_id": ObjectId(reg["id"])})
+            assert stored["aadhaar_scanned"] is True
+            assert stored["identity_recheck_required"] is False
+        asyncio.run(run())
 
 
 class TestScanTrivialAndMaterial:

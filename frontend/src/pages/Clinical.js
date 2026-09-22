@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import api, { formatApiError, errorPayload } from "../lib/api";
 import logger from "../lib/logger";
+import { v4 } from "../lib/uuid";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { OPERATOR_LINES, effectiveLine, lineLabel, writeSessionLine } from "../lib/operatorLines";
@@ -198,7 +199,7 @@ export default function Clinical() {
     onBurst: openPatient,
   });
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (keepEntries = false) => {
     if (!data?.registration?.reg_no) return;
     const request = ++lookupSequence.current;
     try {
@@ -207,10 +208,11 @@ export default function Clinical() {
       });
       if (request !== lookupSequence.current) return;
       setData(resData);
-      setRx(rxFromTranscription(resData.transcription));
       setDraftVersion(resData.transcription?.draft_version ?? 0);
-      setDirty(false);
       setConflict(false);
+      if (keepEntries) return;
+      setRx(rxFromTranscription(resData.transcription));
+      setDirty(false);
       completeOpRef.current = null;
     } catch (err) {
       logger.warn("Failed to reload clinical data:", err);
@@ -245,15 +247,19 @@ export default function Clinical() {
     setBusy(true);
     setError("");
     try {
-      if (!completeOpRef.current) {
-        completeOpRef.current = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`;
-      }
-      const { data: result } = await api.post("/clinical/transcription/complete", {
+      const request = {
         patient_id: data.registration.id,
         expected_generation: data.clinical_generation ?? data.registration.clinical_generation ?? 0,
-        operation_id: completeOpRef.current,
         ...rx,
         expected_draft_version: draftVersion,
+      };
+      const key = JSON.stringify(request);
+      if (completeOpRef.current?.key !== key) {
+        completeOpRef.current = { key, id: v4() };
+      }
+      const { data: result } = await api.post("/clinical/transcription/complete", {
+        ...request,
+        operation_id: completeOpRef.current.id,
       });
       completeOpRef.current = null;
       setDraftVersion(result.transcription?.draft_version ?? 0);
@@ -388,10 +394,10 @@ export default function Clinical() {
                 Another operator saved this prescription. Your entries are kept below — reload the saved version or review yours before saving again.
               </Alert>
               <div className="mt-2 flex flex-wrap gap-2">
-                <Button variant="outline" disabled={busy} onClick={reload} data-testid="draft-conflict-reload">
+                <Button variant="outline" disabled={busy} onClick={() => reload()} data-testid="draft-conflict-reload">
                   Reload saved prescription
                 </Button>
-                <Button variant="outline" disabled={busy} onClick={() => setConflict(false)} data-testid="draft-conflict-review">
+                <Button variant="outline" disabled={busy} onClick={() => reload(true)} data-testid="draft-conflict-review">
                   Review my entries
                 </Button>
               </div>
