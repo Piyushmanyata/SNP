@@ -41,6 +41,7 @@ async def _claim(
     number: str,
     venue: str,
     copy: str,
+    retry_failed: bool = True,
 ) -> Optional[Dict[str, Any]]:
     existing = await db.reminder_ledger.find_one({
         "patient_id": patient_id,
@@ -50,9 +51,18 @@ async def _claim(
     if existing:
         if existing.get("status") != "failed":
             return None
+        if not retry_failed:
+            return None
+        attempts = int(existing.get("attempts") or 1)
+        if attempts >= 3:
+            await db.reminder_ledger.update_one(
+                {"_id": existing["_id"], "status": "failed"},
+                {"$set": {"status": "abandoned"}},
+            )
+            return None
         return await db.reminder_ledger.find_one_and_update(
             {"_id": existing["_id"], "status": "failed"},
-            {"$set": {"status": "pending", "created_at": helpers.now_utc(),
+            {"$set": {"status": "pending", "attempts": attempts + 1, "created_at": helpers.now_utc(),
                       "copy": copy, "number": number, "venue": venue}},
             return_document=True,
         )
@@ -64,6 +74,7 @@ async def _claim(
         "venue": venue,
         "copy": copy,
         "status": "pending",
+        "attempts": 1,
         "provider_id": None,
         "created_at": helpers.now_utc(),
     }
@@ -78,6 +89,61 @@ def _window_text(start_time: Optional[str], end_time: Optional[str]) -> str:
     return ""
 
 
+async def deliver_patient_sms(
+    db: AsyncIOMotorDatabase,
+    patient: dict,
+    message_type: str,
+    event_date: str,
+    venue: str,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    retry_failed: bool = True,
+) -> str:
+    """Returns sent, failed, uncertain, or skipped. Never raises."""
+    row = None
+    accepted = False
+    try:
+        if not msg91.configured():
+            return "skipped"
+        number = valid_phone(patient.get("phone_normalized") or patient.get("phone"))
+        reg_no = patient.get("reg_no")
+        if not number or reg_no is None:
+            return "skipped"
+        fields = {"reg_no": reg_no, "date": helpers.display_date(event_date), "venue": venue}
+        if "{window}" in MESSAGE_COPY[message_type]:
+            fields["window"] = _window_text(start_time, end_time)
+        copy = MESSAGE_COPY[message_type].format(**fields)
+        row = await _claim(
+            db, patient["_id"], message_type, event_date, number, venue, copy,
+            retry_failed=retry_failed,
+        )
+        if not row:
+            return "skipped"
+        provider_id = await asyncio.to_thread(
+            msg91.send_dlt_sms, message_type, number, reg_no, fields["date"] + fields.get("window", ""), venue
+        )
+        accepted = True
+        await db.reminder_ledger.update_one(
+            {"_id": row["_id"]},
+            {"$set": {"status": "sent", "provider_id": provider_id}},
+        )
+        return "sent"
+    except Exception as exc:
+        logger.exception("Patient SMS processing failed; provider accepted=%s", accepted)
+        if row and not accepted:
+            try:
+                await db.reminder_ledger.update_one(
+                    {"_id": row["_id"]},
+                    {"$set": {"status": "failed", "error": str(exc)[:200]}},
+                )
+            except Exception:
+                logger.exception("Could not record patient SMS failure")
+            return "failed"
+        if accepted:
+            return "uncertain"
+        return "failed"
+
+
 async def send_patient_sms(
     db: AsyncIOMotorDatabase,
     patient: dict,
@@ -90,40 +156,8 @@ async def send_patient_sms(
     """Best-effort per-patient DLT send, recorded once per patient/type/event date.
 
     Never raises: the registration or deferral is the durable outcome.
+    True means the provider accepted the message, including an uncertain ledger write.
     """
-    row = None
-    sent = False
-    try:
-        if not msg91.configured():
-            return False
-        number = valid_phone(patient.get("phone_normalized") or patient.get("phone"))
-        reg_no = patient.get("reg_no")
-        if not number or reg_no is None:
-            return False
-        fields = {"reg_no": reg_no, "date": helpers.display_date(event_date), "venue": venue}
-        if "{window}" in MESSAGE_COPY[message_type]:
-            fields["window"] = _window_text(start_time, end_time)
-        copy = MESSAGE_COPY[message_type].format(**fields)
-        row = await _claim(db, patient["_id"], message_type, event_date, number, venue, copy)
-        if not row:
-            return False
-        provider_id = await asyncio.to_thread(
-            msg91.send_dlt_sms, message_type, number, reg_no, fields["date"] + fields.get("window", ""), venue
-        )
-        sent = True
-        await db.reminder_ledger.update_one(
-            {"_id": row["_id"]},
-            {"$set": {"status": "sent", "provider_id": provider_id}},
-        )
-        return True
-    except Exception as exc:
-        logger.exception("Patient SMS processing failed; provider accepted=%s", sent)
-        if row and not sent:
-            try:
-                await db.reminder_ledger.update_one(
-                    {"_id": row["_id"]},
-                    {"$set": {"status": "failed", "error": str(exc)[:200]}},
-                )
-            except Exception:
-                logger.exception("Could not record patient SMS failure")
-        return sent
+    return (await deliver_patient_sms(
+        db, patient, message_type, event_date, venue, start_time, end_time,
+    )) in ("sent", "uncertain")

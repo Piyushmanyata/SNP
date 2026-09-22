@@ -90,18 +90,26 @@ export function MismatchReview({ registration, diff, busy, onConfirm }) {
   );
 }
 
-export function AmbiguousMatch({ registrations }) {
+export function AmbiguousMatch({ registrations, busy, onSelect }) {
   return (
     <div className="rounded-xl border border-red-300 bg-red-50 p-4" data-testid="scan-ambiguous">
       <p className="font-display font-bold text-slate-900">More than one typed record matches</p>
       <p className="text-xs text-red-900 mt-1 mb-3">
-        Find the right registration by name below, then check the patient in from there.
+        Choose the registration that is this person. Nothing is checked in until you do.
       </p>
-      <ul className="space-y-1 text-sm">
+      <ul className="space-y-2 text-sm">
         {registrations.map((r) => (
-          <li key={r.id} data-testid={`ambiguous-${r.reg_no}`}>
-            <span className="font-mono font-bold text-slate-700">#{r.reg_no}</span>{" "}
-            {r.full_name} · {r.age ?? "-"} yrs
+          <li key={r.id}>
+            <button
+              type="button"
+              className="min-h-[44px] w-full rounded-xl border border-red-200 bg-white px-3 text-left font-semibold text-slate-900"
+              data-testid={`ambiguous-${r.reg_no}`}
+              disabled={busy}
+              onClick={() => onSelect(r.id)}
+            >
+              <span className="font-mono">#{r.reg_no}</span> {r.full_name} · {r.age ?? "-"} yrs
+              {r.phone ? ` · ${r.phone}` : ""}
+            </button>
           </li>
         ))}
       </ul>
@@ -141,7 +149,7 @@ export function NoMatch({ card, phone, setPhone, busy, onSubmit }) {
   );
 }
 
-export function ScanOutcome({ result, busy, onPrint, onConfirm, phone, setPhone, onWalkIn }) {
+export function ScanOutcome({ result, busy, onPrint, onConfirm, onChoose, phone, setPhone, onWalkIn }) {
   if (!result) return null;
   if (result.outcome === "arrived") {
     return (
@@ -159,7 +167,7 @@ export function ScanOutcome({ result, busy, onPrint, onConfirm, phone, setPhone,
     );
   }
   if (result.outcome === "ambiguous") {
-    return <AmbiguousMatch registrations={result.registrations} />;
+    return <AmbiguousMatch registrations={result.registrations} busy={busy} onSelect={onChoose} />;
   }
   if (result.outcome === "no_match") {
     return (

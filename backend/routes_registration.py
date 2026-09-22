@@ -11,6 +11,7 @@ from helpers import (
 )
 from serializers import ser_patient
 from security import require_staff, require_any
+from routes_camps import door_manual_open
 from aadhaar import decode_aadhaar
 from aadhaar_extract import extract_document
 import sms
@@ -266,6 +267,9 @@ def _build_patient_document(
         "identity_recheck_required": is_manual,
         "manual_entry": is_manual,
         "manual_exception": True if is_manual else None,
+        "manual_reason": body.manual_reason if is_manual else None,
+        "failed_scan_attempts": body.failed_scan_attempts if is_manual else 0,
+        "manual_at_door": bool(body.at_door) if is_manual else False,
         **({"registration_request_id": body.registration_request_id} if body.registration_request_id else {}),
         "reminder_sms_sent_at": None,
         "created_at": now_utc(),
@@ -359,6 +363,12 @@ async def _create_registration(
         existing = await db.patients.find_one({"registration_request_id": body.registration_request_id})
         if existing:
             return _replay_registration(existing, body, camp["_id"])
+
+    if is_self and not body.aadhaar_scanned:
+        raise HTTPException(status_code=400, detail={
+            "code": "MANUAL_ENTRY_NOT_ALLOWED",
+            "message": "Scan the Aadhaar card. Public registration has no manual entry.",
+        })
 
     phone = normalize_phone(body.phone)
     if is_self and (not phone or is_dummy_phone(phone)):
@@ -468,6 +478,26 @@ def _validate_manual_identity(body: RegisterBody, now) -> None:
         raise HTTPException(status_code=400, detail="Enter an age between 0 and 130, or a valid date of birth")
 
 
+MANUAL_CAMERA_ATTEMPTS = 3
+
+
+def _reject_unscanned_staff_entry(body: RegisterBody, camp: dict) -> None:
+    reason = (body.manual_reason or "").strip()
+    if body.failed_scan_attempts < MANUAL_CAMERA_ATTEMPTS or not reason:
+        raise HTTPException(status_code=400, detail={
+            "code": "MANUAL_ENTRY_NOT_ALLOWED",
+            "message": "Scan the Aadhaar card. Manual entry opens after three failed camera attempts, and it needs a reason.",
+        })
+    body.manual_reason = reason
+    if body.at_door:
+        body.manual_entry = True
+    if body.at_door and not door_manual_open(camp):
+        raise HTTPException(status_code=403, detail={
+            "code": "DOOR_MANUAL_SHUT",
+            "message": "Manual entry at the door is closed.",
+        })
+
+
 @router.post("/register")
 async def desk_register(
     body: RegisterBody,
@@ -484,6 +514,9 @@ async def desk_register(
     phone_norm = normalize_phone(body.phone)
     if not phone_norm or is_dummy_phone(phone_norm):
         raise HTTPException(status_code=400, detail="A valid 10-digit household mobile number is required")
+    if not body.aadhaar_scanned:
+        camp, _day = await _validate_camp_and_day(get_db(), body.camp_day_id)
+        _reject_unscanned_staff_entry(body, camp)
     patient, created = await _create_registration(
         body, actor["_id"], False, request,
     )

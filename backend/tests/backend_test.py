@@ -184,6 +184,7 @@ class TestRegistration:
             "full_name": f"TESTPATIENT Alpha {TAG}", "age": 55, "gender": "M",
             "phone": "9876543210", "camp_day_id": STATE["day_id"],
             "registration_request_id": rid,
+            "failed_scan_attempts": 3, "manual_reason": "scanner unavailable",
         }, timeout=30)
         assert r.status_code == 200, r.text
         body = r.json()
@@ -233,6 +234,7 @@ class TestRegistration:
             "full_name": f"TESTPATIENT Beta {TAG}", "age": 62, "gender": "F",
             "phone": "9812345670", "camp_day_id": STATE["day_id"],
             "registration_request_id": str(uuid.uuid4()),
+            "failed_scan_attempts": 3, "manual_reason": "scanner unavailable",
         }, timeout=30)
         assert r.status_code == 200, r.text
         STATE["p2"] = r.json()["registration"]
@@ -421,6 +423,7 @@ def _arrived_printed(admin, label, phone):
         "full_name": f"TESTPATIENT {label} {TAG}", "age": 48, "gender": "F",
         "phone": phone, "camp_day_id": STATE["day_id"],
         "registration_request_id": str(uuid.uuid4()),
+        "failed_scan_attempts": 3, "manual_reason": "scanner unavailable",
     }, timeout=30)
     assert r.status_code == 200, r.text
     patient = r.json()["registration"]
@@ -927,6 +930,7 @@ class TestFixRegressions:
             "full_name": f"TESTUNDO Gamma {TAG}", "age": 44, "gender": "M",
             "phone": "9876500011", "camp_day_id": STATE["day_id"],
             "registration_request_id": rid,
+            "failed_scan_attempts": 3, "manual_reason": "scanner unavailable",
         }, timeout=30)
         assert r.status_code == 200, r.text
         pid = r.json()["registration"]["id"]

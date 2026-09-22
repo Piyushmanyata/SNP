@@ -273,6 +273,100 @@ def test_completion_obeys_an_existing_clinical_write_claim(monkeypatch):
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("failure_stage", ["transcription", "audit", "ledger"])
+def test_correction_retry_applies_one_generation(monkeypatch, failure_stage):
+    async def run():
+        db = _mock(monkeypatch)
+        _, _, patient = await _printed_patient(db)
+        done = await routes_clinical.complete_prescription(
+            _complete_body(patient["_id"], "complete"), actor=CLINICAL,
+        )
+        body = CorrectionBody(
+            patient_id=str(patient["_id"]), reason="Correct pressure", operation_id="correct-1",
+            expected_generation=done["registration"]["clinical_generation"],
+            full_transcription_confirmed=True, bp="130/85",
+        )
+        if failure_stage == "transcription":
+            original = routes_clinical._upsert_transcription
+
+            async def failed(*args, **kwargs):
+                if kwargs.get("locked"):
+                    raise RuntimeError("injected correction failure")
+                return await original(*args, **kwargs)
+
+            monkeypatch.setattr(routes_clinical, "_upsert_transcription", failed)
+            restore = lambda: monkeypatch.setattr(routes_clinical, "_upsert_transcription", original)
+        elif failure_stage == "audit":
+            original_insert = db.corrections.insert_one
+
+            async def failed(*args, **kwargs):
+                raise RuntimeError("injected correction failure")
+
+            monkeypatch.setattr(db.corrections, "insert_one", failed)
+            restore = lambda: monkeypatch.setattr(db.corrections, "insert_one", original_insert)
+        else:
+            original = routes_clinical.save_operation
+
+            async def failed(db_arg, doc):
+                if doc.get("status") == "committed" and doc.get("kind") == "correct":
+                    raise RuntimeError("injected correction failure")
+                return await original(db_arg, doc)
+
+            monkeypatch.setattr(routes_clinical, "save_operation", failed)
+            restore = lambda: monkeypatch.setattr(routes_clinical, "save_operation", original)
+
+        with pytest.raises(RuntimeError):
+            await routes_clinical.add_correction(body, actor=CLINICAL)
+        restore()
+        result = await routes_clinical.add_correction(body, actor=CLINICAL)
+        assert result["registration"]["clinical_generation"] == 2
+        assert await db.prescription_revisions.count_documents({"kind": "correct"}) == 1
+        assert await db.corrections.count_documents({}) == 1
+        assert await routes_clinical.add_correction(body, actor=CLINICAL) == result
+
+        changed = body.model_copy(update={"bp": "140/90"})
+        with pytest.raises(HTTPException) as exc:
+            await routes_clinical.add_correction(changed, actor=CLINICAL)
+        assert exc.value.detail["code"] == "operation_conflict"
+
+    asyncio.run(run())
+
+
+def test_undo_retry_clears_one_completion(monkeypatch):
+    async def run():
+        db = _mock(monkeypatch)
+        _, _, patient = await _printed_patient(db)
+        done = await routes_clinical.complete_prescription(
+            _complete_body(patient["_id"], "complete"), actor=CLINICAL,
+        )
+        body = UndoCompletionBody(
+            patient_id=str(patient["_id"]),
+            expected_generation=done["registration"]["clinical_generation"],
+            reason="Wrong patient", operation_id="undo-1",
+        )
+        original = routes_clinical.save_operation
+
+        async def failed(db_arg, doc):
+            if doc.get("status") == "committed" and doc.get("kind") == "undo":
+                raise RuntimeError("injected undo failure")
+            return await original(db_arg, doc)
+
+        monkeypatch.setattr(routes_clinical, "save_operation", failed)
+        with pytest.raises(RuntimeError):
+            await routes_clinical.undo_completion(body, actor=CLINICAL)
+        monkeypatch.setattr(routes_clinical, "save_operation", original)
+        result = await routes_clinical.undo_completion(body, actor=CLINICAL)
+        assert result["registration"]["clinical_generation"] == 2
+        assert result["registration"]["committed_revision_id"] is None
+        assert result["transcription"]["locked"] is False
+        again = await routes_clinical.undo_completion(body, actor=CLINICAL)
+        assert again == result
+        current = await db.patients.find_one({"_id": patient["_id"]})
+        assert current["clinical_generation"] == 2
+
+    asyncio.run(run())
+
+
 def test_malformed_correction_content_is_rejected_before_processing(monkeypatch):
     async def run():
         db = _mock(monkeypatch)

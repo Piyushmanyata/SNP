@@ -54,10 +54,18 @@ export function FixedPowerPicker({
   onChange,
   disabled,
   firstFieldRef,
+  unavailable = false,
 }) {
   const [chosen, setChosen] = useState(null);
   const split = chosen ?? (valueR !== null && valueL !== null && valueR !== valueL);
 
+  if (unavailable) {
+    return (
+      <p className="text-sm text-amber-800" data-testid="power-picker-unavailable">
+        Fixed powers could not be loaded. Retry before issuing a power. पावर की सूची नहीं खुली।
+      </p>
+    );
+  }
   if (!powers.length) {
     return (
       <p className="text-sm text-amber-800" data-testid="fixed-power-empty">

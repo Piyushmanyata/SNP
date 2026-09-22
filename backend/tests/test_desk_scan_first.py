@@ -60,6 +60,9 @@ def _reg(session, camp_day_id, **fields):
         "registration_request_id": fields.pop("registration_request_id", str(uuid.uuid4())),
     }
     body.update(fields)
+    if not body.get("aadhaar_scanned"):
+        body.setdefault("failed_scan_attempts", 3)
+        body.setdefault("manual_reason", "scanner unavailable")
     if body.get("aadhaar_scanned"):
         body["qr_payload"] = tostring(Element(
             "PrintLetterBarcodeData", name=body["full_name"], gender=body["gender"],

@@ -318,7 +318,7 @@ async def has_issue_history(db, patient: dict) -> bool:
     return False
 
 
-async def commit_undo(db, patient: dict, expected: int) -> Optional[dict]:
+async def commit_undo(db, patient: dict, expected: int, operation_id: str) -> Optional[dict]:
     return await db.patients.find_one_and_update(
         _commit_filter(patient["_id"], expected, empty_commit=False, require_commit=True),
         {"$set": {
@@ -329,6 +329,7 @@ async def commit_undo(db, patient: dict, expected: int) -> Optional[dict]:
             "clinical_generation": expected + 1,
             "issue_authorization": None,
             "issue_auth_op": None,
+            "last_undo_operation_id": operation_id,
         }},
         return_document=True,
     )

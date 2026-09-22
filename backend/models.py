@@ -83,6 +83,7 @@ class RegisterBody(BaseModel):
     manual_exception: bool = False
     manual_reason: Optional[str] = None
     failed_scan_attempts: int = 0
+    at_door: bool = False
     qr_payload: Optional[str] = None
 
 

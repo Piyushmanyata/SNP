@@ -6,7 +6,15 @@ export function MedicinePicker({
   onChange,
   disabled,
   firstFieldRef,
+  unavailable = false,
 }) {
+  if (unavailable) {
+    return (
+      <p className="text-sm text-amber-800" data-testid="medicine-picker-unavailable">
+        Medicines could not be loaded. Retry before choosing any. दवाइयों की सूची नहीं खुली।
+      </p>
+    );
+  }
   if (!medicines.length) {
     return (
       <p className="text-sm text-amber-800" data-testid="medicine-picker-empty">

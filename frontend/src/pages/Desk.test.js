@@ -68,7 +68,10 @@ jest.mock("../components/AadhaarScanner", () => {
         <button
           type="button"
           data-testid="mock-stall-trigger"
-          onClick={() => onScanStall && onScanStall()}
+          onClick={() => {
+            onFailure && onFailure("error");
+            onScanStall && onScanStall();
+          }}
         >
           Simulate Scan stall
         </button>
@@ -519,18 +522,29 @@ describe("Desk page", () => {
     expect(registerBodies()[0].qr_payload).toBe(CARD_PAYLOAD);
   });
 
+  function revealManual() {
+    for (let i = 0; i < 3; i += 1) {
+      act(() => { modalScanner("mock-stall-trigger").click(); });
+    }
+    act(() => { modalScanner("reg-manual-toggle").click(); });
+  }
+
   test("a manual registration claims no scan and carries no card payload", async () => {
     preRegistrationMode();
     await renderDesk();
     act(() => { container.querySelector('[data-testid="new-registration-button"]').click(); });
-    act(() => { modalScanner("reg-manual-toggle").click(); });
+    expect(modalScanner("reg-manual-toggle")).toBeFalsy();
+    revealManual();
     act(() => { setInput(document.body.querySelector('[data-testid="reg-fullname-input"]'), "Manual Patient"); });
     act(() => { setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "9876500002"); });
+    act(() => { setInput(document.body.querySelector('[data-testid="manual-reason-input"]'), "Camera would not start"); });
     await act(async () => { document.body.querySelector('[data-testid="patient-register-submit"]').click(); });
 
     expect(registerBodies()).toHaveLength(1);
     expect(registerBodies()[0].aadhaar_scanned).toBe(false);
     expect(registerBodies()[0].qr_payload).toBeFalsy();
+    expect(registerBodies()[0].failed_scan_attempts).toBe(3);
+    expect(registerBodies()[0].manual_reason).toBe("Camera would not start");
   });
 
   test("a reopened registration cannot reuse the previous patient's card payload", async () => {
@@ -542,11 +556,10 @@ describe("Desk page", () => {
 
     act(() => { container.querySelector('[data-testid="new-registration-button"]').click(); });
     expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
-    act(() => { modalScanner("mock-failure-trigger").click(); });
-    act(() => { modalScanner("mock-failure-trigger").click(); });
-    act(() => { modalScanner("mock-failure-trigger").click(); });
+    revealManual();
     act(() => { setInput(document.body.querySelector('[data-testid="reg-fullname-input"]'), "Second Patient"); });
     act(() => { setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "9876500003"); });
+    act(() => { setInput(document.body.querySelector('[data-testid="manual-reason-input"]'), "Second try"); });
     await act(async () => { document.body.querySelector('[data-testid="patient-register-submit"]').click(); });
 
     expect(registerBodies()).toHaveLength(1);
@@ -735,21 +748,20 @@ describe("Desk page", () => {
     act(() => {
       container.querySelector('[data-testid="new-registration-button"]').click();
     });
-    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="reg-manual-toggle"]')).toBeNull();
 
-    act(() => {
-      modalScanner("mock-failure-trigger").click();
-    });
-    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
+    act(() => { modalScanner("mock-failure-trigger").click(); });
+    act(() => { modalScanner("mock-failure-trigger").click(); });
+    act(() => { modalScanner("mock-failure-trigger").click(); });
+    expect(document.body.querySelector('[data-testid="reg-manual-toggle"]')).toBeNull();
 
-    act(() => {
-      modalScanner("mock-failure-trigger").click();
-    });
+    act(() => { modalScanner("mock-stall-trigger").click(); });
+    act(() => { modalScanner("mock-stall-trigger").click(); });
+    expect(document.body.querySelector('[data-testid="reg-manual-toggle"]')).toBeNull();
+    act(() => { modalScanner("mock-stall-trigger").click(); });
+    expect(document.body.querySelector('[data-testid="reg-manual-toggle"]')).not.toBeNull();
     expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
-    act(() => {
-      modalScanner("mock-failure-trigger").click();
-    });
-    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).not.toBeNull();
+    act(() => { modalScanner("reg-manual-toggle").click(); });
     expect(document.body.querySelector('[data-testid="manual-entry-note"]')).not.toBeNull();
     expect(document.body.textContent).not.toContain("Register anyway");
   });
@@ -824,11 +836,11 @@ describe("Desk page", () => {
       container.querySelector('[data-testid="new-registration-button"]').click();
     });
     act(() => {
-      modalScanner("mock-failure-trigger").click();
-      modalScanner("mock-failure-trigger").click();
-      modalScanner("mock-failure-trigger").click();
+      modalScanner("mock-stall-trigger").click();
+      modalScanner("mock-stall-trigger").click();
+      modalScanner("mock-stall-trigger").click();
     });
-    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).not.toBeNull();
+    expect(document.body.querySelector('[data-testid="reg-manual-toggle"]')).not.toBeNull();
 
     act(() => {
       document.body.querySelector('[data-testid="modal-close-button"]').click();
@@ -1074,10 +1086,14 @@ describe("Desk page", () => {
       return Promise.resolve({ data: {} });
     });
     await renderDesk();
+    for (let i = 0; i < 3; i += 1) {
+      act(() => { container.querySelector('[data-testid="mock-stall-trigger"]').click(); });
+    }
     act(() => {
       setInput(container.querySelector('[data-testid="reg-fullname-input"]'), "Manual Patient");
       setInput(container.querySelector('[data-testid="reg-age-input"]'), "40");
       setInput(container.querySelector('[data-testid="reg-phone-input"]'), "9876500002");
+      setInput(container.querySelector('[data-testid="door-manual-reason"]'), "Scanners are down");
     });
     await act(async () => {
       container.querySelector('[data-testid="door-manual-submit"]').click();
@@ -1086,6 +1102,9 @@ describe("Desk page", () => {
       full_name: "Manual Patient",
       camp_day_id: "day-2",
       manual_entry: true,
+      at_door: true,
+      failed_scan_attempts: 3,
+      manual_reason: "Scanners are down",
     }));
     expect(api.post).toHaveBeenCalledWith("/desk/arrive/p-8");
     expect(container.textContent).toContain("Registered and arrived: #108");
@@ -1122,8 +1141,13 @@ describe("Desk page", () => {
     expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
   });
 
-  test("the door typed form appears once an admin opens the gate", async () => {
+  test("the door typed form stays hidden until three camera attempts fail", async () => {
     await renderDesk({ door_manual_entry: true });
+    expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
+    act(() => { container.querySelector('[data-testid="mock-stall-trigger"]').click(); });
+    act(() => { container.querySelector('[data-testid="mock-stall-trigger"]').click(); });
+    expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
+    act(() => { container.querySelector('[data-testid="mock-stall-trigger"]').click(); });
     expect(container.querySelector('[data-testid="door-manual-form"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="manual-entry-note"]').textContent)
       .toContain("closes at the end of today");
@@ -1147,6 +1171,7 @@ describe("Desk page", () => {
     await renderDesk();
     act(() => container.querySelector('[data-testid="new-registration-button"]').click());
     await fireBurst(CARD_PAYLOAD);
+    for (let i = 0; i < 3; i += 1) act(() => { modalScanner("mock-stall-trigger").click(); });
     act(() => document.querySelector('[data-testid="reg-manual-toggle"]').click());
     act(() => setInput(document.querySelector('[data-testid="reg-fullname-input"]'), "Manual Name"));
     await act(async () => resolveDecode({ data: { outcome: "card", data: { full_name: "Late scan", age: 42 } } }));

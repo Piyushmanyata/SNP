@@ -75,7 +75,10 @@ jest.mock("./components/AadhaarScanner", () => {
         <button
           type="button"
           data-testid="mock-stall-trigger"
-          onClick={() => onScanStall && onScanStall()}
+          onClick={() => {
+            onFailure && onFailure("error");
+            onScanStall && onScanStall();
+          }}
         >
           Simulate Scan stall
         </button>
@@ -357,12 +360,11 @@ describe("CHALLENGE 2: Desk.js Form Persistence vs Modal Lifecycle", () => {
       container.querySelector('[data-testid="new-registration-button"]').click();
     });
 
-    // Fail twice to reveal manual form
     act(() => {
-      [...document.body.querySelectorAll('[data-testid="mock-failure-trigger"]')].pop().click();
-      [...document.body.querySelectorAll('[data-testid="mock-failure-trigger"]')].pop().click();
-      [...document.body.querySelectorAll('[data-testid="mock-failure-trigger"]')].pop().click();
+      const stall = () => [...document.body.querySelectorAll('[data-testid="mock-stall-trigger"]')].pop();
+      stall().click(); stall().click(); stall().click();
     });
+    act(() => { [...document.body.querySelectorAll('[data-testid="reg-manual-toggle"]')].pop().click(); });
 
     const nameInput = document.body.querySelector('[data-testid="reg-fullname-input"]');
     const phoneInput = document.body.querySelector('[data-testid="reg-phone-input"]');
@@ -390,12 +392,11 @@ describe("CHALLENGE 2: Desk.js Form Persistence vs Modal Lifecycle", () => {
     // Manual form should be closed (failures reset to 0)
     expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
 
-    // Trigger failure twice again to check if form fields are empty strings
     act(() => {
-      [...document.body.querySelectorAll('[data-testid="mock-failure-trigger"]')].pop().click();
-      [...document.body.querySelectorAll('[data-testid="mock-failure-trigger"]')].pop().click();
-      [...document.body.querySelectorAll('[data-testid="mock-failure-trigger"]')].pop().click();
+      const stall = () => [...document.body.querySelectorAll('[data-testid="mock-stall-trigger"]')].pop();
+      stall().click(); stall().click(); stall().click();
     });
+    act(() => { [...document.body.querySelectorAll('[data-testid="reg-manual-toggle"]')].pop().click(); });
 
     const reopenedNameInput = document.body.querySelector('[data-testid="reg-fullname-input"]');
     const reopenedPhoneInput = document.body.querySelector('[data-testid="reg-phone-input"]');
@@ -525,10 +526,10 @@ describe("CHALLENGE 2: Desk.js Form Persistence vs Modal Lifecycle", () => {
     });
 
     act(() => {
-      [...document.body.querySelectorAll('[data-testid="mock-failure-trigger"]')].pop().click();
-      [...document.body.querySelectorAll('[data-testid="mock-failure-trigger"]')].pop().click();
-      [...document.body.querySelectorAll('[data-testid="mock-failure-trigger"]')].pop().click();
+      const stall = () => [...document.body.querySelectorAll('[data-testid="mock-stall-trigger"]')].pop();
+      stall().click(); stall().click(); stall().click();
     });
+    act(() => { [...document.body.querySelectorAll('[data-testid="reg-manual-toggle"]')].pop().click(); });
 
     const nameInput = document.body.querySelector('[data-testid="reg-fullname-input"]');
     act(() => {
