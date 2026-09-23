@@ -368,7 +368,7 @@ class TestFailedRemindersRetryOnALaterRun:
             await mock_db.deferred_slips.insert_one({
                 "patient_id": pid, "item_type": "specs_made", "active": True, "cancelled": False,
                 "collection_date": TOMORROW, "collection_venue": "Token Hall",
-                "collection_start_time": "10:00", "collection_end_time": "12:00", "version": 1,
+                "collection_start_time": "10:00", "collection_end_time": "17:00", "version": 1,
             })
 
         asyncio.run(seed())
@@ -379,8 +379,8 @@ class TestFailedRemindersRetryOnALaterRun:
 
         _post(client)
 
-        assert [(c["date"], c["end_date"], c["start_time"], c["end_time"]) for c in calls] == [
-            ("02-09-2026", "02-09-2026", "10:00", "12:00"),
+        assert [(c["date"], c["end_date"]) for c in calls] == [
+            ("02-09-2026", "02-09-2026"),
         ] * 2
 
 

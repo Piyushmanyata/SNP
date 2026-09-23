@@ -93,10 +93,12 @@ def test_specs_create_update_list_window_contract(monkeypatch):
         headers = _auth(admin_id, "admin", "admin")
         day = _future_date()
 
-        missing = client.post("/api/clinical/specs-days", json={
+        created = client.post("/api/clinical/specs-days", json={
             "camp_id": str(camp_id), "day_date": day, "venue": "Optical",
         }, headers=headers)
-        assert missing.status_code == 400
+        assert created.status_code == 200
+        assert created.json()["specs_day"]["start_time"] == "10:00"
+        assert created.json()["specs_day"]["end_time"] == "17:00"
 
         inverted = client.post("/api/clinical/specs-days", json={
             "camp_id": str(camp_id), "day_date": day, "venue": "  Optical Desk  ",
@@ -106,14 +108,13 @@ def test_specs_create_update_list_window_contract(monkeypatch):
 
         created = client.post("/api/clinical/specs-days", json={
             "camp_id": str(camp_id), "day_date": day, "venue": "  Optical Desk  ",
-            "start_time": "10:00", "end_time": "12:30",
             "seat_limit": 12,
         }, headers=headers)
         assert created.status_code == 200
         row = created.json()["specs_day"]
         assert row["venue"] == "Optical Desk"
         assert row["start_time"] == "10:00"
-        assert row["end_time"] == "12:30"
+        assert row["end_time"] == "17:00"
         assert row["day_date"] == day
         assert "seat_limit" not in row
         assert "seats_taken" not in row
@@ -122,20 +123,24 @@ def test_specs_create_update_list_window_contract(monkeypatch):
         assert "seat_limit" not in stored
         assert "seats_taken" not in stored
 
-        updated = client.post("/api/clinical/specs-days", json={
+        rejected = client.post("/api/clinical/specs-days", json={
             "camp_id": str(camp_id), "day_date": day, "venue": "New Optical",
             "start_time": "11:00", "end_time": "13:00",
+        }, headers=headers)
+        assert rejected.status_code == 400
+        updated = client.post("/api/clinical/specs-days", json={
+            "camp_id": str(camp_id), "day_date": day, "venue": "New Optical",
         }, headers=headers)
         assert updated.status_code == 200
         assert updated.json()["specs_day"]["id"] == row["id"]
         assert updated.json()["specs_day"]["venue"] == "New Optical"
-        assert updated.json()["specs_day"]["start_time"] == "11:00"
+        assert updated.json()["specs_day"]["start_time"] == "10:00"
         listed = client.get("/api/clinical/specs-days", headers=headers)
         assert listed.status_code == 200
         days = listed.json()["specs_days"]
         assert len(days) == 1
         assert "seat_limit" not in days[0]
-        assert days[0]["end_time"] == "13:00"
+        assert days[0]["end_time"] == "17:00"
     asyncio.run(run())
 
 
@@ -203,7 +208,7 @@ def test_many_specs_assignments_do_not_refuse_or_mutate_seats(monkeypatch):
         day_id = ObjectId()
         await mock_db.specs_collection_days.insert_one({
             "_id": day_id, "camp_id": camp_id, "day_date": _future_date(),
-            "venue": "Optical Desk", "start_time": "09:00", "end_time": "17:00",
+            "venue": "Optical Desk", "start_time": "10:00", "end_time": "17:00",
         })
         actor = {"_id": ObjectId(), "role": "clinical_desk_operator"}
         rev_b = ObjectId()
@@ -258,17 +263,25 @@ def test_clinical_specs_picker_rejects_ended_cross_camp_legacy_and_malformed(mon
         assert routes_clinical.ser_specs_day(
             await mock_db.specs_collection_days.find_one({"_id": afternoon}),
         )["window_required"] is True
+        old_hours = ObjectId()
+        await mock_db.specs_collection_days.insert_one({
+            "_id": old_hours, "camp_id": camp_id, "day_date": future,
+            "venue": "Old Hours", "start_time": "10:00", "end_time": "15:00",
+        })
+        assert routes_clinical.ser_specs_day(
+            await mock_db.specs_collection_days.find_one({"_id": old_hours}),
+        )["window_required"] is True
         await mock_db.specs_collection_days.insert_one({
             "_id": ObjectId(), "camp_id": other_camp, "day_date": future,
             "venue": "Other Camp", "start_time": "09:00", "end_time": "13:00",
         })
         await mock_db.specs_collection_days.insert_one({
             "_id": valid, "camp_id": camp_id, "day_date": future,
-            "venue": "Optical Desk", "start_time": "09:00", "end_time": "17:00",
+            "venue": "Optical Desk", "start_time": "10:00", "end_time": "17:00",
         })
         actor = {"_id": ObjectId(), "role": "clinical_desk_operator"}
 
-        for bad_id in (str(ended), str(legacy), str(afternoon), "not-an-id"):
+        for bad_id in (str(ended), str(legacy), str(afternoon), str(old_hours), "not-an-id"):
             with __import__("pytest").raises(__import__("fastapi").HTTPException) as exc:
                 await record_fulfilment(_fulfil(
                     trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",
@@ -288,7 +301,7 @@ def test_clinical_specs_picker_rejects_ended_cross_camp_legacy_and_malformed(mon
             trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",
             specs_collection_day_id=str(valid), operation_id="op-ok",
         ), actor=actor, background_tasks=None)
-        assert ok["slip"]["collection_start_time"] == "09:00"
+        assert ok["slip"]["collection_start_time"] == "10:00"
         assert ok["slip"]["collection_end_time"] == "17:00"
         assert ok["slip"]["collection_venue"] == "Optical Desk"
     asyncio.run(run())
@@ -307,7 +320,6 @@ def test_specs_token_snapshot_survives_later_schedule_edit(monkeypatch):
         day = _future_date()
         created = client.post("/api/clinical/specs-days", json={
             "camp_id": str(camp_id), "day_date": day, "venue": "Optical Desk",
-            "start_time": "10:00", "end_time": "12:00",
         }, headers=headers)
         day_id = created.json()["specs_day"]["id"]
         out = await record_fulfilment(_fulfil(
@@ -315,15 +327,14 @@ def test_specs_token_snapshot_survives_later_schedule_edit(monkeypatch):
             specs_collection_day_id=day_id, operation_id="op-snap",
         ), actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
         assert out["slip"]["collection_start_time"] == "10:00"
-        assert out["slip"]["collection_end_time"] == "12:00"
+        assert out["slip"]["collection_end_time"] == "17:00"
         client.post("/api/clinical/specs-days", json={
             "camp_id": str(camp_id), "day_date": day, "venue": "Moved Hall",
-            "start_time": "14:00", "end_time": "16:00",
         }, headers=headers)
         slip = await mock_db.deferred_slips.find_one({"_id": ObjectId(out["slip"]["id"])})
         assert slip["collection_venue"] == "Optical Desk"
         assert slip["collection_start_time"] == "10:00"
-        assert slip["collection_end_time"] == "12:00"
+        assert slip["collection_end_time"] == "17:00"
         reprint = client.get(f"/api/clinical/slip/{out['slip']['id']}", headers=_auth(
             ObjectId(), "Op", "clinical_desk_operator",
         ))
@@ -389,6 +400,6 @@ def test_started_window_stays_selectable_and_token_sms_states_the_range(monkeypa
         assert sent == [{
             "type": "specs_token", "mobile": "9876500001", "reg_no": 501, "camp_no": "162",
             "date": helpers.display_date(yesterday), "end_date": helpers.display_date(until),
-            "start_time": "10:00", "end_time": "05:00", "venue": "SNP कार्यालय, देवघर",
+            "venue": "SNP कार्यालय, देवघर",
         }]
     asyncio.run(run())

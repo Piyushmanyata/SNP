@@ -664,7 +664,7 @@ class TestFulfilmentLines:
             specs_day = ObjectId()
             await mock_db.specs_collection_days.insert_one({
                 "_id": specs_day, "camp_id": camp_id, "day_date": "2026-09-20", "end_date": "2026-09-27",
-                "venue": "Optical Desk", "start_time": "09:00", "end_time": "17:00", "seat_limit": 2, "seats_taken": 0,
+                "venue": "Optical Desk", "start_time": "10:00", "end_time": "17:00", "seat_limit": 2, "seats_taken": 0,
             })
             body = _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_made",
                            status="deferred", specs_collection_day_id=str(specs_day))
@@ -672,7 +672,7 @@ class TestFulfilmentLines:
             assert out["slip"]["collection_date"] == "2026-09-20"
             assert sent == [{"type": "specs_token", "mobile": "9876500001", "reg_no": 501, "camp_no": "162",
                              "date": "20-09-2026", "end_date": "27-09-2026",
-                             "start_time": "09:00", "end_time": "05:00", "venue": "Optical Desk"}]
+                             "venue": "Optical Desk"}]
         asyncio.run(run())
 
     def test_deferring_ot_sends_the_ot_token_sms(self, monkeypatch):

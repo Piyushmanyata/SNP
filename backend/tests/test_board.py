@@ -133,12 +133,12 @@ class TestCampDayBoard:
                 collection.docs = [{
                     "camp_id": camp_id,
                     "day_date": (today + timedelta(days=i + 2)).date().isoformat(),
-                    "start_time": "09:00", "end_time": "17:00",
+                    "start_time": "10:00", "end_time": "17:00",
                 } for i in range(200)]
                 collection.docs.extend([
-                    {"camp_id": camp_id, "day_date": tomorrow, "start_time": "09:00", "end_time": "17:00"},
+                    {"camp_id": camp_id, "day_date": tomorrow, "start_time": "10:00", "end_time": "17:00"},
                     {"camp_id": camp_id, "day_date": (today - timedelta(days=1)).date().isoformat()},
-                    {"camp_id": ObjectId(), "day_date": TODAY, "start_time": "09:00", "end_time": "17:00"},
+                    {"camp_id": ObjectId(), "day_date": TODAY, "start_time": "10:00", "end_time": "17:00"},
                 ])
             database.specs_collection_days.docs.extend([
                 {"camp_id": camp_id, "day_date": TODAY, "start_time": "09:00"},
@@ -223,7 +223,7 @@ class TestCampDayBoard:
             })
             await mock_db.specs_collection_days.insert_one({
                 "camp_id": camp_id, "day_date": "2026-09-05", "venue": "Optical",
-                "start_time": "09:00", "end_time": "12:00",
+                "start_time": "10:00", "end_time": "17:00",
             })
             await mock_db.reminder_ledger.insert_one({
                 "status": "failed", "created_at": NOW - timedelta(minutes=1),
@@ -254,7 +254,7 @@ class TestCampDayBoard:
             assert out["fulfilment"]["ot"]["deferred"] == 1
             assert out["next_ot"]["seats_left"] == 7
             assert out["next_ot"]["venue"] == "OT Hall"
-            assert out["next_specs"]["start_time"] == "09:00"
+            assert out["next_specs"]["start_time"] == "10:00"
             assert "seats_left" not in out["next_specs"]
             assert out["sms_failures"] == 2
             blob = " ".join(_walk_strings(out))

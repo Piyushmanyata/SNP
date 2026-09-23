@@ -10,6 +10,7 @@ from catalogue import format_power
 from db import get_db
 from helpers import as_utc, display_date, display_timestamp, iso, ist_day_bounds, now_utc, today_ist_str
 from security import require_admin, require_staff, require_any, require_lead
+import sms
 
 router = APIRouter(prefix="/api", tags=["reports"])
 
@@ -310,7 +311,7 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
     )
     specs_day = await db.specs_collection_days.find_one(
         {"camp_id": camp["_id"], "$or": [{"day_date": {"$gte": today}}, {"end_date": {"$gte": today}}],
-         "start_time": {"$gt": ""}, "end_time": {"$gt": ""}},
+         "start_time": sms.SPECS_PICKUP_START_TIME, "end_time": sms.SPECS_PICKUP_END_TIME},
         sort=[("day_date", 1)],
     )
     next_ot = None

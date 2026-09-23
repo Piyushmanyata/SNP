@@ -20,7 +20,7 @@ from clinical_state import (
     release_issue_authorization, save_operation, serialize_revision, validate_completion,
 )
 from helpers import (
-    now_utc, iso, DIAGNOSIS_OPTIONS, now_ist, parse_hhmm, ist_local_instant,
+    now_utc, iso, DIAGNOSIS_OPTIONS, now_ist, ist_local_instant,
     normalize_name, normalize_phone, parse_patient_identifier,
 )
 from bson.errors import InvalidId
@@ -131,7 +131,7 @@ def ser_ot_day(d: dict) -> Dict[str, Any]:
 def ser_specs_day(d: dict) -> Dict[str, Any]:
     start = d.get("start_time")
     end = d.get("end_time")
-    complete = sms.morning_to_evening(start, end)
+    complete = sms.specs_pickup_hours_match(start, end)
     return {
         "id": str(d["_id"]),
         "camp_id": str(d["camp_id"]),
@@ -590,10 +590,10 @@ def _oid_or_400(raw: str) -> ObjectId:
 def _specs_window_selectable(day: dict) -> bool:
     start = day.get("start_time")
     end = day.get("end_time")
-    if not start or not end or not sms.morning_to_evening(start, end):
+    if not sms.specs_pickup_hours_match(start, end):
         return False
     try:
-        return ist_local_instant(day.get("end_date") or day["day_date"], end) > now_ist()
+        return ist_local_instant(day.get("end_date") or day["day_date"], sms.SPECS_PICKUP_END_TIME) > now_ist()
     except (ValueError, TypeError):
         return False
 
@@ -1185,13 +1185,10 @@ def _validated_specs_window(body: SpecsScheduleBody) -> tuple[ObjectId, str, str
         raise HTTPException(status_code=400, detail="Invalid end_date")
     if last_day < first_day:
         raise HTTPException(status_code=400, detail="end_date must not be before day_date")
-    try:
-        start = parse_hhmm(body.start_time)
-        end = parse_hhmm(body.end_time)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
-    if not sms.morning_to_evening(start, end):
-        raise HTTPException(status_code=400, detail="Specs hours must start before 12:00 and end at 12:00 or later")
+    start = sms.SPECS_PICKUP_START_TIME
+    end = sms.SPECS_PICKUP_END_TIME
+    if body.start_time not in (None, start) or body.end_time not in (None, end):
+        raise HTTPException(status_code=400, detail="Specs collection hours are fixed at 10:00–17:00")
     if ist_local_instant(end_date, end) <= now_ist():
         raise HTTPException(status_code=400, detail="Window end must be after now")
     return camp_oid, body.day_date, end_date, venue, start, end

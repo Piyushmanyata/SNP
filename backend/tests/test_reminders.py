@@ -129,8 +129,8 @@ class TestMessageCopy:
         assert CAMP_REMINDER == "कल ({date}) को Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपका नेत्र परीक्षण है। कृपया समय पर {venue} पहुँचें। यह टोकन शिविर स्थल पर दिखाएँ। क्रमांक: {reg_no}। कृपया शिविर के दिन अपना आधार कार्ड अवश्य साथ लाएँ।"
         assert OT_TOKEN == "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपका ऑपरेशन {date} को निर्धारित हुआ है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर अवश्य साथ लाएँ। स्थल: {venue}।"
         assert OT_REMINDER == "कल ({date}) को Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपका नेत्र ऑपरेशन निर्धारित है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ अवश्य लाएँ। स्थल: {venue}।"
-        assert SPECS_TOKEN == "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपको चश्मा {date} से {end_date} तक सुबह  {start_time} बजे से शाम {end_time} बजे तक {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर अवश्य आएँ।"
-        assert SPECS_REMINDER == "Sikar Zilla Welfare Trust के {camp_no} वे शिविर के चश्मे बनकर  तैयार है।  चश्में {date} से {end_date} तक सुबह  {start_time} बजे से शाम {end_time} बजे तक {venue} आकर ले जावें। टोकन क्रमांक {reg_no} अवश्य साथ लाएँ।"
+        assert SPECS_TOKEN == "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपको चश्मा {date} से {end_date} तक प्रतिदिन 10:00 AM से 5:00 PM तक {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर अवश्य आएँ।"
+        assert SPECS_REMINDER == "Sikar Zilla Welfare Trust के {camp_no} वे शिविर के चश्मे बनकर तैयार हैं। चश्मे {date} से {end_date} तक प्रतिदिन 10:00 AM से 5:00 PM तक {venue} आकर ले जाएँ। टोकन क्रमांक {reg_no} अवश्य साथ लाएँ।"
 
     def test_the_dlt_reference_registers_exactly_the_code_copy(self):
         doc = json.loads((backend_dir / "docs" / "msg91-templates.json").read_text(encoding="utf-8"))
@@ -360,11 +360,11 @@ class TestReminderCronHttp:
         assert captured == [{
             "type": "specs", "mobile": HOUSEHOLD, "reg_no": 42, "camp_no": "162",
             "date": TOMORROW_SHOWN, "end_date": "09-09-2026",
-            "start_time": "10:00", "end_time": "05:00", "venue": "Token Hall",
+            "venue": "Token Hall",
         }]
         assert mock_db.reminder_ledger.docs[0]["copy"] == (
-            "Sikar Zilla Welfare Trust के 162 वे शिविर के चश्मे बनकर  तैयार है।  चश्में 02-09-2026 से 09-09-2026 तक "
-            "सुबह  10:00 बजे से शाम 05:00 बजे तक Token Hall आकर ले जावें। टोकन क्रमांक 42 अवश्य साथ लाएँ।"
+            "Sikar Zilla Welfare Trust के 162 वे शिविर के चश्मे बनकर तैयार हैं। चश्मे 02-09-2026 से 09-09-2026 तक "
+            "प्रतिदिन 10:00 AM से 5:00 PM तक Token Hall आकर ले जाएँ। टोकन क्रमांक 42 अवश्य साथ लाएँ।"
         )
 
     def test_a_single_day_legacy_token_reads_as_a_one_day_range(self, monkeypatch):
@@ -381,22 +381,22 @@ class TestReminderCronHttp:
             await mock_db.deferred_slips.insert_one({
                 "patient_id": pid, "item_type": "specs_made", "active": True, "cancelled": False,
                 "collection_date": TOMORROW, "collection_venue": "Token Hall",
-                "collection_start_time": "10:00", "collection_end_time": "12:30", "version": 1,
+                "collection_start_time": "10:00", "collection_end_time": "17:00", "version": 1,
             })
         asyncio.run(seed())
         captured = _calls(monkeypatch)
         _post(_client(monkeypatch, mock_db))
-        assert [(c["date"], c["end_date"], c["end_time"]) for c in captured] == [
-            (TOMORROW_SHOWN, TOMORROW_SHOWN, "12:30"),
+        assert [(c["date"], c["end_date"]) for c in captured] == [
+            (TOMORROW_SHOWN, TOMORROW_SHOWN),
         ]
 
-    def test_specs_token_without_morning_to_evening_hours_is_not_sent(self, monkeypatch):
+    def test_specs_token_without_fixed_pickup_hours_is_not_sent(self, monkeypatch):
         mock_db = setup_mock_db(monkeypatch)
 
         async def seed():
             camp_id = ObjectId()
             await mock_db.camps.insert_one({"_id": camp_id, "name": "C", "venue": "Hall A", "camp_number": 162})
-            for reg_no, hours in ((42, {}), (43, {"collection_start_time": "14:00", "collection_end_time": "17:00"})):
+            for reg_no, hours in ((42, {}), (43, {"collection_start_time": "10:00", "collection_end_time": "15:00"})):
                 pid = ObjectId()
                 await mock_db.patients.insert_one({
                     "_id": pid, "camp_id": camp_id, "camp_day_id": ObjectId(), "reg_no": reg_no,

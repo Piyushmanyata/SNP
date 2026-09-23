@@ -101,7 +101,7 @@ def test_concurrent_same_line_leaves_one_current_specs_record(monkeypatch):
         day = ObjectId()
         await mock_db.specs_collection_days.insert_one({
             "_id": day, "camp_id": camp_id, "day_date": "2026-10-20",
-            "venue": "Optical", "start_time": "09:00", "end_time": "17:00",
+            "venue": "Optical", "start_time": "10:00", "end_time": "17:00",
         })
         actor = {"_id": ObjectId(), "role": "clinical_desk_operator"}
         body = _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",

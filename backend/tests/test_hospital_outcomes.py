@@ -436,14 +436,14 @@ class TestDisplayedDates:
             await db.camps.insert_one({"_id": camp_id, "name": "C", "venue": "Hall", "camp_number": 162})
             patient = {"_id": ObjectId(), "camp_id": camp_id, "phone": "9876500001", "reg_no": 7}
             assert await sms.send_patient_sms(
-                db, patient, message_type, "2026-09-17", "Hall", "09:00", "17:00", "2026-09-24",
+                db, patient, message_type, "2026-09-17", "Hall", "10:00", "17:00", "2026-09-24",
             )
             assert sent[0]["date"] == "17-09-2026"
             if message_type.startswith("specs"):
-                assert (sent[0]["end_date"], sent[0]["start_time"], sent[0]["end_time"]) == (
-                    "24-09-2026", "09:00", "05:00",
-                )
+                assert sent[0]["end_date"] == "24-09-2026"
             ledger = await db.reminder_ledger.find_one({"patient_id": patient["_id"]})
+            if message_type.startswith("specs"):
+                assert "10:00 AM से 5:00 PM" in ledger["copy"]
             assert ledger["event_date"] == "2026-09-17"
             assert "17-09-2026" in ledger["copy"]
             assert "2026-09-17" not in ledger["copy"]
@@ -490,7 +490,7 @@ class TestDisplayedDates:
             specs_day = ObjectId()
             await db.specs_collection_days.insert_one({
                 "_id": specs_day, "camp_id": camp_id, "day_date": "2026-09-20",
-                "venue": "Optical Desk", "start_time": "09:00", "end_time": "17:00",
+                "venue": "Optical Desk", "start_time": "10:00", "end_time": "17:00",
             })
             await record_fulfilment(_issue_body(
                 done["transcription"]["id"], done["revision"]["id"], 1, "specs",

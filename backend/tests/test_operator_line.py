@@ -231,7 +231,7 @@ class TestFulfilmentMatrix:
             specs_day = ObjectId()
             await mock_db.specs_collection_days.insert_one({
                 "_id": specs_day, "camp_id": camp_id, "day_date": "2026-09-20",
-                "venue": "Optical Desk", "start_time": "09:00", "end_time": "17:00", "seat_limit": 2, "seats_taken": 0,
+                "venue": "Optical Desk", "start_time": "10:00", "end_time": "17:00", "seat_limit": 2, "seats_taken": 0,
             })
             first = await record_fulfilment(
                 _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_fixed", status="fulfilled"),
@@ -276,7 +276,7 @@ class TestFulfilmentMatrix:
             specs_day, ot_day = ObjectId(), ObjectId()
             await mock_db.specs_collection_days.insert_one({
                 "_id": specs_day, "camp_id": camp_id, "day_date": "2026-09-20",
-                "venue": "Optical Desk", "start_time": "09:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
+                "venue": "Optical Desk", "start_time": "10:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
             })
             await mock_db.ot_schedule_days.insert_one({
                 "_id": ot_day, "camp_id": camp_id, "day_date": "2026-10-02",
@@ -319,7 +319,7 @@ class TestFulfilmentMatrix:
             specs_day, ot_day = ObjectId(), ObjectId()
             await mock_db.specs_collection_days.insert_one({
                 "_id": specs_day, "camp_id": camp_id, "day_date": "2026-09-20",
-                "venue": "Optical Desk", "start_time": "09:00", "end_time": "17:00", "seat_limit": 2, "seats_taken": 0,
+                "venue": "Optical Desk", "start_time": "10:00", "end_time": "17:00", "seat_limit": 2, "seats_taken": 0,
             })
             await mock_db.ot_schedule_days.insert_one({
                 "_id": ot_day, "camp_id": camp_id, "day_date": "2026-10-02",
@@ -413,7 +413,7 @@ class TestFulfilmentMatrix:
             specs_day = ObjectId()
             await mock_db.specs_collection_days.insert_one({
                 "_id": specs_day, "camp_id": camp_id, "day_date": "2026-09-20",
-                "venue": "Optical Desk", "start_time": "09:00", "end_time": "17:00", "seat_limit": 2, "seats_taken": 0,
+                "venue": "Optical Desk", "start_time": "10:00", "end_time": "17:00", "seat_limit": 2, "seats_taken": 0,
             })
             await record_fulfilment(
                 _fulfil(trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",
