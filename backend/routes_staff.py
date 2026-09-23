@@ -93,7 +93,7 @@ async def create_staff(body: CreateStaffBody, actor: dict = Depends(get_current_
 @router.get("")
 async def list_staff(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
     db = get_db()
-    query = {"deleted_at": None}
+    query: Dict[str, Any] = {"deleted_at": None}
     if actor["role"] == "team_lead":
         query.update({"role": "volunteer", "team_lead_id": str(actor["_id"])})
     users = await db.users.find(query).sort("created_at", -1).to_list(500)

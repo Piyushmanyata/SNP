@@ -295,7 +295,7 @@ async def list_days(camp_id: str, actor: dict = Depends(require_any)) -> Dict[st
 
 @router.patch("/days/{day_id}")
 async def update_camp_day(day_id: str, body: CampDayBody, actor: dict = Depends(require_admin),
-                          background_tasks: BackgroundTasks = None) -> Dict[str, Any]:
+                          background_tasks: BackgroundTasks | None = None) -> Dict[str, Any]:
     db = get_db()
     if not ObjectId.is_valid(day_id) or not ObjectId.is_valid(body.camp_id):
         raise HTTPException(status_code=400, detail="Invalid camp or day ID")
@@ -334,6 +334,8 @@ async def update_camp_day(day_id: str, body: CampDayBody, actor: dict = Depends(
     days = await db.camp_days.find({"camp_id": camp_oid}).to_list(None)
     await db.camps.update_one({"_id": camp_oid}, {"$set": {"camp_date": min(d["day_date"] for d in days)}})
     camp = await db.camps.find_one({"_id": camp_oid})
+    if not camp:
+        raise HTTPException(status_code=404, detail="Camp not found")
     state = effective_printing(camp, days)
     if changed.get("edit_revision"):
         event_key = f"camp_day:{day_id}:{changed['edit_revision']}"
