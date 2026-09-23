@@ -46,7 +46,7 @@ async def _camp_targets(db: AsyncIOMotorDatabase, event_date: str) -> AsyncGener
     days = await db.camp_days.find({"day_date": event_date}).to_list(None)
     for day in days:
         camp = await db.camps.find_one({"_id": day["camp_id"]})
-        venue = camp["venue"] if camp else ""
+        venue = (camp.get("venue_sms") or camp["venue"]) if camp else ""
         async for page in _pages(db.patients, {"camp_day_id": day["_id"]}):
             for patient in page:
                 yield patient, venue, None, None, None

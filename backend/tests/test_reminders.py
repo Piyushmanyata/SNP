@@ -425,6 +425,28 @@ class TestReminderCronHttp:
         assert _post(client).json()["sent"] == 1
         assert captured[0]["camp_no"] == "162"
 
+    def test_venue_over_dlt_variable_limit_is_not_submitted_or_charged(self, monkeypatch):
+        mock_db = setup_mock_db(monkeypatch)
+        asyncio.run(_seed_camp_household(mock_db, n_patients=1, venue="A" * 41))
+        captured = _calls(monkeypatch)
+
+        result = _post(_client(monkeypatch, mock_db)).json()
+
+        assert result["sent"] == 0
+        assert captured == []
+        assert mock_db.reminder_ledger.docs == []
+
+    def test_camp_reminder_uses_short_sms_venue(self, monkeypatch):
+        mock_db = setup_mock_db(monkeypatch)
+        camp_id, _day, _ids = asyncio.run(_seed_camp_household(mock_db, n_patients=1, venue="A" * 64))
+        asyncio.run(mock_db.camps.update_one({"_id": camp_id}, {"$set": {"venue_sms": "Short Camp Venue"}}))
+        captured = _calls(monkeypatch)
+
+        result = _post(_client(monkeypatch, mock_db)).json()
+
+        assert result["sent"] == 1
+        assert captured[0]["venue"] == "Short Camp Venue"
+
     def test_ot_reminder_prefers_the_short_sms_venue(self, monkeypatch):
         mock_db = setup_mock_db(monkeypatch)
         long_venue = "Vimla Ramkrishna Bajaj Eye Hospital, Near Canara Bank, Bilasi Mod, Deoghar 814112 (Jharkhand)"

@@ -8,6 +8,10 @@ Language for the camp workflow design interview.
 An organised medical event that can span multiple operating dates.
 _Avoid_: single-day event
 
+**SMS venue**:
+A short, recognisable camp location, at most 40 characters, used in DLT messages while the full venue remains on camp records.
+_Avoid_: truncated address
+
 **Camp day**:
 One scheduled operating date belonging to a Camp, covering the whole calendar day in Indian Standard Time.
 _Avoid_: separate camp

@@ -433,7 +433,7 @@ async def _confirm_registration(patient: Dict[str, Any], skip_if_today: bool = F
         return
     if skip_if_today and day["day_date"] == today_ist_str():
         return
-    await sms.send_patient_sms(db, row, "registration", day["day_date"], camp["venue"])
+    await sms.send_patient_sms(db, row, "registration", day["day_date"], camp.get("venue_sms") or camp["venue"])
 
 
 def _apply_scanned_identity(body: RegisterBody, message: str) -> None:

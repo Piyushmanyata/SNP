@@ -1,5 +1,5 @@
 from datetime import date
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 from typing import Annotated, Optional, List, Dict, Any
 
 
@@ -39,10 +39,18 @@ class CampSetupDay(BaseModel):
 class CampBody(BaseModel):
     name: str
     venue: str
+    venue_sms: Optional[str] = Field(default=None, max_length=40)
     camp_date: Optional[DateString] = None
     camp_number: Optional[int] = Field(default=None, gt=0)
     days: Optional[List[CampSetupDay]] = None
     setup_request_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def require_short_sms_venue(self) -> "CampBody":
+        self.venue_sms = (self.venue_sms or "").strip() or None
+        if len(self.venue) > 40 and not self.venue_sms:
+            raise ValueError("Short SMS venue is required when the full venue exceeds 40 characters")
+        return self
 
 
 class CampDayBody(BaseModel):
@@ -210,8 +218,15 @@ class OtScheduleBody(BaseModel):
     camp_id: str
     day_date: str
     venue: str
-    venue_sms: Optional[str] = None
+    venue_sms: Optional[str] = Field(default=None, max_length=40)
     seat_limit: int
+
+    @model_validator(mode="after")
+    def require_short_sms_venue(self) -> "OtScheduleBody":
+        self.venue_sms = (self.venue_sms or "").strip() or None
+        if len(self.venue) > 40 and not self.venue_sms:
+            raise ValueError("Short SMS venue is required when the full venue exceeds 40 characters")
+        return self
 
 
 class SpecsScheduleBody(BaseModel):

@@ -137,6 +137,10 @@ async def deliver_patient_sms(
         if missing:
             logger.warning("Patient SMS %s not sent: no %s", message_type, ", ".join(missing))
             return "skipped"
+        too_long = [name for name, value in variables.items() if len(str(value)) > 40]
+        if too_long:
+            logger.warning("Patient SMS %s not sent: %s exceeds DLT variable limit", message_type, ", ".join(too_long))
+            return "skipped"
         copy = template.format(**variables)
         row = await _claim(
             db, patient["_id"], message_type, event_date, number, venue, copy,

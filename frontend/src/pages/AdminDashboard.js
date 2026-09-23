@@ -14,8 +14,9 @@ import TemplateEditor from "../components/TemplateEditor";
 import { displayDate, displayDateRange, displayTimeRange } from "../lib/dates";
 
 const CAMP_VENUE = "Hansa Garden, Rohini Road in Baghmara, Jasidih, Deoghar - 814142";
-const NEW_CAMP = { name: "SNP नेत्र शिविर", venue: CAMP_VENUE, camp_date: "", camp_number: "" };
+const NEW_CAMP = { name: "SNP नेत्र शिविर", venue: CAMP_VENUE, venue_sms: "Hansa Garden, Baghmara, Jasidih, Deoghar", camp_date: "", camp_number: "" };
 const HOSPITAL_VENUE = "Vimla Ramkrishna Bajaj Eye Hospital, Near Canara Bank, Bilasi Mod, Deoghar 814112 (Jharkhand)";
+const HOSPITAL_SMS_VENUE = "बजाज हॉस्पिटल, देवघर";
 
 const TABS = [
   { id: "overview", label: "Overview", icon: ClipboardList },
@@ -110,7 +111,7 @@ function Camps() {
 
   const openCamp = (c) => {
     setEditing(c ? c.id : null);
-    setForm(c ? { name: c.name, venue: c.venue, camp_date: c.camp_date, camp_number: c.camp_number ?? "" } : NEW_CAMP);
+    setForm(c ? { name: c.name, venue: c.venue, venue_sms: c.venue_sms || "", camp_date: c.camp_date, camp_number: c.camp_number ?? "" } : NEW_CAMP);
     setShowCamp(true);
   };
 
@@ -169,6 +170,7 @@ function Camps() {
               {c.camp_number
                 ? <Badge className="mt-1" data-testid={`camp-number-${c.id}`}>SMS camp no. {c.camp_number}</Badge>
                 : <Badge tone="amber" className="mt-1" data-testid={`camp-number-missing-${c.id}`}>No camp number: SMS are not sent</Badge>}
+              {!c.venue_sms && c.venue.length > 40 && <Badge tone="amber" className="mt-1" data-testid={`camp-sms-venue-missing-${c.id}`}>Set a short SMS venue to send messages</Badge>}
             </div>
             <Button size="sm" variant="outline" onClick={() => openCamp(c)} data-testid={`edit-camp-${c.id}`}><Pencil className="w-4 h-4" /> Edit</Button>
             {c.is_active ? (
@@ -206,10 +208,11 @@ function Camps() {
       <Modal open={showCamp} onClose={() => setShowCamp(false)} title={editing ? "Edit Camp" : "New Camp"}>
         <div className="space-y-3">
           <Field label="Camp name" required><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} data-testid="camp-name-input" /></Field>
-          <Field label="Venue" required hint="Sent in the registration and camp-reminder SMS."><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="camp-venue-input" /></Field>
+          <Field label="Venue" required hint="Full address shown on camp records."><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="camp-venue-input" /></Field>
+          <Field label="Short venue for SMS" hint="Required when the full venue exceeds 40 characters; use a clear name patients will recognise."><Input value={form.venue_sms} maxLength={40} onChange={(e) => setForm({ ...form, venue_sms: e.target.value })} data-testid="camp-venue-sms-input" /></Field>
           <Field label="Camp date" required><Input type="date" value={form.camp_date} onChange={(e) => setForm({ ...form, camp_date: e.target.value })} data-testid="camp-date-input" /></Field>
           <Field label="Camp number" required hint="The SMS reads “Sikar Zilla Welfare Trust के 162वें नेत्र शिविर”."><Input type="number" min="1" step="1" inputMode="numeric" value={form.camp_number} onChange={(e) => setForm({ ...form, camp_number: e.target.value })} data-testid="camp-number-input" /></Field>
-          <Button className="w-full" onClick={saveCamp} disabled={busy || !form.name || !form.venue || !form.camp_date || !(Number.isInteger(campNumber) && campNumber > 0)} data-testid="camp-create-submit">{editing ? "Save" : "Create"}</Button>
+          <Button className="w-full" onClick={saveCamp} disabled={busy || !form.name || !form.venue || (form.venue.length > 40 && !form.venue_sms.trim()) || !form.camp_date || !(Number.isInteger(campNumber) && campNumber > 0)} data-testid="camp-create-submit">{editing ? "Save" : "Create"}</Button>
         </div>
       </Modal>
     </div>
@@ -287,7 +290,7 @@ function OtSchedule() {
   const [days, setDays] = useState([]);
   const [camp, setCamp] = useState(null);
   const [err, setErr] = useState("");
-  const [form, setForm] = useState({ day_date: "", venue: HOSPITAL_VENUE, venue_sms: "", seat_limit: 10 });
+  const [form, setForm] = useState({ day_date: "", venue: HOSPITAL_VENUE, venue_sms: HOSPITAL_SMS_VENUE, seat_limit: 10 });
 
   const load = useCallback(() => {
     Promise.all([api.get("/clinical/ot-days"), api.get("/camps/active")])
@@ -299,7 +302,7 @@ function OtSchedule() {
   const add = useCallback(async () => {
     setErr("");
     if (!camp) { setErr("Activate a camp first."); return; }
-    try { await api.post("/clinical/ot-days", { camp_id: camp.id, ...form, seat_limit: Number(form.seat_limit) }); setForm({ day_date: "", venue: HOSPITAL_VENUE, venue_sms: "", seat_limit: 10 }); load(); }
+    try { await api.post("/clinical/ot-days", { camp_id: camp.id, ...form, seat_limit: Number(form.seat_limit) }); setForm({ day_date: "", venue: HOSPITAL_VENUE, venue_sms: HOSPITAL_SMS_VENUE, seat_limit: 10 }); load(); }
     catch (e) { setErr(formatApiError(e)); }
   }, [camp, form, load]);
 
@@ -316,16 +319,17 @@ function OtSchedule() {
               <Scissors className="w-4 h-4 text-emerald-600" />
               <span className="font-medium text-slate-800 text-sm">{displayDate(d.day_date)}</span>
               <span className="text-xs text-slate-600">{d.venue}</span>
+              {!d.venue_sms && d.venue.length > 40 && <Badge tone="amber">Set a short SMS venue</Badge>}
               <Badge tone={d.seats_free > 0 ? "emerald" : "rose"} className="ml-auto">{d.seats_taken}/{d.seat_limit} seats</Badge>
             </div>
           ))}
         </div>
         <div className="flex flex-wrap gap-2 items-end pt-4 mt-3 border-t border-slate-100">
-          <Field label="Date"><Input type="date" value={form.day_date} onChange={(e) => { const existing = days.find((d) => d.day_date === e.target.value); setForm({ ...form, day_date: e.target.value, venue: existing ? existing.venue : HOSPITAL_VENUE, venue_sms: existing?.venue_sms || "", seat_limit: existing ? existing.seat_limit : form.seat_limit }); }} data-testid="ot-date-input" /></Field>
+          <Field label="Date"><Input type="date" value={form.day_date} onChange={(e) => { const existing = days.find((d) => d.day_date === e.target.value); setForm({ ...form, day_date: e.target.value, venue: existing ? existing.venue : HOSPITAL_VENUE, venue_sms: existing ? existing.venue_sms || "" : HOSPITAL_SMS_VENUE, seat_limit: existing ? existing.seat_limit : form.seat_limit }); }} data-testid="ot-date-input" /></Field>
           <Field label="Hospital"><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="ot-venue-input" /></Field>
-          <Field label="Short name for SMS"><Input value={form.venue_sms} onChange={(e) => setForm({ ...form, venue_sms: e.target.value })} placeholder={HOSPITAL_VENUE} data-testid="ot-venue-sms-input" /></Field>
+          <Field label="Short name for SMS" hint="Required when the hospital name exceeds 40 characters."><Input value={form.venue_sms} maxLength={40} onChange={(e) => setForm({ ...form, venue_sms: e.target.value })} placeholder={HOSPITAL_SMS_VENUE} data-testid="ot-venue-sms-input" /></Field>
           <Field label="Seats"><Input type="number" value={form.seat_limit} onChange={(e) => setForm({ ...form, seat_limit: e.target.value })} className="w-24" data-testid="ot-seat-input" /></Field>
-          <Button size="sm" onClick={add} disabled={!form.day_date || !form.venue} data-testid="add-ot-day-button"><Plus className="w-4 h-4" /> Add</Button>
+          <Button size="sm" onClick={add} disabled={!form.day_date || !form.venue || (form.venue.length > 40 && !form.venue_sms.trim())} data-testid="add-ot-day-button"><Plus className="w-4 h-4" /> Add</Button>
         </div>
       </Card>
     </div>

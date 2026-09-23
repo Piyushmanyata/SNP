@@ -4,6 +4,7 @@ from datetime import timedelta
 import pytest
 from bson import ObjectId
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from test_camp_lifecycle import RX, _fulfil, _mock, _seen_patient_with_transcription
 import routes_clinical
@@ -48,6 +49,13 @@ def test_surgery_venue_is_admin_typed_and_required(monkeypatch):
             ), actor=admin)
         assert error.value.status_code == 400
     asyncio.run(run())
+
+
+def test_long_surgery_venue_requires_short_dlt_name():
+    with pytest.raises(ValidationError):
+        OtScheduleBody(camp_id=str(ObjectId()), day_date="2026-10-02", venue="A" * 41, seat_limit=20)
+    with pytest.raises(ValidationError):
+        OtScheduleBody(camp_id=str(ObjectId()), day_date="2026-10-02", venue="A" * 41, venue_sms="B" * 41, seat_limit=20)
 
 
 def test_patient_history_uses_three_queries_for_twenty_visits(monkeypatch):
