@@ -6,6 +6,7 @@ import {
   useAadhaarCamera,
   useAadhaarDecode,
   useWedgeBurst,
+  PATIENT_CODE_PAYLOAD_LENGTH,
   decodePayload,
   AadhaarModeButtons,
   AadhaarCameraView,
@@ -70,12 +71,12 @@ export default function AadhaarScanner({
     if (!busy && !passwordRequired) selectedFile.current = null;
   }, [busy, passwordRequired]);
 
-  useWedgeBurst({ enabled: usbFirst && !disabled, onBurst: decode });
+  useWedgeBurst({ enabled: usbFirst && !disabled, minLength: PATIENT_CODE_PAYLOAD_LENGTH, onBurst: decode });
 
-  const handleLock = useCallback(() => {
+  const handleLock = useCallback((result) => {
     setMode(restMode);
     setHint(false);
-    signalSuccess();
+    if (!result?.superseded) signalSuccess();
   }, [restMode]);
 
   const handleCameraError = useCallback(

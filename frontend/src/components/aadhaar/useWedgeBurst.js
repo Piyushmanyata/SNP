@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+export const PATIENT_CODE_PAYLOAD_LENGTH = "SNP:".length + 8;
+
 function restoreField(el, value) {
   if (!el || !el.isConnected || el.value === value) return;
   const proto = el.tagName === "TEXTAREA"
@@ -42,7 +44,7 @@ export function useWedgeBurst({ enabled, minLength = 20, onBurst, onInterrupted 
       if (notify) onInterruptedRef.current?.();
     };
     const onKeyDown = (event) => {
-      if (event.target?.hasAttribute?.("data-usb-box")) return;
+      if (!buf.length && event.target?.hasAttribute?.("data-usb-box")) return;
       const now = performance.now();
       if (now - lastAt >= 500) reset(true);
       if (event.ctrlKey || event.altKey || event.metaKey || event.repeat || event.isComposing) {

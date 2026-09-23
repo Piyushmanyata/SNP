@@ -746,15 +746,47 @@ describe("AadhaarScanner component", () => {
     expect(resolvePayload).not.toHaveBeenCalled();
   });
 
-  test("a quiet result from the page stops the camera without claiming a card", async () => {
-    const resolvePayload = jest.fn().mockResolvedValue({ outcome: "card", quiet: true });
+  test("a superseded result from the page stops the camera silently without claiming a card", async () => {
+    navigator.vibrate = jest.fn();
+    const resolvePayload = jest.fn().mockResolvedValue({ outcome: "card", quiet: true, superseded: true });
     nativeDetector.detectNative.mockResolvedValue("superseded-card");
-    act(() => root.render(<AadhaarScanner resolvePayload={resolvePayload} />));
-    await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
-    expect(resolvePayload).toHaveBeenCalledWith("superseded-card");
-    expect(container.querySelector('[data-testid="aadhaar-camera-button"]')).not.toBeNull();
-    expect(container.textContent).not.toContain("Identity locked");
+    try {
+      act(() => root.render(<AadhaarScanner resolvePayload={resolvePayload} />));
+      await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+      expect(resolvePayload).toHaveBeenCalledWith("superseded-card");
+      expect(container.querySelector('[data-testid="aadhaar-camera-button"]')).not.toBeNull();
+      expect(container.textContent).not.toContain("Identity locked");
+      expect(navigator.vibrate).not.toHaveBeenCalled();
+    } finally {
+      delete navigator.vibrate;
+    }
+  });
+
+  test("a slip QR typed by the USB scanner into another door field opens the patient and leaves the field alone", async () => {
+    let now = 0;
+    jest.spyOn(performance, "now").mockImplementation(() => now);
+    const onPatientCode = jest.fn().mockResolvedValue(true);
+    const reason = document.createElement("input");
+    reason.value = "scanner down";
+    document.body.appendChild(reason);
+    try {
+      act(() => root.render(<AadhaarScanner usbFirst onPatientCode={onPatientCode} resolvePayload={jest.fn()} />));
+      reason.focus();
+      for (const ch of "SNP:AB3K7T29") {
+        now += 4;
+        const ev = new KeyboardEvent("keydown", { key: ch, bubbles: true, cancelable: true });
+        act(() => { reason.dispatchEvent(ev); });
+        if (!ev.defaultPrevented) reason.value += ch;
+      }
+      const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+      await act(async () => { reason.dispatchEvent(enter); });
+      expect(enter.defaultPrevented).toBe(true);
+      expect(onPatientCode).toHaveBeenCalledWith("SNP:AB3K7T29");
+      expect(reason.value).toBe("scanner down");
+    } finally {
+      reason.remove();
+    }
   });
 
   test("start, stop and start again while the camera is still starting ends with a live camera", async () => {

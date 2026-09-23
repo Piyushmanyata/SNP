@@ -253,7 +253,7 @@ describe("Desk page", () => {
     expect(container.querySelector('[data-testid="door-scan-status"]')).toBeNull();
     await act(async () => finishScan({ data: { outcome: "no_match", card: { full_name: "Old scan" } } }));
     expect(container.textContent).not.toContain("Old scan");
-    expect(resolveResult()).toEqual({ outcome: "card", quiet: true });
+    expect(resolveResult()).toEqual({ outcome: "card", quiet: true, superseded: true });
   });
 
   test("starting a new capture abandons the door scan still in flight", async () => {
@@ -280,7 +280,7 @@ describe("Desk page", () => {
     act(() => { setInput(container.querySelector('[data-testid="desk-find-input"]'), "Scanned"); });
     await act(async () => { container.querySelector('[data-testid="desk-find-button"]').click(); });
     await act(async () => failScan(new Error("Network Error")));
-    expect(resolveResult()).toEqual({ outcome: "card", quiet: true });
+    expect(resolveResult()).toEqual({ outcome: "card", quiet: true, superseded: true });
     expect(container.textContent).not.toContain("Network Error");
     expect(container.querySelector('[data-testid="desk-search-results"]')).not.toBeNull();
   });

@@ -6,7 +6,7 @@ import { v4 } from "../lib/uuid";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { OPERATOR_LINES, effectiveLine, lineLabel, writeSessionLine } from "../lib/operatorLines";
-import { useWedgeBurst } from "../components/aadhaar";
+import { useWedgeBurst, PATIENT_CODE_PAYLOAD_LENGTH } from "../components/aadhaar";
 import {
   ClinicalLookupForm,
   PatientSummaryCard,
@@ -18,7 +18,6 @@ import {
 } from "../components/clinical";
 import { Alert, Badge, Button, Modal } from "../components/ui";
 
-const PATIENT_CODE_PAYLOAD_LENGTH = "SNP:".length + 8;
 
 const emptyRx = {
   diagnosis_options: [],

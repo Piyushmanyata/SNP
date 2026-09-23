@@ -268,3 +268,23 @@ test("keys typed into the USB box are left to the box", async () => {
   expect(container.textContent).toBe("Ready");
   box.remove();
 });
+
+test("a burst that starts elsewhere keeps being captured when focus moves into the USB box", async () => {
+  const box = document.createElement("textarea");
+  box.setAttribute("data-usb-box", "");
+  document.body.appendChild(box);
+  const onBurst = jest.fn();
+  await act(async () => { root.render(<Harness onBurst={onBurst} />); });
+  const payload = "5".repeat(60);
+  [...payload].forEach((ch, index) => {
+    if (index === 30) box.focus();
+    now += 5;
+    const ev = new KeyboardEvent("keydown", { key: ch, bubbles: true, cancelable: true });
+    act(() => { (index >= 30 ? box : document).dispatchEvent(ev); });
+  });
+  const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+  act(() => { box.dispatchEvent(enter); });
+  expect(enter.defaultPrevented).toBe(true);
+  expect(onBurst).toHaveBeenCalledWith(payload);
+  box.remove();
+});

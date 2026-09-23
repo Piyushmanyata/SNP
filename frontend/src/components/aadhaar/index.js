@@ -5,4 +5,4 @@ export { AadhaarCameraView } from "./AadhaarCameraView";
 export { AadhaarManualInput } from "./AadhaarManualInput";
 export { AadhaarScannerStatus } from "./AadhaarScannerStatus";
 export { AadhaarFallbackPanel } from "./AadhaarFallbackPanel";
-export { useWedgeBurst } from "./useWedgeBurst";
+export { useWedgeBurst, PATIENT_CODE_PAYLOAD_LENGTH } from "./useWedgeBurst";
