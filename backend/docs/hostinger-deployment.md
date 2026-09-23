@@ -5,9 +5,9 @@
 - Application domain: `sikarkolkata.io`.
 - VPS: `82.112.234.39`, Ubuntu 24.04.4 LTS, 2 CPUs, 8 GB RAM.
 - Runtime: Docker Engine 29.8.0 and Docker Compose 5.5.1.
-- Application release: `a889edb77b887fa12d084b114f910c7b8b7e3c69` (SMS copy names Sikar Zilla Welfare Trust for DLT approval, 22 September 2026).
-- Release directory: `/opt/snp/releases/a889edb77b887fa12d084b114f910c7b8b7e3c69`.
-- Previous releases kept for rollback: `f2e4592f0dcee138f77c4630964ba92dfb37e664`, `68c978b860edaf9db0dc093740a2228f8ca45ec6`, `730112cb5a122f99b592cce50bb8faf082b3eece`, `13854767e93b1f95bda958680ef27aff387bd36e`, `6f5ab0cb4bd7e58bbf1aacefbaf54db97ff0f3e7`, `ac60bdfe2ecb13555ae449a7d299229ca8758afd`, `7eaed607ba0946c04dd32a405920a49db5e96fe7`, `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`, `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
+- Application release: `c363debd62b33e5dca86b33e5984d6968431cb05` (SMS cost guard and phone UI, 23 September 2026).
+- Release directory: `/opt/snp/releases/c363debd62b33e5dca86b33e5984d6968431cb05`.
+- Previous releases kept for rollback: `a2a4415c3247b34753bf93fbd5337352b1019e49`, `a889edb77b887fa12d084b114f910c7b8b7e3c69`, `f2e4592f0dcee138f77c4630964ba92dfb37e664`, `68c978b860edaf9db0dc093740a2228f8ca45ec6`, `730112cb5a122f99b592cce50bb8faf082b3eece`, `13854767e93b1f95bda958680ef27aff387bd36e`, `6f5ab0cb4bd7e58bbf1aacefbaf54db97ff0f3e7`, `ac60bdfe2ecb13555ae449a7d299229ca8758afd`, `7eaed607ba0946c04dd32a405920a49db5e96fe7`, `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`, `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
 - Current release link: `/opt/snp/current`.
 - Production Compose project: `snp`.
 - Production environment: `/opt/snp/.env.production`, readable only by root.
@@ -242,3 +242,20 @@ In MSG91, open **SMS → Webhook (New)**, add a webhook for SMS delivery reports
 Until the webhook is saved, no reports arrive: each reminder canary waits ten minutes and then releases its batch, and nothing pauses on its own. Admin → SMS warns that delivery reports are off only while the backend has no secret. Once the webhook is saved, the next delivered message shows under Delivered, with its credit.
 
 Before the spectacles flows are configured, open Admin → OT & Specs and give the specs collection day a real SMS venue; the production day still reads `NA`, which the rule refuses.
+
+### Deployment
+
+[PR 47](https://github.com/Piyushmanyata/SNP/pull/47) merged as `c363debd62b33e5dca86b33e5984d6968431cb05` and was deployed from a `git archive` of that commit. CI run [35839859500](https://github.com/Piyushmanyata/SNP/actions/runs/35839859500) passed backend, frontend, dependencies, workflow and verify.
+
+- The running `a2a4415` images were tagged `snp-backend:rollback-a2a4415c…`, `snp-frontend:rollback-a2a4415c…` and `snp-reminders:rollback-a2a4415c…`. Retag them to `:latest`, point `/opt/snp/current` back at `a2a4415`, and run `up -d --no-build` to roll back.
+- A pre-deployment archive, `snp_camps-20260923T085922Z.archive.gz`, was taken by restarting the backup container. Only backend, frontend and reminders were rebuilt and recreated; MongoDB stayed up.
+- A random `MSG91_WEBHOOK_SECRET` was generated on the VPS and appended to `/opt/snp/.env.production` (mode 600, root). It was not printed or copied off the server. The MSG91 webhook itself is still to be saved by the owner, as described above.
+- No migration was needed. Startup created the `provider_id_1` and `created_at_1` indexes on `reminder_ledger`.
+
+Post-deployment checks against the live host:
+
+- `/api/health` returned `{"status":"ok"}`, the homepage returned 200, and HTTP redirected with 308. All services reported healthy or running, and the backend log had no errors.
+- `/api/webhooks/msg91` refused a missing or wrong secret with 401. With the configured secret it answered `{"ok":true,"recorded":0}` to a probe for an unknown request ID, which changed no data. `/api/sms/status` refused an anonymous request with 401.
+- The backend reports the four approved flows set and both spectacles flows empty.
+- The reminder worker's restart run completed and submitted nothing: the ledger still holds its 5 earlier rows, and no camp day falls on 24 September.
+- The served `AdminDashboard-DT6YFXjq.js` carries the new SMS tab and the live SMS venue check.
