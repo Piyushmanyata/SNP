@@ -8,11 +8,9 @@
     "reg_no": "Patient registration / token number",
     "date": "Event date as DD-MM-YYYY. For specs templates, the first day of the collection window",
     "end_date": "Specs only: last day of the collection window as DD-MM-YYYY; equals date for a one-day window",
-    "start_time": "Specs only: window start in 12-hour HH:MM, read after the fixed word सुबह (the admin form requires it before 12:00)",
-    "end_time": "Specs only: window end in 12-hour HH:MM, read after the fixed word शाम (e.g. 17:00 is sent as 05:00)",
     "venue": "Camp, hospital or distribution venue name. For surgery this is the OT Schedule Day's venue_sms when set, else its full venue (ADR 0040)"
   },
-  "dlt_portal_note": "dlt_portal_body is the text to register on the DLT portal; each {#var#} is filled in the order listed in variables. dlt_body is the same text in MSG91 flow syntax. The four non-specs templates were approved on SmartPing and verified in MSG91 on 23 September 2026. The specs copies remain rejected and must not be configured for sending.",
+  "dlt_portal_note": "dlt_portal_body is the text to register on the DLT portal; each {#var#} is filled in the order listed in variables. dlt_body is the same text in MSG91 flow syntax. The four non-specs templates were approved on SmartPing and verified in MSG91 on 23 September 2026. The revised specs copies require new DLT approval before their MSG91 flows can be configured for sending.",
   "templates": [
     {
       "key": "registration",
@@ -80,41 +78,39 @@
     },
     {
       "key": "specs_token",
-      "dlt_template_id": "1777179007849908726",
-      "dlt_status": "Rejected: Variable can be reduce to static information.",
+      "dlt_template_id": null,
+      "rejected_dlt_template_id": "1777179007849908726",
+      "dlt_status": "Revised copy awaiting DLT submission",
       "env_var": "MSG91_TEMPLATE_SPECS_TOKEN",
       "purpose": "Spectacle collection scheduled",
       "variables": [
         "camp_no",
         "date",
         "end_date",
-        "start_time",
-        "end_time",
         "venue",
         "reg_no"
       ],
-      "body": "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपको चश्मा {date} से {end_date} तक सुबह  {start_time} बजे से शाम {end_time} बजे तक {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर अवश्य आएँ।",
-      "dlt_body": "Sikar Zilla Welfare Trust के ##camp_no## वें नेत्र शिविर में आपको चश्मा ##date## से ##end_date## तक सुबह  ##start_time## बजे से शाम ##end_time## बजे तक ##venue## में दिया जाएगा। कृपया चश्मे का टोकन (##reg_no##) लेकर अवश्य आएँ।",
-      "dlt_portal_body": "Sikar Zilla Welfare Trust के {#var#} वें नेत्र शिविर में आपको चश्मा {#var#} से {#var#} तक सुबह  {#var#} बजे से शाम {#var#} बजे तक {#var#} में दिया जाएगा। कृपया चश्मे का टोकन ({#var#}) लेकर अवश्य आएँ।"
+      "body": "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपको चश्मा {date} से {end_date} तक प्रतिदिन 10:00 AM से 5:00 PM तक {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर अवश्य आएँ।",
+      "dlt_body": "Sikar Zilla Welfare Trust के ##camp_no## वें नेत्र शिविर में आपको चश्मा ##date## से ##end_date## तक प्रतिदिन 10:00 AM से 5:00 PM तक ##venue## में दिया जाएगा। कृपया चश्मे का टोकन (##reg_no##) लेकर अवश्य आएँ।",
+      "dlt_portal_body": "Sikar Zilla Welfare Trust के {#var#} वें नेत्र शिविर में आपको चश्मा {#var#} से {#var#} तक प्रतिदिन 10:00 AM से 5:00 PM तक {#var#} में दिया जाएगा। कृपया चश्मे का टोकन ({#var#}) लेकर अवश्य आएँ।"
     },
     {
       "key": "specs",
-      "dlt_template_id": "1777179007858053123",
-      "dlt_status": "Rejected: Variable can be reduce to static information.",
+      "dlt_template_id": null,
+      "rejected_dlt_template_id": "1777179007858053123",
+      "dlt_status": "Revised copy awaiting DLT submission",
       "env_var": "MSG91_TEMPLATE_SPECS",
       "purpose": "Day-before spectacle collection reminder",
       "variables": [
         "camp_no",
         "date",
         "end_date",
-        "start_time",
-        "end_time",
         "venue",
         "reg_no"
       ],
-      "body": "Sikar Zilla Welfare Trust के {camp_no} वे शिविर के चश्मे बनकर  तैयार है।  चश्में {date} से {end_date} तक सुबह  {start_time} बजे से शाम {end_time} बजे तक {venue} आकर ले जावें। टोकन क्रमांक {reg_no} अवश्य साथ लाएँ।",
-      "dlt_body": "Sikar Zilla Welfare Trust के ##camp_no## वे शिविर के चश्मे बनकर  तैयार है।  चश्में ##date## से ##end_date## तक सुबह  ##start_time## बजे से शाम ##end_time## बजे तक ##venue## आकर ले जावें। टोकन क्रमांक ##reg_no## अवश्य साथ लाएँ।",
-      "dlt_portal_body": "Sikar Zilla Welfare Trust के {#var#} वे शिविर के चश्मे बनकर  तैयार है।  चश्में {#var#} से {#var#} तक सुबह  {#var#} बजे से शाम {#var#} बजे तक {#var#} आकर ले जावें। टोकन क्रमांक {#var#} अवश्य साथ लाएँ।"
+      "body": "Sikar Zilla Welfare Trust के {camp_no} वे शिविर के चश्मे बनकर तैयार हैं। चश्मे {date} से {end_date} तक प्रतिदिन 10:00 AM से 5:00 PM तक {venue} आकर ले जाएँ। टोकन क्रमांक {reg_no} अवश्य साथ लाएँ।",
+      "dlt_body": "Sikar Zilla Welfare Trust के ##camp_no## वे शिविर के चश्मे बनकर तैयार हैं। चश्मे ##date## से ##end_date## तक प्रतिदिन 10:00 AM से 5:00 PM तक ##venue## आकर ले जाएँ। टोकन क्रमांक ##reg_no## अवश्य साथ लाएँ।",
+      "dlt_portal_body": "Sikar Zilla Welfare Trust के {#var#} वे शिविर के चश्मे बनकर तैयार हैं। चश्मे {#var#} से {#var#} तक प्रतिदिन 10:00 AM से 5:00 PM तक {#var#} आकर ले जाएँ। टोकन क्रमांक {#var#} अवश्य साथ लाएँ।"
     }
   ],
   "request_example": {
@@ -127,8 +123,6 @@
         "reg_no": "142",
         "date": "20-09-2026",
         "end_date": "27-09-2026",
-        "start_time": "10:00",
-        "end_time": "05:00",
         "venue": "SNP कार्यालय, देवघर"
       }
     ]

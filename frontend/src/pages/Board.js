@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import api, { formatApiError } from "../lib/api";
 import Layout from "../components/Layout";
 import { Card, Stat } from "../components/ui";
-import { displayDate, displayDateRange, displayTimestamp } from "../lib/dates";
+import { displayDate, displayDateRange, displayTimeRange, displayTimestamp } from "../lib/dates";
 
 const POLL_MS = 15000;
 
@@ -124,7 +124,7 @@ export default function Board() {
                 label="Next Specs"
                 value={
                   data.next_specs
-                    ? `${displayDateRange(data.next_specs.day_date, data.next_specs.end_date)} · ${data.next_specs.venue} · ${data.next_specs.start_time}–${data.next_specs.end_time}`
+                    ? `${displayDateRange(data.next_specs.day_date, data.next_specs.end_date)} · ${data.next_specs.venue} · ${displayTimeRange(data.next_specs.start_time, data.next_specs.end_time)}`
                     : "No day scheduled"
                 }
                 testid="board-next-specs"

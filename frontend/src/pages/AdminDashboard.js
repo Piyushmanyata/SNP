@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { formatPower } from "../components/clinical";
 import TemplateEditor from "../components/TemplateEditor";
-import { displayDate, displayDateRange } from "../lib/dates";
+import { displayDate, displayDateRange, displayTimeRange } from "../lib/dates";
 
 const CAMP_VENUE = "Hansa Garden, Rohini Road in Baghmara, Jasidih, Deoghar - 814142";
 const NEW_CAMP = { name: "SNP नेत्र शिविर", venue: CAMP_VENUE, camp_date: "", camp_number: "" };
@@ -336,7 +336,7 @@ function SpecsCollectionDays() {
   const [days, setDays] = useState([]);
   const [camp, setCamp] = useState(null);
   const [err, setErr] = useState("");
-  const [form, setForm] = useState({ day_date: "", end_date: "", venue: "", start_time: "", end_time: "" });
+  const [form, setForm] = useState({ day_date: "", end_date: "", venue: "" });
 
   const load = useCallback(() => {
     Promise.all([api.get("/clinical/specs-days"), api.get("/camps/active")])
@@ -350,7 +350,7 @@ function SpecsCollectionDays() {
     if (!camp) { setErr("Activate a camp first."); return; }
     try {
       await api.post("/clinical/specs-days", { camp_id: camp.id, ...form });
-      setForm({ day_date: "", end_date: "", venue: "", start_time: "", end_time: "" });
+      setForm({ day_date: "", end_date: "", venue: "" });
       load();
     }
     catch (e) { setErr(formatApiError(e)); }
@@ -369,7 +369,7 @@ function SpecsCollectionDays() {
               <span className="font-medium text-slate-800 text-sm">{displayDateRange(d.day_date, d.end_date)}</span>
               <span className="text-xs text-slate-600">{d.venue}</span>
               <Badge tone={d.window_required ? "amber" : "emerald"} className="ml-auto">
-                {d.start_time && d.end_time ? `${d.start_time}–${d.end_time}` : "window required"}
+                {d.start_time && d.end_time ? displayTimeRange(d.start_time, d.end_time) : "window required"}
               </Badge>
             </div>
           ))}
@@ -378,11 +378,9 @@ function SpecsCollectionDays() {
           <Field label="From"><Input type="date" value={form.day_date} onChange={(e) => setForm({ ...form, day_date: e.target.value })} data-testid="specs-date-input" /></Field>
           <Field label="To"><Input type="date" value={form.end_date} min={form.day_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} data-testid="specs-end-date-input" /></Field>
           <Field label="Venue"><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="specs-venue-input" /></Field>
-          <Field label="Start"><Input type="time" value={form.start_time} onChange={(e) => setForm({ ...form, start_time: e.target.value })} className="w-28" data-testid="specs-start-input" /></Field>
-          <Field label="End"><Input type="time" value={form.end_time} onChange={(e) => setForm({ ...form, end_time: e.target.value })} className="w-28" data-testid="specs-end-input" /></Field>
-          <Button size="sm" onClick={add} disabled={!form.day_date || !form.venue || !form.start_time || !form.end_time} data-testid="add-specs-day-button"><Plus className="w-4 h-4" /> Add</Button>
+          <Button size="sm" onClick={add} disabled={!form.day_date || !form.venue} data-testid="add-specs-day-button"><Plus className="w-4 h-4" /> Add</Button>
         </div>
-        <p className="text-xs text-slate-500 mt-2">Leave “To” empty for a single day. The SMS reads सुबह (start) से शाम (end), so start before 12:00 and end at 12:00 or later.</p>
+        <p className="text-xs text-slate-500 mt-2">Leave “To” empty for a single day. Collection hours: 10:00 AM–5:00 PM.</p>
       </Card>
     </div>
   );

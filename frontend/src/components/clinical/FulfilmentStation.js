@@ -4,7 +4,7 @@ import { v4 } from "../../lib/uuid";
 import { Alert, Button, Badge } from "../ui";
 import { Pill, Glasses, Scissors, Printer } from "lucide-react";
 import { FixedPowerPicker, formatPower } from "./FixedPowerPicker";
-import { displayDateRange } from "../../lib/dates";
+import { displayDateRange, displayTimeRange } from "../../lib/dates";
 
 export const FULFILMENT_LINES = {
   medicine: {
@@ -102,7 +102,7 @@ function DayPicker({ line, days, value, onChange }) {
           >
             {displayDateRange(d.day_date, d.end_date)} · {d.venue}
             {specs
-              ? ` · ${d.start_time}–${d.end_time}`
+              ? ` · ${displayTimeRange(d.start_time, d.end_time)}`
               : d.seats_free <= 0 ? " (full)" : ` (${d.seats_free} free)`}
           </option>
         ))}

@@ -121,7 +121,7 @@ beforeEach(() => {
       return Promise.resolve({
         data: {
           specs_days: [
-            { id: "sp-1", day_date: "2026-09-12", end_date: "2026-09-19", venue: "Base Optical", start_time: "10:00", end_time: "12:00" },
+            { id: "sp-1", day_date: "2026-09-12", end_date: "2026-09-19", venue: "Base Optical", start_time: "10:00", end_time: "17:00" },
           ],
         },
       });
@@ -285,7 +285,7 @@ describe("AdminDashboard component", () => {
     expect(container.textContent).toContain("5/20 seats");
     expect(container.querySelector('[data-testid="specs-days-list"]')).not.toBeNull();
     expect(container.textContent).toContain("Base Optical");
-    expect(container.textContent).toContain("10:00–12:00");
+    expect(container.textContent).toContain("10:00 AM–5:00 PM");
     expect(container.textContent).toContain("05-09-2026");
     expect(container.textContent).toContain("12-09-2026");
     expect(container.textContent).not.toContain("2026-09-05");
@@ -433,15 +433,16 @@ describe("AdminDashboard component", () => {
 
     expect(container.textContent).toContain("Base Optical");
     expect(container.textContent).toContain("12-09-2026 – 19-09-2026");
-    expect(container.textContent).toContain("10:00–12:00");
+    expect(container.textContent).toContain("10:00 AM–5:00 PM");
     expect(container.querySelector('[data-testid="specs-seat-input"]')).toBeNull();
     expect(container.querySelector('[data-testid="specs-days-list"]')).not.toBeNull();
 
     const dateInput = container.querySelector('[data-testid="specs-date-input"]');
     const untilInput = container.querySelector('[data-testid="specs-end-date-input"]');
     const venueInput = container.querySelector('[data-testid="specs-venue-input"]');
-    const startInput = container.querySelector('[data-testid="specs-start-input"]');
-    const endInput = container.querySelector('[data-testid="specs-end-input"]');
+    expect(container.querySelector('[data-testid="specs-start-input"]')).toBeNull();
+    expect(container.querySelector('[data-testid="specs-end-input"]')).toBeNull();
+    expect(container.textContent).toContain("Collection hours: 10:00 AM–5:00 PM");
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
     act(() => {
       setter.call(dateInput, "2026-09-20");
@@ -450,10 +451,6 @@ describe("AdminDashboard component", () => {
       untilInput.dispatchEvent(new Event("input", { bubbles: true }));
       setter.call(venueInput, "New Optical");
       venueInput.dispatchEvent(new Event("input", { bubbles: true }));
-      setter.call(startInput, "10:00");
-      startInput.dispatchEvent(new Event("input", { bubbles: true }));
-      setter.call(endInput, "17:00");
-      endInput.dispatchEvent(new Event("input", { bubbles: true }));
     });
 
     await act(async () => {
@@ -462,14 +459,12 @@ describe("AdminDashboard component", () => {
 
     expect(api.post).toHaveBeenCalledWith(
       "/clinical/specs-days",
-      expect.objectContaining({
+      {
         camp_id: "c-1",
         day_date: "2026-09-20",
         end_date: "2026-09-27",
         venue: "New Optical",
-        start_time: "10:00",
-        end_time: "17:00",
-      })
+      }
     );
   });
 

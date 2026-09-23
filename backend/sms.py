@@ -16,8 +16,10 @@ REGISTRATION_CONFIRMATION = "Sikar Zilla Welfare Trust के {camp_no}वें
 CAMP_REMINDER = "कल ({date}) को Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपका नेत्र परीक्षण है। कृपया समय पर {venue} पहुँचें। यह टोकन शिविर स्थल पर दिखाएँ। क्रमांक: {reg_no}। कृपया शिविर के दिन अपना आधार कार्ड अवश्य साथ लाएँ।"
 OT_TOKEN = "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपका ऑपरेशन {date} को निर्धारित हुआ है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर अवश्य साथ लाएँ। स्थल: {venue}।"
 OT_REMINDER = "कल ({date}) को Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपका नेत्र ऑपरेशन निर्धारित है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ अवश्य लाएँ। स्थल: {venue}।"
-SPECS_TOKEN = "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपको चश्मा {date} से {end_date} तक सुबह  {start_time} बजे से शाम {end_time} बजे तक {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर अवश्य आएँ।"
-SPECS_REMINDER = "Sikar Zilla Welfare Trust के {camp_no} वे शिविर के चश्मे बनकर  तैयार है।  चश्में {date} से {end_date} तक सुबह  {start_time} बजे से शाम {end_time} बजे तक {venue} आकर ले जावें। टोकन क्रमांक {reg_no} अवश्य साथ लाएँ।"
+SPECS_PICKUP_START_TIME = "10:00"
+SPECS_PICKUP_END_TIME = "17:00"
+SPECS_TOKEN = "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपको चश्मा {date} से {end_date} तक प्रतिदिन 10:00 AM से 5:00 PM तक {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर अवश्य आएँ।"
+SPECS_REMINDER = "Sikar Zilla Welfare Trust के {camp_no} वे शिविर के चश्मे बनकर तैयार हैं। चश्मे {date} से {end_date} तक प्रतिदिन 10:00 AM से 5:00 PM तक {venue} आकर ले जाएँ। टोकन क्रमांक {reg_no} अवश्य साथ लाएँ।"
 
 MESSAGE_COPY = {
     "registration": REGISTRATION_CONFIRMATION,
@@ -91,13 +93,8 @@ async def _claim(
     return doc
 
 
-def morning_to_evening(start_time: Optional[str], end_time: Optional[str]) -> bool:
-    return bool(start_time and end_time and start_time < "12:00" <= end_time)
-
-
-def _clock(hhmm: str) -> str:
-    hour, minute = hhmm.split(":")
-    return f"{(int(hour) - 1) % 12 + 1:02d}:{minute}"
+def specs_pickup_hours_match(start_time: Optional[str], end_time: Optional[str]) -> bool:
+    return (start_time, end_time) == (SPECS_PICKUP_START_TIME, SPECS_PICKUP_END_TIME)
 
 
 def _template_variables(template: str, values: Dict[str, Any]) -> Dict[str, Any]:
@@ -125,16 +122,15 @@ async def deliver_patient_sms(
         reg_no = patient.get("reg_no")
         if not number or reg_no is None:
             return "skipped"
+        if message_type in ("specs_token", "specs") and not specs_pickup_hours_match(start_time, end_time):
+            return "skipped"
         camp = await db.camps.find_one({"_id": patient["camp_id"]}) if patient.get("camp_id") else None
-        hours = morning_to_evening(start_time, end_time)
         template = MESSAGE_COPY[message_type]
         variables = _template_variables(template, {
             "reg_no": reg_no,
             "camp_no": str((camp or {}).get("camp_number") or ""),
             "date": helpers.display_date(event_date),
             "end_date": helpers.display_date(end_date or event_date),
-            "start_time": _clock(str(start_time)) if hours else "",
-            "end_time": _clock(str(end_time)) if hours else "",
             "venue": venue,
         })
         missing = [name for name, value in variables.items() if value == ""]

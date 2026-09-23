@@ -734,7 +734,7 @@ class TestFulfilmentStateMachineAndDeskStress:
                 "camp_id": ObjectId(),
                 "day_date": "2026-09-25",
                 "venue": "Vision Center",
-                "start_time": "09:00", "end_time": "17:00",
+                "start_time": "10:00", "end_time": "17:00",
                 "seat_limit": 3,
                 "seats_taken": 0,
             })

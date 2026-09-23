@@ -69,7 +69,7 @@ beforeEach(() => {
       return Promise.resolve({
         data: {
           specs_days: [
-            { id: "sp-1", day_date: "2026-09-12", venue: "Base Optical", start_time: "09:00", end_time: "12:00" },
+            { id: "sp-1", day_date: "2026-09-12", venue: "Base Optical", start_time: "10:00", end_time: "17:00" },
             { id: "sp-full", day_date: "2026-09-13", venue: "Full Desk", window_required: true },
           ],
         },
@@ -708,7 +708,7 @@ describe("Clinical page component", () => {
     const openOpt = Array.from(daySelect.options).find((o) => o.value === "sp-1");
     expect(openOpt.disabled).toBe(false);
     expect(openOpt.textContent).toContain("Base Optical");
-    expect(openOpt.textContent).toContain("09:00–12:00");
+    expect(openOpt.textContent).toContain("10:00 AM–5:00 PM");
   });
 
   test("advancing a wizard step saves a draft so an interrupted transcription is not lost", async () => {

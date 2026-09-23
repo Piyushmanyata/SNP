@@ -751,11 +751,11 @@ class TestFulfilmentDecomposedAndInvariants:
                 "fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER})
             await mock_db.specs_collection_days.insert_one({
                 "_id": day1, "camp_id": ObjectId(), "day_date": SCHEDULE_DAY,
-                "venue": "District Hospital", "start_time": "09:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
+                "venue": "District Hospital", "start_time": "10:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
             })
             await mock_db.specs_collection_days.insert_one({
                 "_id": day2, "camp_id": ObjectId(), "day_date": SCHEDULE_DAY_2,
-                "venue": "Community Health Center", "start_time": "09:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
+                "venue": "Community Health Center", "start_time": "10:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
             })
 
             bad_body = review_body(mock_db,transcription_id=str(t_id), item_type="specs_made", status="deferred")
@@ -826,7 +826,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 "camp_id": ObjectId(),
                 "day_date": SCHEDULE_DAY,
                 "venue": "Optical Desk",
-                "start_time": "09:00", "end_time": "17:00",
+                "start_time": "10:00", "end_time": "17:00",
                 "seat_limit": 1,
                 "seats_taken": 0,
             })
@@ -872,11 +872,11 @@ class TestFulfilmentDecomposedAndInvariants:
                 "fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER})
             await mock_db.specs_collection_days.insert_one({
                 "_id": day1, "camp_id": ObjectId(), "day_date": SCHEDULE_DAY,
-                "venue": "Optical 1", "start_time": "09:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
+                "venue": "Optical 1", "start_time": "10:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
             })
             await mock_db.specs_collection_days.insert_one({
                 "_id": day2, "camp_id": ObjectId(), "day_date": SCHEDULE_DAY_2,
-                "venue": "Optical 2", "start_time": "09:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
+                "venue": "Optical 2", "start_time": "10:00", "end_time": "17:00", "seat_limit": 5, "seats_taken": 0,
             })
 
             body1 = review_body(mock_db,
@@ -911,7 +911,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 "fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER})
             await mock_db.specs_collection_days.insert_one({
                 "_id": day_id, "camp_id": ObjectId(), "day_date": SCHEDULE_DAY,
-                "venue": "Optical", "start_time": "09:00", "end_time": "17:00", "seat_limit": 1, "seats_taken": 0,
+                "venue": "Optical", "start_time": "10:00", "end_time": "17:00", "seat_limit": 1, "seats_taken": 0,
             })
             await record_fulfilment(
                 review_body(mock_db, transcription_id=str(t_id), item_type="specs_made", status="deferred",
@@ -940,7 +940,7 @@ class TestFulfilmentDecomposedAndInvariants:
                 "fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER})
             await mock_db.specs_collection_days.insert_one({
                 "_id": day_id, "camp_id": ObjectId(), "day_date": SCHEDULE_DAY,
-                "venue": "Optical", "start_time": "09:00", "end_time": "17:00", "seat_limit": 1, "seats_taken": 0,
+                "venue": "Optical", "start_time": "10:00", "end_time": "17:00", "seat_limit": 1, "seats_taken": 0,
             })
             await record_fulfilment(
                 review_body(mock_db, transcription_id=str(t_id), item_type="specs_made", status="deferred",
@@ -969,7 +969,7 @@ class TestFulfilmentDecomposedAndInvariants:
             await mock_db.transcriptions.insert_one({"_id": t_b, "patient_id": p_b, "locked": False, "specs_measurements": RX})
             await mock_db.specs_collection_days.insert_one({
                 "_id": day_id, "camp_id": ObjectId(), "day_date": SCHEDULE_DAY,
-                "venue": "Optical", "start_time": "09:00", "end_time": "17:00", "seat_limit": 1, "seats_taken": 0,
+                "venue": "Optical", "start_time": "10:00", "end_time": "17:00", "seat_limit": 1, "seats_taken": 0,
             })
             actor = {"_id": ObjectId(), "role": "clinical_desk_operator"}
             await record_fulfilment(

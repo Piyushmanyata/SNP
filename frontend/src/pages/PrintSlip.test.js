@@ -126,7 +126,7 @@ describe("Token print page", () => {
 
     expect(surface.textContent).toContain("चश्मा / Spectacles");
     expect(surface.textContent).toContain("05-12-2026 – 12-12-2026");
-    expect(surface.textContent).toContain("10:00–12:00");
+    expect(surface.textContent).toContain("10:00 AM–12:00 PM");
     expect(surface.textContent).toContain("Bring this token for collection.");
     expect(surface.textContent).not.toContain("IOL");
     expect(surface.textContent).not.toContain("आधार कार्ड");
