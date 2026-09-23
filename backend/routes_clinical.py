@@ -1132,6 +1132,8 @@ async def create_ot_day(body: OtScheduleBody, actor: dict = Depends(require_admi
         raise HTTPException(status_code=400, detail="Camp is not active")
     existing = await db.ot_schedule_days.find_one({"camp_id": camp_id, "day_date": body.day_date})
     if existing:
+        if await db.fulfilments.find_one({"ot_schedule_day_id": existing["_id"], "status": {"$ne": "deferred"}}):
+            raise HTTPException(status_code=409, detail="Completed OT days cannot be edited")
         assigned = existing.get("seats_taken", 0)
         if body.seat_limit < assigned:
             raise HTTPException(status_code=409, detail={
@@ -1165,6 +1167,71 @@ async def list_ot_days(actor: dict = Depends(require_any)) -> Dict[str, Any]:
         "camp_id": camp["_id"], "day_date": {"$gte": now_ist().date().isoformat()},
     }).sort("day_date", 1).to_list(100)
     return {"ot_days": [ser_ot_day(d) for d in days]}
+
+
+@router.patch("/ot-days/{day_id}")
+async def update_ot_day(day_id: str, body: OtScheduleBody, actor: dict = Depends(require_admin),
+                        background_tasks: BackgroundTasks = None) -> Dict[str, Any]:
+    db = get_db()
+    camp_id = _oid_or_400(body.camp_id)
+    oid = _oid_or_400(day_id)
+    day = await db.ot_schedule_days.find_one({"_id": oid, "camp_id": camp_id})
+    if not day:
+        raise HTTPException(status_code=404, detail="OT day not found")
+    try:
+        date = datetime.strptime(body.day_date, "%Y-%m-%d").date()
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid day_date")
+    if date.isoformat() != body.day_date or date < now_ist().date() or day["day_date"] < now_ist().date().isoformat():
+        raise HTTPException(status_code=409, detail="Past OT days cannot be edited")
+    if body.seat_limit <= 0:
+        raise HTTPException(status_code=400, detail="Seat limit must be positive")
+    venue = (body.venue or "").strip()
+    if not venue:
+        raise HTTPException(status_code=400, detail="Venue is required")
+    if body.seat_limit < day.get("seats_taken", 0):
+        raise HTTPException(status_code=409, detail={
+            "code": "SEAT_LIMIT_BELOW_ASSIGNED",
+            "message": f"Cannot set below {day.get('seats_taken', 0)} already-assigned seats",
+        })
+    date_changed = body.day_date != day["day_date"]
+    if date_changed:
+        if await db.ot_schedule_days.find_one({"camp_id": camp_id, "day_date": body.day_date}):
+            raise HTTPException(status_code=409, detail="Another OT day already uses that date")
+    if await db.fulfilments.find_one({"ot_schedule_day_id": oid, "status": {"$ne": "deferred"}}):
+        raise HTTPException(status_code=409, detail="Completed OT days cannot be edited")
+    revision = str(ObjectId()) if date_changed else day.get("edit_revision")
+    updates = {"day_date": body.day_date, "seat_limit": body.seat_limit,
+               "venue": venue, "venue_sms": body.venue_sms}
+    if date_changed:
+        updates["edit_revision"] = revision
+    try:
+        changed = await db.ot_schedule_days.find_one_and_update(
+            {"_id": oid, "day_date": day["day_date"], "seats_taken": {"$lte": body.seat_limit}},
+            {"$set": updates},
+            return_document=True,
+        )
+    except DuplicateKeyError:
+        raise HTTPException(status_code=409, detail="Another OT day already uses that date")
+    if not changed:
+        raise HTTPException(status_code=409, detail="Seats or date changed; reload and try again")
+    if changed.get("edit_revision") or venue != day["venue"] or body.venue_sms != day.get("venue_sms"):
+        slips = await db.deferred_slips.find({"ot_schedule_day_id": oid, "active": True}).to_list(None)
+        fields = {"collection_date": body.day_date, "collection_venue": venue,
+                  "collection_venue_sms": body.venue_sms}
+        await db.deferred_slips.update_many({"ot_schedule_day_id": oid, "active": True}, {"$set": fields})
+        await db.fulfilments.update_many({"ot_schedule_day_id": oid, "status": "deferred"}, {"$set": fields})
+        if changed.get("edit_revision"):
+            event_key = f"ot_day:{day_id}:{changed['edit_revision']}"
+            for patient_id in {slip["patient_id"] for slip in slips}:
+                patient = await db.patients.find_one({"_id": patient_id})
+                if patient:
+                    args = (db, patient, "ot_token", body.day_date, body.venue_sms or venue)
+                    if background_tasks is not None:
+                        background_tasks.add_task(sms.send_patient_sms, *args, event_key=event_key)
+                    else:
+                        await sms.send_patient_sms(*args, event_key=event_key)
+    return {"ot_day": ser_ot_day(changed)}
 
 
 def _validated_specs_window(body: SpecsScheduleBody) -> tuple[ObjectId, str, str, str, str, str]:

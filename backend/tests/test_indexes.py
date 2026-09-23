@@ -9,6 +9,7 @@ from pymongo import ASCENDING
 
 from db import (
     HOUSEHOLD_LEDGER_INDEX_NAME,
+    LEGACY_LEDGER_INDEX_NAME,
     LEDGER_INDEX_NAME,
     LEDGER_PARTIAL_FILTER,
     PERSON_CAMP_INDEX,
@@ -46,6 +47,8 @@ def test_non_unique_person_camp_index_is_dropped():
 
 
 def test_ledger_index_from_the_household_grain_is_dropped_and_rebuilt():
+    assert LEGACY_LEDGER_INDEX_NAME == "patient_id_1_message_type_1_event_date_1"
+    assert LEDGER_INDEX_NAME == "patient_id_1_message_type_1_event_date_1_event_key_1"
     assert LEDGER_PARTIAL_FILTER == {"patient_id": {"$exists": True}}
     # An index built before the partial filter existed conflicts on name, so it must go.
     assert should_drop_ledger_index({LEDGER_INDEX_NAME: {"unique": True}})

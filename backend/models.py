@@ -42,6 +42,11 @@ class PatchStaffLineBody(BaseModel):
     line: Optional[str] = None
 
 
+class PatchStaffTeamLeadBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    team_lead_id: Optional[str] = None
+
+
 # ---- camps ----
 class CampSetupDay(BaseModel):
     day_date: DateString

@@ -324,6 +324,42 @@ class TestSpecsSmsVenue:
 
 
 class TestSendTimeGuard:
+    def test_schedule_edits_on_the_same_date_each_send_once(self, monkeypatch):
+        mock_db = setup_mock_db(monkeypatch)
+        patient = _registration_patient(mock_db)
+        captured = _calls(monkeypatch)
+        _client(monkeypatch, mock_db)
+
+        outcomes = [asyncio.run(sms.deliver_patient_sms(
+            mock_db, patient, "registration", TOMORROW, "Hansa Garden, Jasidih, Deoghar",
+            event_key=revision,
+        )) for revision in ("day-edit-1", "day-edit-2", "day-edit-2")]
+
+        assert outcomes == ["sent", "sent", "skipped"]
+        assert len(captured) == 2
+        assert [row["event_date"] for row in mock_db.reminder_ledger.docs] == [TOMORROW, TOMORROW]
+        assert [row["event_key"] for row in mock_db.reminder_ledger.docs] == ["day-edit-1", "day-edit-2"]
+
+    @pytest.mark.parametrize("message_type", ["registration", "camp", "ot_token"])
+    def test_registrar_phone_never_receives_patient_sms(self, monkeypatch, message_type):
+        mock_db = setup_mock_db(monkeypatch)
+        patient = _registration_patient(mock_db)
+        registrar_id = ObjectId()
+        patient["created_by"] = str(registrar_id)
+        asyncio.run(mock_db.users.insert_one({
+            "_id": registrar_id, "role": "volunteer", "phone": "+91 98765 00001",
+        }))
+        captured = _calls(monkeypatch)
+        _client(monkeypatch, mock_db)
+
+        outcome = asyncio.run(sms.deliver_patient_sms(
+            mock_db, patient, message_type, TOMORROW, "Hansa Garden, Jasidih, Deoghar",
+        ))
+
+        assert outcome == "skipped"
+        assert captured == []
+        assert mock_db.reminder_ledger.docs == []
+
     def test_a_venue_is_sent_with_its_spacing_tidied(self, monkeypatch):
         mock_db = setup_mock_db(monkeypatch)
         patient = _registration_patient(mock_db)

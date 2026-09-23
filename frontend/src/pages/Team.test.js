@@ -22,6 +22,7 @@ jest.mock("../lib/api", () => {
       get: jest.fn(),
       post: jest.fn(),
       patch: jest.fn(),
+      delete: jest.fn(),
     },
     formatApiError: actual.formatApiError,
     errorPayload: actual.errorPayload,
@@ -83,6 +84,7 @@ beforeEach(() => {
   });
   api.post.mockResolvedValue({ data: { staff: { id: "new-1", name: "New Person" } } });
   api.patch.mockResolvedValue({ data: { ok: true } });
+  api.delete.mockResolvedValue({ data: { ok: true } });
 });
 
 afterEach(() => {
@@ -243,5 +245,30 @@ describe("Team page", () => {
       expect.objectContaining({ name: "Vol Two", role: "volunteer" }),
     );
     expect(api.get).not.toHaveBeenCalledWith("/staff/team-leads");
+  });
+
+  test("admin can reassign a volunteer before deleting a team lead", async () => {
+    await renderTeam();
+    const selector = container.querySelector('[data-testid="reassign-team-v1"]');
+    expect(selector).not.toBeNull();
+
+    await act(async () => {
+      setInputValue(selector, "");
+    });
+
+    expect(api.patch).toHaveBeenCalledWith("/staff/v1/team-lead", { team_lead_id: null });
+  });
+
+  test("delete confirms account removal and calls the staff endpoint", async () => {
+    const confirm = jest.spyOn(window, "confirm").mockReturnValue(true);
+    await renderTeam();
+
+    await act(async () => {
+      container.querySelector('[data-testid="delete-staff-v1"]').click();
+    });
+
+    expect(confirm).toHaveBeenCalled();
+    expect(api.delete).toHaveBeenCalledWith("/staff/v1");
+    confirm.mockRestore();
   });
 });

@@ -1,5 +1,6 @@
 import asyncio
 import sys
+from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -11,13 +12,15 @@ from fastapi import HTTPException
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import routes_camps
+from helpers import now_ist
 from models import CampDayBody, DoorManualBody, PrintWindowBody
 
 
 @pytest.mark.parametrize("operation", ["door", "day", "print"])
 def test_deleted_document_after_camp_write_returns_not_found(monkeypatch, operation):
-    camp = {"_id": ObjectId(), "name": "Camp", "venue": "Hall", "camp_date": "2026-09-12"}
-    day = {"_id": ObjectId(), "camp_id": camp["_id"], "day_date": "2026-09-12", "seat_limit": 10}
+    day_date = (now_ist().date() + timedelta(days=1)).isoformat()
+    camp = {"_id": ObjectId(), "name": "Camp", "venue": "Hall", "camp_date": day_date}
+    day = {"_id": ObjectId(), "camp_id": camp["_id"], "day_date": day_date, "seat_limit": 10}
     db = SimpleNamespace(
         camps=SimpleNamespace(
             find_one=AsyncMock(side_effect=[camp, None if operation == "door" else camp]),

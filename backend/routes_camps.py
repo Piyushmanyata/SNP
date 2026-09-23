@@ -1,11 +1,12 @@
 from typing import Any, Dict
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 from db import get_db
 from models import CampBody, CampDayBody, DoorManualBody, PrintWindowBody
 from helpers import IST, as_utc, iso, next_ist_midnight, now_utc, today_ist_str
 from security import require_admin, require_any
+import sms
 
 router = APIRouter(prefix="/api/camps", tags=["camps"])
 
@@ -32,13 +33,17 @@ def ser_camp(c: dict) -> Dict[str, Any]:
 def ser_day(d: dict, *, printing_open: bool | None = None, today: str | None = None) -> Dict[str, Any]:
     today = today or today_ist_str()
     open_ = bool(printing_open) if printing_open is not None else bool(d.get("printing_open", False))
+    booked = d.get("booked", 0)
     return {
         "id": str(d["_id"]),
         "camp_id": str(d["camp_id"]),
         "day_date": d["day_date"],
         "seat_limit": d.get("seat_limit", 0),
+        "booked": booked,
+        "over_capacity": booked > d.get("seat_limit", 0),
         "printing_open": open_,
         "is_today": d["day_date"] == today,
+        "can_edit": d["day_date"] >= today,
     }
 
 
@@ -257,6 +262,8 @@ async def upsert_camp_day(body: CampDayBody, actor: dict = Depends(require_admin
         raise HTTPException(status_code=404, detail="Camp not found")
     existing = await db.camp_days.find_one({"camp_id": camp_oid, "day_date": body.day_date})
     if existing:
+        if existing["day_date"] < today_ist_str():
+            raise HTTPException(status_code=409, detail="Past camp days cannot be edited")
         await db.camp_days.update_one({"_id": existing["_id"]},
                                       {"$set": {"seat_limit": body.seat_limit}})
         d = await db.camp_days.find_one({"_id": existing["_id"]})
@@ -284,6 +291,65 @@ async def list_days(camp_id: str, actor: dict = Depends(require_any)) -> Dict[st
     days = await db.camp_days.find({"camp_id": ObjectId(camp_id)}).sort("day_date", 1).to_list(100)
     days_out, _state = _days_projection(camp or {}, days)
     return {"days": days_out}
+
+
+@router.patch("/days/{day_id}")
+async def update_camp_day(day_id: str, body: CampDayBody, actor: dict = Depends(require_admin),
+                          background_tasks: BackgroundTasks = None) -> Dict[str, Any]:
+    db = get_db()
+    if not ObjectId.is_valid(day_id) or not ObjectId.is_valid(body.camp_id):
+        raise HTTPException(status_code=400, detail="Invalid camp or day ID")
+    camp_oid = ObjectId(body.camp_id)
+    day = await db.camp_days.find_one({"_id": ObjectId(day_id), "camp_id": camp_oid})
+    if not day:
+        raise HTTPException(status_code=404, detail="Day not found")
+    if day["day_date"] < today_ist_str() or body.day_date < today_ist_str():
+        raise HTTPException(status_code=409, detail="Past camp days cannot be edited")
+    date_changed = body.day_date != day["day_date"]
+    booked = []
+    if date_changed:
+        booked = await db.patients.find({"camp_id": camp_oid, "$or": [
+            {"booked_camp_day_id": day["_id"]}, {"camp_day_id": day["_id"]},
+        ]}).to_list(None)
+        if any(p.get("arrived_at") or p.get("printed_at") or p.get("queue_status") != "registered" for p in booked):
+            raise HTTPException(status_code=409, detail="Day has arrived or clinical patients; its date cannot change")
+        if booked and await db.transcriptions.find_one({"patient_id": {"$in": [p["_id"] for p in booked]}}):
+            raise HTTPException(status_code=409, detail="Day has clinical patients; its date cannot change")
+        if await db.camp_days.find_one({"camp_id": camp_oid, "day_date": body.day_date}):
+            raise HTTPException(status_code=409, detail="Another camp day already uses that date")
+    revision = str(ObjectId()) if date_changed else day.get("edit_revision")
+    updates = {"day_date": body.day_date, "seat_limit": body.seat_limit}
+    if date_changed:
+        updates["edit_revision"] = revision
+    try:
+        changed = await db.camp_days.find_one_and_update(
+            {"_id": day["_id"], "day_date": day["day_date"]},
+            {"$set": updates},
+            return_document=True,
+        )
+    except DuplicateKeyError:
+        raise HTTPException(status_code=409, detail="Another camp day already uses that date")
+    if not changed:
+        raise HTTPException(status_code=409, detail="Day changed; reload and try again")
+    days = await db.camp_days.find({"camp_id": camp_oid}).to_list(None)
+    await db.camps.update_one({"_id": camp_oid}, {"$set": {"camp_date": min(d["day_date"] for d in days)}})
+    camp = await db.camps.find_one({"_id": camp_oid})
+    state = effective_printing(camp, days)
+    if changed.get("edit_revision"):
+        event_key = f"camp_day:{day_id}:{changed['edit_revision']}"
+        booked = await db.patients.find({"camp_id": camp_oid, "$or": [
+            {"booked_camp_day_id": day["_id"]}, {"camp_day_id": day["_id"]},
+        ]}).to_list(None)
+        for patient in booked:
+            if patient.get("booked_camp_day_id") == day["_id"] or not patient.get("booked_camp_day_id"):
+                args = (db, patient, "registration", body.day_date, camp.get("venue_sms") or camp["venue"])
+                if background_tasks is not None:
+                    background_tasks.add_task(sms.send_patient_sms, *args, event_key=event_key)
+                else:
+                    await sms.send_patient_sms(*args, event_key=event_key)
+    return {"day": ser_day(changed, printing_open=bool(
+        state["printing_open"] and state["operating_day_id"] == str(changed["_id"])
+    ))}
 
 
 @router.patch("/days/{day_id}/print-window")

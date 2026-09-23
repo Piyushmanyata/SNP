@@ -230,6 +230,7 @@ function CampDays({ campId }) {
   const [days, setDays] = useState([]);
   const [date, setDate] = useState("");
   const [seat, setSeat] = useState(50);
+  const [editing, setEditing] = useState(null);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const load = useCallback(() => {
@@ -237,20 +238,36 @@ function CampDays({ campId }) {
   }, [campId]);
   useEffect(() => { load(); }, [load]);
 
-  const add = useCallback(async () => {
+  const save = useCallback(async () => {
     setErr("");
     setBusy(true);
     try {
-      await api.post("/camps/days", { camp_id: campId, day_date: date, seat_limit: Number(seat) });
+      const body = { camp_id: campId, day_date: date, seat_limit: Number(seat) };
+      if (editing) await api.patch(`/camps/days/${editing}`, body);
+      else await api.post("/camps/days", body);
       setDate("");
       setSeat(50);
+      setEditing(null);
       load();
     } catch (e) {
       setErr(formatApiError(e));
     } finally {
       setBusy(false);
     }
-  }, [campId, date, seat, load]);
+  }, [campId, date, seat, editing, load]);
+
+  const edit = (day) => {
+    setEditing(day.id);
+    setDate(day.day_date);
+    setSeat(day.seat_limit);
+    setErr("");
+  };
+
+  const cancelEdit = () => {
+    setEditing(null);
+    setDate("");
+    setSeat(50);
+  };
 
   const togglePrint = useCallback(async (id, val) => {
     setErr("");
@@ -273,9 +290,11 @@ function CampDays({ campId }) {
           <CalendarDays className="w-4 h-4 text-slate-400" />
           <span className="font-medium text-slate-800 text-sm">{displayDate(d.day_date)}</span>
           {d.is_today && <Badge tone="emerald">Today</Badge>}
-          <span className="text-xs text-slate-600">seats: {d.seat_limit}</span>
+          <span className="text-xs text-slate-600">{d.booked ?? 0} booked / {d.seat_limit} seats</span>
+          {d.over_capacity && <Badge tone="rose">Over capacity</Badge>}
           <div className="ml-auto flex items-center gap-2">
             <Badge tone={d.printing_open ? "emerald" : "slate"}>{d.printing_open ? "Print open" : "Print closed"}</Badge>
+            {d.can_edit !== false && <Button size="sm" variant="outline" onClick={() => edit(d)} data-testid={`edit-day-${d.id}`}><Pencil className="w-4 h-4" /> Edit</Button>}
             <Button size="sm" variant={d.printing_open ? "outline" : "primary"} onClick={() => togglePrint(d.id, !d.printing_open)} data-testid={`toggle-print-window-${d.id}`}>
               <PrinterCheck className="w-4 h-4" /> {d.printing_open ? "Close" : "Open"}
             </Button>
@@ -285,8 +304,9 @@ function CampDays({ campId }) {
       ))}
       <div className="flex flex-wrap gap-2 items-end pt-2">
         <Field label="Date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} data-testid="new-day-date" /></Field>
-        <Field label="Seat limit"><Input type="number" value={seat} onChange={(e) => setSeat(e.target.value)} className="w-28" data-testid="new-day-seat" /></Field>
-        <Button size="sm" onClick={add} disabled={busy || !date} data-testid="add-day-button"><Plus className="w-4 h-4" /> Add day</Button>
+        <Field label="Seat limit"><Input type="number" min="1" value={seat} onChange={(e) => setSeat(e.target.value)} className="w-28" data-testid="new-day-seat" /></Field>
+        <Button size="sm" onClick={save} disabled={busy || !date || Number(seat) < 1} data-testid={editing ? "save-day-button" : "add-day-button"}>{editing ? <Pencil className="w-4 h-4" /> : <Plus className="w-4 h-4" />} {editing ? "Save day" : "Add day"}</Button>
+        {editing && <Button size="sm" variant="ghost" onClick={cancelEdit}>Cancel</Button>}
       </div>
     </div>
   );
@@ -298,6 +318,8 @@ function OtSchedule() {
   const [camp, setCamp] = useState(null);
   const [err, setErr] = useState("");
   const [form, setForm] = useState({ day_date: "", venue: HOSPITAL_VENUE, venue_sms: HOSPITAL_SMS_VENUE, seat_limit: 10 });
+  const [editing, setEditing] = useState(null);
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
     Promise.all([api.get("/clinical/ot-days"), api.get("/camps/active")])
@@ -306,12 +328,26 @@ function OtSchedule() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const add = useCallback(async () => {
+  const save = useCallback(async () => {
     setErr("");
     if (!camp) { setErr("Activate a camp first."); return; }
-    try { await api.post("/clinical/ot-days", { camp_id: camp.id, ...form, seat_limit: Number(form.seat_limit) }); setForm({ day_date: "", venue: HOSPITAL_VENUE, venue_sms: HOSPITAL_SMS_VENUE, seat_limit: 10 }); load(); }
-    catch (e) { setErr(formatApiError(e)); }
-  }, [camp, form, load]);
+    setBusy(true);
+    try {
+      const body = { camp_id: camp.id, ...form, seat_limit: Number(form.seat_limit) };
+      if (editing) await api.patch(`/clinical/ot-days/${editing}`, body);
+      else await api.post("/clinical/ot-days", body);
+      setForm({ day_date: "", venue: HOSPITAL_VENUE, venue_sms: HOSPITAL_SMS_VENUE, seat_limit: 10 });
+      setEditing(null);
+      load();
+    } catch (e) { setErr(formatApiError(e)); }
+    finally { setBusy(false); }
+  }, [camp, form, editing, load]);
+
+  const edit = (day) => {
+    setEditing(day.id);
+    setForm({ day_date: day.day_date, venue: day.venue, venue_sms: day.venue_sms || "", seat_limit: day.seat_limit });
+    setErr("");
+  };
 
   return (
     <div className="space-y-4">
@@ -326,17 +362,19 @@ function OtSchedule() {
               <Scissors className="w-4 h-4 text-emerald-600" />
               <span className="font-medium text-slate-800 text-sm">{displayDate(d.day_date)}</span>
               <Badge tone={d.seats_free > 0 ? "emerald" : "rose"} className="ml-auto">{d.seats_taken}/{d.seat_limit} seats</Badge>
+              <Button size="sm" variant="outline" onClick={() => edit(d)} data-testid={`edit-ot-day-${d.id}`}><Pencil className="w-4 h-4" /> Edit</Button>
               <span className="basis-full text-xs text-slate-600 break-words">{d.venue}</span>
               <SmsVenueBadge venue={d.venue} venueSms={d.venue_sms} testid={`ot-sms-venue-problem-${d.id}`} />
             </div>
           ))}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start pt-4 mt-3 border-t border-slate-100">
-          <Field label="Date"><Input type="date" value={form.day_date} onChange={(e) => { const existing = days.find((d) => d.day_date === e.target.value); setForm({ ...form, day_date: e.target.value, venue: existing ? existing.venue : HOSPITAL_VENUE, venue_sms: existing ? existing.venue_sms || "" : HOSPITAL_SMS_VENUE, seat_limit: existing ? existing.seat_limit : form.seat_limit }); }} data-testid="ot-date-input" /></Field>
+          <Field label="Date"><Input type="date" value={form.day_date} onChange={(e) => { const existing = editing ? null : days.find((d) => d.day_date === e.target.value); setForm({ ...form, day_date: e.target.value, venue: existing ? existing.venue : form.venue, venue_sms: existing ? existing.venue_sms || "" : form.venue_sms, seat_limit: existing ? existing.seat_limit : form.seat_limit }); }} data-testid="ot-date-input" /></Field>
           <Field label="Seats"><Input type="number" inputMode="numeric" min="1" value={form.seat_limit} onChange={(e) => setForm({ ...form, seat_limit: e.target.value })} data-testid="ot-seat-input" /></Field>
           <Field label="Hospital"><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="ot-venue-input" /></Field>
           <SmsVenueField label="Short name for SMS" venue={form.venue} value={form.venue_sms} onChange={(venue_sms) => setForm({ ...form, venue_sms })} placeholder={HOSPITAL_SMS_VENUE} testid="ot-venue-sms-input" />
-          <Button className="sm:col-span-2" onClick={add} disabled={!form.day_date || !form.venue || Boolean(smsVenueFor(form.venue, form.venue_sms).problem)} data-testid="add-ot-day-button"><Plus className="w-4 h-4" /> Add OT day</Button>
+          <Button className="sm:col-span-2" onClick={save} disabled={busy || !form.day_date || !form.venue || Number(form.seat_limit) < 1 || Boolean(smsVenueFor(form.venue, form.venue_sms).problem)} data-testid={editing ? "save-ot-day-button" : "add-ot-day-button"}>{editing ? <Pencil className="w-4 h-4" /> : <Plus className="w-4 h-4" />} {editing ? "Save OT day" : "Add OT day"}</Button>
+          {editing && <Button variant="ghost" onClick={() => { setEditing(null); setForm({ day_date: "", venue: HOSPITAL_VENUE, venue_sms: HOSPITAL_SMS_VENUE, seat_limit: 10 }); }}>Cancel</Button>}
         </div>
       </Card>
     </div>

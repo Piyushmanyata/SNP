@@ -1,5 +1,4 @@
 import io
-import subprocess
 import asyncio
 import sys
 from pathlib import Path
@@ -34,7 +33,7 @@ def test_extract_rejects_non_documents_without_echoing_content():
     assert 'private-photo-data' not in response.text
 
 
-def test_extract_decodes_a_real_qr_image_before_ocr():
+def test_extract_decodes_a_real_qr_image():
     import zxingcpp
 
     payload = '<PrintLetterBarcodeData uid="123456781234" name="Test Patient" gender="M" dob="01/01/1980" />'
@@ -53,62 +52,16 @@ def test_extract_decodes_a_real_qr_image_before_ocr():
     assert response.json()['payload'] == payload
 
 
-def test_extract_returns_reviewed_suggestions_without_raw_identity_or_lock(monkeypatch):
-    import aadhaar_document
-    from helpers import age_from_dob
-
-    text = 'Name: Test Patient\nDOB: 14/06/1975\nMALE\nXXXX XXXX 4321\nAddress: Test Street, Test Town 123456'
-    tsv = 'level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n'
-    tsv += ''.join(f'5\t1\t1\t1\t{i}\t1\t0\t0\t10\t10\t95\t{line}\n' for i, line in enumerate(text.splitlines(), 1))
-    monkeypatch.setattr(subprocess, 'run', lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, tsv.encode(), b''))
-
-    async def run_in_process(document, password):
-        return aadhaar_document.extract(document, password)
-
-    monkeypatch.setattr(aadhaar_extract, 'run_worker', run_in_process)
+def test_extract_unreadable_qr_requires_manual_entry():
     output = io.BytesIO()
     Image.new('RGB', (200, 100), 'white').save(output, format='PNG')
     app = FastAPI()
     app.include_router(routes_registration.router)
     with TestClient(app) as client:
         response = client.post('/api/aadhaar/extract', content=output.getvalue())
-    assert response.status_code == 200, response.text
-    assert response.json()['outcome'] == 'review'
-    assert response.json()['data'] == {
-        'full_name': 'Test Patient', 'dob': '1975-06-14', 'age': age_from_dob('1975-06-14'), 'gender': 'M',
-        'aadhaar_last4': '4321', 'address': 'Test Street, Test Town 123456',
-    }
-    assert 'payload' not in response.json()
-    assert 'XXXX' not in response.text
-
-
-@pytest.mark.parametrize('label', ['Year of Birth', 'YOB', 'जन्म वर्ष', 'जन्म का वर्ष'])
-@pytest.mark.parametrize('year', ['1950', '2999', '1800'])
-def test_extract_preserves_labelled_birth_year_and_preceding_name_for_review(monkeypatch, label, year):
-    import aadhaar_document
-    from datetime import date
-
-    text = f'Test Patient\n{label}: {year}\nFEMALE'
-    tsv = 'level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext\n'
-    tsv += ''.join(f'5\t1\t1\t1\t{i}\t1\t0\t0\t10\t10\t95\t{line}\n' for i, line in enumerate(text.splitlines(), 1))
-    monkeypatch.setattr(subprocess, 'run', lambda *args, **kwargs: subprocess.CompletedProcess(args, 0, tsv.encode(), b''))
-
-    async def run_in_process(document, password):
-        return aadhaar_document.extract(document, password)
-
-    monkeypatch.setattr(aadhaar_extract, 'run_worker', run_in_process)
-    output = io.BytesIO()
-    Image.new('RGB', (200, 100), 'white').save(output, format='PNG')
-    app = FastAPI()
-    app.include_router(routes_registration.router)
-    with TestClient(app) as client:
-        response = client.post('/api/aadhaar/extract', content=output.getvalue())
-    assert response.status_code == 200, response.text
-    assert response.json()['outcome'] == 'review'
-    expected = {'full_name': 'Test Patient', 'gender': 'F'}
-    if year == '1950':
-        expected.update({'dob': '1950', 'age': date.today().year - 1950})
-    assert response.json()['data'] == expected
+    assert response.status_code == 422, response.text
+    assert response.json()['detail']['code'] == 'QR_NOT_FOUND'
+    assert 'manually' in response.json()['detail']['message'].lower()
 
 
 def test_extract_reads_qr_from_heic_and_pdf():
@@ -190,12 +143,12 @@ def test_extract_deadline_cancels_work_and_releases_capacity(monkeypatch):
     with TestClient(app) as client:
         response = client.post('/api/aadhaar/extract', content=b'%PDF-')
         assert response.status_code == 504
-        assert response.json()['detail']['code'] == 'OCR_TIMEOUT'
+        assert response.json()['detail']['code'] == 'QR_TIMEOUT'
         assert client.post('/api/aadhaar/extract', content=b'no').status_code == 415
     assert cancelled == [True]
 
 
-def test_extract_disconnect_cancels_recognition_and_releases_capacity(monkeypatch):
+def test_extract_disconnect_cancels_qr_reading_and_releases_capacity(monkeypatch):
     from fastapi import Request, HTTPException
 
     async def run():

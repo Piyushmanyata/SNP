@@ -89,7 +89,7 @@ test("a page resolver classifies the photo payload instead of the default decode
   expect(scanner.outcome).toBe("card");
 });
 
-test("a patient code photo that matches nobody is not uploaded for OCR", async () => {
+test("a patient code photo that matches nobody is not uploaded", async () => {
   classify = jest.fn().mockResolvedValue({ outcome: "not-aadhaar", quiet: true });
   act(() => root.render(<Harness />));
   wasmDetector.detectWasmPhoto.mockResolvedValueOnce("snp:unknown1");
@@ -157,26 +157,25 @@ test("a browser without bitmap decoding still reads the photo in the worker", as
   expect(onScanned).toHaveBeenCalledWith({ full_name: "Test Person" }, "browser-card");
 });
 
-test("unreadable photo returns backend suggestions for review without locking identity", async () => {
+test("unreadable photo offers manual entry without locking identity", async () => {
   const file = new File(["image"], "card.jpg", { type: "image/jpeg" });
-  const data = { full_name: "Test Person", gender: "F" };
-  api.post.mockResolvedValueOnce({ data: { outcome: "review", data, message: "Review extracted details" } });
+  api.post.mockRejectedValueOnce({ response: { status: 422, data: { detail: { code: "QR_NOT_FOUND", message: "No readable Aadhaar QR was found. Enter details manually." } } } });
   await act(async () => scanner.scanFile(file));
   expect(api.post).toHaveBeenCalledWith("/aadhaar/extract", file, expect.objectContaining({
     headers: { "Content-Type": "image/jpeg" },
   }));
-  expect(scanner.reviewData).toEqual(data);
-  expect(scanner.outcome).toBe("review");
+  expect(scanner.error).toMatch(/enter details manually/i);
+  expect(scanner.outcome).toBe("");
   expect(scanner.busy).toBe(false);
   expect(onScanned).not.toHaveBeenCalled();
 });
 
 test("PDF uploads go straight to the backend without allocating a browser bitmap", async () => {
   const file = new File(["pdf"], "card.pdf", { type: "application/pdf" });
-  api.post.mockResolvedValueOnce({ data: { outcome: "review", data: { full_name: "Test Person" } } });
+  api.post.mockResolvedValueOnce({ data: { outcome: "card", data: { full_name: "Test Person" }, payload: "pdf-card" } });
   await act(async () => scanner.scanFile(file));
   expect(global.createImageBitmap).not.toHaveBeenCalled();
-  expect(scanner.reviewData).toEqual({ full_name: "Test Person" });
+  expect(onScanned).toHaveBeenCalledWith({ full_name: "Test Person" }, "pdf-card");
 });
 
 test("password retry sends an encoded transient header and clears the password prompt", async () => {
@@ -184,17 +183,16 @@ test("password retry sends an encoded transient header and clears the password p
   api.post.mockRejectedValueOnce({ response: { status: 422, data: { detail: { code: "PDF_PASSWORD_REQUIRED" } } } });
   await act(async () => scanner.scanFile(file));
   expect(scanner.passwordRequired).toBe(true);
-  expect(scanner.reviewData).toBeNull();
-  api.post.mockResolvedValueOnce({ data: { outcome: "review", data: { full_name: "Test Person" } } });
+  api.post.mockResolvedValueOnce({ data: { outcome: "card", data: { full_name: "Test Person" }, payload: "pdf-card" } });
   await act(async () => scanner.scanFile(file, "राम 1990"));
   expect(api.post).toHaveBeenLastCalledWith("/aadhaar/extract", file, expect.objectContaining({
     headers: { "Content-Type": "application/pdf", "X-PDF-Password": "%E0%A4%B0%E0%A4%BE%E0%A4%AE%201990" },
   }));
   expect(scanner.passwordRequired).toBe(false);
-  expect(onScanned).not.toHaveBeenCalled();
+  expect(onScanned).toHaveBeenCalledWith({ full_name: "Test Person" }, "pdf-card");
 });
 
-test.each(["card", "review"])("cancelled extraction cannot apply an older %s to a newer scan", async (outcome) => {
+test("cancelled extraction cannot apply an older card to a newer scan", async () => {
   let finishPrevious;
   let finishCurrent;
   let uploadStarted;
@@ -212,29 +210,18 @@ test.each(["card", "review"])("cancelled extraction cannot apply an older %s to 
   expect(uploadSignal.aborted).toBe(true);
   api.post.mockImplementationOnce(() => new Promise((resolve) => { finishCurrent = resolve; }));
   await act(async () => { scanner.decode("current-card"); });
-  await act(async () => finishPrevious({ data: { outcome, data: { full_name: "Previous Patient" } } }));
+  await act(async () => finishPrevious({ data: { outcome: "card", data: { full_name: "Previous Patient" } } }));
   expect(scanner.busy).toBe(true);
-  expect(scanner.reviewData).toBeNull();
   expect(onScanned).not.toHaveBeenCalled();
   await act(async () => finishCurrent({ data: { outcome: "card", data: { full_name: "Current Patient" } } }));
   expect(onScanned).toHaveBeenCalledWith({ full_name: "Current Patient" }, "current-card");
 });
 
-test("a new attempt and cancellation clear earlier review suggestions", async () => {
-  api.post.mockResolvedValue({ data: { outcome: "review", data: { full_name: "Previous Patient" } } });
-  await act(async () => scanner.scanFile(new File(["image"], "old.jpg")));
-  expect(scanner.reviewData).not.toBeNull();
-  act(() => scanner.cancelDecode());
-  expect(scanner.reviewData).toBeNull();
-  expect(scanner.passwordRequired).toBe(false);
-});
-
-test("OCR service failure offers a usable fallback without stale identity", async () => {
-  api.post.mockRejectedValueOnce({ response: { status: 503, data: { detail: { code: "OCR_UNAVAILABLE" } } } });
+test("QR service failure offers a usable fallback without stale identity", async () => {
+  api.post.mockRejectedValueOnce({ response: { status: 503, data: { detail: { code: "QR_UNAVAILABLE" } } } });
   await act(async () => scanner.scanFile(new File(["image"], "card.jpg")));
   expect(scanner.error).toMatch(/enter details manually/);
   expect(scanner.busy).toBe(false);
-  expect(scanner.reviewData).toBeNull();
   expect(onScanned).not.toHaveBeenCalled();
 });
 
@@ -244,7 +231,7 @@ test.each(["png", "jpeg"])("a small compressed 48-megapixel %s goes to the backe
     : new Uint8Array([255, 216, 255, 192, 0, 17, 8, 23, 112, 31, 64, 3, 1, 17, 0, 2, 17, 0, 3, 17, 0]);
   const file = new File([bytes], `card.${format}`, { type: `image/${format}` });
   const imageConstructor = jest.spyOn(global, "Image");
-  api.post.mockResolvedValueOnce({ data: { outcome: "review", data: { full_name: "Test Person" } } });
+  api.post.mockRejectedValueOnce({ response: { status: 422, data: { detail: { code: "QR_NOT_FOUND" } } } });
   try {
     await act(async () => scanner.scanFile(file));
     expect(global.createImageBitmap).not.toHaveBeenCalled();
@@ -259,8 +246,8 @@ test.each([
   ["unknown format", new Uint8Array([1, 2, 3, 4])],
   ["truncated JPEG segment", new Uint8Array([255, 216, 255, 224, 255, 255])],
 ])("%s uses backend fallback without speculative browser decoding", async (_name, bytes) => {
-  api.post.mockResolvedValueOnce({ data: { outcome: "review", data: { full_name: "Test Person" } } });
+  api.post.mockRejectedValueOnce({ response: { status: 422, data: { detail: { code: "QR_NOT_FOUND" } } } });
   await act(async () => scanner.scanFile(new File([bytes], "card.jpg", { type: "image/jpeg" })));
   expect(global.createImageBitmap).not.toHaveBeenCalled();
-  expect(scanner.reviewData).toEqual({ full_name: "Test Person" });
+  expect(scanner.error).toMatch(/enter details manually/i);
 });

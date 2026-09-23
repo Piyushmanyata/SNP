@@ -110,6 +110,31 @@ export default function Team() {
     [load]
   );
 
+  const reassign = useCallback(async (s, teamLeadId) => {
+    setErr("");
+    setMsg("");
+    try {
+      await api.patch(`/staff/${s.id}/team-lead`, { team_lead_id: teamLeadId || null });
+      setMsg(`Updated team assignment for ${s.name}.`);
+      load();
+    } catch (error) {
+      setErr(formatApiError(error));
+    }
+  }, [load]);
+
+  const deleteStaff = useCallback(async (s) => {
+    if (!window.confirm(`Delete ${s.name}'s account? They will lose access; past activity stays in reports.`)) return;
+    setErr("");
+    setMsg("");
+    try {
+      await api.delete(`/staff/${s.id}`);
+      setMsg(`Deleted account for ${s.name}.`);
+      load();
+    } catch (error) {
+      setErr(formatApiError(error));
+    }
+  }, [load]);
+
   return (
     <Layout title={isTeamLead ? "My Team" : "Staff & Team Management"}>
       <div className="space-y-6">
@@ -221,9 +246,23 @@ export default function Team() {
                     {s.phone && (
                       <p className="text-xs text-slate-500 mt-0.5">{s.phone}</p>
                     )}
+                    {isAdmin && s.role === "volunteer" && (
+                      <label className="block text-xs text-slate-700 mt-2" htmlFor={`reassign-team-${s.id}`}>
+                        Team Lead
+                        <Select
+                          id={`reassign-team-${s.id}`}
+                          value={s.team_lead_id || ""}
+                          onChange={(e) => reassign(s, e.target.value)}
+                          data-testid={`reassign-team-${s.id}`}
+                        >
+                          <option value="">No Team Lead (Direct)</option>
+                          {teamLeads.map((lead) => <option key={lead.id} value={lead.id}>{lead.name}</option>)}
+                        </Select>
+                      </label>
+                    )}
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <Button
                       size="sm"
                       variant="outline"
@@ -240,6 +279,17 @@ export default function Team() {
                     >
                       {s.disabled_at ? "Enable" : "Disable"}
                     </Button>
+                    {s.id !== user?.id && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="min-h-11 min-w-11"
+                        data-testid={`delete-staff-${s.id}`}
+                        onClick={() => deleteStaff(s)}
+                      >
+                        Delete
+                      </Button>
+                    )}
                   </div>
                 </div>
               ))}

@@ -29,7 +29,7 @@ async def run_worker(document: bytes, password: str) -> dict:
     try:
         output, _ = await process.communicate(json.dumps({'password': password}).encode() + b'\n' + document)
         if process.returncode or len(output) > 128 * 1024:
-            fail(503, 'OCR_UNAVAILABLE', 'Document reader could not finish. Retry or enter details manually.')
+            fail(503, 'QR_UNAVAILABLE', 'QR reader could not finish. Retry or enter details manually.')
         result = json.loads(output)
         if 'error' in result:
             fail(result['status'], result['error'], result['message'])
@@ -64,7 +64,7 @@ async def extract_document(request: Request) -> dict:
     if len(attempts) >= 12:
         fail(429, 'RATE_LIMITED', 'Too many document attempts. Enter details manually or try again later.')
     if _active:
-        fail(429, 'OCR_BUSY', 'Another document is being read. Please retry shortly or enter details manually.')
+        fail(429, 'QR_BUSY', 'Another document is being read. Please retry shortly or enter details manually.')
     _requests[ip] = attempts + [now]
     _active = True
     try:
@@ -85,22 +85,22 @@ async def extract_document(request: Request) -> dict:
                 fail(422, 'INVALID_PASSWORD', 'The PDF password is too long.')
             try:
                 password = unquote(encoded_password, errors='strict')
-                recognition = asyncio.create_task(run_worker(bytes(document), password))
+                reading = asyncio.create_task(run_worker(bytes(document), password))
                 disconnected = asyncio.create_task(wait_for_disconnect(request))
                 try:
-                    done, _ = await asyncio.wait((recognition, disconnected), return_when=asyncio.FIRST_COMPLETED)
-                    if recognition in done:
-                        return await recognition
+                    done, _ = await asyncio.wait((reading, disconnected), return_when=asyncio.FIRST_COMPLETED)
+                    if reading in done:
+                        return await reading
                     fail(499, 'REQUEST_CANCELLED', 'Document reading was cancelled.')
                 finally:
-                    recognition.cancel()
+                    reading.cancel()
                     disconnected.cancel()
-                    await asyncio.gather(recognition, disconnected, return_exceptions=True)
+                    await asyncio.gather(reading, disconnected, return_exceptions=True)
             except UnicodeError:
                 fail(422, 'INVALID_PASSWORD', 'Enter the PDF password again.')
             except (OSError, ValueError):
-                fail(503, 'OCR_UNAVAILABLE', 'Document reader is unavailable. Enter details manually or ask the desk.')
+                fail(503, 'QR_UNAVAILABLE', 'QR reader is unavailable. Enter details manually or ask the desk.')
     except TimeoutError:
-        fail(504, 'OCR_TIMEOUT', 'Reading the document took too long. Try a cropped photo or enter details manually.')
+        fail(504, 'QR_TIMEOUT', 'Reading the QR took too long. Try a cropped photo or enter details manually.')
     finally:
         _active = False

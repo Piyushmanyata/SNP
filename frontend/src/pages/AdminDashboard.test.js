@@ -358,6 +358,20 @@ describe("AdminDashboard component", () => {
     );
   });
 
+  test("shows a camp day as over capacity after seats fall below bookings", async () => {
+    await act(async () => { root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>); });
+    await act(async () => { container.querySelector('[data-testid="admin-tab-camps"]').click(); });
+    api.get.mockResolvedValueOnce({ data: { days: [
+      { id: "cd-1", day_date: "2026-08-27", seat_limit: 2, booked: 3, over_capacity: true, printing_open: false },
+    ] } });
+
+    await act(async () => { container.querySelector('[data-testid="manage-days-c-1"]').click(); });
+
+    const day = container.querySelector('[data-testid="day-row-cd-1"]');
+    expect(day.textContent).toContain("3 booked / 2 seats");
+    expect(day.textContent).toContain("Over capacity");
+  });
+
   test("deleting a camp or a day asks first and clears an old error on success", async () => {
     const confirm = jest.spyOn(window, "confirm").mockReturnValue(false);
     api.delete.mockRejectedValueOnce({ response: { data: { detail: "Camp has registrations; cannot delete" } } });
@@ -564,6 +578,44 @@ describe("AdminDashboard component", () => {
     });
     await act(async () => save.click());
     expect(api.post).toHaveBeenCalledWith("/clinical/ot-days", expect.objectContaining({ venue_sms: "Bajaj Hospital, Deoghar" }));
+  });
+
+  test("an admin can edit a camp day's date and seats", async () => {
+    api.patch.mockResolvedValue({ data: {} });
+    await act(async () => root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>));
+    await act(async () => container.querySelector('[data-testid="admin-tab-camps"]').click());
+    await act(async () => container.querySelector('[data-testid="manage-days-c-1"]').click());
+    await act(async () => container.querySelector('[data-testid="edit-day-cd-1"]').click());
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    act(() => {
+      const date = container.querySelector('[data-testid="new-day-date"]');
+      setter.call(date, "2026-10-05");
+      date.dispatchEvent(new Event("input", { bubbles: true }));
+      const seats = container.querySelector('[data-testid="new-day-seat"]');
+      setter.call(seats, "30");
+      seats.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => container.querySelector('[data-testid="save-day-button"]').click());
+    expect(api.patch).toHaveBeenCalledWith("/camps/days/cd-1", {
+      camp_id: "c-1", day_date: "2026-10-05", seat_limit: 30,
+    });
+  });
+
+  test("an admin can edit an OT day's date, seats and hospital", async () => {
+    api.patch.mockResolvedValue({ data: {} });
+    await act(async () => root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>));
+    await act(async () => container.querySelector('[data-testid="admin-tab-ot"]').click());
+    await act(async () => container.querySelector('[data-testid="edit-ot-day-ot-1"]').click());
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    act(() => {
+      const date = container.querySelector('[data-testid="ot-date-input"]');
+      setter.call(date, "2026-10-05");
+      date.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => container.querySelector('[data-testid="save-ot-day-button"]').click());
+    expect(api.patch).toHaveBeenCalledWith("/clinical/ot-days/ot-1", {
+      camp_id: "c-1", day_date: "2026-10-05", venue: "Base Eye Hospital", venue_sms: "", seat_limit: 20,
+    });
   });
 
   describe("Camp supplies", () => {
