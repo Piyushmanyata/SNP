@@ -53,7 +53,6 @@ async function renderStation(props) {
         onDone={jest.fn()}
         navigate={jest.fn()}
         setBanner={jest.fn()}
-        setError={jest.fn()}
         {...props}
       />
     );
@@ -71,7 +70,6 @@ async function renderSection(data, otDays = [], specsDays = [], line = "medicine
         onDone={jest.fn()}
         navigate={jest.fn()}
         setBanner={jest.fn()}
-        setError={jest.fn()}
       />
     );
   });
@@ -421,7 +419,6 @@ describe("Fulfilment lines", () => {
         clinical_generation: 1,
         fulfilments: [],
       },
-      setError: jest.fn(),
     });
     await act(async () => {
       container.querySelector('[data-testid="station-medicine-paper-review"]').click();
@@ -429,9 +426,11 @@ describe("Fulfilment lines", () => {
     await act(async () => {
       container.querySelector('[data-testid="station-medicine-save"]').click();
     });
+    expect(container.querySelector('[data-testid="station-medicine"] [role="alert"]').textContent).toContain("network");
     await act(async () => {
       container.querySelector('[data-testid="station-medicine-save"]').click();
     });
+    expect(container.querySelector('[role="alert"]')).toBeNull();
     const ids = api.post.mock.calls.map((call) => call[1].operation_id);
     expect(ids).toEqual(["op-retry-1", "op-retry-1"]);
     uuid.mockRestore();

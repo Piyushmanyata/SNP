@@ -7,7 +7,7 @@ import { hospitalOutcomeLabel } from "./prescriptionRules";
 function Row({ k, v, testId }) {
   return (
     <div data-testid={testId}>
-      <span className="text-slate-400 mr-2">{k}:</span>
+      <span className="text-slate-600 mr-2">{k}:</span>
       <span className="font-semibold text-slate-900">{v || "—"}</span>
     </div>
   );

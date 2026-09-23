@@ -184,7 +184,7 @@ class TestDeskNumericLookupBound:
 
     def test_non_decimal_digits_do_not_reach_the_int_conversion(self, monkeypatch):
         async def run():
-            _mock(monkeypatch)
+            await _seed(_mock(monkeypatch))
             with pytest.raises(HTTPException) as exc:
                 await lookup(QrLookupBody(value="²²²"), actor=ACTOR)
             assert exc.value.status_code == 404

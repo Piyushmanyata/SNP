@@ -89,7 +89,7 @@ The volunteer gives the app a still image of the QR; the app reads the QR from t
 _Avoid_: scan, gallery scan
 
 **Wedge burst**:
-The keystroke stream a USB imager emits for one card: the whole payload followed by a terminator. Registration listens for it wherever focus is, with no mode to select and no field to click; the terminator fires Decode. Scan at the door does not: there the volunteer chooses USB / paste and watches the payload arrive in the box, because a door that reads cards invisibly gives the volunteer nothing to believe.
+The keystroke stream a USB imager emits for one card: the whole payload followed by a terminator. Registration listens for it wherever focus is, with no mode to select and no field to click; the terminator fires Decode. At the door, on a laptop, the USB / paste box opens focused, the payload arrives visibly in it, and the box clears for the next patient; a burst that lands in any other field is still read, and that field keeps its value (ADR 0048).
 _Avoid_: USB wedge (the old name for the fallback textarea), paste mode, manual USB mode
 
 **OT Schedule Day**:

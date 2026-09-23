@@ -1,4 +1,5 @@
-import { backendOrigin } from "./api";
+import { AxiosError } from "axios";
+import api, { backendOrigin } from "./api";
 
 const ORIGINAL_ENV = process.env.REACT_APP_BACKEND_URL;
 
@@ -35,4 +36,20 @@ test("IPv6 page uses its same origin", () => {
 test("a production build without a configured API uses HTTPS on the page origin", () => {
   delete process.env.REACT_APP_BACKEND_URL;
   expect(backendOrigin(mockLocation("camps.example.org", "https:"))).toBe("https://camps.example.org");
+});
+
+test("a 401 outside sign-in announces that the session ended", async () => {
+  const reject401 = (config) => Promise.reject(
+    new AxiosError("Unauthorized", "ERR_BAD_REQUEST", config, null, { status: 401, data: {}, headers: {}, config }),
+  );
+  const listener = jest.fn();
+  window.addEventListener("snp:unauthorized", listener);
+  try {
+    await expect(api.post("/auth/login", {}, { adapter: reject401 })).rejects.toMatchObject({ response: { status: 401 } });
+    expect(listener).not.toHaveBeenCalled();
+    await expect(api.get("/kpis", { adapter: reject401 })).rejects.toMatchObject({ response: { status: 401 } });
+    expect(listener).toHaveBeenCalledTimes(1);
+  } finally {
+    window.removeEventListener("snp:unauthorized", listener);
+  }
 });

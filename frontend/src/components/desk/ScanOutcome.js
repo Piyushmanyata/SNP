@@ -26,17 +26,17 @@ export function ArrivedCard({ registration, onPrint }) {
           </span>
         )}
       </div>
-      <p className="text-xs text-slate-500 mt-1">
+      <p className="text-xs text-slate-600 mt-1">
         {registration.gender_label} · {registration.age ?? "-"} yrs
         {registration.phone ? ` · ${registration.phone}` : ""}
       </p>
       <div className="flex gap-2 mt-3">
         {seen ? (
-          <span className="text-xs text-slate-500" data-testid="scan-already-seen">
+          <span className="text-xs text-slate-600" data-testid="scan-already-seen">
             The doctor has already seen this patient. There is nothing to print.
           </span>
         ) : (
-          <Button size="sm" onClick={() => onPrint(registration)} data-testid="scan-print-button">
+          <Button size="lg" onClick={() => onPrint(registration)} data-testid="scan-print-button">
             <Printer className="w-4 h-4" /> Print prescription
           </Button>
         )}
@@ -55,7 +55,7 @@ export function MismatchReview({ registration, diff, busy, onConfirm }) {
       </p>
       <table className="w-full text-sm">
         <thead>
-          <tr className="text-left text-xs uppercase tracking-wide text-slate-500">
+          <tr className="text-left text-xs uppercase tracking-wide text-slate-600">
             <th className="py-1">Field</th>
             <th className="py-1">Stored</th>
             <th className="py-1">On the card</th>
@@ -66,7 +66,7 @@ export function MismatchReview({ registration, diff, busy, onConfirm }) {
             const shown = (value) => (row.field === "dob" ? displayDate(value) || "—" : value ?? "—");
             return (
               <tr key={row.field} className="border-t border-amber-200" data-testid={`diff-${row.field}`}>
-                <td className="py-1 text-slate-500">{FIELD_LABELS[row.field] || row.field}</td>
+                <td className="py-1 text-slate-600">{FIELD_LABELS[row.field] || row.field}</td>
                 <td className="py-1 text-slate-700">{shown(row.stored)}</td>
                 <td className="py-1 font-semibold text-slate-900">{shown(row.card)}</td>
               </tr>
@@ -74,7 +74,7 @@ export function MismatchReview({ registration, diff, busy, onConfirm }) {
           })}
         </tbody>
       </table>
-      <p className="text-xs text-slate-500 mt-3">
+      <p className="text-xs text-slate-600 mt-3">
         Household phone, camp day and registration number are kept.
       </p>
       <Button
@@ -120,32 +120,40 @@ export function AmbiguousMatch({ registrations, busy, onSelect }) {
 export function NoMatch({ card, phone, setPhone, busy, onSubmit }) {
   const ready = /^\d{10}$/.test(phone || "");
   return (
-    <div className="rounded-xl border border-slate-300 bg-slate-50 p-4" data-testid="scan-no-match">
+    <form
+      className="rounded-xl border border-slate-300 bg-slate-50 p-4"
+      data-testid="scan-no-match"
+      onSubmit={(e) => { e.preventDefault(); if (ready && !busy) onSubmit(); }}
+    >
       <p className="font-display font-bold text-slate-900">No booking found for this card</p>
       <div className="mt-3 space-y-1 text-sm" data-testid="door-card-readonly">
-        <p data-testid="door-card-name"><span className="text-slate-400 mr-2">Name:</span>{card?.full_name}</p>
-        <p><span className="text-slate-400 mr-2">Age:</span>{card?.age ?? "—"}</p>
-        <p><span className="text-slate-400 mr-2">Gender:</span>{card?.gender || "—"}</p>
-        <p><span className="text-slate-400 mr-2">Address:</span>{card?.address || "—"}</p>
+        <p data-testid="door-card-name"><span className="text-slate-600 mr-2">Name:</span>{card?.full_name}</p>
+        <p><span className="text-slate-600 mr-2">Age:</span>{card?.age ?? "—"}</p>
+        <p><span className="text-slate-600 mr-2">Gender:</span>{card?.gender || "—"}</p>
+        <p><span className="text-slate-600 mr-2">Address:</span>{card?.address || "—"}</p>
       </div>
-      <Field label="Household mobile" required className="mt-3">
-        <Input
-          value={phone}
-          onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-          inputMode="numeric"
-          data-testid="door-phone-input"
-        />
-      </Field>
+      <div className="mt-3">
+        <Field label="Household mobile" required>
+          <Input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
+            inputMode="numeric"
+            autoComplete="tel"
+            enterKeyHint="done"
+            data-testid="door-phone-input"
+          />
+        </Field>
+      </div>
       <Button
+        type="submit"
         size="sm"
         className="mt-3"
-        onClick={onSubmit}
         disabled={!ready || busy}
         data-testid="door-register-button"
       >
         Register
       </Button>
-    </div>
+    </form>
   );
 }
 

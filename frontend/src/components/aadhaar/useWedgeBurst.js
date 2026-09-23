@@ -1,15 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 
-export function scrubActiveInput(text) {
-  const el = document.activeElement;
-  if (!el || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA")) return;
-  if (typeof el.value !== "string" || !el.value.endsWith(text)) return;
+export const PATIENT_CODE_PAYLOAD_LENGTH = "SNP:".length + 8;
+
+function restoreField(el, value) {
+  if (!el || !el.isConnected || el.value === value) return;
   const proto = el.tagName === "TEXTAREA"
     ? window.HTMLTextAreaElement.prototype
     : window.HTMLInputElement.prototype;
-  const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
-  setter.call(el, el.value.slice(0, -text.length));
+  Object.getOwnPropertyDescriptor(proto, "value").set.call(el, value);
   el.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function typingField() {
+  const el = document.activeElement;
+  return el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA") ? el : null;
 }
 
 export function useWedgeBurst({ enabled, minLength = 20, onBurst, onInterrupted }) {
@@ -22,6 +26,9 @@ export function useWedgeBurst({ enabled, minLength = 20, onBurst, onInterrupted 
   useEffect(() => {
     if (!enabled) return undefined;
     let buf = "";
+    let field = null;
+    let before = "";
+    let capturing = false;
     let firstAt = 0;
     let lastAt = 0;
     let idleTimer;
@@ -31,10 +38,13 @@ export function useWedgeBurst({ enabled, minLength = 20, onBurst, onInterrupted 
       clearTimeout(idleTimer);
       const notify = interrupted && isBurst();
       buf = "";
+      field = null;
+      capturing = false;
       setReceiving(false);
       if (notify) onInterruptedRef.current?.();
     };
     const onKeyDown = (event) => {
+      if (!buf.length && event.target?.hasAttribute?.("data-usb-box")) return;
       const now = performance.now();
       if (now - lastAt >= 500) reset(true);
       if (event.ctrlKey || event.altKey || event.metaKey || event.repeat || event.isComposing) {
@@ -42,22 +52,30 @@ export function useWedgeBurst({ enabled, minLength = 20, onBurst, onInterrupted 
         return;
       }
       if (event.key.length === 1) {
-        if (!buf.length) firstAt = now;
+        if (!buf.length) {
+          firstAt = now;
+          field = typingField();
+          before = field ? field.value : "";
+        }
         buf += event.key;
         lastAt = now;
-        setReceiving(isBurst());
+        capturing = capturing || isBurst();
+        if (capturing) event.preventDefault();
+        setReceiving(capturing);
         clearTimeout(idleTimer);
         idleTimer = setTimeout(() => reset(true), 500);
         return;
       }
       if (event.key === "Enter" || event.key === "Tab") {
         const candidate = buf;
+        const target = field;
+        const value = before;
         const accepted = isBurst();
         reset();
         if (!accepted) return;
         event.preventDefault();
         event.stopPropagation();
-        scrubActiveInput(candidate);
+        restoreField(target, value);
         onBurstRef.current?.(candidate);
         return;
       }

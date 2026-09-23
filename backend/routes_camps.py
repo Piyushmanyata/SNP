@@ -1,6 +1,7 @@
 from typing import Any, Dict
 from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
+from pymongo.errors import DuplicateKeyError
 from db import get_db
 from models import CampBody, CampDayBody, DoorManualBody, PrintWindowBody
 from helpers import IST, as_utc, iso, next_ist_midnight, now_utc, today_ist_str
@@ -203,9 +204,8 @@ async def active_camp_public() -> Dict[str, Any]:
 @router.patch("/{camp_id}")
 async def update_camp(camp_id: str, body: CampBody, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
-    await db.camps.update_one({"_id": ObjectId(camp_id)}, {"$set": {
-        "name": body.name, "venue": body.venue, "camp_date": body.camp_date,
-        "camp_number": body.camp_number}})
+    await db.camps.update_one({"_id": ObjectId(camp_id)}, {"$set": body.model_dump(
+        exclude_unset=True, include={"name", "venue", "camp_date", "camp_number"})})
     c = await db.camps.find_one({"_id": ObjectId(camp_id)})
     if not c:
         raise HTTPException(status_code=404, detail="Camp not found")
@@ -220,14 +220,20 @@ async def activate_camp(camp_id: str, actor: dict = Depends(require_admin)) -> D
         raise HTTPException(status_code=404, detail="Camp not found")
     # exactly one active: deactivate others first (partial unique index guards)
     await db.camps.update_many({"is_active": True}, {"$set": {"is_active": False, "print_override": None}})
-    await db.camps.update_one({"_id": oid}, {"$set": {"is_active": True, "print_override": None}})
+    try:
+        await db.camps.update_one({"_id": oid}, {"$set": {"is_active": True, "print_override": None}})
+    except DuplicateKeyError:
+        raise HTTPException(status_code=409, detail={
+            "code": "CAMP_ACTIVATION_CONFLICT",
+            "message": "Another camp was activated at the same time. Refresh and try again.",
+        })
     return {"ok": True}
 
 
 @router.post("/{camp_id}/deactivate")
 async def deactivate_camp(camp_id: str, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
-    await db.camps.update_one({"_id": ObjectId(camp_id)}, {"$set": {"is_active": False}})
+    await db.camps.update_one({"_id": ObjectId(camp_id)}, {"$set": {"is_active": False, "print_override": None}})
     return {"ok": True}
 
 

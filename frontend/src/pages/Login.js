@@ -91,6 +91,7 @@ export default function Login() {
             <Field label="4-digit PIN">
               <Input
                 type="password"
+                inputMode="numeric"
                 value={pin}
                 onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
                 placeholder="••••"

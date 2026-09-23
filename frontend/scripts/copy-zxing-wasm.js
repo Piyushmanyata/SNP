@@ -10,8 +10,8 @@ const wasmDest = path.join(wasmDir, "zxing_reader.wasm");
 const iifeDest = path.join(root, "public", "zxing-wasm-reader.js");
 
 if (!fs.existsSync(wasmSrc) || !fs.existsSync(iifeSrc)) {
-  console.warn("zxing-wasm binaries not found; skip copy");
-  process.exit(0);
+  console.error("zxing-wasm reader assets are missing; the QR reader would not load.");
+  process.exit(1);
 }
 fs.mkdirSync(wasmDir, { recursive: true });
 fs.copyFileSync(wasmSrc, wasmDest);

@@ -1,6 +1,6 @@
 import React, { act } from "react";
 import ReactDOM from "react-dom/client";
-import { scrubActiveInput, useWedgeBurst } from "./useWedgeBurst";
+import { useWedgeBurst } from "./useWedgeBurst";
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -218,18 +218,73 @@ describe("useWedgeBurst", () => {
   });
 });
 
-describe("scrubActiveInput", () => {
-  test("strips the trailing burst from a focused input and dispatches input", () => {
-    const input = document.createElement("input");
-    document.body.appendChild(input);
-    input.value = "99AADHAAR|Sunita Devi|F|1975-06-14|123456781234|addr";
-    input.focus();
-    const seen = [];
-    input.addEventListener("input", () => seen.push(input.value));
-    const burst = "AADHAAR|Sunita Devi|F|1975-06-14|123456781234|addr";
-    scrubActiveInput(burst);
-    expect(input.value).toBe("99");
-    expect(seen).toEqual(["99"]);
-    input.remove();
+test("once a burst is recognised its keys stop reaching the focused field, and the field gets its earlier value back", async () => {
+  const input = document.createElement("input");
+  input.value = "98765";
+  document.body.appendChild(input);
+  input.focus();
+  const seen = [];
+  input.addEventListener("input", () => seen.push(input.value));
+  const onBurst = jest.fn();
+  await act(async () => { root.render(<Harness onBurst={onBurst} />); });
+  const prevented = [];
+  for (const ch of "1".repeat(40)) {
+    now += 5;
+    const ev = fireKey(ch);
+    prevented.push(ev.defaultPrevented);
+    if (!ev.defaultPrevented) input.value = `${input.value}${ch}`.slice(0, 10);
+  }
+  expect(prevented.slice(0, 19).every((flag) => !flag)).toBe(true);
+  expect(prevented.slice(19).every(Boolean)).toBe(true);
+  expect(input.value).toBe("9876511111");
+  expect(container.textContent).toBe("Receiving scanner data");
+  const enter = fireKey("Enter");
+  expect(enter.defaultPrevented).toBe(true);
+  expect(onBurst).toHaveBeenCalledWith("1".repeat(40));
+  expect(input.value).toBe("98765");
+  expect(seen).toEqual(["98765"]);
+  input.remove();
+});
+
+test("keys typed into the USB box are left to the box", async () => {
+  const box = document.createElement("textarea");
+  box.setAttribute("data-usb-box", "");
+  document.body.appendChild(box);
+  box.focus();
+  const onBurst = jest.fn();
+  await act(async () => { root.render(<Harness onBurst={onBurst} />); });
+  let prevented = false;
+  for (const ch of "1".repeat(40)) {
+    now += 5;
+    const ev = new KeyboardEvent("keydown", { key: ch, bubbles: true, cancelable: true });
+    act(() => { box.dispatchEvent(ev); });
+    prevented = prevented || ev.defaultPrevented;
+  }
+  const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+  act(() => { box.dispatchEvent(enter); });
+  expect(prevented).toBe(false);
+  expect(enter.defaultPrevented).toBe(false);
+  expect(onBurst).not.toHaveBeenCalled();
+  expect(container.textContent).toBe("Ready");
+  box.remove();
+});
+
+test("a burst that starts elsewhere keeps being captured when focus moves into the USB box", async () => {
+  const box = document.createElement("textarea");
+  box.setAttribute("data-usb-box", "");
+  document.body.appendChild(box);
+  const onBurst = jest.fn();
+  await act(async () => { root.render(<Harness onBurst={onBurst} />); });
+  const payload = "5".repeat(60);
+  [...payload].forEach((ch, index) => {
+    if (index === 30) box.focus();
+    now += 5;
+    const ev = new KeyboardEvent("keydown", { key: ch, bubbles: true, cancelable: true });
+    act(() => { (index >= 30 ? box : document).dispatchEvent(ev); });
   });
+  const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+  act(() => { box.dispatchEvent(enter); });
+  expect(enter.defaultPrevented).toBe(true);
+  expect(onBurst).toHaveBeenCalledWith(payload);
+  box.remove();
 });

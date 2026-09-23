@@ -155,10 +155,24 @@ async def disable_staff(staff_id: str, actor: dict = Depends(get_current_user)) 
             raise HTTPException(status_code=403, detail="Insufficient permissions")
     else:
         raise HTTPException(status_code=403, detail="Insufficient permissions")
+    if user["_id"] == actor["_id"]:
+        raise HTTPException(status_code=409, detail={
+            "code": "CANNOT_DISABLE_SELF",
+            "message": "You cannot disable your own account.",
+        })
 
     await db.users.update_one(
         {"_id": user["_id"]}, {"$set": {"disabled_at": now_utc()}, "$inc": {"session_version": 1}}
     )
+    if (
+        user.get("role") == "admin" and not user.get("disabled_at")
+        and not await db.users.count_documents({"role": "admin", "disabled_at": None})
+    ):
+        await db.users.update_one({"_id": user["_id"]}, {"$set": {"disabled_at": None}})
+        raise HTTPException(status_code=409, detail={
+            "code": "LAST_ADMIN",
+            "message": "At least one admin must stay enabled.",
+        })
     return {"ok": True}
 
 

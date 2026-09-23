@@ -21,14 +21,15 @@ MAX_REG_NO_DIGITS = 12
 
 async def _resolve(value: str) -> Optional[Dict[str, Any]]:
     db = get_db()
+    camp = await _active_camp(db)
     v = parse_patient_identifier(value)
-    p = await db.patients.find_one({"patient_qr": v})
+    p = await db.patients.find_one({"camp_id": camp["_id"], "patient_qr": v})
     if p:
         return p
     if v.isdecimal():
         if len(v) > MAX_REG_NO_DIGITS:
             raise HTTPException(status_code=400, detail="That is not a valid registration number")
-        p = await db.patients.find_one({"reg_no": int(v)})
+        p = await db.patients.find_one({"camp_id": camp["_id"], "reg_no": int(v)})
         if p:
             return p
     return None
@@ -107,16 +108,27 @@ async def _require_door_open(db, camp: dict) -> dict:
     return state
 
 
+def _require_in_camp(patient: dict, camp: dict) -> None:
+    if patient.get("camp_id") != camp["_id"]:
+        raise HTTPException(status_code=409, detail={
+            "code": "WRONG_CAMP",
+            "message": "That registration is not in this camp.",
+        })
+
+
 async def _stamp_arrival(
     db: AsyncIOMotorDatabase, patient: dict, actor_id: str,
+    camp: Optional[dict] = None, state: Optional[dict] = None,
 ) -> Dict[str, Any]:
     """Arrival is a presence. It never consults camp-day capacity."""
     if patient.get("arrived_at"):
         return patient
-    camp = await db.camps.find_one({"_id": patient["camp_id"]})
-    if not camp:
-        raise HTTPException(status_code=404, detail="Camp not found")
-    state = await _require_door_open(db, camp)
+    if camp is None:
+        camp = await db.camps.find_one({"_id": patient["camp_id"]})
+        if not camp:
+            raise HTTPException(status_code=404, detail="Camp not found")
+    if state is None:
+        state = await _require_door_open(db, camp)
     updates: Dict[str, Any] = {
         "arrived_at": now_utc(),
         "arrived_by": actor_id,
@@ -212,14 +224,14 @@ async def scan(
     """Resolve a camp-day Lock against the active camp. Never creates a registration."""
     db = get_db()
     camp = await _active_camp(db)
-    await _require_door_open(db, camp)
+    state = await _require_door_open(db, camp)
     card = _decode_card(body.payload)
     person = await _known_person(db, card)
     hits = await _duplicate_hits(db, camp["_id"], _card_as_register_body(card), person)
 
     scanned_hits = [h for h in hits if _is_scanned_row(h)]
     if scanned_hits:
-        arrived = await _stamp_arrival(db, scanned_hits[0], str(actor["_id"]))
+        arrived = await _stamp_arrival(db, scanned_hits[0], str(actor["_id"]), camp, state)
         return {"outcome": "arrived", "registration": ser_patient(arrived)}
 
     manual_hits = [h for h in hits if _is_manual(h)]
@@ -229,7 +241,7 @@ async def scan(
         diff = _material_diff(card, manual_hits[0])
         if not diff:
             patient = await _apply_overwrite(db, manual_hits[0], card)
-            arrived = await _stamp_arrival(db, patient, str(actor["_id"]))
+            arrived = await _stamp_arrival(db, patient, str(actor["_id"]), camp, state)
             return {
                 "outcome": "arrived",
                 "registration": ser_patient(arrived),
@@ -252,16 +264,12 @@ async def scan_confirm(
     """Apply the Aadhaar overwrite to a Manual entry and stamp Arrival in one operation."""
     db = get_db()
     camp = await _active_camp(db)
-    await _require_door_open(db, camp)
+    state = await _require_door_open(db, camp)
     card = _decode_card(body.payload)
     patient = await db.patients.find_one({"_id": ObjectId(body.patient_id)})
     if not patient:
         raise HTTPException(status_code=404, detail="Registration not found")
-    if patient.get("camp_id") != camp["_id"]:
-        raise HTTPException(status_code=409, detail={
-            "code": "WRONG_CAMP",
-            "message": "That registration is not in this camp.",
-        })
+    _require_in_camp(patient, camp)
     person = await _known_person(db, card)
     hits = await _duplicate_hits(db, camp["_id"], _card_as_register_body(card), person)
     if all(hit["_id"] != patient["_id"] for hit in hits):
@@ -278,7 +286,7 @@ async def scan_confirm(
             "message": "This registration already has Aadhaar on file.",
         })
     patient = await _apply_overwrite(db, patient, card)
-    arrived = await _stamp_arrival(db, patient, str(actor["_id"]))
+    arrived = await _stamp_arrival(db, patient, str(actor["_id"]), camp, state)
     return {"outcome": "arrived", "registration": ser_patient(arrived)}
 
 
@@ -288,10 +296,12 @@ async def arrive(
     actor: dict = Depends(require_staff),
 ) -> Dict[str, Any]:
     db = get_db()
+    camp = await _active_camp(db)
     p = await db.patients.find_one({"_id": ObjectId(patient_id)})
     if not p:
         raise HTTPException(status_code=404, detail="Registration not found")
-    arrived = await _stamp_arrival(db, p, str(actor["_id"]))
+    _require_in_camp(p, camp)
+    arrived = await _stamp_arrival(db, p, str(actor["_id"]), camp)
     return {"registration": ser_patient(arrived)}
 
 
@@ -323,14 +333,25 @@ async def _prescription_payload(db, p: dict, actor: dict, stamp: bool) -> Dict[s
             "message": "Confirm identity before printing.",
         })
     if stamp and not p.get("printed_at"):
-        await db.patients.update_one(
-            {"_id": p["_id"], "printed_at": None},
+        stamped = await db.patients.find_one_and_update(
+            {
+                "_id": p["_id"], "printed_at": None,
+                "queue_status": {"$ne": "seen"}, "identity_recheck_required": {"$ne": True},
+            },
             {"$set": {
                 "printed_at": now_utc(),
                 "checked_in_by": str(actor["_id"]),
             }},
+            return_document=True,
         )
-        p = await db.patients.find_one({"_id": p["_id"]})
+        p = stamped or await db.patients.find_one({"_id": p["_id"]})
+        if not p:
+            raise HTTPException(status_code=404, detail="Registration not found")
+        if not p.get("printed_at"):
+            raise HTTPException(status_code=409, detail={
+                "code": "PRINT_CONFLICT",
+                "message": "This registration changed while printing. Try again.",
+            })
     camp = await db.camps.find_one({"_id": p["camp_id"]})
     return {
         "registration": ser_patient(p),
@@ -368,9 +389,11 @@ async def print_prescription(
     actor: dict = Depends(require_staff),
 ) -> Dict[str, Any]:
     db = get_db()
+    camp = await _active_camp(db)
     p = await db.patients.find_one({"_id": ObjectId(patient_id)})
     if not p:
         raise HTTPException(status_code=404, detail="Registration not found")
+    _require_in_camp(p, camp)
     return await _prescription_payload(db, p, actor, stamp=True)
 
 

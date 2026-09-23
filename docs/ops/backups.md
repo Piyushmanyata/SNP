@@ -1,13 +1,14 @@
 # Backups
 
-Production compose runs two services against the `backups` volume.
+Production compose runs one `backup` service against the `backups` volume. It dumps MongoDB every `BACKUP_INTERVAL_SECONDS` (default 3600) into `/backups/${DB_NAME}-<UTC timestamp>.archive.gz` and deletes dumps older than `BACKUP_KEEP_DAYS` (default 14) days. A failed dump leaves earlier dumps in place.
 
-- `backup` dumps MongoDB every `BACKUP_INTERVAL_SECONDS` (default 3600) into `/backups/${DB_NAME}-<UTC timestamp>.archive.gz` and deletes dumps older than `BACKUP_KEEP_DAYS` (default 14) days.
-- `backup-sync` copies those dumps off the box with `rclone copy` to `BACKUP_REMOTE`. It never uses `sync`, so pruning on the box does not delete off-box copies. Files younger than 60 seconds are skipped so a dump still being written is not copied.
+During camp, keep the interval at 3600 so a failure loses at most an hour. To change it, set `BACKUP_INTERVAL_SECONDS` in `.env.production` and recreate the service.
 
-During camp, keep the interval at 3600 so a failure loses at most an hour. To change it, set `BACKUP_INTERVAL_SECONDS` in `.env` and recreate the services.
+Dumps stay on the box; a backup on the same disk is not disaster recovery. Copy them off yourself, with your provider's backup tool or by exporting the directory and uploading it:
 
-`BACKUP_REMOTE` is required. Compose refuses to start when it is unset. Copy `backup.env.example` to `backup.env` (gitignored) and fill the five `RCLONE_CONFIG_OFFBOX_*` keys for the S3-compatible bucket. The remote name those variables define is `offbox`; a typical value is `BACKUP_REMOTE=offbox:snp-backups`.
+```sh
+docker compose --env-file .env.production -f docker-compose.prod.yml cp backup:/backups ./backup-export
+```
 
 ## Restore drill
 
@@ -16,25 +17,25 @@ Run this once before camp. Record the date at the bottom of this file.
 List dumps:
 
 ```sh
-docker compose -f docker-compose.prod.yml exec backup ls -1 /backups
+docker compose --env-file .env.production -f docker-compose.prod.yml exec backup ls -1 /backups
 ```
 
-Restore one dump into a side database (replace `<file>` and `<DB_NAME>`):
+Restore one dump into a side database (replace `<file>`). The backup container already holds `MONGO_PASSWORD` and `DB_NAME`, and authenticates as `snp` like `ops/backup.sh`:
 
 ```sh
-docker compose -f docker-compose.prod.yml exec backup mongorestore --uri mongodb://mongo:27017 --gzip --archive=/backups/<file> --nsFrom "<DB_NAME>.*" --nsTo "<DB_NAME>_drill.*"
+docker compose --env-file .env.production -f docker-compose.prod.yml exec backup sh -c 'mongorestore --host mongo --username snp --password "$MONGO_PASSWORD" --authenticationDatabase admin --gzip --archive=/backups/<file> --nsFrom "$DB_NAME.*" --nsTo "${DB_NAME}_drill.*"'
 ```
 
 Verify the `patients` count in the side database:
 
 ```sh
-docker compose -f docker-compose.prod.yml exec mongo mongosh --quiet --eval 'db.getSiblingDB("<DB_NAME>_drill").patients.countDocuments()'
+docker compose --env-file .env.production -f docker-compose.prod.yml exec backup sh -c 'mongosh --host mongo --username snp --password "$MONGO_PASSWORD" --authenticationDatabase admin --quiet --eval "db.getSiblingDB(\"${DB_NAME}_drill\").patients.countDocuments()"'
 ```
 
 Drop the side database:
 
 ```sh
-docker compose -f docker-compose.prod.yml exec mongo mongosh --quiet --eval 'db.getSiblingDB("<DB_NAME>_drill").dropDatabase()'
+docker compose --env-file .env.production -f docker-compose.prod.yml exec backup sh -c 'mongosh --host mongo --username snp --password "$MONGO_PASSWORD" --authenticationDatabase admin --quiet --eval "db.getSiblingDB(\"${DB_NAME}_drill\").dropDatabase()"'
 ```
 
 ## Drill log

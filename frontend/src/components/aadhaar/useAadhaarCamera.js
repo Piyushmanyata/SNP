@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { createLiveScanEngine, MAX_DETECT_INTERVAL_MS } from "./liveScan/liveScanEngine";
+import { createLiveScanEngine, TICK_MS } from "./liveScan/liveScanEngine";
 import * as grab from "./liveScan/grabFrame";
 import * as nativeDetector from "./liveScan/nativeDetector";
 import * as wasmDetector from "./liveScan/wasmDetector";
@@ -11,56 +11,52 @@ import {
   attachStreamToVideo,
   checkTorchCapability,
   applyTorch,
-  createStillCapture,
+  zoomRange,
+  applyZoom,
+  focusAt,
 } from "./cameraHelpers";
 
 export function useAadhaarCamera({
   decode,
   onLock,
   onError,
-  onHintFallbacks,
+  onHint,
   onScanStall,
 } = {}) {
   const [cameraState, setCameraState] = useState("idle");
   const [cameras, setCameras] = useState([]);
-  const [currentCameraIndex, setCurrentCameraIndex] = useState(0);
   const [torchAvailable, setTorchAvailable] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
+  const [zoom, setZoom] = useState(null);
 
   const camerasRef = useRef(cameras);
   camerasRef.current = cameras;
-  const currentCameraIndexRef = useRef(currentCameraIndex);
-  currentCameraIndexRef.current = currentCameraIndex;
+  const currentCameraIndexRef = useRef(0);
+  const callbacks = useRef({ decode, onLock, onError, onHint, onScanStall });
+  callbacks.current = { decode, onLock, onError, onHint, onScanStall };
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const engineRef = useRef(null);
   const loopRef = useRef(null);
   const mountedRef = useRef(true);
-  const isStartingRef = useRef(false);
   const sessionRef = useRef(0);
-  const stillCaptureRef = useRef(null);
-  const nextStillAtRef = useRef(0);
 
   const stopLoop = useCallback(() => {
     if (loopRef.current) {
       clearInterval(loopRef.current);
       loopRef.current = null;
     }
-    if (engineRef.current) {
-      engineRef.current.stop();
-    }
+    engineRef.current?.stop();
+    engineRef.current = null;
   }, []);
 
   const stopCamera = useCallback(async () => {
     sessionRef.current += 1;
     stopLoop();
-    stillCaptureRef.current = null;
     const stream = streamRef.current;
     streamRef.current = null;
-    if (stream) {
-      stream.getTracks().forEach((t) => t.stop());
-    }
+    stream?.getTracks().forEach((t) => t.stop());
     const video = videoRef.current;
     if (video) {
       try {
@@ -74,6 +70,7 @@ export function useAadhaarCamera({
       setCameraState("idle");
       setTorchAvailable(false);
       setTorchOn(false);
+      setZoom(null);
     }
   }, [stopLoop]);
 
@@ -84,74 +81,62 @@ export function useAadhaarCamera({
       stopLoop();
       const stream = streamRef.current;
       streamRef.current = null;
-      if (stream) stream.getTracks().forEach((t) => t.stop());
+      stream?.getTracks().forEach((t) => t.stop());
     };
   }, [stopLoop]);
 
-  const frameFor = useCallback(async (region) => {
-    const video = videoRef.current;
-    if (region === "full" && stillCaptureRef.current && Date.now() >= nextStillAtRef.current) {
-      nextStillAtRef.current = Date.now() + 3000;
-      try {
-        const blob = await stillCaptureRef.current.takePhoto();
-        if (!await grab.canDecodePhoto(blob)) return grab.grabFrame(video, region);
-        const bitmap = await createImageBitmap(blob);
-        try {
-          const imageData = grab.bitmapToImageData(bitmap);
-          if (imageData) return imageData;
-        } finally {
-          bitmap.close?.();
-        }
-      } catch (e) {
-        logger.warn("Still capture failed, falling back to preview frame:", e);
-        stillCaptureRef.current = null;
-      }
-    }
-    return grab.grabFrame(video, region);
-  }, []);
-
   const startLoop = useCallback(() => {
-    const video = videoRef.current;
+    const lanes = [];
+    if (nativeDetector.hasNativeBarcodeDetector()) {
+      lanes.push({
+        load: nativeDetector.loadNativeDetector,
+        detect: () => nativeDetector.detectNative(videoRef.current),
+      });
+    }
+    lanes.push({
+      load: wasmDetector.loadZxingWorker,
+      regions: ["roi", "full"],
+      detect: (region) => wasmDetector.detectWasmImageData(grab.grabFrame(videoRef.current, region)),
+    });
     const engine = createLiveScanEngine({
-      hasNativeDetector: nativeDetector.hasNativeBarcodeDetector(),
-      decode,
-      loadWasm: wasmDetector.loadZxingWorker,
-      detectNative: async (_frame, region) => {
-        return nativeDetector.detectNativeImageData(await frameFor(region));
-      },
-      detectWasm: async (_frame, region) => {
-        return wasmDetector.detectWasmImageData(await frameFor(region));
-      },
+      lanes,
+      decode: (payload) => callbacks.current.decode(payload),
       onLock: (result) => {
         stopCamera();
-        if (onLock) onLock(result);
+        callbacks.current.onLock?.(result);
       },
-      onHintFallbacks: () => {
-        if (onHintFallbacks) onHintFallbacks();
-      },
-      onScanStall: () => {
-        if (onScanStall) onScanStall();
-      },
+      onHint: () => callbacks.current.onHint?.(),
+      onScanStall: () => callbacks.current.onScanStall?.(),
       onError: async (message) => {
         await stopCamera();
-        if (mountedRef.current) {
-          setCameraState("error");
-          if (onError) onError(message);
-        }
+        if (!mountedRef.current) return;
+        setCameraState("error");
+        callbacks.current.onError?.(message);
       },
     });
     engineRef.current = engine;
     engine.start();
-    engine.tick(video);
-    loopRef.current = setInterval(() => {
-      engine.tick(video);
-    }, MAX_DETECT_INTERVAL_MS);
-  }, [decode, frameFor, onHintFallbacks, onLock, onScanStall, onError, stopCamera]);
+    engine.tick();
+    loopRef.current = setInterval(() => engine.tick(), TICK_MS);
+  }, [stopCamera]);
+
+  const refreshCameras = useCallback(async (session, stream) => {
+    try {
+      const refreshed = await listVideoInputs();
+      if (!mountedRef.current || session !== sessionRef.current || !refreshed.length) return;
+      setCameras(refreshed);
+      camerasRef.current = refreshed;
+      const activeDevice = stream.getVideoTracks()[0]?.getSettings?.().deviceId;
+      const activeIndex = refreshed.findIndex((camera) => camera.deviceId === activeDevice);
+      if (activeIndex >= 0) currentCameraIndexRef.current = activeIndex;
+    } catch (e) {
+      logger.warn("Failed to refresh camera list after start:", e);
+    }
+  }, []);
 
   const startCamera = useCallback(
     async (cameraIndexToUse) => {
-      if (isStartingRef.current) return;
-      isStartingRef.current = true;
+      wasmDetector.loadZxingWorker().catch(() => {});
       await stopCamera();
       const session = sessionRef.current;
       setCameraState("starting");
@@ -171,51 +156,35 @@ export function useAadhaarCamera({
         await attachStreamToVideo(videoRef.current, stream);
         if (!mountedRef.current || session !== sessionRef.current) return;
 
-        stillCaptureRef.current = createStillCapture(stream);
-        nextStillAtRef.current = Date.now() + 3000;
-
-        if (checkTorchCapability(stream)) {
-          setTorchAvailable(true);
+        setTorchAvailable(checkTorchCapability(stream));
+        const range = zoomRange(stream);
+        if (range && range.near > range.min && await applyZoom(stream, range.near)) {
+          if (session === sessionRef.current) setZoom({ ...range, value: range.near });
+        } else if (range && session === sessionRef.current) {
+          setZoom({ ...range, value: range.min });
         }
-
-        try {
-          const refreshed = await listVideoInputs();
-          if (mountedRef.current && session === sessionRef.current && refreshed.length) {
-            setCameras(refreshed);
-            camerasRef.current = refreshed;
-            const activeDevice = stream.getVideoTracks()[0]?.getSettings?.().deviceId;
-            const activeIndex = refreshed.findIndex((camera) => camera.deviceId === activeDevice);
-            if (activeIndex >= 0) {
-              setCurrentCameraIndex(activeIndex);
-              currentCameraIndexRef.current = activeIndex;
-            }
-          }
-        } catch (e) {
-          logger.warn("Failed to refresh camera list after start:", e);
-        }
-
         if (!mountedRef.current || session !== sessionRef.current) return;
+
         setCameraState("scanning");
         startLoop();
+        videoRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+        refreshCameras(session, stream);
       } catch (err) {
         if (!mountedRef.current || session !== sessionRef.current) return;
         await stopCamera();
         if (mountedRef.current) {
           setCameraState("error");
-          if (onError) onError(cameraErrorMessage(err));
+          callbacks.current.onError?.(cameraErrorMessage(err));
         }
-      } finally {
-        isStartingRef.current = false;
       }
     },
-    [onError, startLoop, stopCamera]
+    [refreshCameras, startLoop, stopCamera]
   );
 
   const switchCamera = useCallback(async () => {
     const available = camerasRef.current;
     if (available.length <= 1) return;
     const nextIndex = (currentCameraIndexRef.current + 1) % available.length;
-    setCurrentCameraIndex(nextIndex);
     currentCameraIndexRef.current = nextIndex;
     await startCamera(nextIndex);
   }, [startCamera]);
@@ -227,17 +196,28 @@ export function useAadhaarCamera({
     setTorchOn(nextTorch);
   }, [torchAvailable, torchOn]);
 
+  const toggleZoom = useCallback(async () => {
+    if (!zoom) return;
+    const next = zoom.value > zoom.min ? zoom.min : zoom.near;
+    if (await applyZoom(streamRef.current, next)) setZoom((current) => current && { ...current, value: next });
+  }, [zoom]);
+
+  const focus = useCallback((x, y) => {
+    if (streamRef.current) focusAt(streamRef.current, x, y);
+  }, []);
+
   return {
     cameraState,
-    setCameraState,
     cameras,
-    currentCameraIndex,
     torchAvailable,
     torchOn,
+    zoom,
     startCamera,
     stopCamera,
     switchCamera,
     toggleTorch,
+    toggleZoom,
+    focus,
     videoRef,
   };
 }

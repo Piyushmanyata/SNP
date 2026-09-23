@@ -6,7 +6,7 @@ import { v4 } from "../lib/uuid";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import { OPERATOR_LINES, effectiveLine, lineLabel, writeSessionLine } from "../lib/operatorLines";
-import { useWedgeBurst } from "../components/aadhaar";
+import { useWedgeBurst, PATIENT_CODE_PAYLOAD_LENGTH } from "../components/aadhaar";
 import {
   ClinicalLookupForm,
   PatientSummaryCard,
@@ -18,7 +18,6 @@ import {
 } from "../components/clinical";
 import { Alert, Badge, Button, Modal } from "../components/ui";
 
-const PATIENT_CODE_PAYLOAD_LENGTH = "SNP:".length + 8;
 
 const emptyRx = {
   diagnosis_options: [],
@@ -67,6 +66,7 @@ export default function Clinical() {
   const [results, setResults] = useState(null);
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
+  const [rxError, setRxError] = useState("");
   const [banner, setBanner] = useState("");
   const [diagOpts, setDiagOpts] = useState([]);
   const [medicines, setMedicines] = useState([]);
@@ -106,7 +106,10 @@ export default function Clinical() {
     setPicking(!next);
   }, [user]);
 
-  useEffect(() => { completeOpRef.current = null; }, [patientId]);
+  useEffect(() => {
+    completeOpRef.current = null;
+    setRxError("");
+  }, [patientId]);
 
   useEffect(() => {
     if (!dirty) return undefined;
@@ -222,7 +225,7 @@ export default function Clinical() {
   const saveStep = useCallback(async () => {
     if (!data?.registration?.id) return false;
     setBusy(true);
-    setError("");
+    setRxError("");
     try {
       const { data: saved } = await api.post("/clinical/transcription", {
         patient_id: data.registration.id,
@@ -235,7 +238,7 @@ export default function Clinical() {
       return true;
     } catch (err) {
       if (errorPayload(err)?.code === "draft_version_conflict") setConflict(true);
-      else setError(formatApiError(err));
+      else setRxError(formatApiError(err));
       return false;
     } finally {
       setBusy(false);
@@ -245,7 +248,7 @@ export default function Clinical() {
   const completeRx = useCallback(async () => {
     if (!data?.registration?.id) return;
     setBusy(true);
-    setError("");
+    setRxError("");
     try {
       const request = {
         patient_id: data.registration.id,
@@ -276,7 +279,7 @@ export default function Clinical() {
       setBanner("Prescription completed. Patient is marked seen.");
     } catch (err) {
       if (errorPayload(err)?.code === "draft_version_conflict") setConflict(true);
-      else setError(formatApiError(err));
+      else setRxError(formatApiError(err));
     } finally {
       setBusy(false);
     }
@@ -419,11 +422,10 @@ export default function Clinical() {
                 medicines={medicines}
                 powers={powers}
                 toggleDiag={toggleDiag}
-                locked={locked}
                 busy={busy}
+                error={rxError}
                 saveStep={saveStep}
                 completeRx={completeRx}
-                setShowCorrection={setShowCorrection}
                 firstFieldRef={firstFieldRef}
                 medicineUnavailable={referenceError.includes("medicines")}
                 powerUnavailable={referenceError.includes("fixed powers")}
@@ -438,7 +440,7 @@ export default function Clinical() {
                 emphasizePowers={line === "specs_fixed" || line === "specs_made"}
               />
               {locked ? <Button variant="outline" className="mb-3" disabled={busy} onClick={() => setShowCorrection(true)} data-testid="add-correction-button">Add correction</Button> : <Button variant="outline" className="mb-3" disabled={busy} onClick={() => setEditing(true)} data-testid="edit-transcription-button">Edit prescription</Button>}
-              {!(data.committed_revision?.prescribed_lines || []).includes(line) && (
+              {line !== "doctor_rx" && data.committed_revision && !(data.committed_revision.prescribed_lines || []).includes(line) && (
                 <p className="text-sm text-amber-800 mb-3" data-testid="line-mismatch-warning">
                   This prescription does not imply {lineLabel(line)}. Record anyway.
                 </p>
@@ -453,7 +455,6 @@ export default function Clinical() {
                   onDone={clearPatient}
                   navigate={navigate}
                   setBanner={setBanner}
-                  setError={setError}
                   onBusyChange={setBusy}
                 />
               )}

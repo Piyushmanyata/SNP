@@ -213,6 +213,56 @@ class TestConflictsAreNotCrashes:
 
         asyncio.run(run())
 
+    def test_a_stale_print_does_not_stamp_a_row_that_now_needs_an_identity_recheck(self, monkeypatch):
+        async def run():
+            mock_db = setup_mock_db(monkeypatch)
+            camp_id, day_id, pid = ObjectId(), ObjectId(), ObjectId()
+            await mock_db.camps.insert_one({"_id": camp_id, "name": "C", "venue": "V", "is_active": True})
+            await mock_db.camp_days.insert_one({
+                "_id": day_id, "camp_id": camp_id, "day_date": helpers.today_ist_str(), "seat_limit": 50,
+            })
+            row = {
+                "_id": pid, "camp_id": camp_id, "camp_day_id": day_id, "reg_no": 1, "full_name": "P",
+                "patient_qr": "qr-1", "queue_status": "arrived", "arrived_at": helpers.now_utc(),
+                "printed_at": None,
+            }
+            await mock_db.patients.insert_one({**row, "identity_recheck_required": True})
+
+            with pytest.raises(HTTPException) as exc:
+                await routes_desk._prescription_payload(mock_db, row, ACTOR, stamp=True)
+            assert exc.value.status_code == 409
+            assert exc.value.detail["code"] == "PRINT_CONFLICT"
+            assert (await mock_db.patients.find_one({"_id": pid}))["printed_at"] is None
+
+            await mock_db.patients.update_one({"_id": pid}, {"$set": {"identity_recheck_required": False}})
+            printed = await routes_desk.print_prescription(str(pid), actor=ACTOR)
+            assert printed["registration"]["printed_at"]
+            reprinted = await routes_desk.print_prescription(str(pid), actor=ACTOR)
+            assert reprinted["registration"]["printed_at"] == printed["registration"]["printed_at"]
+
+        asyncio.run(run())
+
+    def test_the_desk_does_not_reach_a_registration_from_another_camp(self, monkeypatch):
+        async def run():
+            mock_db = setup_mock_db(monkeypatch)
+            active_id, old_id, pid = ObjectId(), ObjectId(), ObjectId()
+            await mock_db.camps.insert_one({"_id": active_id, "name": "A", "venue": "V", "is_active": True})
+            await mock_db.camps.insert_one({"_id": old_id, "name": "B", "venue": "V", "is_active": False})
+            await mock_db.patients.insert_one({
+                "_id": pid, "camp_id": old_id, "camp_day_id": ObjectId(), "reg_no": 7,
+                "patient_qr": "QR-OLD", "queue_status": "registered",
+            })
+
+            assert await routes_desk._resolve("7") is None
+            assert await routes_desk._resolve("qr-old") is None
+            for route in (routes_desk.arrive, routes_desk.print_prescription):
+                with pytest.raises(HTTPException) as exc:
+                    await route(str(pid), actor=ACTOR)
+                assert exc.value.status_code == 409
+                assert exc.value.detail["code"] == "WRONG_CAMP"
+
+        asyncio.run(run())
+
 
 # --------------------------------------------------------------------------
 # The public board is polled from every idle login screen

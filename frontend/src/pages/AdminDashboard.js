@@ -73,9 +73,9 @@ function Overview() {
       <Card>
         <p className="text-xs font-mono uppercase tracking-widest text-slate-500">Active Camp</p>
         {camp ? (
-          <p className="font-display font-extrabold text-2xl text-slate-900 mt-1">{camp.name} <span className="text-slate-400 font-normal text-base">· {camp.venue}</span></p>
+          <p className="font-display font-extrabold text-2xl text-slate-900 mt-1">{camp.name} <span className="text-slate-600 font-normal text-base">· {camp.venue}</span></p>
         ) : (
-          <p className="text-slate-400 mt-1">No active camp. Create & activate one under “Camps & Days”.</p>
+          <p className="text-slate-600 mt-1">No active camp. Create & activate one under “Camps & Days”.</p>
         )}
       </Card>
       <div className="grid grid-cols-3 gap-3">
@@ -100,6 +100,7 @@ function Camps() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(NEW_CAMP);
   const [expand, setExpand] = useState(null);
+  const [busy, setBusy] = useState(false);
   const campNumber = Number(form.camp_number);
 
   const load = useCallback(() => {
@@ -114,6 +115,8 @@ function Camps() {
   };
 
   const saveCamp = useCallback(async () => {
+    setErr("");
+    setBusy(true);
     try {
       const body = { ...form, camp_number: Number(form.camp_number) };
       if (editing) await api.patch(`/camps/${editing}`, body);
@@ -122,25 +125,32 @@ function Camps() {
       load();
     } catch (e) {
       setErr(formatApiError(e));
+    } finally {
+      setBusy(false);
     }
   }, [editing, form, load]);
 
   const activate = useCallback(async (id) => {
+    setErr("");
     try { await api.post(`/camps/${id}/activate`); load(); }
     catch (e) { setErr(formatApiError(e)); }
   }, [load]);
 
   const deactivate = useCallback(async (id) => {
+    setErr("");
     try { await api.post(`/camps/${id}/deactivate`); load(); }
     catch (e) { setErr(formatApiError(e)); }
   }, [load]);
 
-  const del = useCallback(async (id) => {
-    try { await api.delete(`/camps/${id}`); load(); }
+  const del = useCallback(async (camp) => {
+    if (!window.confirm(`Delete ${camp.name} and its days? This cannot be undone.`)) return;
+    setErr("");
+    try { await api.delete(`/camps/${camp.id}`); load(); }
     catch (e) { setErr(formatApiError(e)); }
   }, [load]);
 
   const setDoorManual = useCallback(async (enabled) => {
+    setErr("");
     try { await api.post("/camps/door-manual", { enabled }); load(); }
     catch (e) { setErr(formatApiError(e)); }
   }, [load]);
@@ -155,7 +165,7 @@ function Camps() {
             <Tent className={`w-5 h-5 ${c.is_active ? "text-emerald-500" : "text-slate-300"}`} />
             <div className="flex-1">
               <p className="font-display font-bold text-slate-900">{c.name} {c.is_active && <Badge tone="emerald">Active</Badge>}</p>
-              <p className="text-xs text-slate-400">{c.venue} · {displayDate(c.camp_date)}</p>
+              <p className="text-xs text-slate-600">{c.venue} · {displayDate(c.camp_date)}</p>
               {c.camp_number
                 ? <Badge className="mt-1" data-testid={`camp-number-${c.id}`}>SMS camp no. {c.camp_number}</Badge>
                 : <Badge tone="amber" className="mt-1" data-testid={`camp-number-missing-${c.id}`}>No camp number: SMS are not sent</Badge>}
@@ -167,7 +177,7 @@ function Camps() {
               <Button size="sm" onClick={() => activate(c.id)} data-testid={`activate-camp-${c.id}`}><Power className="w-4 h-4" /> Activate</Button>
             )}
             <Button size="sm" variant="outline" onClick={() => setExpand(expand === c.id ? null : c.id)} data-testid={`manage-days-${c.id}`}><CalendarDays className="w-4 h-4" /> Days</Button>
-            <Button size="sm" variant="ghost" onClick={() => del(c.id)} data-testid={`delete-camp-${c.id}`}><Trash2 className="w-4 h-4 text-rose-500" /></Button>
+            <Button size="sm" variant="ghost" onClick={() => del(c)} aria-label={`Delete ${c.name}`} data-testid={`delete-camp-${c.id}`}><Trash2 className="w-4 h-4 text-rose-500" /></Button>
           </div>
           {c.is_active && (
             <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center gap-3" data-testid="door-manual-control">
@@ -199,7 +209,7 @@ function Camps() {
           <Field label="Venue" required hint="Sent in the registration and camp-reminder SMS."><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="camp-venue-input" /></Field>
           <Field label="Camp date" required><Input type="date" value={form.camp_date} onChange={(e) => setForm({ ...form, camp_date: e.target.value })} data-testid="camp-date-input" /></Field>
           <Field label="Camp number" required hint="The SMS reads “Sikar Zilla Welfare Trust के 162वें नेत्र शिविर”."><Input type="number" min="1" step="1" inputMode="numeric" value={form.camp_number} onChange={(e) => setForm({ ...form, camp_number: e.target.value })} data-testid="camp-number-input" /></Field>
-          <Button className="w-full" onClick={saveCamp} disabled={!form.name || !form.venue || !form.camp_date || !(Number.isInteger(campNumber) && campNumber > 0)} data-testid="camp-create-submit">{editing ? "Save" : "Create"}</Button>
+          <Button className="w-full" onClick={saveCamp} disabled={busy || !form.name || !form.venue || !form.camp_date || !(Number.isInteger(campNumber) && campNumber > 0)} data-testid="camp-create-submit">{editing ? "Save" : "Create"}</Button>
         </div>
       </Modal>
     </div>
@@ -211,12 +221,15 @@ function CampDays({ campId }) {
   const [date, setDate] = useState("");
   const [seat, setSeat] = useState(50);
   const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
   const load = useCallback(() => {
     api.get(`/camps/${campId}/days`).then((r) => setDays(r.data.days)).catch((e) => setErr(formatApiError(e)));
   }, [campId]);
   useEffect(() => { load(); }, [load]);
 
   const add = useCallback(async () => {
+    setErr("");
+    setBusy(true);
     try {
       await api.post("/camps/days", { camp_id: campId, day_date: date, seat_limit: Number(seat) });
       setDate("");
@@ -224,16 +237,21 @@ function CampDays({ campId }) {
       load();
     } catch (e) {
       setErr(formatApiError(e));
+    } finally {
+      setBusy(false);
     }
   }, [campId, date, seat, load]);
 
   const togglePrint = useCallback(async (id, val) => {
+    setErr("");
     try { await api.patch(`/camps/days/${id}/print-window`, { printing_open: val }); load(); }
     catch (e) { setErr(formatApiError(e)); }
   }, [load]);
 
-  const del = useCallback(async (id) => {
-    try { await api.delete(`/camps/days/${id}`); load(); }
+  const del = useCallback(async (day) => {
+    if (!window.confirm(`Delete camp day ${displayDate(day.day_date)}? This cannot be undone.`)) return;
+    setErr("");
+    try { await api.delete(`/camps/days/${day.id}`); load(); }
     catch (e) { setErr(formatApiError(e)); }
   }, [load]);
 
@@ -245,20 +263,20 @@ function CampDays({ campId }) {
           <CalendarDays className="w-4 h-4 text-slate-400" />
           <span className="font-medium text-slate-800 text-sm">{displayDate(d.day_date)}</span>
           {d.is_today && <Badge tone="emerald">Today</Badge>}
-          <span className="text-xs text-slate-400">seats: {d.seat_limit}</span>
+          <span className="text-xs text-slate-600">seats: {d.seat_limit}</span>
           <div className="ml-auto flex items-center gap-2">
             <Badge tone={d.printing_open ? "emerald" : "slate"}>{d.printing_open ? "Print open" : "Print closed"}</Badge>
             <Button size="sm" variant={d.printing_open ? "outline" : "primary"} onClick={() => togglePrint(d.id, !d.printing_open)} data-testid={`toggle-print-window-${d.id}`}>
               <PrinterCheck className="w-4 h-4" /> {d.printing_open ? "Close" : "Open"}
             </Button>
-            <Button size="sm" variant="ghost" onClick={() => del(d.id)} data-testid={`delete-day-${d.id}`}><Trash2 className="w-4 h-4 text-rose-500" /></Button>
+            <Button size="sm" variant="ghost" onClick={() => del(d)} aria-label={`Delete camp day ${displayDate(d.day_date)}`} data-testid={`delete-day-${d.id}`}><Trash2 className="w-4 h-4 text-rose-500" /></Button>
           </div>
         </div>
       ))}
       <div className="flex flex-wrap gap-2 items-end pt-2">
         <Field label="Date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} data-testid="new-day-date" /></Field>
         <Field label="Seat limit"><Input type="number" value={seat} onChange={(e) => setSeat(e.target.value)} className="w-28" data-testid="new-day-seat" /></Field>
-        <Button size="sm" onClick={add} disabled={!date} data-testid="add-day-button"><Plus className="w-4 h-4" /> Add day</Button>
+        <Button size="sm" onClick={add} disabled={busy || !date} data-testid="add-day-button"><Plus className="w-4 h-4" /> Add day</Button>
       </div>
     </div>
   );
@@ -292,12 +310,12 @@ function OtSchedule() {
         <h3 className="font-display font-bold text-slate-900 mb-3">OT Schedule Days</h3>
         <p className="text-sm text-slate-600 mb-3">Surgery takes place at the hospital. The camp only schedules the appointment.</p>
         <div className="space-y-2" data-testid="ot-days-list">
-          {days.length === 0 && <p className="text-slate-400 text-sm">No OT days yet.</p>}
+          {days.length === 0 && <p className="text-slate-600 text-sm">No OT days yet.</p>}
           {days.map((d) => (
             <div key={d.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50" data-testid={`ot-day-${d.id}`}>
               <Scissors className="w-4 h-4 text-emerald-600" />
               <span className="font-medium text-slate-800 text-sm">{displayDate(d.day_date)}</span>
-              <span className="text-xs text-slate-400">{d.venue}</span>
+              <span className="text-xs text-slate-600">{d.venue}</span>
               <Badge tone={d.seats_free > 0 ? "emerald" : "rose"} className="ml-auto">{d.seats_taken}/{d.seat_limit} seats</Badge>
             </div>
           ))}
@@ -344,12 +362,12 @@ function SpecsCollectionDays() {
       <Card>
         <h3 className="font-display font-bold text-slate-900 mb-3">Specs collection days</h3>
         <div className="space-y-2" data-testid="specs-days-list">
-          {days.length === 0 && <p className="text-slate-400 text-sm">No Specs collection days yet.</p>}
+          {days.length === 0 && <p className="text-slate-600 text-sm">No Specs collection days yet.</p>}
           {days.map((d) => (
             <div key={d.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50" data-testid={`specs-day-${d.id}`}>
               <Glasses className="w-4 h-4 text-emerald-600" />
               <span className="font-medium text-slate-800 text-sm">{displayDateRange(d.day_date, d.end_date)}</span>
-              <span className="text-xs text-slate-400">{d.venue}</span>
+              <span className="text-xs text-slate-600">{d.venue}</span>
               <Badge tone={d.window_required ? "amber" : "emerald"} className="ml-auto">
                 {d.start_time && d.end_time ? `${d.start_time}–${d.end_time}` : "window required"}
               </Badge>
@@ -414,7 +432,7 @@ function useCatalogue(resource) {
 function CatalogueChips({ items, setActive, testid, label, icon: Icon }) {
   return (
     <div className="flex flex-wrap gap-2" data-testid={`${testid}-list`}>
-      {items.length === 0 && <p className="text-slate-400 text-sm">Nothing added yet.</p>}
+      {items.length === 0 && <p className="text-slate-600 text-sm">Nothing added yet.</p>}
       {items.map((item) => (
         <div
           key={item.id}
@@ -492,7 +510,7 @@ function Board({ title, rows = [], testid }) {
         <Trophy className="w-5 h-5 text-amber-500" /> {title}
       </h3>
       <div className="space-y-2" data-testid={testid}>
-        {safeRows.length === 0 && <p className="text-slate-400 text-sm">No points yet.</p>}
+        {safeRows.length === 0 && <p className="text-slate-600 text-sm">No points yet.</p>}
         {safeRows.map((r, i) => (
           <div key={`${r.name}-${i}`} className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-50">
             <span className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold ${i === 0 ? "bg-amber-400 text-white" : "bg-slate-200 text-slate-600"}`}>
@@ -527,10 +545,21 @@ function Leaderboards() {
   );
 }
 
+async function exportErrorMessage(e) {
+  try {
+    const body = JSON.parse(await e.response.data.text());
+    return body.detail != null ? formatApiError({ response: { data: body } }) : body.message || formatApiError(e);
+  } catch {
+    return formatApiError(e);
+  }
+}
+
 function Exports() {
   const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
   const download = useCallback(async (path, filename) => {
     setMsg("");
+    setErr("");
     try {
       const res = await api.get(path, { responseType: "blob" });
       const url = window.URL.createObjectURL(new Blob([res.data]));
@@ -538,11 +567,12 @@ function Exports() {
       a.href = url; a.download = filename; a.click();
       setTimeout(() => window.URL.revokeObjectURL(url), 0);
       setMsg(`Downloaded ${filename}`);
-    } catch (e) { setMsg(formatApiError(e)); }
+    } catch (e) { setErr(await exportErrorMessage(e)); }
   }, []);
   return (
     <div className="space-y-4">
       {msg && <Alert tone="emerald">{msg}</Alert>}
+      <Alert>{err}</Alert>
       <Card>
         <h3 className="font-display font-bold text-slate-900 mb-1">Camp Records Export</h3>
         <p className="text-sm text-slate-500 mb-3">

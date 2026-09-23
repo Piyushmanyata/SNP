@@ -1,6 +1,6 @@
 import logger from "../../lib/logger";
 
-export function classifyCameraError(err) {
+function classifyCameraError(err) {
   const msg = String(err?.message || err || "");
   const name = String(err?.name || "");
   if (typeof window !== "undefined" && window.isSecureContext === false) {
@@ -58,19 +58,6 @@ export function buildCameraConstraintAttempts(deviceId) {
   attempts.push({ video: { facingMode: "user" } });
   attempts.push({ video: true });
   return attempts;
-}
-
-export function createStillCapture(stream) {
-  const track = stream?.getVideoTracks?.()[0];
-  if (!track || typeof window === "undefined" || !window.ImageCapture) return null;
-  try {
-    const capture = new window.ImageCapture(track);
-    if (typeof capture.takePhoto !== "function") return null;
-    return capture;
-  } catch (e) {
-    logger.warn("Still capture unavailable on this track:", e);
-    return null;
-  }
 }
 
 export async function acquireCameraStream(deviceId) {
@@ -133,5 +120,53 @@ export async function applyTorch(stream, nextTorch) {
     await track.applyConstraints({ advanced: [{ torch: nextTorch }] });
   } catch (e) {
     logger.warn("Failed to toggle torch constraints:", e);
+  }
+}
+
+function capabilities(stream) {
+  const track = stream?.getVideoTracks?.()[0];
+  try {
+    return { track, caps: track?.getCapabilities?.() || {} };
+  } catch {
+    return { track, caps: {} };
+  }
+}
+
+export function zoomRange(stream) {
+  const { caps } = capabilities(stream);
+  const zoom = caps.zoom;
+  if (!zoom || !(zoom.max > zoom.min)) return null;
+  const step = zoom.step > 0 ? zoom.step : 0.1;
+  const snap = (value) => Math.min(zoom.max, Math.max(zoom.min, Math.round(value / step) * step));
+  return { min: zoom.min, max: zoom.max, near: snap(zoom.min * 2), snap };
+}
+
+export async function applyZoom(stream, value) {
+  const { track } = capabilities(stream);
+  if (!track) return false;
+  try {
+    await track.applyConstraints({ advanced: [{ zoom: value }] });
+    return true;
+  } catch (e) {
+    logger.warn("Failed to apply zoom:", e);
+    return false;
+  }
+}
+
+export async function focusAt(stream, x, y) {
+  const { track, caps } = capabilities(stream);
+  const modes = caps.focusMode || [];
+  if (!track || !modes.length) return;
+  const mode = modes.includes("single-shot") ? "single-shot" : modes.includes("continuous") ? "continuous" : null;
+  if (!mode) return;
+  try {
+    await track.applyConstraints({ advanced: [{ focusMode: mode, pointsOfInterest: [{ x, y }] }] });
+    if (mode === "single-shot" && modes.includes("continuous")) {
+      setTimeout(() => {
+        track.applyConstraints({ advanced: [{ focusMode: "continuous" }] }).catch(() => {});
+      }, 1500);
+    }
+  } catch (e) {
+    logger.warn("Failed to focus:", e);
   }
 }

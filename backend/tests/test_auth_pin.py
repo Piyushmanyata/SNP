@@ -13,6 +13,7 @@ os.environ.setdefault("DB_NAME", "snp_test")
 os.environ.setdefault("JWT_SECRET", "test-jwt-secret")
 os.environ.setdefault("COOKIE_SECURE", "false")
 
+import pytest
 from bson import ObjectId
 from fastapi.testclient import TestClient
 
@@ -22,7 +23,7 @@ import routes_staff
 import security
 import server as server_mod
 from security import hash_pin
-from fastapi import Request, Response
+from fastapi import HTTPException, Request, Response
 from models import LoginBody
 from test_adversarial_challenger import setup_mock_db
 
@@ -136,4 +137,31 @@ def test_simultaneous_wrong_logins_share_a_five_attempt_budget(monkeypatch):
         ], return_exceptions=True)
         assert len(verified) == 5
         assert sum(result.status_code == 429 for result in results) == 7
+    asyncio.run(run())
+
+
+def test_disable_staff_keeps_an_enabled_admin(monkeypatch):
+    async def run():
+        mock_db = setup_mock_db(monkeypatch)
+        _patch_db(monkeypatch, mock_db)
+        first = {"_id": ObjectId(), "name": "A", "name_normalized": "a", "role": "admin", "disabled_at": None}
+        second = {"_id": ObjectId(), "name": "B", "name_normalized": "b", "role": "admin", "disabled_at": None}
+        await mock_db.users.insert_one(first)
+        await mock_db.users.insert_one(second)
+
+        with pytest.raises(HTTPException) as own:
+            await routes_staff.disable_staff(str(first["_id"]), first)
+        assert own.value.status_code == 409
+        assert own.value.detail["code"] == "CANNOT_DISABLE_SELF"
+
+        await mock_db.users.update_one({"_id": first["_id"]}, {"$set": {"disabled_at": security.now_utc()}})
+        with pytest.raises(HTTPException) as last:
+            await routes_staff.disable_staff(str(second["_id"]), first)
+        assert last.value.status_code == 409
+        assert last.value.detail["code"] == "LAST_ADMIN"
+        assert (await mock_db.users.find_one({"_id": second["_id"]}))["disabled_at"] is None
+
+        await mock_db.users.update_one({"_id": first["_id"]}, {"$set": {"disabled_at": None}})
+        assert await routes_staff.disable_staff(str(second["_id"]), first) == {"ok": True}
+        assert (await mock_db.users.find_one({"_id": second["_id"]}))["disabled_at"] is not None
     asyncio.run(run())

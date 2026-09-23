@@ -172,7 +172,7 @@ async def clinical_lookup(body: dict, actor: dict = Depends(require_clinical)) -
     p = None
     if camp:
         p = await db.patients.find_one({"camp_id": camp["_id"], "patient_qr": value})
-        if not p and value.isdigit() and int(value) < 2 ** 63:
+        if not p and value.isdecimal() and len(value) <= 12:
             p = await db.patients.find_one({"camp_id": camp["_id"], "reg_no": int(value)})
     if not p:
         raise HTTPException(status_code=404, detail="No matching registration found")
@@ -180,7 +180,7 @@ async def clinical_lookup(body: dict, actor: dict = Depends(require_clinical)) -
     if gate == "not_arrived":
         raise HTTPException(status_code=409, detail={
             "code": "not_arrived",
-            "message": "This registration has not been checked in.",
+            "message": "This patient has not arrived at the door yet.",
         })
     if gate == "never_printed":
         raise HTTPException(status_code=409, detail={
@@ -239,7 +239,7 @@ async def _require_printed_patient(db, patient_id: str) -> dict:
         raise HTTPException(status_code=404, detail="Registration not found")
     gate = arrival_ready(p)
     if gate == "not_arrived":
-        raise conflict("not_arrived", "This registration has not been checked in.")
+        raise conflict("not_arrived", "This patient has not arrived at the door yet.")
     if gate == "never_printed":
         raise conflict("never_printed", "This patient's prescription was never printed.")
     return p

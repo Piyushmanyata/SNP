@@ -20,7 +20,7 @@ export function AadhaarFallbackPanel({
         The camera is not reading this card.
       </p>
       <p className="text-xs text-amber-800 mt-1 mb-3">
-        Turn on the torch, upload a photo of the QR, or type the details.
+        Hold the card a little farther away, tap the picture to focus, turn on the torch, or upload a photo of the QR instead.
       </p>
       <div className="flex flex-wrap gap-2">
         {torchAvailable && (

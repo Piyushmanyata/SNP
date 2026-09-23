@@ -31,10 +31,7 @@ async def aadhaar_extract(request: Request) -> Dict[str, Any]:
 
 @router.post("/aadhaar/decode")
 async def aadhaar_decode(body: AadhaarDecodeBody) -> Dict[str, Any]:
-    result = decode_aadhaar(body.payload or "")
-    if result["outcome"] == "card":
-        result["data"]["age"] = age_from_dob(result["data"].get("dob") or "")
-    return result
+    return decode_aadhaar(body.payload or "")
 
 
 # ---------- soft duplicate check ----------

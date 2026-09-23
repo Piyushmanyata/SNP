@@ -54,11 +54,9 @@ function wizardProps(overrides) {
     medicines: MEDICINES,
     powers: POWERS,
     toggleDiag: jest.fn(),
-    locked: false,
     busy: false,
     saveStep: jest.fn(),
     completeRx: jest.fn(),
-    setShowCorrection: jest.fn(),
     ...overrides,
   };
 }
@@ -88,6 +86,15 @@ async function next(times = 1) {
     await act(async () => q("wizard-next").click());
   }
 }
+
+describe("wizard save errors", () => {
+  test("a save error shows beside the step buttons", () => {
+    renderWizard(baseRx, { error: "Draft save failed" });
+    const alert = q("clinical-prescription-form").querySelector('[role="alert"]');
+    expect(alert.textContent).toContain("Draft save failed");
+    expect(alert.nextElementSibling.contains(q("wizard-next"))).toBe(true);
+  });
+});
 
 describe("wizard step pruning", () => {
   test("a patient with no lines walks only diagnosis, lines and review", () => {
