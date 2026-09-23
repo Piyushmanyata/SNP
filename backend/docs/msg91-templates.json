@@ -10,7 +10,7 @@
     "end_date": "Specs only: last day of the collection window as DD-MM-YYYY; equals date for a one-day window",
     "venue": "Camp, hospital or distribution venue name; 3 to 30 characters with no link, phone number or placeholder (ADR 0051). Use the camp, OT Schedule Day or Specs collection day venue_sms when set, else its full venue"
   },
-  "dlt_portal_note": "dlt_portal_body is the text to register on the DLT portal; each {#var#} is filled in the order listed in variables. dlt_body is the same text in MSG91 flow syntax. The four non-specs templates were approved on SmartPing and verified in MSG91 on 23 September 2026. The revised specs copies require new DLT approval before their MSG91 flows can be configured for sending.",
+  "dlt_portal_note": "dlt_portal_body is the text registered on the DLT portal; each {#var#} is filled in the order listed in variables. dlt_body is the same text in MSG91 flow syntax. All six templates were approved on SmartPing on 23 September 2026. Check that each MSG91 flow shows Verified by DLT before enabling it on the VPS.",
   "templates": [
     {
       "key": "registration",
@@ -78,9 +78,10 @@
     },
     {
       "key": "specs_token",
-      "dlt_template_id": null,
+      "dlt_template_id": "1777179015421050461",
+      "msg91_flow_id": "6ab3a55711b0c861c10e65e2",
       "rejected_dlt_template_id": "1777179007849908726",
-      "dlt_status": "Revised copy awaiting DLT submission",
+      "dlt_status": "Approved by SmartPing; Verified by DLT in MSG91",
       "env_var": "MSG91_TEMPLATE_SPECS_TOKEN",
       "purpose": "Spectacle collection scheduled",
       "variables": [
@@ -96,9 +97,10 @@
     },
     {
       "key": "specs",
-      "dlt_template_id": null,
+      "dlt_template_id": "1777179015427680603",
+      "msg91_flow_id": "6ab3a56d4313c436210f3de3",
       "rejected_dlt_template_id": "1777179007858053123",
-      "dlt_status": "Revised copy awaiting DLT submission",
+      "dlt_status": "Approved by SmartPing; Verified by DLT in MSG91",
       "env_var": "MSG91_TEMPLATE_SPECS",
       "purpose": "Day-before spectacle collection reminder",
       "variables": [

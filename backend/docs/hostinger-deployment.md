@@ -209,17 +209,17 @@ A post-bootstrap archive, `snp_camps-20260908T072922Z.archive.gz`, was restored 
 
 An ongoing off-machine backup destination is still required. Archives on the VPS do not protect against loss of that VPS. Follow the root README's backup instructions; `docs/ops/backups.md` refers to a `backup-sync` service and `BACKUP_REMOTE` variable that the current Compose file does not implement.
 
-MSG91 credentials and approved templates have not been configured. SMS remains skipped until those are supplied and actual delivery is tested. Real phone scanning and printer acceptance remain operator checks.
+At the time of this baseline deployment, MSG91 credentials and approved templates had not been configured. Later SMS setup is recorded below. Real phone scanning and printer acceptance remain operator checks.
 
 ## SMS template setup — 23 September 2026
 
-SmartPing approved the registration, camp reminder, surgery scheduled and surgery reminder content on header `SZWTRT`. Their DLT IDs and the matching MSG91 flow IDs are recorded in [msg91-templates.json](msg91-templates.json). All four flows show “Verified by DLT” in MSG91. The two spectacles templates remain rejected with the operator remark “Variable can be reduce to static information.” Their flow IDs must remain unset.
+At this stage SmartPing had approved the registration, camp reminder, surgery scheduled and surgery reminder content on header `SZWTRT`. Their DLT IDs and the matching MSG91 flow IDs are recorded in [msg91-templates.json](msg91-templates.json). All four flows showed “Verified by DLT” in MSG91. The two spectacles templates were still rejected with the operator remark “Variable can be reduce to static information.” Their later approval is recorded below.
 
-The backend now allows configured message types to send independently ([ADR 0048](adr/0048-enable-only-configured-sms-flows.md)). An `SNPProdSMS` auth key was created with the SMS send rule and IP security limited to the VPS egress address `82.112.234.39`. The key and four approved flow IDs are set in `/opt/snp/.env.production`; `MSG91_TEMPLATE_SPECS_TOKEN` and `MSG91_TEMPLATE_SPECS` remain empty. The key is not stored in the repository. Recreate backend and reminder containers after deploying this change, then verify a consented test message and its provider delivery result before live patient messaging.
+The backend now allows configured message types to send independently ([ADR 0048](adr/0048-enable-only-configured-sms-flows.md)). An `SNPProdSMS` auth key was created with the SMS send rule and IP security limited to the VPS egress address `82.112.234.39`. At this stage, the key and four approved flow IDs were set in `/opt/snp/.env.production`; `MSG91_TEMPLATE_SPECS_TOKEN` and `MSG91_TEMPLATE_SPECS` were empty. The key is not stored in the repository. A consented test message and its provider delivery result are required before live patient messaging.
 
 ## Fixed spectacles collection hours — 23 September 2026
 
-[ADR 0049](adr/0049-fixed-spectacles-collection-hours.md) fixes collection at 10:00 AM–5:00 PM. The backend persists `10:00` and `17:00`; staff screens and printed tokens use AM/PM. The revised spectacles SMS copies place those hours in static text, leaving five DLT variables. The two rejected IDs in [msg91-templates.json](msg91-templates.json) describe the old text only. Keep the spectacles flow IDs unset until SmartPing approves the revised text and MSG91 verifies matching flows.
+[ADR 0049](adr/0049-fixed-spectacles-collection-hours.md) fixes collection at 10:00 AM–5:00 PM. The backend persists `10:00` and `17:00`; staff screens and printed tokens use AM/PM. The revised spectacles SMS copies place those hours in static text, leaving five DLT variables. The two rejected IDs in [msg91-templates.json](msg91-templates.json) describe the old text only. The matching flows were approved and verified later on 23 September, as recorded below.
 
 Before this deployment, production had one future spectacles day (5 October–6 November 2026) at 10:00–15:00 and zero active spectacles slips. After deploying the code, re-save that date range in Admin → OT & Specs to set 10:00–17:00, then verify the listed hours before assigning patients. Other environments must audit their active slips before changing a schedule because printed tokens snapshot the hours.
 
@@ -259,3 +259,9 @@ Post-deployment checks against the live host:
 - The backend reports the four approved flows set and both spectacles flows empty.
 - The reminder worker's restart run completed and submitted nothing: the ledger still holds its 5 earlier rows, and no camp day falls on 24 September.
 - The served `AdminDashboard-DT6YFXjq.js` carries the new SMS tab and the live SMS venue check.
+
+## Spectacles SMS approval — 23 September 2026
+
+SmartPing approved the revised `SNP Specs Token` and `SNP Specs Reminder` texts as Promotional on header `SZWTRT`. The DLT IDs are `1777179015421050461` and `1777179015427680603`. Matching Unicode MSG91 flows were created as `6ab3a55711b0c861c10e65e2` and `6ab3a56d4313c436210f3de3`, with variables `camp_no`, `date`, `end_date`, `venue`, and `reg_no` in that order. The exact copies and IDs are in [msg91-templates.json](msg91-templates.json).
+
+Both new flows now show “Verified by DLT” in MSG91. Set `MSG91_TEMPLATE_SPECS_TOKEN` and `MSG91_TEMPLATE_SPECS` in `/opt/snp/.env.production` and recreate the backend and reminders containers after deploying. The 5 October–6 November spectacles day still needs fixed 10:00–17:00 hours and a real SMS venue before patient sends can occur.
