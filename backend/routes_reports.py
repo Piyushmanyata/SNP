@@ -227,6 +227,8 @@ def _empty_board(as_of: str, state: str) -> Dict[str, Any]:
         "activity": [],
         "quiet_count": 0,
         "sms_failures": 0,
+        "sms_not_sent": 0,
+        "sms_paused": [],
         "next_ot": None,
         "next_specs": None,
     }
@@ -295,15 +297,16 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
             if bucket is not None and status in bucket:
                 bucket[status] += f["count"]
 
-    sms_rows = await db.reminder_ledger.aggregate([
-        {"$match": {"status": {"$in": ["failed", "abandoned"]}, "created_at": {"$gte": start, "$lt": end}}},
-        {"$group": {"_id": "$patient_id", "count": {"$sum": 1}}},
-    ]).to_list(None)
-    sms_patient_ids = [r["_id"] for r in sms_rows if r["_id"]]
-    sms_failures = 0
-    if sms_patient_ids:
-        camp_set = set(await db.patients.distinct("_id", {"_id": {"$in": sms_patient_ids}, **camp_filter}))
-        sms_failures = sum(row["count"] for row in sms_rows if row["_id"] in camp_set)
+    sms_rows = await db.reminder_ledger.find({"created_at": {"$gte": start, "$lt": end}}).to_list(None)
+    sms_patient_ids = list({r["patient_id"] for r in sms_rows if r.get("patient_id")})
+    camp_set = set(await db.patients.distinct("_id", {"_id": {"$in": sms_patient_ids}, **camp_filter})) if sms_patient_ids else set()
+    camp_sms = [r for r in sms_rows if r.get("patient_id") in camp_set]
+    sms_failures = sum(
+        1 for r in camp_sms
+        if r.get("status") in ("failed", "abandoned", "rejected") or r.get("delivery") == "failed"
+    )
+    sms_not_sent = sum(1 for r in camp_sms if r.get("status") == "paused")
+    sms_paused = [c["_id"] for c in await db.sms_controls.find({"paused": True}).to_list(None)]
 
     ot_day = await db.ot_schedule_days.find_one(
         {"camp_id": camp["_id"], "day_date": {"$gte": today}},
@@ -347,6 +350,8 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
         "activity": activity,
         "quiet_count": quiet_count,
         "sms_failures": sms_failures,
+        "sms_not_sent": sms_not_sent,
+        "sms_paused": sms_paused,
         "next_ot": next_ot,
         "next_specs": next_specs,
     }

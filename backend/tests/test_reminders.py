@@ -59,7 +59,13 @@ def _async_noop():
     return _inner
 
 
-def _client(monkeypatch, mock_db, *, msg91_on=True, secret=SECRET):
+async def _open_canary(*_args):
+    return "open"
+
+
+def _client(monkeypatch, mock_db, *, msg91_on=True, secret=SECRET, canary=False):
+    if not canary:
+        monkeypatch.setattr(routes_reminders, "_canary", _open_canary)
     monkeypatch.setattr(server_mod, "init_indexes", _async_noop())
     monkeypatch.setattr(server_mod, "seed_admin", _async_noop())
     monkeypatch.setattr(helpers, "today_ist_str", lambda: TODAY)
@@ -162,7 +168,7 @@ class TestReminderCronHttp:
         provider = msg91.send_dlt_sms
 
         def fail(*args, **kwargs):
-            raise RuntimeError("provider unavailable")
+            raise msg91.Unsent("connection refused")
 
         monkeypatch.setattr(msg91, "send_dlt_sms", fail)
         first = _post(client).json()
@@ -427,7 +433,7 @@ class TestReminderCronHttp:
 
     def test_venue_over_dlt_variable_limit_is_not_submitted_or_charged(self, monkeypatch):
         mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=1, venue="A" * 41))
+        asyncio.run(_seed_camp_household(mock_db, n_patients=1, venue="A" * 31))
         captured = _calls(monkeypatch)
 
         result = _post(_client(monkeypatch, mock_db)).json()

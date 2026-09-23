@@ -142,7 +142,7 @@ def test_sms_ledger_failure_does_not_escape_or_resend_an_accepted_message(monkey
         def send(*args):
             calls.append(args)
             if not provider_succeeds:
-                raise RuntimeError("provider unavailable")
+                raise sms.msg91.Unsent("connection refused")
             return "accepted"
 
         async def unavailable(*args, **kwargs):

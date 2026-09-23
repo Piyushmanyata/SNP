@@ -138,6 +138,7 @@ def ser_specs_day(d: dict) -> Dict[str, Any]:
         "day_date": d["day_date"],
         "end_date": d.get("end_date") or d["day_date"],
         "venue": d["venue"],
+        "venue_sms": d.get("venue_sms"),
         "start_time": start,
         "end_time": end,
         "window_required": not complete,
@@ -1126,7 +1127,7 @@ async def create_ot_day(body: OtScheduleBody, actor: dict = Depends(require_admi
     venue = (body.venue or "").strip()
     if not venue:
         raise HTTPException(status_code=400, detail="Venue is required")
-    venue_sms = (body.venue_sms or "").strip() or None
+    venue_sms = body.venue_sms
     if not await db.camps.find_one({"_id": camp_id, "is_active": True}):
         raise HTTPException(status_code=400, detail="Camp is not active")
     existing = await db.ot_schedule_days.find_one({"camp_id": camp_id, "day_date": body.day_date})
@@ -1202,7 +1203,7 @@ async def create_specs_day(body: SpecsScheduleBody, actor: dict = Depends(requir
     if not camp:
         raise HTTPException(status_code=400, detail="Camp is not active")
     existing = await db.specs_collection_days.find_one({"camp_id": camp_oid, "day_date": day_date})
-    fields = {"end_date": end_date, "venue": venue, "start_time": start, "end_time": end}
+    fields = {"end_date": end_date, "venue": venue, "venue_sms": body.venue_sms, "start_time": start, "end_time": end}
     if existing:
         await db.specs_collection_days.update_one({"_id": existing["_id"]}, {"$set": fields})
         d = await db.specs_collection_days.find_one({"_id": existing["_id"]})

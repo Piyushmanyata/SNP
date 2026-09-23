@@ -40,7 +40,7 @@ export function AadhaarReviewForm({ initial = {}, onConfirm, disabled }) {
           <Input value={fields.full_name} maxLength={120} disabled={disabled} onChange={(e) => update("full_name", e.target.value)} data-testid="aadhaar-review-full_name" />
         </Field>
         <Field label="Age" required>
-          <Input type="number" min="0" max="130" value={fields.age} disabled={disabled} onChange={(e) => update("age", e.target.value)} data-testid="aadhaar-review-age" />
+          <Input type="number" inputMode="numeric" pattern="[0-9]*" min="0" max="130" value={fields.age} disabled={disabled} onChange={(e) => update("age", e.target.value)} data-testid="aadhaar-review-age" />
         </Field>
         <Field label="Date / year of birth" hint="Leave blank if unknown">
           <Input value={fields.dob} maxLength={10} placeholder="YYYY-MM-DD or YYYY" disabled={disabled} onChange={(e) => update("dob", e.target.value)} data-testid="aadhaar-review-dob" />

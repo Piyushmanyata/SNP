@@ -83,7 +83,7 @@ export default function Login() {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Your registered name"
                 required
-                autoFocus
+                autoFocus={window.matchMedia?.("(pointer: fine)").matches}
                 autoComplete="username"
                 data-testid="login-name-input"
               />

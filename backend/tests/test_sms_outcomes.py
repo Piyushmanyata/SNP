@@ -37,45 +37,123 @@ WORKER_URL = "http://backend:8000/api/cron/reminders"
 
 
 class _FakeResponse:
-    def __init__(self, payload):
+    def __init__(self, payload, status):
         self._payload = payload
+        self.status = status
 
     def read(self):
         return self._payload
 
-    def __enter__(self):
-        return self
 
-    def __exit__(self, *exc):
-        return False
-
-
-def _provider(monkeypatch, body, requests=None):
+def _provider(monkeypatch, body, requests=None, *, status=200, fail_connect=None, fail_reply=None):
     payload = body if isinstance(body, bytes) else json.dumps(body).encode()
 
-    def _open(request, timeout=None):
-        if requests is not None:
-            requests.append(request)
-        return _FakeResponse(payload)
+    class _Connection:
+        def __init__(self, host, timeout=None):
+            self.host = host
 
-    monkeypatch.setattr(msg91.urllib.request, "urlopen", _open)
+        def connect(self):
+            if fail_connect:
+                raise fail_connect
+
+        def request(self, method, path, body=None, headers=None):
+            if requests is not None:
+                requests.append({"host": self.host, "path": path, "body": json.loads(body), "headers": headers})
+
+        def getresponse(self):
+            if fail_reply:
+                raise fail_reply
+            return _FakeResponse(payload, status)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(msg91.http.client, "HTTPSConnection", _Connection)
 
 
 class TestProviderAcceptance:
-    def test_http_200_provider_error_body_stays_unsent(self, monkeypatch):
+    def test_a_provider_refusal_is_recorded_and_never_repeated(self, monkeypatch):
         mock_db = setup_mock_db(monkeypatch)
         asyncio.run(_seed_camp_household(mock_db, n_patients=1))
         client = _client(monkeypatch, mock_db)
-        _provider(monkeypatch, {"type": "error", "message": "template not approved"})
+        requests = []
+        _provider(monkeypatch, {"type": "error", "message": "template not approved"}, requests, status=400)
 
         body = _post(client).json()
+        mock_db.reminder_ledger.docs[0]["created_at"] -= routes_reminders.sms.RETRY_AFTER * 2
+        again = _post(client).json()
 
-        assert body["sent"] == 0
-        assert body["failed"] == 1
-        assert body["ok"] is False
+        assert (body["sent"], body["failed"], body["ok"]) == (0, 0, True)
+        assert again["sent"] == 0
+        assert len(requests) == 1
         row = mock_db.reminder_ledger.docs[0]
-        assert row["status"] == "failed"
+        assert row["status"] == "rejected"
+        assert row["error"] == "template not approved"
         assert row["provider_id"] is None
+
+    def test_the_request_carries_the_flow_and_every_variable(self, monkeypatch):
+        mock_db = setup_mock_db(monkeypatch)
+        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
+        client = _client(monkeypatch, mock_db)
+        requests = []
+        _provider(monkeypatch, {"type": "success", "message": "rq-1"}, requests)
+
+        _post(client)
+
+        [sent] = requests
+        assert (sent["host"], sent["path"]) == ("control.msg91.com", "/api/v5/flow")
+        assert sent["headers"]["authkey"] == "auth"
+        assert sent["body"] == {
+            "template_id": "tmpl-camp", "short_url": "0",
+            "recipients": [{"mobiles": f"91{HOUSEHOLD}", "date": "02-09-2026", "camp_no": "162",
+                            "venue": "Hall A", "reg_no": "1000"}],
+        }
+
+    def test_a_connection_that_never_opened_is_retried_later(self, monkeypatch):
+        mock_db = setup_mock_db(monkeypatch)
+        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
+        client = _client(monkeypatch, mock_db)
+        _provider(monkeypatch, {"type": "success", "message": "rq-2"}, fail_connect=ConnectionRefusedError("refused"))
+
+        first = _post(client).json()
+        assert (first["sent"], first["failed"], first["ok"]) == (0, 1, False)
+        assert mock_db.reminder_ledger.docs[0]["status"] == "failed"
+
+        _provider(monkeypatch, {"type": "success", "message": "rq-2"})
+        _later(mock_db)
+        second = _post(client).json()
+
+        assert (second["sent"], second["failed"], second["ok"]) == (1, 0, True)
+        assert mock_db.reminder_ledger.docs[0]["provider_id"] == "rq-2"
+
+    @pytest.mark.parametrize("failure", [TimeoutError("read timed out"), ConnectionResetError("reset")])
+    def test_a_reply_lost_after_sending_is_uncertain_and_never_resent(self, monkeypatch, failure):
+        mock_db = setup_mock_db(monkeypatch)
+        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
+        client = _client(monkeypatch, mock_db)
+        requests = []
+        _provider(monkeypatch, {"type": "success", "message": "rq-3"}, requests, fail_reply=failure)
+
+        first = _post(client).json()
+        _later(mock_db)
+        second = _post(client).json()
+
+        assert (first["sent"], first["failed"], first["ok"]) == (1, 0, True)
+        assert second["sent"] == 0
+        assert len(requests) == 1
+        assert mock_db.reminder_ledger.docs[0]["status"] == "uncertain"
+
+    def test_a_server_error_after_sending_is_uncertain(self, monkeypatch):
+        mock_db = setup_mock_db(monkeypatch)
+        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
+        client = _client(monkeypatch, mock_db)
+        _provider(monkeypatch, b"<html>bad gateway</html>", status=502)
+
+        _post(client)
+
+        row = mock_db.reminder_ledger.docs[0]
+        assert row["status"] == "uncertain"
+        assert "502" in row["error"]
 
     def test_success_body_records_the_request_id(self, monkeypatch):
         mock_db = setup_mock_db(monkeypatch)
@@ -86,7 +164,7 @@ class TestProviderAcceptance:
 
         body = _post(client).json()
 
-        assert body == {"ok": True, "sent": 1, "failed": 0, "complete": True,
+        assert body == {"ok": True, "sent": 1, "failed": 0, "complete": True, "waiting": False,
                         "event_date": TOMORROW, "send_date": "2026-09-01"}
         row = mock_db.reminder_ledger.docs[0]
         assert row["status"] == "sent"
@@ -102,18 +180,21 @@ class TestProviderAcceptance:
         ["success"],
         b"not json at all",
     ])
-    def test_malformed_or_missing_identifier_fails_safely(self, monkeypatch, body):
+    def test_an_unreadable_reply_is_uncertain_and_never_resent(self, monkeypatch, body):
         mock_db = setup_mock_db(monkeypatch)
         asyncio.run(_seed_camp_household(mock_db, n_patients=1))
         client = _client(monkeypatch, mock_db)
-        _provider(monkeypatch, body)
+        requests = []
+        _provider(monkeypatch, body, requests)
 
         result = _post(client).json()
+        _later(mock_db)
+        _post(client)
 
-        assert result["sent"] == 0
-        assert result["failed"] == 1
+        assert (result["failed"], result["ok"]) == (0, True)
+        assert len(requests) == 1
         row = mock_db.reminder_ledger.docs[0]
-        assert row["status"] == "failed"
+        assert row["status"] == "uncertain"
         assert row["provider_id"] is None
 
     def test_request_id_field_is_accepted_when_the_type_is_success(self, monkeypatch):
@@ -225,7 +306,7 @@ class TestBoundedDispatch:
         client = _client(monkeypatch, mock_db)
 
         first = _post(client).json()
-        assert first == {"ok": True, "sent": 3, "failed": 0, "complete": False,
+        assert first == {"ok": True, "sent": 3, "failed": 0, "complete": False, "waiting": False,
                          "event_date": TOMORROW, "send_date": "2026-09-01"}
         assert [c["type"] for c in captured] == ["camp", "camp", "ot"]
 
@@ -244,7 +325,7 @@ class TestBoundedDispatch:
         def fake_send(message_type, mobile, variables):
             calls.append(variables["reg_no"])
             if len(calls) <= 2:
-                raise RuntimeError("carrier down")
+                raise msg91.Unsent("carrier down")
             return f"id-{len(calls)}"
 
         monkeypatch.setattr(msg91, "send_dlt_sms", fake_send)
@@ -280,7 +361,7 @@ def _flaky_provider(monkeypatch, failures):
     def fake_send(message_type, mobile, variables):
         calls.append({"type": message_type, **variables})
         if len(calls) <= failures:
-            raise RuntimeError("carrier down")
+            raise msg91.Unsent("carrier down")
         return f"id-{len(calls)}"
 
     monkeypatch.setattr(msg91, "send_dlt_sms", fake_send)
@@ -316,19 +397,20 @@ class TestFailedRemindersRetryOnALaterRun:
         assert (third["sent"], third["failed"], third["ok"]) == (1, 0, True)
         assert len(calls) == 2
 
-    def test_three_spaced_failures_are_abandoned_and_stay_reported(self, monkeypatch):
+    def test_three_spaced_failures_are_abandoned_and_the_day_can_finish(self, monkeypatch):
         mock_db = setup_mock_db(monkeypatch)
         asyncio.run(_seed_camp_household(mock_db, n_patients=1))
         calls = _flaky_provider(monkeypatch, failures=99)
         client = _client(monkeypatch, mock_db)
 
+        results = []
         for _ in range(4):
-            result = _post(client).json()
+            results.append(_post(client).json())
             _later(mock_db)
 
         assert len(calls) == 3
         assert mock_db.reminder_ledger.docs[0]["status"] == "abandoned"
-        assert (result["failed"], result["ok"]) == (1, False)
+        assert [(r["failed"], r["ok"]) for r in results] == [(1, False)] * 3 + [(0, True)]
 
     def test_a_retry_skips_a_surgery_cancelled_after_the_failure(self, monkeypatch):
         mock_db = setup_mock_db(monkeypatch)

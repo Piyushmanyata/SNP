@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import string
 from datetime import timedelta
 from typing import Any, Dict, Optional
@@ -30,6 +31,30 @@ MESSAGE_COPY = {
     "specs": SPECS_REMINDER,
 }
 RETRY_AFTER = timedelta(minutes=10)
+VARIABLE_LIMIT = 30
+SMS_VENUE_MIN = 3
+_LINK = re.compile(r"https?://|www\.|\.(?:com|in|org|net|io|co|info|app|link|ly|me)\b", re.IGNORECASE)
+_PHONE = re.compile(r"\d(?:[\s-]?\d){6,}")
+_PLACEHOLDERS = {"na", "n/a", "nil", "none", "null", "tbd", "tba", "test"}
+REPORT_STATUS = {"1": "delivered", "2": "failed", "9": "failed", "16": "failed", "17": "failed", "20": "failed", "25": "failed"}
+_DLT_STATUS = {"16", "25"}
+_DLT_REASON = re.compile(r"dlt|template|header|entity|scrub|consent", re.IGNORECASE)
+
+
+def clean_sms_venue(raw: Optional[str]) -> str:
+    return " ".join((raw or "").split())
+
+
+def sms_venue_problem(venue: str) -> Optional[str]:
+    if not SMS_VENUE_MIN <= len(venue) <= VARIABLE_LIMIT:
+        return f"SMS venue must be {SMS_VENUE_MIN} to {VARIABLE_LIMIT} characters"
+    if _LINK.search(venue):
+        return "SMS venue must not contain a link"
+    if _PHONE.search(venue):
+        return "SMS venue must not contain a phone number"
+    if venue.strip(" .-").casefold() in _PLACEHOLDERS:
+        return "SMS venue must name the place, not a placeholder"
+    return None
 
 
 def valid_phone(raw: Optional[str]) -> Optional[str]:
@@ -37,6 +62,11 @@ def valid_phone(raw: Optional[str]) -> Optional[str]:
     if not n or helpers.is_dummy_phone(n):
         return None
     return n
+
+
+async def paused(db: AsyncIOMotorDatabase, message_type: str) -> bool:
+    control = await db.sms_controls.find_one({"_id": message_type})
+    return bool(control and control.get("paused"))
 
 
 async def _claim(
@@ -55,17 +85,18 @@ async def _claim(
         "event_date": event_date,
     })
     if existing:
-        if existing.get("status") != "failed":
+        status = existing.get("status")
+        if status not in ("failed", "paused"):
             return None
-        attempts = int(existing.get("attempts") or 1)
+        attempts = int(existing.get("attempts") or 0)
         if attempts >= 3:
             await db.reminder_ledger.update_one(
-                {"_id": existing["_id"], "status": "failed"},
+                {"_id": existing["_id"], "status": status},
                 {"$set": {"status": "abandoned"}},
             )
             return None
-        retryable: Dict[str, Any] = {"_id": existing["_id"], "status": "failed"}
-        if retry_after:
+        retryable: Dict[str, Any] = {"_id": existing["_id"], "status": status}
+        if retry_after and status == "failed":
             retryable["created_at"] = {"$lte": helpers.now_utc() - retry_after}
         return await db.reminder_ledger.find_one_and_update(
             retryable,
@@ -93,6 +124,20 @@ async def _claim(
     return doc
 
 
+async def _record_paused(
+    db: AsyncIOMotorDatabase, patient_id: Any, message_type: str, event_date: str,
+    number: str, venue: str, copy: str,
+) -> None:
+    try:
+        await db.reminder_ledger.insert_one({
+            "patient_id": patient_id, "message_type": message_type, "event_date": event_date,
+            "number": number, "venue": venue, "copy": copy, "status": "paused", "attempts": 0,
+            "provider_id": None, "created_at": helpers.now_utc(),
+        })
+    except DuplicateKeyError:
+        pass
+
+
 def specs_pickup_hours_match(start_time: Optional[str], end_time: Optional[str]) -> bool:
     return (start_time, end_time) == (SPECS_PICKUP_START_TIME, SPECS_PICKUP_END_TIME)
 
@@ -112,9 +157,10 @@ async def deliver_patient_sms(
     end_date: Optional[str] = None,
     retry_after: Optional[timedelta] = None,
 ) -> str:
-    """Returns sent, failed, uncertain, or skipped. Never raises."""
+    """Returns sent, failed, uncertain, rejected, paused, or skipped. Never raises."""
     row = None
-    accepted = False
+    submitted = False
+    venue = clean_sms_venue(venue)
     try:
         if not msg91.configured() or not msg91.template_id(message_type):
             return "skipped"
@@ -137,27 +183,46 @@ async def deliver_patient_sms(
         if missing:
             logger.warning("Patient SMS %s not sent: no %s", message_type, ", ".join(missing))
             return "skipped"
-        too_long = [name for name, value in variables.items() if len(str(value)) > 40]
+        too_long = [name for name, value in variables.items() if len(str(value)) > VARIABLE_LIMIT]
         if too_long:
             logger.warning("Patient SMS %s not sent: %s exceeds DLT variable limit", message_type, ", ".join(too_long))
             return "skipped"
+        venue_problem = sms_venue_problem(str(venue))
+        if venue_problem:
+            logger.warning("Patient SMS %s not sent: %s", message_type, venue_problem)
+            return "skipped"
         copy = template.format(**variables)
+        if await paused(db, message_type):
+            await _record_paused(db, patient["_id"], message_type, event_date, number, venue, copy)
+            return "paused"
         row = await _claim(
             db, patient["_id"], message_type, event_date, number, venue, copy,
             retry_after=retry_after,
         )
         if not row:
             return "skipped"
-        provider_id = await asyncio.to_thread(msg91.send_dlt_sms, message_type, number, variables)
-        accepted = True
-        await db.reminder_ledger.update_one(
-            {"_id": row["_id"]},
-            {"$set": {"status": "sent", "provider_id": provider_id}},
-        )
-        return "sent"
+        update: Dict[str, Any]
+        try:
+            provider_id = await asyncio.to_thread(msg91.send_dlt_sms, message_type, number, variables)
+        except msg91.Unsent as exc:
+            update = {"status": "failed", "error": str(exc)[:200]}
+        except msg91.Rejected as exc:
+            update = {"status": "rejected", "error": str(exc)[:200]}
+        except Exception as exc:
+            submitted = True
+            update = {"status": "uncertain", "error": f"{type(exc).__name__}: {exc}"[:200]}
+        else:
+            submitted = True
+            update = {"status": "sent", "provider_id": provider_id}
+        if update["status"] != "sent":
+            logger.warning("Patient SMS %s %s: %s", message_type, update["status"], update["error"])
+        await db.reminder_ledger.update_one({"_id": row["_id"]}, {"$set": update})
+        return update["status"]
     except Exception as exc:
-        logger.exception("Patient SMS processing failed; provider accepted=%s", accepted)
-        if row and not accepted:
+        logger.exception("Patient SMS processing failed; submitted=%s", submitted)
+        if submitted:
+            return "uncertain"
+        if row:
             try:
                 await db.reminder_ledger.update_one(
                     {"_id": row["_id"]},
@@ -165,9 +230,6 @@ async def deliver_patient_sms(
                 )
             except Exception:
                 logger.exception("Could not record patient SMS failure")
-            return "failed"
-        if accepted:
-            return "uncertain"
         return "failed"
 
 
@@ -184,8 +246,60 @@ async def send_patient_sms(
     """Best-effort per-patient DLT send, recorded once per patient/type/event date.
 
     Never raises: the registration or deferral is the durable outcome.
-    True means the provider accepted the message, including an uncertain ledger write.
+    True means the request reached the provider, including when its reply was lost.
     """
     return (await deliver_patient_sms(
         db, patient, message_type, event_date, venue, start_time, end_time, end_date,
     )) in ("sent", "uncertain")
+
+
+def _credit(raw: Any) -> float:
+    try:
+        return max(float(raw), 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+async def record_delivery_report(db: AsyncIOMotorDatabase, report: Dict[str, Any]) -> bool:
+    request_id = str(report.get("requestId") or "").strip()
+    code = str(report.get("status") or "").strip()
+    delivery = REPORT_STATUS.get(code)
+    if not request_id or not delivery:
+        return False
+    row = await db.reminder_ledger.find_one({"provider_id": request_id})
+    if not row:
+        return False
+    tel = "".join(ch for ch in str(report.get("telNum") or "") if ch.isdigit())
+    if tel and not tel.endswith(row["number"]):
+        return False
+    reason = str(report.get("failureReason") or "").strip()[:200]
+    dlt_failure = delivery == "failed" and (code in _DLT_STATUS or bool(_DLT_REASON.search(reason)))
+    await db.reminder_ledger.update_one({"_id": row["_id"]}, {"$set": {
+        "delivery": delivery, "delivery_reason": reason or None, "dlt_failure": dlt_failure,
+        "credit": _credit(report.get("credit")), "reported_at": helpers.now_utc(),
+    }})
+    if dlt_failure:
+        await _pause(db, row, reason or f"Operator status {code}")
+    return True
+
+
+async def _pause(db: AsyncIOMotorDatabase, row: Dict[str, Any], reason: str) -> None:
+    control = await db.sms_controls.find_one({"_id": row["message_type"]}) or {}
+    resumed_at = control.get("resumed_at")
+    if control.get("paused") or (resumed_at and helpers.as_utc(row["created_at"]) < helpers.as_utc(resumed_at)):
+        return
+    await db.sms_controls.update_one(
+        {"_id": row["message_type"]},
+        {"$set": {"paused": True, "paused_at": helpers.now_utc(), "paused_reason": reason,
+                  "paused_request_id": row.get("provider_id")}},
+        upsert=True,
+    )
+    logger.warning("SMS %s paused after a DLT failure: %s", row["message_type"], reason)
+
+
+async def resume(db: AsyncIOMotorDatabase, message_type: str, actor_id: str) -> None:
+    await db.sms_controls.update_one(
+        {"_id": message_type},
+        {"$set": {"paused": False, "resumed_at": helpers.now_utc(), "resumed_by": actor_id}},
+        upsert=True,
+    )

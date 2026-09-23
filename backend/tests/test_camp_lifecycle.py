@@ -455,7 +455,7 @@ class TestRegistrationConfirmationSms:
             assert {s["venue"] for s in sent} == {"Short Camp Venue"}
         asyncio.run(run())
 
-    def test_camp_short_sms_venue_is_saved_and_limited_to_40_characters(self, monkeypatch):
+    def test_camp_sms_venue_is_saved_and_follows_the_sms_venue_rule(self, monkeypatch):
         async def run():
             _mock(monkeypatch)
             created = await routes_camps.create_camp(
@@ -471,12 +471,13 @@ class TestRegistrationConfirmationSms:
             assert changed["camp"]["venue_sms"] == "Another Venue"
 
         asyncio.run(run())
+        for venue_sms in ("X" * 31, None, "  ", "NA", "N/A", "Hall 98765 43210", "www.snp.in"):
+            with pytest.raises(ValidationError):
+                CampBody(name="Camp", venue="A" * 64, venue_sms=venue_sms, camp_date=OTHER_DAY)
+        assert CampBody(name="Camp", venue="A" * 64, venue_sms="  Hansa   Garden ", camp_date=OTHER_DAY).venue_sms == "Hansa Garden"
+        assert CampBody(name="Camp", venue="Sikar Bhawan", camp_date=OTHER_DAY).venue_sms is None
         with pytest.raises(ValidationError):
-            CampBody(name="Camp", venue="A" * 64, venue_sms="X" * 41, camp_date=OTHER_DAY)
-        with pytest.raises(ValidationError):
-            CampBody(name="Camp", venue="A" * 64, camp_date=OTHER_DAY)
-        with pytest.raises(ValidationError):
-            CampBody(name="Camp", venue="A" * 64, venue_sms="  ", camp_date=OTHER_DAY)
+            CampBody(name="Camp", venue="Sikar Bhawan, call 9876543210", camp_date=OTHER_DAY)
 
     def test_a_send_failure_does_not_fail_the_registration(self, monkeypatch):
         async def run():
@@ -484,7 +485,7 @@ class TestRegistrationConfirmationSms:
             _recorder(monkeypatch)
 
             def boom(*_a, **_k):
-                raise RuntimeError("gateway down")
+                raise sms.msg91.Unsent("gateway down")
 
             monkeypatch.setattr(sms.msg91, "send_dlt_sms", boom)
             _camp_id, (day_id,) = await _seed_camp(mock_db, days=(OTHER_DAY,))

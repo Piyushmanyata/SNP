@@ -1,9 +1,10 @@
+import http.client
 import json
 import os
-import urllib.request
 from typing import Any, Dict
 
-MSG91_FLOW_URL = "https://control.msg91.com/api/v5/flow"
+MSG91_HOST = "control.msg91.com"
+MSG91_FLOW_PATH = "/api/v5/flow"
 
 TEMPLATE_ENV = {
     "registration": "MSG91_TEMPLATE_REGISTRATION",
@@ -13,6 +14,14 @@ TEMPLATE_ENV = {
     "specs_token": "MSG91_TEMPLATE_SPECS_TOKEN",
     "specs": "MSG91_TEMPLATE_SPECS",
 }
+
+
+class Unsent(Exception):
+    pass
+
+
+class Rejected(Exception):
+    pass
 
 
 def configured() -> bool:
@@ -34,20 +43,34 @@ def send_dlt_sms(message_type: str, mobile: str, variables: Dict[str, Any]) -> s
             **{name: str(value) for name, value in variables.items()},
         }],
     }
-    req = urllib.request.Request(
-        MSG91_FLOW_URL,
-        data=json.dumps(payload).encode(),
-        headers={
-            "authkey": os.environ["MSG91_AUTH_KEY"],
-            "Content-Type": "application/json",
-            "accept": "application/json",
-        },
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        body = json.loads(resp.read().decode() or "{}")
+    conn = http.client.HTTPSConnection(MSG91_HOST, timeout=20)
+    try:
+        try:
+            conn.connect()
+        except OSError as exc:
+            raise Unsent(f"{type(exc).__name__}: {exc}") from exc
+        conn.request(
+            "POST",
+            MSG91_FLOW_PATH,
+            body=json.dumps(payload).encode(),
+            headers={
+                "authkey": os.environ["MSG91_AUTH_KEY"],
+                "Content-Type": "application/json",
+                "accept": "application/json",
+            },
+        )
+        response = conn.getresponse()
+        status = response.status
+        raw = response.read()
+    finally:
+        conn.close()
+    if status >= 500:
+        raise ValueError(f"MSG91 answered HTTP {status}")
+    body = json.loads(raw.decode() or "{}")
+    if isinstance(body, dict) and body.get("type") == "error":
+        raise Rejected(str(body.get("message") or f"HTTP {status}"))
     if not isinstance(body, dict) or body.get("type") != "success":
-        raise ValueError("MSG91 did not accept the message")
+        raise ValueError("MSG91 reply did not confirm the message")
     request_id = str(body.get("message") or body.get("request_id") or "").strip()
     if not request_id:
         raise ValueError("MSG91 accepted the message without a request id")

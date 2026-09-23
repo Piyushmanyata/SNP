@@ -501,7 +501,7 @@ function DoorScanCard({
               <Input value={doorForm.full_name} onChange={(e) => setDoorForm({ ...doorForm, full_name: e.target.value })} data-testid="reg-fullname-input" />
             </Field>
             <Field label="Age" required>
-              <Input type="number" value={doorForm.age} onChange={(e) => setDoorForm({ ...doorForm, age: e.target.value })} data-testid="reg-age-input" />
+              <Input type="number" inputMode="numeric" pattern="[0-9]*" value={doorForm.age} onChange={(e) => setDoorForm({ ...doorForm, age: e.target.value })} data-testid="reg-age-input" />
             </Field>
             <Field label="Phone (household)" required>
               <Input value={doorForm.phone} onChange={(e) => setDoorForm({ ...doorForm, phone: e.target.value.replace(/\D/g, "").slice(0, 10) })} inputMode="numeric" autoComplete="tel" data-testid="reg-phone-input" />

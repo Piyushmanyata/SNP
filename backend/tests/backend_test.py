@@ -90,7 +90,7 @@ class TestCamps:
         assert r.json()["camp"]["id"] == camp["id"]
 
     def test_only_one_active_camp(self, admin):
-        r = admin.post(f"{API}/camps", json={"name": f"TEST_Camp2_{TAG}", "venue": "V2",
+        r = admin.post(f"{API}/camps", json={"name": f"TEST_Camp2_{TAG}", "venue": "Venue Two",
                                              "camp_date": TODAY_IST}, timeout=30)
         second = r.json()["camp"]["id"]
         assert admin.post(f"{API}/camps/{second}/activate", timeout=30).status_code == 200

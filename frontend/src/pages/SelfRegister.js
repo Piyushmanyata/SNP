@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import api, { formatApiError } from "../lib/api";
-import { Button, Card, Input, Field, Alert } from "../components/ui";
+import { Button, Card, Input, Select, Field, Alert } from "../components/ui";
 import AadhaarScanner from "../components/AadhaarScanner";
 import { Stethoscope, CheckCircle2, Lock } from "lucide-react";
 import { v4 } from "../lib/uuid";
@@ -71,17 +71,25 @@ export default function SelfRegister() {
     }
   }, [scanned, phone, dayId, reqId]);
 
+  const missing = [
+    !scanned && "Aadhaar card scan",
+    !/^\d{10}$/.test(phone) && "10-digit mobile",
+    !dayId && "camp day",
+  ].filter(Boolean);
+
   return (
     <div className="min-h-screen bg-slate-50">
       <header className="bg-slate-900 text-white">
-        <div className="max-w-xl mx-auto px-4 h-16 flex items-center gap-3">
-          <div className="w-9 h-9 rounded-xl bg-emerald-500 flex items-center justify-center">
-            <Stethoscope className="w-5 h-5" />
-          </div>
-          <div>
-            <a href="/" className="font-display font-extrabold text-lg min-h-[44px] inline-flex items-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400">SNP Camps</a>
-            <p className="text-[11px] text-slate-400 mt-1">Patient Self-Registration</p>
-          </div>
+        <div className="max-w-xl mx-auto px-4 h-16 flex items-center">
+          <a href="/" className="flex items-center gap-3 min-h-[44px] rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-emerald-400">
+            <span className="w-9 h-9 rounded-xl bg-emerald-500 flex items-center justify-center">
+              <Stethoscope className="w-5 h-5" />
+            </span>
+            <span className="leading-tight">
+              <span className="block font-display font-extrabold text-lg">SNP Camps</span>
+              <span className="block text-xs text-slate-400">Patient Self-Registration</span>
+            </span>
+          </a>
         </div>
       </header>
 
@@ -130,19 +138,22 @@ export default function SelfRegister() {
               )}
 
               <Field label="Mobile" required hint="Required 10-digit household contact">
-                <Input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="10-digit mobile" inputMode="numeric" data-testid="self-phone-input" />
+                <Input type="tel" value={phone} onChange={(e) => setPhone(normalisePhone(e.target.value))} placeholder="10-digit mobile" inputMode="numeric" autoComplete="tel-national" data-testid="self-phone-input" />
               </Field>
 
               <Field label="Camp day">
-                <select className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300" value={dayId} onChange={(e) => setDayId(e.target.value)} data-testid="self-day-select">
+                <Select value={dayId} onChange={(e) => setDayId(e.target.value)} data-testid="self-day-select">
                   {days.map((d) => <option key={d.id} value={d.id}>{displayDate(d.day_date)}{d.is_today ? " (today)" : ""}</option>)}
-                </select>
+                </Select>
               </Field>
 
               <Alert>{error}</Alert>
-              <Button size="lg" className="w-full" disabled={!scanned || !dayId || !/^\d{10}$/.test(phone) || busy} onClick={submit} data-testid="self-register-submit">
+              <Button size="lg" className="w-full" disabled={busy || missing.length > 0} aria-describedby={missing.length ? "self-register-missing" : undefined} onClick={submit} data-testid="self-register-submit">
                 {busy ? "Registering…" : "Register"}
               </Button>
+              {!busy && missing.length > 0 && (
+                <p id="self-register-missing" className="text-sm text-slate-700" data-testid="self-register-missing">Still needed: {missing.join(", ")}</p>
+              )}
             </Card>
           </>
         )}
@@ -159,9 +170,9 @@ export default function SelfRegister() {
             </div>
             <p className="text-5xl font-display font-extrabold text-emerald-600" data-testid="self-receipt-regno">#{receipt.reg_no}</p>
             <div className="mt-4 text-sm text-slate-600 space-y-1">
-              <p><span className="text-slate-400">Camp:</span> {receipt.camp_name}</p>
-              <p><span className="text-slate-400">Venue:</span> {receipt.venue}</p>
-              <p><span className="text-slate-400">Day:</span> {displayDate(receipt.day_date)}</p>
+              <p><span className="text-slate-600">Camp:</span> {receipt.camp_name}</p>
+              <p><span className="text-slate-600">Venue:</span> {receipt.venue}</p>
+              <p><span className="text-slate-600">Day:</span> {displayDate(receipt.day_date)}</p>
             </div>
             <Button variant="outline" className="mt-6 w-full" onClick={() => { setReceipt(null); setScanned(null); setReqId(""); setReadFailed(false); }} data-testid="self-register-another">
               Register another patient
@@ -175,9 +186,14 @@ export default function SelfRegister() {
 
 function Row({ k, v }) {
   return (
-    <div className="flex justify-between text-sm">
-      <span className="text-slate-400">{k}</span>
-      <span className="font-medium text-slate-800">{v || "-"}</span>
+    <div className="flex justify-between gap-3 text-sm">
+      <span className="shrink-0 text-slate-600">{k}</span>
+      <span className="min-w-0 break-words text-right font-medium text-slate-800">{v || "-"}</span>
     </div>
   );
+}
+
+function normalisePhone(value) {
+  const digits = value.replace(/\D/g, "");
+  return (digits.match(/^(?:91|0)(\d{10})$/)?.[1] || digits).slice(0, 10);
 }

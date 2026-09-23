@@ -266,6 +266,26 @@ _Avoid_: camp records, clinical audit, the reports (there is exactly one export)
 
 Every SMS below is Devanagari, per patient, and carries that patient's reg_no. A household number covering three patients receives three messages. Each is its own DLT template.
 
+**SMS venue**:
+The place name an SMS gives the patient: the short name the admin set on the camp, OT Schedule Day or Specs collection day, else its full venue. It is 3 to 30 characters, carries no link and no phone number, and is never a placeholder such as NA. A schedule whose SMS venue breaks the rule cannot be saved, and no SMS is submitted with one, because the provider charges for a message that fails.
+_Avoid_: short venue, venue_sms (the field, not the idea), SMS address
+
+**Delivery report**:
+The provider's final word on one submitted SMS: delivered or failed, with the reason and the credit charged. Acceptance at submission is not delivery, and a failed message is still charged.
+_Avoid_: DLR (in UI copy), receipt, acknowledgement
+
+**DLT failure**:
+A Delivery report that says the operator refused the message against its DLT template — a variable too long, content that does not match the template or header, or a message the operator rejected. It is a fault in what was sent, not in the patient's phone, so it will repeat for every patient until fixed. An absent, switched-off or DND phone is not a DLT failure.
+_Avoid_: bounce, delivery failure (includes phones that are simply off)
+
+**SMS pause**:
+A message type that has stopped submitting because of a DLT failure. Only an admin resumes it. Pausing one type never stops the others. A registration confirmation or Token SMS that falls due during a pause is not sent later; it is counted as not sent. The day's reminder batch waits instead, and goes out if the type is resumed before the day ends.
+_Avoid_: kill switch, disabled template (a template with no flow is unconfigured, not paused)
+
+**Canary**:
+The first reminder of a type in the day's reminder batch. The rest of that type wait for its Delivery report, up to ten minutes, so a DLT failure costs one message instead of the whole batch.
+_Avoid_: test SMS (that is the operator's consented check), probe
+
 **Registration confirmation**:
 Sent when a registration is created for a future camp day, whether by self-register or by a volunteer. Confirms the patient is registered and states reg_no, camp day date, and venue. A desk registration for today is a walk-in who is already at the camp, so it sends nothing (ADR 0041); self-registration always sends.
 _Avoid_: welcome SMS, enrolment SMS, receipt

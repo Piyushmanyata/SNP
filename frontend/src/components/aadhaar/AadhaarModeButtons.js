@@ -81,7 +81,7 @@ export function AadhaarModeButtons({
                   photoRef.current?.click();
                 }}
                 disabled={blocked}
-                className="flex-1 sm:flex-none"
+                className="flex-auto whitespace-nowrap sm:flex-none"
                 data-testid="aadhaar-photo-button"
               >
                 <Aperture className="w-4 h-4" /> Take photo
@@ -106,7 +106,7 @@ export function AadhaarModeButtons({
               fileRef.current?.click();
             }}
             disabled={blocked}
-            className="flex-1 sm:flex-none"
+            className="flex-auto whitespace-nowrap sm:flex-none"
             data-testid="aadhaar-upload-button"
           >
             <Upload className="w-4 h-4" /> Upload photo / PDF
@@ -128,7 +128,7 @@ export function AadhaarModeButtons({
               setMode(mode === "manual" ? "idle" : "manual");
             }}
             disabled={disabled || busy}
-            className="flex-1 sm:flex-none"
+            className="flex-auto whitespace-nowrap sm:flex-none"
             aria-pressed={mode === "manual"}
             data-testid="aadhaar-manual-toggle"
           >

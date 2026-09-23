@@ -106,6 +106,16 @@ describe("Camp-day board", () => {
     expect(container.querySelector('[data-testid="quiet-text-d2"]').textContent).toBe("Quiet");
     expect(table.querySelector("caption")).not.toBeNull();
     expect(table.querySelector("th[scope='col']")).not.toBeNull();
+    expect(container.querySelector('[data-testid="board-sms-paused"]')).toBeNull();
+  });
+
+  test("flags a paused SMS type and counts messages held back", async () => {
+    api.get.mockResolvedValue({ data: { ...PAYLOAD, sms_not_sent: 4, sms_paused: ["registration", "camp"] } });
+    await act(async () => { root.render(<MemoryRouter><Board /></MemoryRouter>); });
+    expect(container.querySelector('[data-testid="board-sms-paused"]').textContent)
+      .toContain("Registration confirmation, Camp reminder");
+    expect(container.querySelector('[data-testid="board-sms-not-sent"]').textContent).toBe("4");
+    expect(container.querySelector('[data-testid="board-sms-failures"]').textContent).toBe("1");
   });
 
   test("poll pauses while hidden, ignores stale, and resumes on visible", async () => {

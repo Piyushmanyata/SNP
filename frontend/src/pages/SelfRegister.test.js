@@ -81,6 +81,24 @@ test("submit stays disabled without a mobile number", async () => {
     container.querySelector('[data-testid="fake-scan"]').click();
   });
   expect(container.querySelector('[data-testid="self-register-submit"]').disabled).toBe(true);
+  expect(container.querySelector('[data-testid="self-register-missing"]').textContent).toBe("Still needed: 10-digit mobile");
+});
+
+test.each([
+  ["+91 98765 00001", "9876500001"],
+  ["09876500001", "9876500001"],
+  ["98765-00001", "9876500001"],
+  ["98765000012", "9876500001"],
+  ["9123456789", "9123456789"],
+])("the mobile field normalises %s to %s", async (typed, stored) => {
+  await act(async () => root.render(<SelfRegister />));
+  const input = container.querySelector('[data-testid="self-phone-input"]');
+  act(() => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, typed);
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  expect(input.value).toBe(stored);
+  expect(container.querySelector('[data-testid="self-register-missing"]').textContent).toBe("Still needed: Aadhaar card scan");
 });
 
 test("a scan submits the QR payload and never typed identity", async () => {
