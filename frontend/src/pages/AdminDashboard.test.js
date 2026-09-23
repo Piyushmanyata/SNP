@@ -209,14 +209,18 @@ describe("AdminDashboard component", () => {
     act(() => type("camp-date-input", "2026-10-10"));
     expect(submit().disabled).toBe(true);
     act(() => type("camp-number-input", "163"));
+    act(() => type("camp-venue-sms-input", ""));
+    expect(submit().disabled).toBe(true);
+    act(() => type("camp-venue-sms-input", "Hansa Garden, Baghmara, Jasidih, Deoghar"));
     await act(async () => submit().click());
-    expect(api.post).toHaveBeenCalledWith("/camps", expect.objectContaining({ camp_date: "2026-10-10", camp_number: 163 }));
+    expect(api.post).toHaveBeenCalledWith("/camps", expect.objectContaining({ camp_date: "2026-10-10", camp_number: 163, venue_sms: "Hansa Garden, Baghmara, Jasidih, Deoghar" }));
 
     await act(async () => container.querySelector('[data-testid="edit-camp-c-1"]').click());
     act(() => type("camp-number-input", "162"));
+    act(() => type("camp-venue-sms-input", "Short Camp Venue"));
     await act(async () => submit().click());
     expect(api.patch).toHaveBeenCalledWith("/camps/c-1", {
-      name: "Active Nadia Camp", venue: "Krishnanagar Hall", camp_date: "2026-08-27", camp_number: 162,
+      name: "Active Nadia Camp", venue: "Krishnanagar Hall", venue_sms: "Short Camp Venue", camp_date: "2026-08-27", camp_number: 162,
     });
   });
 
@@ -466,6 +470,29 @@ describe("AdminDashboard component", () => {
         venue: "New Optical",
       }
     );
+  });
+
+  test("an OT day with a long hospital name needs a short SMS name", async () => {
+    api.post.mockResolvedValue({ data: {} });
+    await act(async () => root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>));
+    await act(async () => container.querySelector('[data-testid="admin-tab-ot"]').click());
+    const date = container.querySelector('[data-testid="ot-date-input"]');
+    const shortName = container.querySelector('[data-testid="ot-venue-sms-input"]');
+    const save = container.querySelector('[data-testid="add-ot-day-button"]');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    act(() => {
+      setter.call(date, "2026-10-02");
+      date.dispatchEvent(new Event("input", { bubbles: true }));
+      setter.call(shortName, "");
+      shortName.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(save.disabled).toBe(true);
+    act(() => {
+      setter.call(shortName, "Bajaj Hospital, Deoghar");
+      shortName.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => save.click());
+    expect(api.post).toHaveBeenCalledWith("/clinical/ot-days", expect.objectContaining({ venue_sms: "Bajaj Hospital, Deoghar" }));
   });
 
   describe("Camp supplies", () => {

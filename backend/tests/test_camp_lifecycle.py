@@ -22,12 +22,14 @@ os.environ.setdefault("AADHAAR_HASH_PEPPER", "test-pepper")
 import pytest
 from bson import ObjectId
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 import helpers
 import msg91
 import routes_desk
+import routes_camps
 import sms
-from models import CompletePrescriptionBody, FulfilmentBody, RegisterBody, ScanBody, ScanConfirmBody
+from models import CampBody, CompletePrescriptionBody, FulfilmentBody, RegisterBody, ScanBody, ScanConfirmBody
 
 
 def _fulfil(trans_id, rev_id, **kw):
@@ -442,15 +444,39 @@ class TestRegistrationConfirmationSms:
         async def run():
             mock_db = _mock(monkeypatch)
             sent = _recorder(monkeypatch)
-            _camp_id, (day_id,) = await _seed_camp(mock_db, days=(OTHER_DAY,))
+            camp_id, (day_id,) = await _seed_camp(mock_db, days=(OTHER_DAY,))
+            await mock_db.camps.update_one({"_id": camp_id}, {"$set": {"venue_sms": "Short Camp Venue"}})
             a = await _register(day_id, full_name="Sunita Devi", manual_entry=True)
             b = await _register(day_id, full_name="Ram Prasad", manual_entry=True)
             assert [s["type"] for s in sent] == ["registration", "registration"]
             assert [s["reg_no"] for s in sent] == [a["reg_no"], b["reg_no"]]
             assert {s["mobile"] for s in sent} == {"9876500001"}
             assert {s["date"] for s in sent} == {"03-09-2026"}
-            assert {s["venue"] for s in sent} == {"Sikar Bhawan"}
+            assert {s["venue"] for s in sent} == {"Short Camp Venue"}
         asyncio.run(run())
+
+    def test_camp_short_sms_venue_is_saved_and_limited_to_40_characters(self, monkeypatch):
+        async def run():
+            _mock(monkeypatch)
+            created = await routes_camps.create_camp(
+                CampBody(name="Camp", venue="A" * 64, venue_sms="Short Venue", camp_date=OTHER_DAY),
+                actor=ACTOR,
+            )
+            assert created["camp"]["venue_sms"] == "Short Venue"
+            changed = await routes_camps.update_camp(
+                created["camp"]["id"],
+                CampBody(name="Camp", venue="A" * 64, venue_sms="Another Venue", camp_date=OTHER_DAY),
+                actor=ACTOR,
+            )
+            assert changed["camp"]["venue_sms"] == "Another Venue"
+
+        asyncio.run(run())
+        with pytest.raises(ValidationError):
+            CampBody(name="Camp", venue="A" * 64, venue_sms="X" * 41, camp_date=OTHER_DAY)
+        with pytest.raises(ValidationError):
+            CampBody(name="Camp", venue="A" * 64, camp_date=OTHER_DAY)
+        with pytest.raises(ValidationError):
+            CampBody(name="Camp", venue="A" * 64, venue_sms="  ", camp_date=OTHER_DAY)
 
     def test_a_send_failure_does_not_fail_the_registration(self, monkeypatch):
         async def run():
