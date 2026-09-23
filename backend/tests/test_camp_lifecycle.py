@@ -78,6 +78,8 @@ def _mock(monkeypatch):
 
 def _recorder(monkeypatch):
     sent = []
+    for name in msg91.TEMPLATE_ENV.values():
+        monkeypatch.setenv(name, "test-flow")
 
     def fake_send(message_type, mobile, variables):
         sent.append({"type": message_type, "mobile": mobile, **variables})

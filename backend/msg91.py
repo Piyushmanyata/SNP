@@ -16,13 +16,13 @@ TEMPLATE_ENV = {
 
 
 def configured() -> bool:
-    return bool(os.environ.get("MSG91_AUTH_KEY")) and all(
+    return bool(os.environ.get("MSG91_AUTH_KEY")) and any(
         os.environ.get(name) for name in TEMPLATE_ENV.values()
     )
 
 
 def template_id(message_type: str) -> str:
-    return os.environ[TEMPLATE_ENV[message_type]]
+    return os.environ.get(TEMPLATE_ENV[message_type], "")
 
 
 def send_dlt_sms(message_type: str, mobile: str, variables: Dict[str, Any]) -> str:

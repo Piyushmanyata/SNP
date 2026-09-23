@@ -210,3 +210,9 @@ A post-bootstrap archive, `snp_camps-20260908T072922Z.archive.gz`, was restored 
 An ongoing off-machine backup destination is still required. Archives on the VPS do not protect against loss of that VPS. Follow the root README's backup instructions; `docs/ops/backups.md` refers to a `backup-sync` service and `BACKUP_REMOTE` variable that the current Compose file does not implement.
 
 MSG91 credentials and approved templates have not been configured. SMS remains skipped until those are supplied and actual delivery is tested. Real phone scanning and printer acceptance remain operator checks.
+
+## SMS template setup — 23 September 2026
+
+SmartPing approved the registration, camp reminder, surgery scheduled and surgery reminder content on header `SZWTRT`. Their DLT IDs and the matching MSG91 flow IDs are recorded in [msg91-templates.json](msg91-templates.json). All four flows show “Verified by DLT” in MSG91. The two spectacles templates remain rejected with the operator remark “Variable can be reduce to static information.” Their flow IDs must remain unset.
+
+The backend now allows configured message types to send independently ([ADR 0048](adr/0048-enable-only-configured-sms-flows.md)). An `SNPProdSMS` auth key was created with the SMS send rule and IP security limited to the VPS egress address `82.112.234.39`. The key and four approved flow IDs are set in `/opt/snp/.env.production`; `MSG91_TEMPLATE_SPECS_TOKEN` and `MSG91_TEMPLATE_SPECS` remain empty. The key is not stored in the repository. Recreate backend and reminder containers after deploying this change, then verify a consented test message and its provider delivery result before live patient messaging.

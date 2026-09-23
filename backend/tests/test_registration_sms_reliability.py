@@ -136,6 +136,7 @@ def test_sms_ledger_failure_does_not_escape_or_resend_an_accepted_message(monkey
     async def run():
         db = setup_mock_db(monkeypatch)
         monkeypatch.setattr(sms.msg91, "configured", lambda: True)
+        monkeypatch.setenv("MSG91_TEMPLATE_REGISTRATION", "test-flow")
         calls = []
 
         def send(*args):
@@ -162,6 +163,7 @@ def test_accepted_sms_is_not_marked_failed_when_receipt_persistence_fails(monkey
     async def run():
         db = setup_mock_db(monkeypatch)
         monkeypatch.setattr(sms.msg91, "configured", lambda: True)
+        monkeypatch.setenv("MSG91_TEMPLATE_REGISTRATION", "test-flow")
         calls = []
         monkeypatch.setattr(sms.msg91, "send_dlt_sms", lambda *args: calls.append(args) or "accepted")
         update = db.reminder_ledger.update_one
