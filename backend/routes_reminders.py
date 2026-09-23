@@ -1,5 +1,6 @@
 import hmac
 import os
+from datetime import timedelta
 from typing import Any, AsyncGenerator, Dict, List, Tuple
 
 from fastapi import APIRouter, HTTPException, Request
@@ -14,6 +15,7 @@ router = APIRouter(prefix="/api", tags=["cron"])
 
 PAGE_SIZE = 500
 SEND_LIMIT = 200
+CANARY_WAIT = timedelta(minutes=10)
 
 Target = Tuple[dict, str, str | None, str | None, str | None]
 
@@ -55,8 +57,6 @@ async def _camp_targets(db: AsyncIOMotorDatabase, event_date: str) -> AsyncGener
 async def _token_targets(
     db: AsyncIOMotorDatabase, item_type: str, event_date: str
 ) -> AsyncGenerator[Target, None]:
-    day_collection = db.ot_schedule_days if item_type == "ot" else db.specs_collection_days
-    day_field = "ot_schedule_day_id" if item_type == "ot" else "specs_collection_day_id"
     query = {"item_type": item_type, "active": True, "collection_date": event_date}
     async for page in _pages(db.deferred_slips, query):
         for s in page:
@@ -65,13 +65,37 @@ async def _token_targets(
             patient = await db.patients.find_one({"_id": s["patient_id"]})
             if not patient:
                 continue
-            venue = s.get("collection_venue") or ""
-            if item_type != "specs_made" and s.get(day_field):
-                day = await day_collection.find_one({"_id": s[day_field]})
+            venue = s.get("collection_venue_sms") or s.get("collection_venue") or ""
+            if item_type == "ot" and s.get("ot_schedule_day_id"):
+                day = await db.ot_schedule_days.find_one({"_id": s["ot_schedule_day_id"]})
                 if day:
                     venue = day.get("venue_sms") or day["venue"]
             yield (patient, venue, s.get("collection_start_time"), s.get("collection_end_time"),
                    s.get("collection_end_date"))
+
+
+async def _gate(db: AsyncIOMotorDatabase, message_type: str, event_date: str) -> str:
+    control = await db.sms_controls.find_one({"_id": message_type}) or {}
+    if control.get("paused"):
+        return "paused"
+    return await _canary(db, message_type, event_date, control.get("resumed_at"))
+
+
+async def _canary(db: AsyncIOMotorDatabase, message_type: str, event_date: str, resumed_at: Any) -> str:
+    query: Dict[str, Any] = {
+        "message_type": message_type, "event_date": event_date,
+        "status": {"$in": ["sent", "uncertain", "rejected"]},
+    }
+    if resumed_at:
+        query["created_at"] = {"$gte": resumed_at}
+    first = await db.reminder_ledger.find(query).sort("created_at", 1).limit(1).to_list(1)
+    if not first:
+        return "canary"
+    row = first[0]
+    settled = row["status"] == "rejected" or row.get("delivery")
+    if settled or helpers.as_utc(row["created_at"]) <= helpers.now_utc() - CANARY_WAIT:
+        return "open"
+    return "waiting"
 
 
 async def _send_each(
@@ -93,6 +117,9 @@ async def _send_each(
                 db, patient, message_type, event_date, venue,
                 start_time=start, end_time=end, end_date=end_date, retry_after=sms.RETRY_AFTER,
             )
+            if outcome == "paused":
+                complete = False
+                break
             if outcome == "skipped":
                 continue
             used += 1
@@ -112,24 +139,31 @@ async def send_d1_reminders() -> Dict[str, Any]:
     sent = 0
     used = 0
     complete = True
+    waiting = False
     for message_type, item_type in (("camp", None), ("ot", "ot"), ("specs", "specs_made")):
-        if not complete:
-            break
+        gate = await _gate(db, message_type, tomorrow)
+        if gate in ("paused", "waiting"):
+            complete, waiting = False, True
+            continue
         targets = (
             _camp_targets(db, tomorrow) if item_type is None
             else _token_targets(db, item_type, tomorrow)
         )
-        dispatched, attempted, complete = await _send_each(
-            db, message_type, targets, tomorrow, SEND_LIMIT - used,
+        dispatched, attempted, drained = await _send_each(
+            db, message_type, targets, tomorrow, min(1, SEND_LIMIT - used) if gate == "canary" else SEND_LIMIT - used,
         )
         sent += dispatched
         used += attempted
+        if not drained:
+            complete = False
+            if gate == "open" and not await sms.paused(db, message_type):
+                break
+            waiting = True
     failed = await db.reminder_ledger.count_documents({
-        "event_date": tomorrow, "message_type": {"$in": ["camp", "ot", "specs"]},
-        "status": {"$in": ["failed", "abandoned"]},
+        "event_date": tomorrow, "message_type": {"$in": ["camp", "ot", "specs"]}, "status": "failed",
     })
     return {
-        "ok": failed == 0, "sent": sent, "failed": failed, "complete": complete,
+        "ok": failed == 0, "sent": sent, "failed": failed, "complete": complete, "waiting": waiting,
         "event_date": tomorrow, "send_date": today,
     }
 

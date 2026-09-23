@@ -7,22 +7,25 @@ import {
 } from "../components/ui";
 import {
   Tent, Users, CalendarDays, Trophy, Download, Scissors, Glasses, Power, Trash2,
-  Plus, PrinterCheck, ClipboardList, Stethoscope, FileText, BarChart3, Pill, Pencil,
+  Plus, PrinterCheck, ClipboardList, Stethoscope, FileText, BarChart3, Pill, Pencil, MessageSquare, RefreshCw,
 } from "lucide-react";
 import { formatPower } from "../components/clinical";
 import TemplateEditor from "../components/TemplateEditor";
-import { displayDate, displayDateRange, displayTimeRange } from "../lib/dates";
+import { displayDate, displayDateRange, displayTimeRange, displayTimestamp } from "../lib/dates";
+import { SMS_LABELS, SMS_VENUE_MAX, smsVenueFor } from "../lib/sms";
 
 const CAMP_VENUE = "Hansa Garden, Rohini Road in Baghmara, Jasidih, Deoghar - 814142";
-const NEW_CAMP = { name: "SNP नेत्र शिविर", venue: CAMP_VENUE, venue_sms: "Hansa Garden, Baghmara, Jasidih, Deoghar", camp_date: "", camp_number: "" };
+const NEW_CAMP = { name: "SNP नेत्र शिविर", venue: CAMP_VENUE, venue_sms: "Hansa Garden, Jasidih, Deoghar", camp_date: "", camp_number: "" };
 const HOSPITAL_VENUE = "Vimla Ramkrishna Bajaj Eye Hospital, Near Canara Bank, Bilasi Mod, Deoghar 814112 (Jharkhand)";
 const HOSPITAL_SMS_VENUE = "बजाज हॉस्पिटल, देवघर";
+const NEW_SPECS_DAY = { day_date: "", end_date: "", venue: "", venue_sms: "" };
 
 const TABS = [
   { id: "overview", label: "Overview", icon: ClipboardList },
   { id: "camps", label: "Camps & Days", icon: Tent },
   { id: "template", label: "Rx Template", icon: FileText },
   { id: "ot", label: "OT & Specs", icon: Scissors },
+  { id: "sms", label: "SMS", icon: MessageSquare },
   { id: "supplies", label: "Camp supplies", icon: Pill },
   { id: "board", label: "Leaderboards", icon: Trophy },
   { id: "exports", label: "Exports", icon: Download },
@@ -32,7 +35,7 @@ export default function AdminDashboard() {
   const [tab, setTab] = useState("overview");
   return (
     <Layout title="Admin">
-      <div className="flex flex-wrap gap-2 mb-5" data-testid="admin-tabs">
+      <div className="flex gap-2 mb-5 -mx-4 px-4 overflow-x-auto [scrollbar-width:none] sm:mx-0 sm:px-0 sm:flex-wrap sm:overflow-visible" data-testid="admin-tabs">
         {TABS.map((t) => {
           const Icon = t.icon;
           return (
@@ -48,6 +51,7 @@ export default function AdminDashboard() {
       {tab === "camps" && <Camps />}
       {tab === "template" && <TemplateEditor />}
       {tab === "ot" && <div className="space-y-5"><OtSchedule /><SpecsCollectionDays /></div>}
+      {tab === "sms" && <SmsHealth />}
       {tab === "supplies" && <div className="space-y-5"><Medicines /><FixedPowers /></div>}
       {tab === "board" && <Leaderboards />}
       {tab === "exports" && <Exports />}
@@ -74,7 +78,10 @@ function Overview() {
       <Card>
         <p className="text-xs font-mono uppercase tracking-widest text-slate-500">Active Camp</p>
         {camp ? (
-          <p className="font-display font-extrabold text-2xl text-slate-900 mt-1">{camp.name} <span className="text-slate-600 font-normal text-base">· {camp.venue}</span></p>
+          <>
+            <p className="font-display font-extrabold text-2xl text-slate-900 mt-1">{camp.name}</p>
+            <p className="text-slate-600 text-sm mt-1 break-words">{camp.venue}</p>
+          </>
         ) : (
           <p className="text-slate-600 mt-1">No active camp. Create & activate one under “Camps & Days”.</p>
         )}
@@ -164,13 +171,13 @@ function Camps() {
         <Card key={c.id} data-testid={`camp-card-${c.id}`}>
           <div className="flex flex-wrap items-center gap-3">
             <Tent className={`w-5 h-5 ${c.is_active ? "text-emerald-500" : "text-slate-300"}`} />
-            <div className="flex-1">
+            <div className="flex-1 min-w-0 basis-56">
               <p className="font-display font-bold text-slate-900">{c.name} {c.is_active && <Badge tone="emerald">Active</Badge>}</p>
               <p className="text-xs text-slate-600">{c.venue} · {displayDate(c.camp_date)}</p>
               {c.camp_number
                 ? <Badge className="mt-1" data-testid={`camp-number-${c.id}`}>SMS camp no. {c.camp_number}</Badge>
                 : <Badge tone="amber" className="mt-1" data-testid={`camp-number-missing-${c.id}`}>No camp number: SMS are not sent</Badge>}
-              {!c.venue_sms && c.venue.length > 40 && <Badge tone="amber" className="mt-1" data-testid={`camp-sms-venue-missing-${c.id}`}>Set a short SMS venue to send messages</Badge>}
+<SmsVenueBadge venue={c.venue} venueSms={c.venue_sms} testid={`camp-sms-venue-missing-${c.id}`} />
             </div>
             <Button size="sm" variant="outline" onClick={() => openCamp(c)} data-testid={`edit-camp-${c.id}`}><Pencil className="w-4 h-4" /> Edit</Button>
             {c.is_active ? (
@@ -209,10 +216,10 @@ function Camps() {
         <div className="space-y-3">
           <Field label="Camp name" required><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} data-testid="camp-name-input" /></Field>
           <Field label="Venue" required hint="Full address shown on camp records."><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="camp-venue-input" /></Field>
-          <Field label="Short venue for SMS" hint="Required when the full venue exceeds 40 characters; use a clear name patients will recognise."><Input value={form.venue_sms} maxLength={40} onChange={(e) => setForm({ ...form, venue_sms: e.target.value })} data-testid="camp-venue-sms-input" /></Field>
+          <SmsVenueField label="Short venue for SMS" venue={form.venue} value={form.venue_sms} onChange={(venue_sms) => setForm({ ...form, venue_sms })} testid="camp-venue-sms-input" />
           <Field label="Camp date" required><Input type="date" value={form.camp_date} onChange={(e) => setForm({ ...form, camp_date: e.target.value })} data-testid="camp-date-input" /></Field>
           <Field label="Camp number" required hint="The SMS reads “Sikar Zilla Welfare Trust के 162वें नेत्र शिविर”."><Input type="number" min="1" step="1" inputMode="numeric" value={form.camp_number} onChange={(e) => setForm({ ...form, camp_number: e.target.value })} data-testid="camp-number-input" /></Field>
-          <Button className="w-full" onClick={saveCamp} disabled={busy || !form.name || !form.venue || (form.venue.length > 40 && !form.venue_sms.trim()) || !form.camp_date || !(Number.isInteger(campNumber) && campNumber > 0)} data-testid="camp-create-submit">{editing ? "Save" : "Create"}</Button>
+          <Button className="w-full" onClick={saveCamp} disabled={busy || !form.name || !form.venue || Boolean(smsVenueFor(form.venue, form.venue_sms).problem) || !form.camp_date || !(Number.isInteger(campNumber) && campNumber > 0)} data-testid="camp-create-submit">{editing ? "Save" : "Create"}</Button>
         </div>
       </Modal>
     </div>
@@ -315,21 +322,21 @@ function OtSchedule() {
         <div className="space-y-2" data-testid="ot-days-list">
           {days.length === 0 && <p className="text-slate-600 text-sm">No OT days yet.</p>}
           {days.map((d) => (
-            <div key={d.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50" data-testid={`ot-day-${d.id}`}>
+            <div key={d.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 p-3 rounded-xl bg-slate-50" data-testid={`ot-day-${d.id}`}>
               <Scissors className="w-4 h-4 text-emerald-600" />
               <span className="font-medium text-slate-800 text-sm">{displayDate(d.day_date)}</span>
-              <span className="text-xs text-slate-600">{d.venue}</span>
-              {!d.venue_sms && d.venue.length > 40 && <Badge tone="amber">Set a short SMS venue</Badge>}
               <Badge tone={d.seats_free > 0 ? "emerald" : "rose"} className="ml-auto">{d.seats_taken}/{d.seat_limit} seats</Badge>
+              <span className="basis-full text-xs text-slate-600 break-words">{d.venue}</span>
+              <SmsVenueBadge venue={d.venue} venueSms={d.venue_sms} testid={`ot-sms-venue-problem-${d.id}`} />
             </div>
           ))}
         </div>
-        <div className="flex flex-wrap gap-2 items-end pt-4 mt-3 border-t border-slate-100">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start pt-4 mt-3 border-t border-slate-100">
           <Field label="Date"><Input type="date" value={form.day_date} onChange={(e) => { const existing = days.find((d) => d.day_date === e.target.value); setForm({ ...form, day_date: e.target.value, venue: existing ? existing.venue : HOSPITAL_VENUE, venue_sms: existing ? existing.venue_sms || "" : HOSPITAL_SMS_VENUE, seat_limit: existing ? existing.seat_limit : form.seat_limit }); }} data-testid="ot-date-input" /></Field>
+          <Field label="Seats"><Input type="number" inputMode="numeric" min="1" value={form.seat_limit} onChange={(e) => setForm({ ...form, seat_limit: e.target.value })} data-testid="ot-seat-input" /></Field>
           <Field label="Hospital"><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="ot-venue-input" /></Field>
-          <Field label="Short name for SMS" hint="Required when the hospital name exceeds 40 characters."><Input value={form.venue_sms} maxLength={40} onChange={(e) => setForm({ ...form, venue_sms: e.target.value })} placeholder={HOSPITAL_SMS_VENUE} data-testid="ot-venue-sms-input" /></Field>
-          <Field label="Seats"><Input type="number" value={form.seat_limit} onChange={(e) => setForm({ ...form, seat_limit: e.target.value })} className="w-24" data-testid="ot-seat-input" /></Field>
-          <Button size="sm" onClick={add} disabled={!form.day_date || !form.venue || (form.venue.length > 40 && !form.venue_sms.trim())} data-testid="add-ot-day-button"><Plus className="w-4 h-4" /> Add</Button>
+          <SmsVenueField label="Short name for SMS" venue={form.venue} value={form.venue_sms} onChange={(venue_sms) => setForm({ ...form, venue_sms })} placeholder={HOSPITAL_SMS_VENUE} testid="ot-venue-sms-input" />
+          <Button className="sm:col-span-2" onClick={add} disabled={!form.day_date || !form.venue || Boolean(smsVenueFor(form.venue, form.venue_sms).problem)} data-testid="add-ot-day-button"><Plus className="w-4 h-4" /> Add OT day</Button>
         </div>
       </Card>
     </div>
@@ -340,7 +347,7 @@ function SpecsCollectionDays() {
   const [days, setDays] = useState([]);
   const [camp, setCamp] = useState(null);
   const [err, setErr] = useState("");
-  const [form, setForm] = useState({ day_date: "", end_date: "", venue: "" });
+  const [form, setForm] = useState(NEW_SPECS_DAY);
 
   const load = useCallback(() => {
     Promise.all([api.get("/clinical/specs-days"), api.get("/camps/active")])
@@ -354,7 +361,7 @@ function SpecsCollectionDays() {
     if (!camp) { setErr("Activate a camp first."); return; }
     try {
       await api.post("/clinical/specs-days", { camp_id: camp.id, ...form });
-      setForm({ day_date: "", end_date: "", venue: "" });
+      setForm(NEW_SPECS_DAY);
       load();
     }
     catch (e) { setErr(formatApiError(e)); }
@@ -368,24 +375,122 @@ function SpecsCollectionDays() {
         <div className="space-y-2" data-testid="specs-days-list">
           {days.length === 0 && <p className="text-slate-600 text-sm">No Specs collection days yet.</p>}
           {days.map((d) => (
-            <div key={d.id} className="flex items-center gap-3 p-3 rounded-xl bg-slate-50" data-testid={`specs-day-${d.id}`}>
+            <div key={d.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 p-3 rounded-xl bg-slate-50" data-testid={`specs-day-${d.id}`}>
               <Glasses className="w-4 h-4 text-emerald-600" />
               <span className="font-medium text-slate-800 text-sm">{displayDateRange(d.day_date, d.end_date)}</span>
-              <span className="text-xs text-slate-600">{d.venue}</span>
               <Badge tone={d.window_required ? "amber" : "emerald"} className="ml-auto">
                 {d.start_time && d.end_time ? displayTimeRange(d.start_time, d.end_time) : "window required"}
               </Badge>
+              <span className="basis-full text-xs text-slate-600 break-words">{d.venue}</span>
+              <SmsVenueBadge venue={d.venue} venueSms={d.venue_sms} testid={`specs-sms-venue-problem-${d.id}`} />
             </div>
           ))}
         </div>
-        <div className="flex flex-wrap gap-2 items-end pt-4 mt-3 border-t border-slate-100">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start pt-4 mt-3 border-t border-slate-100">
           <Field label="From"><Input type="date" value={form.day_date} onChange={(e) => setForm({ ...form, day_date: e.target.value })} data-testid="specs-date-input" /></Field>
           <Field label="To"><Input type="date" value={form.end_date} min={form.day_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} data-testid="specs-end-date-input" /></Field>
           <Field label="Venue"><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="specs-venue-input" /></Field>
-          <Button size="sm" onClick={add} disabled={!form.day_date || !form.venue} data-testid="add-specs-day-button"><Plus className="w-4 h-4" /> Add</Button>
+          <SmsVenueField label="Short venue for SMS" venue={form.venue} value={form.venue_sms} onChange={(venue_sms) => setForm({ ...form, venue_sms })} testid="specs-venue-sms-input" />
+          <Button className="sm:col-span-2" onClick={add} disabled={!form.day_date || !form.venue || Boolean(smsVenueFor(form.venue, form.venue_sms).problem)} data-testid="add-specs-day-button"><Plus className="w-4 h-4" /> Add collection days</Button>
         </div>
         <p className="text-xs text-slate-500 mt-2">Leave “To” empty for a single day. Collection hours: 10:00 AM–5:00 PM.</p>
       </Card>
+    </div>
+  );
+}
+
+function SmsVenueField({ label, venue, value, onChange, placeholder, testid }) {
+  const sms = smsVenueFor(venue, value);
+  const note = sms.problem
+    ? `${sms.problem}${value.trim() ? "" : ". Set a short name patients will recognise."}`
+    : sms.text ? `SMS will say “${sms.text}” · ${sms.length}/${SMS_VENUE_MAX}` : `Up to ${SMS_VENUE_MAX} characters. Leave empty to use the venue.`;
+  return (
+    <Field label={label}>
+      <Input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-invalid={Boolean(sms.problem)} className={sms.problem ? "border-rose-400 focus:ring-rose-500 focus:border-rose-500" : ""} data-testid={testid} />
+      <span className={`block text-xs mt-1 break-words ${sms.problem ? "text-rose-700 font-medium" : "text-slate-600"}`} data-testid={`${testid}-note`}>{note}</span>
+    </Field>
+  );
+}
+
+function SmsVenueBadge({ venue, venueSms, testid }) {
+  const { problem } = smsVenueFor(venue, venueSms);
+  return problem ? <Badge tone="amber" className="mt-1" data-testid={testid}>No SMS until fixed: {problem}</Badge> : null;
+}
+
+function todayLine(t) {
+  const parts = [
+    [t.submitted, "submitted"], [t.delivered, "delivered"], [t.dlt_failed + t.other_failed, "failed"],
+    [t.uncertain, "reply lost"], [t.rejected + t.unsent, "not accepted"], [t.paused, "held back"],
+  ].filter(([n]) => n > 0);
+  return parts.length ? `Today: ${parts.map(([n, label]) => `${n} ${label}`).join(" · ")}` : "Nothing sent today";
+}
+
+function SmsHealth() {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState("");
+  const load = useCallback(() => {
+    setErr("");
+    api.get("/sms/status").then((r) => setData(r.data)).catch((e) => setErr(formatApiError(e)));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const resume = useCallback(async (type) => {
+    if (!window.confirm(`Resume ${SMS_LABELS[type]}? Fix the cause first: a message that fails again is still charged.`)) return;
+    setBusy(type);
+    setErr("");
+    try { setData((await api.post(`/sms/${type}/resume`)).data); }
+    catch (e) { setErr(formatApiError(e)); }
+    finally { setBusy(""); }
+  }, []);
+
+  if (!data) return err ? <ErrorCard message={err} onRetry={load} /> : <p className="text-slate-600" data-testid="sms-loading">Loading SMS status…</p>;
+  const today = data.today;
+  return (
+    <div className="space-y-4" data-testid="sms-health">
+      {err && <Alert>{err}</Alert>}
+      {!data.reports_enabled && (
+        <Alert tone="amber">Delivery reports are off. Failed messages are not counted here, and a DLT failure cannot pause sending.</Alert>
+      )}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <Stat label="Submitted today" value={today.submitted} testid="sms-today-submitted" />
+        <Stat label="Delivered" value={today.delivered} tone="emerald" testid="sms-today-delivered" />
+        <Stat label="DLT failures" value={today.dlt_failed} tone={today.dlt_failed ? "amber" : "slate"} testid="sms-today-dlt" />
+        <Stat label="Credits charged" value={today.credits} testid="sms-today-credits" />
+      </div>
+      <Card className="!p-0 overflow-hidden">
+        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-100">
+          <h3 className="font-display font-bold text-slate-900">Message types</h3>
+          <Button size="sm" variant="ghost" onClick={load} aria-label="Refresh SMS status" data-testid="sms-refresh"><RefreshCw className="w-4 h-4" /></Button>
+        </div>
+        <ul className="divide-y divide-slate-100">
+          {data.types.map((t) => (
+            <li key={t.message_type} className="p-4 flex flex-col sm:flex-row sm:items-center gap-3" data-testid={`sms-type-${t.message_type}`}>
+              <div className="flex-1 min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="font-semibold text-slate-900">{SMS_LABELS[t.message_type]}</p>
+                  {t.paused ? <Badge tone="rose">Paused</Badge> : t.configured ? <Badge tone="emerald">Sending</Badge> : <Badge>Not set up</Badge>}
+                </div>
+                {t.paused && (
+                  <p className="text-sm text-rose-700 mt-1 break-words" data-testid={`sms-paused-reason-${t.message_type}`}>
+                    {t.paused_reason} · {displayTimestamp(t.paused_at)}
+                    {t.paused_request_id && <span className="block text-xs text-slate-600 font-mono">MSG91 request {t.paused_request_id}</span>}
+                  </p>
+                )}
+                <p className="text-xs text-slate-600 mt-1" data-testid={`sms-today-${t.message_type}`}>{todayLine(t.today)}</p>
+              </div>
+              {t.paused && (
+                <Button className="w-full sm:w-auto" onClick={() => resume(t.message_type)} disabled={busy === t.message_type} data-testid={`sms-resume-${t.message_type}`}>
+                  Resume
+                </Button>
+              )}
+            </li>
+          ))}
+        </ul>
+      </Card>
+      <p className="text-xs text-slate-600">
+        A DLT failure pauses that message type, because the provider charges for every failed message. Registration and Token SMS due while paused are not sent later; the day’s reminders wait and go out if you resume before the day ends.
+      </p>
     </div>
   );
 }

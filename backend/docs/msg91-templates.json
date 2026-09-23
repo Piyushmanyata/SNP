@@ -8,7 +8,7 @@
     "reg_no": "Patient registration / token number",
     "date": "Event date as DD-MM-YYYY. For specs templates, the first day of the collection window",
     "end_date": "Specs only: last day of the collection window as DD-MM-YYYY; equals date for a one-day window",
-    "venue": "Camp, hospital or distribution venue name; maximum 40 characters per DLT variable. For a camp, use venue_sms when set, else its full venue (ADR 0050). For surgery use the OT Schedule Day's venue_sms when set, else its full venue (ADR 0040)"
+    "venue": "Camp, hospital or distribution venue name; 3 to 30 characters with no link, phone number or placeholder (ADR 0051). Use the camp, OT Schedule Day or Specs collection day venue_sms when set, else its full venue"
   },
   "dlt_portal_note": "dlt_portal_body is the text to register on the DLT portal; each {#var#} is filled in the order listed in variables. dlt_body is the same text in MSG91 flow syntax. The four non-specs templates were approved on SmartPing and verified in MSG91 on 23 September 2026. The revised specs copies require new DLT approval before their MSG91 flows can be configured for sending.",
   "templates": [

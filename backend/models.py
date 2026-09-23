@@ -2,8 +2,20 @@ from datetime import date
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 from typing import Annotated, Optional, List, Dict, Any
 
+from sms import clean_sms_venue, sms_venue_problem
+
 
 DateString = Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$"), AfterValidator(lambda value: date.fromisoformat(value).isoformat())]
+
+
+def _checked_sms_venue(venue: str, venue_sms: Optional[str]) -> Optional[str]:
+    short = clean_sms_venue(venue_sms) or None
+    if not short and not venue.strip():
+        return None
+    problem = sms_venue_problem(short or clean_sms_venue(venue))
+    if problem:
+        raise ValueError(problem if short else f"{problem}; set a short SMS venue")
+    return short
 
 
 # ---- auth ----
@@ -39,17 +51,15 @@ class CampSetupDay(BaseModel):
 class CampBody(BaseModel):
     name: str
     venue: str
-    venue_sms: Optional[str] = Field(default=None, max_length=40)
+    venue_sms: Optional[str] = None
     camp_date: Optional[DateString] = None
     camp_number: Optional[int] = Field(default=None, gt=0)
     days: Optional[List[CampSetupDay]] = None
     setup_request_id: Optional[str] = None
 
     @model_validator(mode="after")
-    def require_short_sms_venue(self) -> "CampBody":
-        self.venue_sms = (self.venue_sms or "").strip() or None
-        if len(self.venue) > 40 and not self.venue_sms:
-            raise ValueError("Short SMS venue is required when the full venue exceeds 40 characters")
+    def check_sms_venue(self) -> "CampBody":
+        self.venue_sms = _checked_sms_venue(self.venue, self.venue_sms)
         return self
 
 
@@ -218,14 +228,12 @@ class OtScheduleBody(BaseModel):
     camp_id: str
     day_date: str
     venue: str
-    venue_sms: Optional[str] = Field(default=None, max_length=40)
+    venue_sms: Optional[str] = None
     seat_limit: int
 
     @model_validator(mode="after")
-    def require_short_sms_venue(self) -> "OtScheduleBody":
-        self.venue_sms = (self.venue_sms or "").strip() or None
-        if len(self.venue) > 40 and not self.venue_sms:
-            raise ValueError("Short SMS venue is required when the full venue exceeds 40 characters")
+    def check_sms_venue(self) -> "OtScheduleBody":
+        self.venue_sms = _checked_sms_venue(self.venue, self.venue_sms)
         return self
 
 
@@ -234,5 +242,11 @@ class SpecsScheduleBody(BaseModel):
     day_date: str
     end_date: Optional[str] = None
     venue: str
+    venue_sms: Optional[str] = None
     start_time: Optional[str] = None
     end_time: Optional[str] = None
+
+    @model_validator(mode="after")
+    def check_sms_venue(self) -> "SpecsScheduleBody":
+        self.venue_sms = _checked_sms_venue(self.venue, self.venue_sms)
+        return self

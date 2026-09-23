@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from "react";
 import api, { formatApiError } from "../lib/api";
 import Layout from "../components/Layout";
-import { Card, Stat } from "../components/ui";
+import { Alert, Card, Stat } from "../components/ui";
 import { displayDate, displayDateRange, displayTimeRange, displayTimestamp } from "../lib/dates";
+import { SMS_LABELS } from "../lib/sms";
 
 const POLL_MS = 15000;
 
@@ -73,6 +74,13 @@ export default function Board() {
         )}
         {data && (
           <>
+            {(data.sms_paused || []).length > 0 && (
+              <div data-testid="board-sms-paused">
+                <Alert>
+                  SMS paused after a DLT failure: {data.sms_paused.map((type) => SMS_LABELS[type] || type).join(", ")}. An admin must resume it.
+                </Alert>
+              </div>
+            )}
             <p className="text-sm text-slate-600" data-testid="board-context">
               {data.camp?.name || "No camp"}
               {data.day?.day_date ? ` · ${displayDate(data.day.day_date)}` : ""}
@@ -90,7 +98,8 @@ export default function Board() {
                 testid="board-backlog"
               />
               <Stat label="Quiet volunteers" value={data.quiet_count ?? 0} testid="board-quiet-count" />
-              <Stat label="SMS failures" value={data.sms_failures ?? 0} testid="board-sms-failures" />
+              <Stat label="SMS failures" value={data.sms_failures ?? 0} tone={(data.sms_failures ?? 0) > 0 ? "amber" : "slate"} testid="board-sms-failures" />
+              <Stat label="SMS held back" value={data.sms_not_sent ?? 0} tone={(data.sms_not_sent ?? 0) > 0 ? "amber" : "slate"} testid="board-sms-not-sent" />
               <Stat
                 label="Medicine given"
                 value={fulfilment.medicine?.fulfilled ?? 0}
@@ -111,29 +120,31 @@ export default function Board() {
                 value={fulfilment.ot?.declined ?? 0}
                 testid="board-ot-declined"
               />
-              <Stat
-                label="Next OT"
-                value={
-                  data.next_ot
-                    ? `${displayDate(data.next_ot.day_date)} · ${data.next_ot.venue} · ${data.next_ot.seats_left} seats`
-                    : "No day scheduled"
-                }
-                testid="board-next-ot"
-              />
-              <Stat
-                label="Next Specs"
-                value={
-                  data.next_specs
-                    ? `${displayDateRange(data.next_specs.day_date, data.next_specs.end_date)} · ${data.next_specs.venue} · ${displayTimeRange(data.next_specs.start_time, data.next_specs.end_time)}`
-                    : "No day scheduled"
-                }
-                testid="board-next-specs"
-              />
             </div>
+            <Card>
+              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="min-w-0">
+                  <dt className="text-xs font-mono uppercase tracking-widest text-slate-600">Next OT</dt>
+                  <dd className="mt-1 font-semibold text-slate-900 break-words" data-testid="board-next-ot">
+                    {data.next_ot
+                      ? `${displayDate(data.next_ot.day_date)} · ${data.next_ot.venue} · ${data.next_ot.seats_left} seats`
+                      : "No day scheduled"}
+                  </dd>
+                </div>
+                <div className="min-w-0">
+                  <dt className="text-xs font-mono uppercase tracking-widest text-slate-600">Next Specs</dt>
+                  <dd className="mt-1 font-semibold text-slate-900 break-words" data-testid="board-next-specs">
+                    {data.next_specs
+                      ? `${displayDateRange(data.next_specs.day_date, data.next_specs.end_date)} · ${data.next_specs.venue} · ${displayTimeRange(data.next_specs.start_time, data.next_specs.end_time)}`
+                      : "No day scheduled"}
+                  </dd>
+                </div>
+              </dl>
+            </Card>
             <Card>
               <h3 className="font-display font-bold text-slate-900 mb-3">Registration activity</h3>
               <div className="overflow-x-auto">
-                <table className="w-full text-sm min-w-[480px]" data-testid="board-activity">
+                <table className="w-full text-sm" data-testid="board-activity">
                   <caption className="sr-only">Registration activity by Volunteer</caption>
                   <thead>
                     <tr className="text-left text-slate-500">

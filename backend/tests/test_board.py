@@ -237,6 +237,16 @@ class TestCampDayBoard:
                 "status": "abandoned", "created_at": NOW - timedelta(minutes=1),
                 "patient_id": p_seen,
             })
+            for row in (
+                {"status": "rejected"},
+                {"status": "sent", "delivery": "failed", "dlt_failure": True},
+                {"status": "sent", "delivery": "delivered"},
+                {"status": "uncertain"},
+                {"status": "paused"},
+            ):
+                await mock_db.reminder_ledger.insert_one({**row, "created_at": NOW - timedelta(minutes=1), "patient_id": p_tx})
+            await mock_db.sms_controls.insert_one({"_id": "registration", "paused": True})
+            await mock_db.sms_controls.insert_one({"_id": "camp", "paused": False})
             out = await camp_day_board(actor=ADMIN)
             assert out["state"] == "current"
             assert out["as_of"]
@@ -256,7 +266,9 @@ class TestCampDayBoard:
             assert out["next_ot"]["venue"] == "OT Hall"
             assert out["next_specs"]["start_time"] == "10:00"
             assert "seats_left" not in out["next_specs"]
-            assert out["sms_failures"] == 2
+            assert out["sms_failures"] == 4
+            assert out["sms_not_sent"] == 1
+            assert out["sms_paused"] == ["registration"]
             blob = " ".join(_walk_strings(out))
             assert "Sunita" not in blob
             assert "Ramesh" not in blob

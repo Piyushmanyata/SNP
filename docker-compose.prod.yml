@@ -43,6 +43,7 @@ services:
       MSG91_TEMPLATE_OT: ${MSG91_TEMPLATE_OT:-}
       MSG91_TEMPLATE_SPECS_TOKEN: ${MSG91_TEMPLATE_SPECS_TOKEN:-}
       MSG91_TEMPLATE_SPECS: ${MSG91_TEMPLATE_SPECS:-}
+      MSG91_WEBHOOK_SECRET: ${MSG91_WEBHOOK_SECRET:-}
     depends_on:
       mongo:
         condition: service_healthy

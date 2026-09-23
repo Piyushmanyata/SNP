@@ -136,6 +136,8 @@ async def init_indexes() -> None:
     await db.patients.create_index([("camp_id", ASCENDING), ("phone_normalized", ASCENDING)])
     await db.patients.create_index([("camp_id", ASCENDING), ("queue_status", ASCENDING)])
     await db.reminder_ledger.create_index([("status", ASCENDING), ("created_at", ASCENDING)])
+    await db.reminder_ledger.create_index("provider_id", sparse=True)
+    await db.reminder_ledger.create_index("created_at")
     patient_indexes = await db.patients.index_information()
     if should_drop_person_camp_index(patient_indexes):
         await db.patients.drop_index(PERSON_CAMP_INDEX_NAME)

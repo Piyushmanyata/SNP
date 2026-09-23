@@ -23,6 +23,7 @@ import routes_clinical
 import routes_reports
 import routes_templates
 import routes_reminders
+import routes_sms
 
 
 async def seed_admin() -> None:
@@ -86,3 +87,4 @@ app.include_router(routes_clinical.router)
 app.include_router(routes_reports.router)
 app.include_router(routes_templates.router)
 app.include_router(routes_reminders.router)
+app.include_router(routes_sms.router)

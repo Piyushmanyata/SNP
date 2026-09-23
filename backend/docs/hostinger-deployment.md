@@ -222,3 +222,23 @@ The backend now allows configured message types to send independently ([ADR 0048
 [ADR 0049](adr/0049-fixed-spectacles-collection-hours.md) fixes collection at 10:00 AM–5:00 PM. The backend persists `10:00` and `17:00`; staff screens and printed tokens use AM/PM. The revised spectacles SMS copies place those hours in static text, leaving five DLT variables. The two rejected IDs in [msg91-templates.json](msg91-templates.json) describe the old text only. Keep the spectacles flow IDs unset until SmartPing approves the revised text and MSG91 verifies matching flows.
 
 Before this deployment, production had one future spectacles day (5 October–6 November 2026) at 10:00–15:00 and zero active spectacles slips. After deploying the code, re-save that date range in Admin → OT & Specs to set 10:00–17:00, then verify the listed hours before assigning patients. Other environments must audit their active slips before changing a schedule because printed tokens snapshot the hours.
+
+## SMS cost guard — 23 September 2026
+
+[ADR 0051](adr/0051-one-sms-venue-rule-at-thirty-characters.md) limits every DLT variable to 30 characters and holds every SMS venue to one rule. [ADR 0052](adr/0052-delivery-reports-pause-and-canary.md) reads MSG91 delivery reports, pauses a message type after a DLT failure, and sends one reminder per type before the rest of the batch. Admin → SMS shows each message type, pauses and today's credits, and resumes a paused type.
+
+Delivery reports need one shared secret. `MSG91_WEBHOOK_SECRET` is set in `/opt/snp/.env.production`, which only root can read; read it on the VPS with:
+
+```sh
+grep '^MSG91_WEBHOOK_SECRET=' /opt/snp/.env.production | cut -d= -f2-
+```
+
+In MSG91, open **SMS → Webhook (New)**, add a webhook for SMS delivery reports with:
+
+- URL: `https://sikarkolkata.io/api/webhooks/msg91`
+- Method: POST, JSON body
+- Header: `X-SNP-Webhook-Secret` with the value read above
+
+Until the webhook is saved, no reports arrive: each reminder canary waits ten minutes and then releases its batch, and nothing pauses on its own. Admin → SMS warns that delivery reports are off only while the backend has no secret. Once the webhook is saved, the next delivered message shows under Delivered, with its credit.
+
+Before the spectacles flows are configured, open Admin → OT & Specs and give the specs collection day a real SMS venue; the production day still reads `NA`, which the rule refuses.

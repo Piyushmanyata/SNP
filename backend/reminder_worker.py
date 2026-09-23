@@ -36,6 +36,8 @@ def run_worker(api_url: str, secret: str, stopped: Event) -> None:
                 raise ValueError("SMS provider is not configured")
             if result.get("complete") is False:
                 logger.info("Reminder batch delivered %s; more remain", result.get("sent"))
+                if result.get("waiting"):
+                    stopped.wait(60)
                 continue
         except (URLError, OSError, ValueError, HTTPException) as error:
             logger.warning("Reminder run failed (%s); retry in %s seconds", type(error).__name__, retry_delay)

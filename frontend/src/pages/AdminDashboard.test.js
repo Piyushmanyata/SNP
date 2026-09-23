@@ -212,8 +212,10 @@ describe("AdminDashboard component", () => {
     act(() => type("camp-venue-sms-input", ""));
     expect(submit().disabled).toBe(true);
     act(() => type("camp-venue-sms-input", "Hansa Garden, Baghmara, Jasidih, Deoghar"));
+    expect(submit().disabled).toBe(true);
+    act(() => type("camp-venue-sms-input", "Hansa Garden, Jasidih, Deoghar"));
     await act(async () => submit().click());
-    expect(api.post).toHaveBeenCalledWith("/camps", expect.objectContaining({ camp_date: "2026-10-10", camp_number: 163, venue_sms: "Hansa Garden, Baghmara, Jasidih, Deoghar" }));
+    expect(api.post).toHaveBeenCalledWith("/camps", expect.objectContaining({ camp_date: "2026-10-10", camp_number: 163, venue_sms: "Hansa Garden, Jasidih, Deoghar" }));
 
     await act(async () => container.querySelector('[data-testid="edit-camp-c-1"]').click());
     act(() => type("camp-number-input", "162"));
@@ -468,8 +470,77 @@ describe("AdminDashboard component", () => {
         day_date: "2026-09-20",
         end_date: "2026-09-27",
         venue: "New Optical",
+        venue_sms: "",
       }
     );
+  });
+
+  test("an SMS venue that would fail DLT blocks saving and says why", async () => {
+    await act(async () => {
+      root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>);
+    });
+    await act(async () => container.querySelector('[data-testid="admin-tab-ot"]').click());
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    const type = (testid, value) => act(() => {
+      const input = container.querySelector(`[data-testid="${testid}"]`);
+      setter.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const note = () => container.querySelector('[data-testid="specs-venue-sms-input-note"]').textContent;
+    const add = () => container.querySelector('[data-testid="add-specs-day-button"]');
+
+    type("specs-date-input", "2026-10-05");
+    type("specs-venue-input", "NA");
+    expect(note()).toContain("3 to 30 characters");
+    expect(add().disabled).toBe(true);
+
+    type("specs-venue-sms-input", "Office 9876543210");
+    expect(note()).toBe("SMS venue must not contain a phone number");
+    expect(add().disabled).toBe(true);
+
+    type("specs-venue-sms-input", "SNP Office, Deoghar");
+    expect(note()).toBe("SMS will say “SNP Office, Deoghar” · 19/30");
+    expect(add().disabled).toBe(false);
+  });
+
+  test("SMS tab shows each message type and resumes a paused one", async () => {
+    const today = { submitted: 3, delivered: 1, dlt_failed: 1, other_failed: 0, uncertain: 0, rejected: 0, unsent: 0, paused: 1, credits: 2.25 };
+    const status = (paused) => ({
+      reports_enabled: false,
+      today,
+      types: ["registration", "camp", "ot_token", "ot", "specs_token", "specs"].map((message_type) => ({
+        message_type,
+        configured: !message_type.startsWith("specs"),
+        paused: paused && message_type === "registration",
+        paused_at: paused && message_type === "registration" ? "2026-09-23T05:00:00Z" : null,
+        paused_reason: paused && message_type === "registration" ? "DLT Template variable exceeded max length" : null,
+        today,
+      })),
+    });
+    const getDefault = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url === "/sms/status" ? Promise.resolve({ data: status(true) }) : getDefault(url)));
+    api.post.mockResolvedValue({ data: status(false) });
+    jest.spyOn(window, "confirm").mockReturnValue(true);
+
+    await act(async () => {
+      root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>);
+    });
+    await act(async () => container.querySelector('[data-testid="admin-tab-sms"]').click());
+
+    expect(container.textContent).toContain("Delivery reports are off");
+    expect(container.querySelector('[data-testid="sms-today-credits"]').textContent).toBe("2.25");
+    const registration = container.querySelector('[data-testid="sms-type-registration"]');
+    expect(registration.textContent).toContain("Paused");
+    expect(container.querySelector('[data-testid="sms-paused-reason-registration"]').textContent).toContain("exceeded max length");
+    expect(container.querySelector('[data-testid="sms-type-specs"]').textContent).toContain("Not set up");
+    expect(container.querySelector('[data-testid="sms-type-camp"]').textContent).toContain("Sending");
+    expect(container.querySelector('[data-testid="sms-resume-camp"]')).toBeNull();
+
+    await act(async () => container.querySelector('[data-testid="sms-resume-registration"]').click());
+
+    expect(api.post).toHaveBeenCalledWith("/sms/registration/resume");
+    expect(container.querySelector('[data-testid="sms-resume-registration"]')).toBeNull();
+    window.confirm.mockRestore();
   });
 
   test("an OT day with a long hospital name needs a short SMS name", async () => {
