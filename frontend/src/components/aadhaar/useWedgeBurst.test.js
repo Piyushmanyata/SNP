@@ -233,3 +233,27 @@ describe("scrubActiveInput", () => {
     input.remove();
   });
 });
+
+test("once a burst is recognised its keys stop reaching the focused field and only the leaked head is scrubbed", async () => {
+  const input = document.createElement("input");
+  document.body.appendChild(input);
+  input.focus();
+  const onBurst = jest.fn();
+  await act(async () => { root.render(<Harness onBurst={onBurst} />); });
+  const prevented = [];
+  for (const ch of "1".repeat(40)) {
+    now += 5;
+    const ev = fireKey(ch);
+    prevented.push(ev.defaultPrevented);
+    if (!ev.defaultPrevented) input.value += ch;
+  }
+  expect(prevented.slice(0, 19).every((flag) => !flag)).toBe(true);
+  expect(prevented.slice(19).every(Boolean)).toBe(true);
+  expect(input.value).toBe("1".repeat(19));
+  expect(container.textContent).toBe("Receiving scanner data");
+  input.value = `name ${input.value}`;
+  fireKey("Enter");
+  expect(onBurst).toHaveBeenCalledWith("1".repeat(40));
+  expect(input.value).toBe("name ");
+  input.remove();
+});

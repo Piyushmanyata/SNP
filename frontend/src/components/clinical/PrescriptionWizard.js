@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import { Card, Button } from "../ui";
-import { ChevronLeft, ChevronRight, FileEdit } from "lucide-react";
+import { Alert, Card, Button } from "../ui";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { SpecsMeasurementsGrid } from "./SpecsMeasurementsGrid";
 import { MedicinePicker } from "./MedicinePicker";
 import { FixedPowerPicker, formatPower } from "./FixedPowerPicker";
@@ -121,7 +121,7 @@ function Summary({ rx, medicines }) {
   );
 }
 
-function OptionalVitals({ rx, setRx, locked }) {
+function OptionalVitals({ rx, setRx }) {
   const hospital = (rx.prescribed_lines || []).includes("ot");
   const [open, setOpen] = useState(
     Boolean(rx.remarks || (!hospital && (rx.blood_sugar || rx.bp))),
@@ -143,8 +143,8 @@ function OptionalVitals({ rx, setRx, locked }) {
   return (
     <div className="mt-4">
       {hospital
-        ? <RemarksField rx={rx} setRx={setRx} disabled={locked} />
-        : <VitalsFields rx={rx} setRx={setRx} disabled={locked} />}
+        ? <RemarksField rx={rx} setRx={setRx} />
+        : <VitalsFields rx={rx} setRx={setRx} />}
     </div>
   );
 }
@@ -156,11 +156,10 @@ export function PrescriptionWizard({
   medicines = [],
   powers = [],
   toggleDiag,
-  locked,
   busy,
+  error,
   saveStep,
   completeRx,
-  setShowCorrection,
   firstFieldRef,
   medicineUnavailable = false,
   powerUnavailable = false,
@@ -178,20 +177,7 @@ export function PrescriptionWizard({
 
   return (
     <Card className="mb-5" data-testid="clinical-prescription-form">
-      <div className="flex items-center justify-between mb-1">
-        <h3 className="font-display font-bold text-slate-900">{current.label}</h3>
-        {locked && (
-          <Button
-            size="sm"
-            variant="outline"
-            type="button"
-            onClick={() => setShowCorrection(true)}
-            data-testid="add-correction-button"
-          >
-            <FileEdit className="w-4 h-4" /> Correction
-          </Button>
-        )}
-      </div>
+      <h3 className="font-display font-bold text-slate-900 mb-1">{current.label}</h3>
       <p className="text-xs font-mono uppercase tracking-widest text-slate-500 mb-4" data-testid="wizard-progress">
         Step {position + 1} of {steps.length}
       </p>
@@ -202,7 +188,6 @@ export function PrescriptionWizard({
           setRx={setRx}
           diagOpts={diagOpts}
           toggleDiag={toggleDiag}
-          disabled={locked}
           firstFieldRef={firstFieldRef}
         />
       )}
@@ -212,12 +197,11 @@ export function PrescriptionWizard({
           <legend className="text-sm text-slate-700 mb-2">
             Tick every line the doctor wrote on the paper.
           </legend>
-          <LineChoices rx={rx} setRx={setRx} disabled={locked || rx.none_prescribed} />
+          <LineChoices rx={rx} setRx={setRx} disabled={rx.none_prescribed} />
           <label className="flex items-center gap-3 min-h-[52px] border-t border-slate-200 mt-2 pt-2">
             <input
               type="checkbox"
               checked={Boolean(rx.none_prescribed)}
-              disabled={locked}
               onChange={(e) =>
                 setRx({
                   ...withLines(rx, e.target.checked ? [] : rx.prescribed_lines || []),
@@ -235,7 +219,6 @@ export function PrescriptionWizard({
         <MedicinePicker
           medicines={medicines}
           selectedIds={rx.prescribed_medicine_ids || []}
-          disabled={locked}
           onChange={(ids) => setRx({ ...rx, prescribed_medicine_ids: ids })}
           unavailable={medicineUnavailable}
         />
@@ -246,7 +229,6 @@ export function PrescriptionWizard({
           powers={powers}
           valueR={rx.fixed_power_r}
           valueL={rx.fixed_power_l}
-          disabled={locked}
           onChange={(r, l) => setRx({ ...rx, fixed_power_r: r, fixed_power_l: l })}
           unavailable={powerUnavailable}
         />
@@ -255,16 +237,15 @@ export function PrescriptionWizard({
       {current.key === "specs_made" && (
         <SpecsMeasurementsGrid
           specsMeasurements={rx.specs_measurements}
-          disabled={locked}
           onChange={(specs) => setRx({ ...rx, specs_measurements: specs })}
         />
       )}
 
       {current.key === "ot" && (
         <>
-          <OtFields rx={rx} setRx={setRx} disabled={locked} />
+          <OtFields rx={rx} setRx={setRx} />
           <div className="mt-4">
-            <VitalsInputs rx={rx} setRx={setRx} disabled={locked} />
+            <VitalsInputs rx={rx} setRx={setRx} />
           </div>
         </>
       )}
@@ -272,12 +253,11 @@ export function PrescriptionWizard({
       {current.key === "review" && (
         <>
           <Summary rx={rx} medicines={medicines} />
-          <OptionalVitals rx={rx} setRx={setRx} locked={locked} />
+          <OptionalVitals rx={rx} setRx={setRx} />
           <label className="flex items-center gap-2 min-h-[52px] mt-4">
             <input
               type="checkbox"
               checked={Boolean(rx.full_transcription_confirmed)}
-              disabled={locked}
               onChange={(e) =>
                 setRx({ ...rx, full_transcription_confirmed: e.target.checked })
               }
@@ -288,40 +268,39 @@ export function PrescriptionWizard({
         </>
       )}
 
-      {!locked && (
-        <div className="mt-5 flex items-center gap-2">
+      <Alert className="mt-5">{error}</Alert>
+      <div className="mt-5 flex items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          disabled={busy || position === 0}
+          onClick={() => setIndex((i) => Math.max(i - 1, 0))}
+          data-testid="wizard-back"
+        >
+          <ChevronLeft className="w-4 h-4" /> Back
+        </Button>
+        {current.key === "review" ? (
           <Button
             type="button"
-            variant="outline"
-            disabled={busy || position === 0}
-            onClick={() => setIndex((i) => Math.max(i - 1, 0))}
-            data-testid="wizard-back"
+            className="flex-1"
+            disabled={busy || !canAdvance}
+            onClick={() => completeRx && completeRx()}
+            data-testid="complete-prescription-button"
           >
-            <ChevronLeft className="w-4 h-4" /> Back
+            Save prescription &amp; mark seen
           </Button>
-          {current.key === "review" ? (
-            <Button
-              type="button"
-              className="flex-1"
-              disabled={busy || !canAdvance}
-              onClick={() => completeRx && completeRx()}
-              data-testid="complete-prescription-button"
-            >
-              Save prescription &amp; mark seen
-            </Button>
-          ) : (
-            <Button
-              type="button"
-              className="flex-1"
-              disabled={busy || !canAdvance}
-              onClick={goNext}
-              data-testid="wizard-next"
-            >
-              Next <ChevronRight className="w-4 h-4" />
-            </Button>
-          )}
-        </div>
-      )}
+        ) : (
+          <Button
+            type="button"
+            className="flex-1"
+            disabled={busy || !canAdvance}
+            onClick={goNext}
+            data-testid="wizard-next"
+          >
+            Next <ChevronRight className="w-4 h-4" />
+          </Button>
+        )}
+      </div>
     </Card>
   );
 }

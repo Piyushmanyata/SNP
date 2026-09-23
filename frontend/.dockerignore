@@ -5,3 +5,5 @@ coverage
 npm-debug.log*
 docs
 .test-runtime
+public/wasm
+public/zxing-wasm-reader.js

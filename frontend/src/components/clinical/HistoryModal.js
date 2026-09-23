@@ -6,7 +6,7 @@ export function HistoryModal({ open, onClose, history }) {
   return (
     <Modal open={open} onClose={onClose} title="Clinical History" size="lg">
       {history?.length === 0 && (
-        <p className="text-slate-400 text-sm">No prior clinical records.</p>
+        <p className="text-slate-600 text-sm">No prior clinical records.</p>
       )}
       <div className="space-y-3">
         {history?.map((h) => (
@@ -15,7 +15,7 @@ export function HistoryModal({ open, onClose, history }) {
               <span className="font-semibold">
                 {h.camp_name || "Camp"} · #{h.reg_no}
               </span>
-              <span className="text-slate-400">
+              <span className="text-slate-600">
                 {displayTimestamp(h.transcription?.created_at).slice(0, 10)}
               </span>
             </div>

@@ -15,11 +15,41 @@ export function AuthProvider({ children }) {
       setLoading(false);
       return;
     }
-    api
-      .get("/auth/me")
-      .then((r) => setUser(r.data.user))
-      .catch(() => setUser(false))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    let retry;
+    const check = (attempt) => {
+      api
+        .get("/auth/me")
+        .then((r) => {
+          if (cancelled) return;
+          setUser(r.data.user);
+          setLoading(false);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          const status = err?.response?.status;
+          if (status && status < 500) {
+            setUser(false);
+            setLoading(false);
+            return;
+          }
+          retry = setTimeout(() => check(attempt + 1), Math.min(1000 * 2 ** attempt, 15000));
+        });
+    };
+    check(0);
+    return () => {
+      cancelled = true;
+      clearTimeout(retry);
+    };
+  }, []);
+
+  useEffect(() => {
+    const signOut = () => {
+      setUser(false);
+      setLoading(false);
+    };
+    window.addEventListener("snp:unauthorized", signOut);
+    return () => window.removeEventListener("snp:unauthorized", signOut);
   }, []);
 
   const login = useCallback(async (name, pin) => {

@@ -156,13 +156,6 @@ def parse_patient_identifier(raw_value: str) -> str:
 # ---- labellers (never render raw enums) ----
 
 STATUS_LABELS = {"registered": "Registered", "arrived": "Arrived", "seen": "Seen", "waiting": "Registered"}
-ROLE_LABELS = {
-    "admin": "Admin",
-    "team_lead": "Team Lead",
-    "volunteer": "Volunteer",
-    "clinical_desk_operator": "Clinical Desk Operator",
-    "patient": "Patient",
-}
 GENDER_LABELS = {"M": "Male", "F": "Female", "O": "Other", "male": "Male", "female": "Female"}
 
 DIAGNOSIS_OPTIONS = [

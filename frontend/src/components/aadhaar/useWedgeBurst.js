@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 export function scrubActiveInput(text) {
   const el = document.activeElement;
   if (!el || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA")) return;
-  if (typeof el.value !== "string" || !el.value.endsWith(text)) return;
+  if (!text || typeof el.value !== "string" || !el.value.endsWith(text)) return;
   const proto = el.tagName === "TEXTAREA"
     ? window.HTMLTextAreaElement.prototype
     : window.HTMLInputElement.prototype;
@@ -22,6 +22,8 @@ export function useWedgeBurst({ enabled, minLength = 20, onBurst, onInterrupted 
   useEffect(() => {
     if (!enabled) return undefined;
     let buf = "";
+    let typed = 0;
+    let capturing = false;
     let firstAt = 0;
     let lastAt = 0;
     let idleTimer;
@@ -31,6 +33,8 @@ export function useWedgeBurst({ enabled, minLength = 20, onBurst, onInterrupted 
       clearTimeout(idleTimer);
       const notify = interrupted && isBurst();
       buf = "";
+      typed = 0;
+      capturing = false;
       setReceiving(false);
       if (notify) onInterruptedRef.current?.();
     };
@@ -45,19 +49,23 @@ export function useWedgeBurst({ enabled, minLength = 20, onBurst, onInterrupted 
         if (!buf.length) firstAt = now;
         buf += event.key;
         lastAt = now;
-        setReceiving(isBurst());
+        capturing = capturing || isBurst();
+        if (capturing) event.preventDefault();
+        else typed = buf.length;
+        setReceiving(capturing);
         clearTimeout(idleTimer);
         idleTimer = setTimeout(() => reset(true), 500);
         return;
       }
       if (event.key === "Enter" || event.key === "Tab") {
         const candidate = buf;
+        const leaked = buf.slice(0, typed);
         const accepted = isBurst();
         reset();
         if (!accepted) return;
         event.preventDefault();
         event.stopPropagation();
-        scrubActiveInput(candidate);
+        scrubActiveInput(leaked);
         onBurstRef.current?.(candidate);
         return;
       }

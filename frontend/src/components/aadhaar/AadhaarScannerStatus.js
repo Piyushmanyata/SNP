@@ -16,7 +16,7 @@ export function AadhaarScannerStatus({
       {busy && mode !== "manual" && (
         <div role="status" aria-live="polite" className="flex items-center gap-2 text-sm text-slate-700 mt-2">
           <Spinner className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Reading Aadhaar… Please wait.</span>
+          <span>Reading the QR…</span>
         </div>
       )}
 

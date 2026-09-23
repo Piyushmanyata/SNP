@@ -6,6 +6,7 @@ import api from "../lib/api";
 import { LINE_STORAGE_KEY } from "../lib/operatorLines";
 import * as nativeDetector from "../components/aadhaar/liveScan/nativeDetector";
 import * as grab from "../components/aadhaar/liveScan/grabFrame";
+import * as wasmDetector from "../components/aadhaar/liveScan/wasmDetector";
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -113,7 +114,10 @@ async function scanWithCamera(payload) {
   Object.defineProperty(window.HTMLVideoElement.prototype, "videoWidth", { configurable: true, get: () => 1280 });
   jest.spyOn(grab, "grabFrame").mockReturnValue({ width: 4, height: 4, data: new Uint8ClampedArray(64) });
   jest.spyOn(nativeDetector, "hasNativeBarcodeDetector").mockReturnValue(true);
-  jest.spyOn(nativeDetector, "detectNativeImageData").mockResolvedValue(payload);
+  jest.spyOn(nativeDetector, "loadNativeDetector").mockResolvedValue({});
+  jest.spyOn(nativeDetector, "detectNative").mockResolvedValueOnce(payload).mockResolvedValue(null);
+  jest.spyOn(wasmDetector, "loadZxingWorker").mockResolvedValue();
+  jest.spyOn(wasmDetector, "detectWasmImageData").mockResolvedValue(null);
   await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
   return track;
@@ -946,6 +950,30 @@ describe("Clinical draft version and dirty-draft protection", () => {
       "/clinical/transcription",
       expect.objectContaining({ expected_draft_version: 7 }),
     );
+  });
+
+  test("an uncommitted draft shows no line mismatch", async () => {
+    api.post.mockResolvedValueOnce(draftPatient(1));
+    await renderPage();
+    typeLookup("1001");
+    await submitLookup();
+    expect(container.querySelector('[data-testid="edit-transcription-button"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="line-mismatch-warning"]')).toBeNull();
+  });
+
+  test("the Doctor Rx line shows no line mismatch after completion", async () => {
+    auth.user.line = "doctor_rx";
+    sessionStorage.setItem(LINE_STORAGE_KEY, "doctor_rx");
+    api.post.mockResolvedValueOnce({ data: {
+      ...draftPatient(1).data,
+      transcription: { id: "tx-1", locked: true, diagnosis_options: [] },
+      committed_revision: { id: "rev-1", prescribed_lines: ["medicine"] },
+    } });
+    await renderPage();
+    typeLookup("1001");
+    await submitLookup();
+    expect(container.querySelector('[data-testid="add-correction-button"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="line-mismatch-warning"]')).toBeNull();
   });
 
   test("a failed draft save keeps the entries and leaves no conflict prompt", async () => {

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { gzipSync } from "node:zlib";
 
@@ -13,4 +13,8 @@ for (const extension of ["js", "css"]) {
   const limit = extension === "js" ? 150_000 : 15_000;
   console.log(`Initial ${extension}: ${bytes} bytes gzip; limit ${limit}`);
   assert(bytes <= limit, `Initial ${extension} exceeds the gzip budget`);
+}
+for (const file of ["zxing-worker.js", "zxing-wasm-reader.js", "wasm/zxing_reader.wasm"]) {
+  const path = resolve("build", file);
+  assert(existsSync(path) && statSync(path).size > 0, `Missing QR reader asset build/${file}`);
 }

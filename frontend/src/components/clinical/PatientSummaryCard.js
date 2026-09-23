@@ -15,7 +15,7 @@ export function PatientSummaryCard({ data, locked, openHistory }) {
           <p className="font-display font-bold text-slate-900">
             {data.registration.full_name}
           </p>
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-slate-600">
             {data.registration.gender_label} · {data.registration.age ?? "-"} yrs
           </p>
         </div>

@@ -44,7 +44,7 @@ export function Field({ label, children, required, hint }) {
         </span>
       )}
       {children}
-      {hint && <span className="block text-xs text-slate-400 mt-1">{hint}</span>}
+      {hint && <span className="block text-xs text-slate-600 mt-1">{hint}</span>}
     </label>
   );
 }
@@ -55,10 +55,6 @@ const inputCls =
 export const Input = React.forwardRef(function Input({ className = "", ...props }, ref) {
   return <input ref={ref} className={`${inputCls} ${className}`} {...props} />;
 });
-
-export function Textarea({ className = "", ...props }) {
-  return <textarea className={`${inputCls} py-2.5 min-h-[80px] ${className}`} {...props} />;
-}
 
 export function Select({ className = "", children, ...props }) {
   return (
@@ -191,9 +187,9 @@ export function Stat({ label, value, tone = "slate", testid }) {
     amber: "text-amber-600",
   };
   return (
-    <Card className="p-4 sm:p-5">
-      <p className="text-xs font-mono uppercase tracking-widest text-slate-500">{label}</p>
-      <p className={`mt-2 text-3xl font-display font-extrabold ${tones[tone]}`} data-testid={testid}>{value}</p>
+    <Card className="min-w-0 !p-3 sm:!p-5">
+      <p className="truncate text-[11px] sm:text-xs font-mono uppercase tracking-normal sm:tracking-widest text-slate-600">{label}</p>
+      <p className={`mt-1 sm:mt-2 text-2xl sm:text-3xl font-display font-extrabold tabular-nums ${tones[tone]}`} data-testid={testid}>{value}</p>
     </Card>
   );
 }

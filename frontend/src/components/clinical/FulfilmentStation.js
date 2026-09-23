@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import api, { formatApiError } from "../../lib/api";
-import { Button, Badge } from "../ui";
+import { v4 } from "../../lib/uuid";
+import { Alert, Button, Badge } from "../ui";
 import { Pill, Glasses, Scissors, Printer } from "lucide-react";
 import { FixedPowerPicker, formatPower } from "./FixedPowerPicker";
 import { displayDateRange } from "../../lib/dates";
@@ -193,7 +194,6 @@ export function FulfilmentStation({
   onDone,
   navigate,
   setBanner,
-  setError,
   onBusyChange,
 }) {
   const line = FULFILMENT_LINES[lineKey];
@@ -206,6 +206,7 @@ export function FulfilmentStation({
   const slip = data?.slips?.find((s) => s.item_type === line.itemType && s.active);
   const [dayId, setDayId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
   const [paperReviewed, setPaperReviewed] = useState(false);
   const issueOpRef = useRef(null);
   const prescribedMedicines = useMemo(
@@ -265,7 +266,7 @@ export function FulfilmentStation({
         paper_reviewed: paperReviewed,
         reviewed_revision_id: data.committed_revision?.id,
         reviewed_generation: data.clinical_generation ?? data.registration?.clinical_generation,
-        operation_id: issueOpRef.current || (issueOpRef.current = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}`),
+        operation_id: issueOpRef.current || (issueOpRef.current = v4()),
       });
       issueOpRef.current = null;
       setBanner(`${line.label}: ${statusLabel(line, res.fulfilment?.status || nextStatus)}`);
@@ -280,7 +281,7 @@ export function FulfilmentStation({
       setBusy(false);
       onBusyChange?.(false);
     }
-  }, [data?.transcription?.id, data?.committed_revision?.id, data?.clinical_generation, data?.registration?.clinical_generation, line, dayId, paperReviewed, outcomes, issued, navigate, onDone, setBanner, setError, onBusyChange]);
+  }, [data?.transcription?.id, data?.committed_revision?.id, data?.clinical_generation, data?.registration?.clinical_generation, line, dayId, paperReviewed, outcomes, issued, navigate, onDone, setBanner, onBusyChange]);
 
   const header = (
     <div className="flex items-center gap-2 mb-3">
@@ -343,6 +344,7 @@ export function FulfilmentStation({
             >
               {decline.label}
             </Button>
+            <Alert className="mt-2">{error}</Alert>
           </div>
         )}
       </div>
@@ -404,6 +406,7 @@ export function FulfilmentStation({
             : "Record the prescribed power for both eyes before recording this line."}
         </p>
       )}
+      <Alert className="mt-2">{error}</Alert>
     </div>
   );
 }

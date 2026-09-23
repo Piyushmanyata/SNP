@@ -11,7 +11,6 @@ export function FulfilmentSection({
   onDone,
   navigate,
   setBanner,
-  setError,
   onBusyChange,
 }) {
   if (!FULFILMENT_LINES[line]) return null;
@@ -27,7 +26,6 @@ export function FulfilmentSection({
         onDone={onDone}
         navigate={navigate}
         setBanner={setBanner}
-        setError={setError}
         onBusyChange={onBusyChange}
       />
     </Card>

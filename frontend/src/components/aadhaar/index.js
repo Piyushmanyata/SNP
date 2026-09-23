@@ -1,5 +1,5 @@
 export { useAadhaarCamera } from "./useAadhaarCamera";
-export { useAadhaarDecode } from "./useAadhaarDecode";
+export { useAadhaarDecode, decodePayload } from "./useAadhaarDecode";
 export { AadhaarModeButtons } from "./AadhaarModeButtons";
 export { AadhaarCameraView } from "./AadhaarCameraView";
 export { AadhaarManualInput } from "./AadhaarManualInput";

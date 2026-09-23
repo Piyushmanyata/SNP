@@ -4,15 +4,10 @@ import api, { formatApiError } from "../../lib/api";
 import { useAadhaarDecode } from "./useAadhaarDecode";
 import * as nativeDetector from "./liveScan/nativeDetector";
 import * as wasmDetector from "./liveScan/wasmDetector";
-import * as grab from "./liveScan/grabFrame";
 
 jest.mock("../../lib/api");
 jest.mock("./liveScan/nativeDetector");
 jest.mock("./liveScan/wasmDetector");
-jest.mock("./liveScan/grabFrame", () => ({
-  ...jest.requireActual("./liveScan/grabFrame"),
-  bitmapToImageData: jest.fn(() => ({ width: 4, height: 4, data: new Uint8ClampedArray(64) })),
-}));
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 let root;
@@ -28,8 +23,10 @@ function photoFile(width = 8, height = 8) {
   return new File([bytes], "card.png", { type: "image/png" });
 }
 
+let classify;
+
 function Harness() {
-  scanner = useAadhaarDecode({ onScanned });
+  scanner = useAadhaarDecode({ onScanned, classify });
   return null;
 }
 
@@ -38,24 +35,83 @@ beforeEach(() => {
   container = document.createElement("div");
   root = ReactDOM.createRoot(container);
   onScanned = jest.fn();
+  classify = undefined;
   global.createImageBitmap = jest.fn().mockResolvedValue({ width: 8, height: 8, close: jest.fn() });
   nativeDetector.hasNativeBarcodeDetector.mockReturnValue(false);
   wasmDetector.loadZxingWorker.mockResolvedValue();
-  wasmDetector.detectWasmImageData.mockResolvedValue(null);
-  grab.bitmapToImageData.mockReturnValue({ width: 4, height: 4, data: new Uint8ClampedArray(64) });
+  wasmDetector.detectWasmPhoto.mockResolvedValue(null);
   formatApiError.mockReturnValue("Request failed");
   act(() => root.render(<Harness />));
 });
 
-test("dense photo retries with more image detail before requesting OCR", async () => {
-  global.createImageBitmap.mockResolvedValueOnce({ width: 2400, height: 1600, close: jest.fn() });
-  grab.bitmapToImageData.mockImplementation((_bitmap, size) => ({ width: size, height: size, data: new Uint8ClampedArray(4) }));
-  wasmDetector.detectWasmImageData.mockImplementation(async (image) => image.width > 1600 ? "dense-card" : null);
+test("a phone photo is read whole in the worker before any upload", async () => {
+  const file = photoFile(4000, 3000);
+  wasmDetector.detectWasmPhoto.mockResolvedValueOnce("dense-card");
   api.post.mockResolvedValueOnce({ data: { outcome: "card", data: { full_name: "Test Person" } } });
-  await act(async () => scanner.scanFile(photoFile(2400, 1600)));
+  await act(async () => scanner.scanFile(file));
+  expect(wasmDetector.detectWasmPhoto).toHaveBeenCalledWith(file);
   expect(onScanned).toHaveBeenCalledWith({ full_name: "Test Person" }, "dense-card");
   expect(api.post).toHaveBeenCalledTimes(1);
   expect(api.post).toHaveBeenCalledWith("/aadhaar/decode", { payload: "dense-card" });
+});
+
+test("the platform detector reads the photo bitmap first and skips the worker", async () => {
+  const bitmap = { width: 4000, height: 3000, close: jest.fn() };
+  global.createImageBitmap.mockResolvedValueOnce(bitmap);
+  nativeDetector.hasNativeBarcodeDetector.mockReturnValue(true);
+  nativeDetector.detectNative.mockResolvedValueOnce("native-card");
+  api.post.mockResolvedValueOnce({ data: { outcome: "card", data: { full_name: "Test Person" } } });
+  await act(async () => scanner.scanFile(photoFile(4000, 3000)));
+  expect(nativeDetector.detectNative).toHaveBeenCalledWith(bitmap);
+  expect(bitmap.close).toHaveBeenCalled();
+  expect(wasmDetector.detectWasmPhoto).not.toHaveBeenCalled();
+  expect(onScanned).toHaveBeenCalledWith({ full_name: "Test Person" }, "native-card");
+});
+
+test("a platform miss falls through to the worker", async () => {
+  nativeDetector.hasNativeBarcodeDetector.mockReturnValue(true);
+  nativeDetector.detectNative.mockResolvedValueOnce(null);
+  wasmDetector.detectWasmPhoto.mockResolvedValueOnce("wasm-card");
+  api.post.mockResolvedValueOnce({ data: { outcome: "card", data: { full_name: "Test Person" } } });
+  await act(async () => scanner.scanFile(photoFile()));
+  expect(onScanned).toHaveBeenCalledWith({ full_name: "Test Person" }, "wasm-card");
+});
+
+test("a page resolver classifies the photo payload instead of the default decode", async () => {
+  classify = jest.fn().mockResolvedValue({ outcome: "card", source: "desk_scan" });
+  act(() => root.render(<Harness />));
+  wasmDetector.detectWasmPhoto.mockResolvedValueOnce("door-card");
+  await act(async () => scanner.scanFile(photoFile()));
+  expect(classify).toHaveBeenCalledWith("door-card");
+  expect(api.post).not.toHaveBeenCalled();
+  expect(scanner.outcome).toBe("card");
+});
+
+test("a patient code photo that matches nobody is not uploaded for OCR", async () => {
+  classify = jest.fn().mockResolvedValue({ outcome: "not-aadhaar", source: "patient_code", message: "No patient found for that code." });
+  act(() => root.render(<Harness />));
+  wasmDetector.detectWasmPhoto.mockResolvedValueOnce("snp:unknown1");
+  await act(async () => scanner.scanFile(photoFile()));
+  expect(api.post).not.toHaveBeenCalled();
+  expect(scanner.busy).toBe(false);
+});
+
+test("a card read by the server is resolved by the page resolver too", async () => {
+  classify = jest.fn().mockResolvedValue({ outcome: "card", source: "desk_scan" });
+  act(() => root.render(<Harness />));
+  const file = new File(["pdf"], "card.pdf", { type: "application/pdf" });
+  api.post.mockResolvedValueOnce({ data: { outcome: "card", data: { full_name: "Test Person" }, payload: "server-card" } });
+  await act(async () => scanner.scanFile(file));
+  expect(classify).toHaveBeenCalledWith("server-card");
+  expect(scanner.outcome).toBe("card");
+});
+
+test("a resolver failure is shown and counted as an error", async () => {
+  classify = jest.fn().mockRejectedValue(new Error("offline"));
+  act(() => root.render(<Harness />));
+  await act(async () => { await scanner.decode("card"); });
+  expect(scanner.error).toBe("Request failed");
+  expect(scanner.busy).toBe(false);
 });
 
 afterEach(() => {
@@ -63,29 +119,14 @@ afterEach(() => {
   delete global.createImageBitmap;
 });
 
-test("a browser without bitmap decoding can read a photo through its image element", async () => {
+test("a browser without bitmap decoding still reads the photo in the worker", async () => {
   delete global.createImageBitmap;
-  const PreviousImage = global.Image;
-  const previousCreate = URL.createObjectURL;
-  const previousRevoke = URL.revokeObjectURL;
-  URL.createObjectURL = jest.fn(() => "blob:test");
-  URL.revokeObjectURL = jest.fn();
-  global.Image = class {
-    width = 8;
-    height = 8;
-    set src(value) { if (value) Promise.resolve().then(() => this.onload()); }
-  };
-  wasmDetector.detectWasmImageData.mockResolvedValueOnce("browser-card");
+  nativeDetector.hasNativeBarcodeDetector.mockReturnValue(true);
+  wasmDetector.detectWasmPhoto.mockResolvedValueOnce("browser-card");
   api.post.mockResolvedValueOnce({ data: { outcome: "card", data: { full_name: "Test Person" } } });
-  try {
-    await act(async () => scanner.scanFile(photoFile()));
-    expect(onScanned).toHaveBeenCalledWith({ full_name: "Test Person" }, "browser-card");
-    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:test");
-  } finally {
-    global.Image = PreviousImage;
-    URL.createObjectURL = previousCreate;
-    URL.revokeObjectURL = previousRevoke;
-  }
+  await act(async () => scanner.scanFile(photoFile()));
+  expect(nativeDetector.detectNative).not.toHaveBeenCalled();
+  expect(onScanned).toHaveBeenCalledWith({ full_name: "Test Person" }, "browser-card");
 });
 
 test("unreadable photo returns backend suggestions for review without locking identity", async () => {

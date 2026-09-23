@@ -12,6 +12,7 @@ jest.mock("../lib/api");
 jest.mock("./aadhaar/liveScan/wasmDetector", () => ({
   loadZxingWorker: jest.fn().mockResolvedValue(),
   detectWasmImageData: jest.fn().mockResolvedValue(null),
+  detectWasmPhoto: jest.fn().mockResolvedValue(null),
 }));
 
 let container = null;
@@ -26,13 +27,9 @@ beforeEach(() => {
   root = ReactDOM.createRoot(container);
   jest.clearAllMocks();
   jest.spyOn(nativeDetector, "hasNativeBarcodeDetector").mockReturnValue(true);
-  jest.spyOn(nativeDetector, "detectNativeImageData").mockResolvedValue(null);
+  jest.spyOn(nativeDetector, "loadNativeDetector").mockResolvedValue({});
+  jest.spyOn(nativeDetector, "detectNative").mockResolvedValue(null);
   jest.spyOn(grab, "grabFrame").mockReturnValue({
-    width: 4,
-    height: 4,
-    data: new Uint8ClampedArray(64),
-  });
-  jest.spyOn(grab, "bitmapToImageData").mockReturnValue({
     width: 4,
     height: 4,
     data: new Uint8ClampedArray(64),
@@ -172,7 +169,7 @@ describe("AadhaarScanner component", () => {
 
   test("starts environment camera and Locks after Decode card", async () => {
     const onScannedMock = jest.fn();
-    nativeDetector.detectNativeImageData.mockResolvedValue("2567820190301120000...");
+    nativeDetector.detectNative.mockResolvedValue("2567820190301120000...");
     api.post.mockResolvedValue({
       data: {
         outcome: "card",
@@ -216,7 +213,7 @@ describe("AadhaarScanner component", () => {
   test("stopping the camera discards a pending identity response", async () => {
     const onScanned = jest.fn();
     let finishDecode;
-    nativeDetector.detectNativeImageData.mockResolvedValue("pending-card");
+    nativeDetector.detectNative.mockResolvedValue("pending-card");
     api.post.mockImplementationOnce(() => new Promise((resolve) => {
       finishDecode = resolve;
     }));
@@ -237,7 +234,7 @@ describe("AadhaarScanner component", () => {
     let resolvePrevious;
     let rejectPrevious;
     let resolveCurrent;
-    nativeDetector.detectNativeImageData.mockResolvedValue("test-card");
+    nativeDetector.detectNative.mockResolvedValue("test-card");
     api.post
       .mockImplementationOnce(() => new Promise((resolve, reject) => {
         resolvePrevious = resolve;
@@ -292,7 +289,7 @@ describe("AadhaarScanner component", () => {
     await act(async () => container.querySelector('[data-testid="aadhaar-camera-stop"]').click());
     await act(async () => grantPermission(mediaStream));
     expect(mediaTrack.stop).toHaveBeenCalled();
-    expect(nativeDetector.detectNativeImageData).not.toHaveBeenCalled();
+    expect(nativeDetector.detectNative).not.toHaveBeenCalled();
     expect(container.querySelector('[data-testid="aadhaar-camera-region"]').srcObject).toBeNull();
   });
 
@@ -334,7 +331,7 @@ describe("AadhaarScanner component", () => {
 
   test("handles file upload QR scan successfully", async () => {
     const onScannedMock = jest.fn();
-    nativeDetector.detectNativeImageData.mockResolvedValue(
+    nativeDetector.detectNative.mockResolvedValue(
       '<PrintLetterBarcodeData uid="999999991234" name="Test Person" gender="M" dob="01/01/1980" house="Test Address" />'
     );
     api.post.mockResolvedValueOnce({
@@ -361,7 +358,7 @@ describe("AadhaarScanner component", () => {
     });
 
     expect(global.createImageBitmap).toHaveBeenCalledWith(file);
-    expect(nativeDetector.detectNativeImageData).toHaveBeenCalled();
+    expect(nativeDetector.detectNative).toHaveBeenCalled();
     expect(api.post).toHaveBeenCalledWith("/aadhaar/decode", {
       payload: '<PrintLetterBarcodeData uid="999999991234" name="Test Person" gender="M" dob="01/01/1980" house="Test Address" />',
     });
@@ -373,8 +370,8 @@ describe("AadhaarScanner component", () => {
 
   test("a native image decoder error still permits the WASM reader to scan the card", async () => {
     const onScanned = jest.fn();
-    nativeDetector.detectNativeImageData.mockRejectedValueOnce(new Error("Unsupported image"));
-    wasmDetector.detectWasmImageData.mockResolvedValueOnce("fallback-card");
+    nativeDetector.detectNative.mockRejectedValueOnce(new Error("Unsupported image"));
+    wasmDetector.detectWasmPhoto.mockResolvedValueOnce("fallback-card");
     api.post.mockResolvedValueOnce({ data: { outcome: "card", data: { full_name: "Test Person" } } });
     act(() => root.render(<AadhaarScanner onScanned={onScanned} />));
     const fileInput = container.querySelector('[data-testid="aadhaar-file-input"]');
@@ -407,11 +404,11 @@ describe("AadhaarScanner component", () => {
     const bitmap = { width: 8, height: 8, close: jest.fn() };
     if (stage === "bitmap") {
       global.createImageBitmap.mockReturnValueOnce(recognition);
-      nativeDetector.detectNativeImageData.mockResolvedValueOnce("old-upload");
+      nativeDetector.detectNative.mockResolvedValueOnce("old-upload");
     } else if (stage === "native") {
-      nativeDetector.detectNativeImageData.mockReturnValueOnce(recognition);
+      nativeDetector.detectNative.mockReturnValueOnce(recognition);
     } else {
-      wasmDetector.detectWasmImageData.mockReturnValueOnce(recognition);
+      wasmDetector.detectWasmPhoto.mockReturnValueOnce(recognition);
     }
     const fileInput = container.querySelector('[data-testid="aadhaar-file-input"]');
     await act(async () => {
@@ -579,7 +576,85 @@ describe("AadhaarScanner component", () => {
     expect(container.querySelector('[data-testid="aadhaar-camera-stop"]')).not.toBeNull();
   });
 
-  test.each(["bounded", "oversized", "unknown"])("keeps preview scanning fast with %s still photos and spaces captures three seconds apart", async (kind) => {
+  test("live scan races the platform detector on the video and the WASM reader on frames, never still photos", async () => {
+    let tick;
+    jest.spyOn(global, "setInterval").mockImplementation((callback) => {
+      tick = callback;
+      return 12345;
+    });
+    const takePhoto = jest.fn();
+    window.ImageCapture = jest.fn().mockImplementation(() => ({ takePhoto }));
+    try {
+      act(() => root.render(<AadhaarScanner />));
+      await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+      for (let i = 0; i < 4; i += 1) {
+        await act(async () => {
+          tick();
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        });
+      }
+      const video = container.querySelector('[data-testid="aadhaar-camera-region"]');
+      expect(nativeDetector.detectNative).toHaveBeenCalledWith(video);
+      expect(wasmDetector.detectWasmImageData).toHaveBeenCalled();
+      expect(grab.grabFrame.mock.calls.map((call) => call[1]).slice(0, 2)).toEqual(["roi", "full"]);
+      expect(window.ImageCapture).not.toHaveBeenCalled();
+      expect(takePhoto).not.toHaveBeenCalled();
+    } finally {
+      delete window.ImageCapture;
+    }
+  });
+
+  test("the WASM reader is warmed as the camera starts, before any frame", async () => {
+    act(() => root.render(<AadhaarScanner />));
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+    expect(wasmDetector.loadZxingWorker).toHaveBeenCalled();
+  });
+
+  test("zooms to 2x where the camera can, and one tap returns to 1x", async () => {
+    mediaTrack.getCapabilities.mockReturnValue({ zoom: { min: 1, max: 8, step: 0.1 } });
+    act(() => root.render(<AadhaarScanner />));
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+    const applied = mediaTrack.applyConstraints.mock.calls.map((call) => call[0].advanced[0].zoom);
+    expect(applied[0]).toBeCloseTo(2);
+    const toggle = container.querySelector('[data-testid="aadhaar-zoom-toggle"]');
+    expect(toggle.textContent).toContain("2×");
+    await act(async () => toggle.click());
+    expect(mediaTrack.applyConstraints).toHaveBeenLastCalledWith({ advanced: [{ zoom: 1 }] });
+    expect(container.querySelector('[data-testid="aadhaar-zoom-toggle"]').textContent).toContain("1×");
+  });
+
+  test("a camera without zoom shows no zoom control", async () => {
+    act(() => root.render(<AadhaarScanner />));
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+    expect(container.querySelector('[data-testid="aadhaar-zoom-toggle"]')).toBeNull();
+  });
+
+  test("tapping the preview asks the camera to focus there", async () => {
+    mediaTrack.getCapabilities.mockReturnValue({ focusMode: ["continuous", "single-shot"] });
+    act(() => root.render(<AadhaarScanner />));
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+    await act(async () => container.querySelector('[data-testid="aadhaar-focus-area"]').click());
+    expect(mediaTrack.applyConstraints).toHaveBeenCalledWith({
+      advanced: [{ focusMode: "single-shot", pointsOfInterest: [{ x: 0.5, y: 0.5 }] }],
+    });
+  });
+
+  test("a Lock vibrates so the volunteer knows without looking", async () => {
+    navigator.vibrate = jest.fn();
+    nativeDetector.detectNative.mockResolvedValue("card-payload");
+    api.post.mockResolvedValue({ data: { outcome: "card", source: "secure_qr", data: { full_name: "A" } } });
+    try {
+      act(() => root.render(<AadhaarScanner onScanned={jest.fn()} />));
+      await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+      expect(navigator.vibrate).toHaveBeenCalledWith(80);
+      expect(container.querySelector('[data-testid="aadhaar-camera-button"]')).not.toBeNull();
+    } finally {
+      delete navigator.vibrate;
+    }
+  });
+
+  test("the viewfinder tip changes to focus advice when nothing locks quickly", async () => {
     let now = 10000;
     let tick;
     jest.spyOn(Date, "now").mockImplementation(() => now);
@@ -587,40 +662,67 @@ describe("AadhaarScanner component", () => {
       tick = callback;
       return 12345;
     });
-    const header = new Uint8Array(PHOTO_HEADER);
-    if (kind === "oversized") header.set([23, 112, 31, 64], 7);
-    const takePhoto = jest.fn().mockResolvedValue(new Blob(kind === "unknown" ? [] : [header]));
-    window.ImageCapture = jest.fn().mockImplementation(() => ({ takePhoto }));
-    const scanNextFrame = async () => {
-      tick();
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    };
+    act(() => root.render(<AadhaarScanner />));
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+    expect(container.querySelector('[data-testid="aadhaar-camera-tip"]').textContent).toContain("Fill the box");
+    now += 4000;
+    await act(async () => tick());
+    expect(container.querySelector('[data-testid="aadhaar-camera-tip"]').textContent).toContain("Tap to focus");
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  test("a door on a laptop opens with the USB box focused and clears it after every scan", async () => {
+    const resolvePayload = jest.fn().mockResolvedValue({ outcome: "card", source: "desk_scan" });
+    act(() => root.render(<AadhaarScanner usbFirst resolvePayload={resolvePayload} />));
+    const textarea = container.querySelector('[data-testid="aadhaar-qr-input"]');
+    expect(textarea).not.toBeNull();
+    expect(document.activeElement).toBe(textarea);
+    act(() => {
+      textarea.value = "  2345678901  ";
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    expect(resolvePayload).toHaveBeenCalledWith("2345678901");
+    expect(api.post).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("");
+    expect(document.activeElement).toBe(textarea);
+    expect(container.textContent).toContain("Identity locked from card");
+  });
+
+  test("a USB terminator sent as Tab also decodes", async () => {
+    const resolvePayload = jest.fn().mockResolvedValue({ outcome: "garbage", message: "Not a card" });
+    act(() => root.render(<AadhaarScanner usbFirst resolvePayload={resolvePayload} />));
+    const textarea = container.querySelector('[data-testid="aadhaar-qr-input"]');
+    act(() => {
+      textarea.value = "12345";
+      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    });
+    expect(resolvePayload).toHaveBeenCalledWith("12345");
+    expect(container.textContent).toContain("Not a card");
+  });
+
+  test("a phone opens the door on the camera button and offers Take photo", async () => {
+    window.matchMedia = jest.fn().mockReturnValue({ matches: true });
     try {
-      act(() => root.render(<AadhaarScanner />));
-      await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
-      for (let i = 0; i < 8; i += 1) {
-        now += 125;
-        await act(scanNextFrame);
-      }
-      expect(takePhoto).not.toHaveBeenCalled();
-      expect(grab.grabFrame).toHaveBeenCalledTimes(9);
-      now += 3000;
-      await act(scanNextFrame);
-      expect(takePhoto).toHaveBeenCalledTimes(1);
-      if (kind === "bounded") {
-        expect(global.createImageBitmap).toHaveBeenCalledTimes(1);
-      } else {
-        expect(global.createImageBitmap).not.toHaveBeenCalled();
-        expect(grab.grabFrame).toHaveBeenCalledTimes(10);
-      }
-      for (let i = 0; i < 8; i += 1) {
-        now += 125;
-        await act(scanNextFrame);
-      }
-      expect(takePhoto).toHaveBeenCalledTimes(1);
+      act(() => root.render(<AadhaarScanner usbFirst />));
+      expect(container.querySelector('[data-testid="aadhaar-qr-input"]')).toBeNull();
+      const photoInput = container.querySelector('[data-testid="aadhaar-photo-input"]');
+      expect(photoInput.getAttribute("capture")).toBe("environment");
+      expect(photoInput.getAttribute("accept")).toBe("image/*");
+      expect(container.querySelector('[data-testid="aadhaar-photo-button"]').textContent).toContain("Take photo");
     } finally {
-      delete window.ImageCapture;
+      delete window.matchMedia;
     }
+  });
+
+  test("a laptop is not offered Take photo", () => {
+    act(() => root.render(<AadhaarScanner />));
+    expect(container.querySelector('[data-testid="aadhaar-photo-button"]')).toBeNull();
   });
 
   test("trims leading and trailing whitespace on manual decode button click", async () => {
@@ -663,7 +765,7 @@ describe("AadhaarScanner component", () => {
 
   test("a patient code found on camera tears the camera down", async () => {
     const onPatientCode = jest.fn().mockResolvedValue(true);
-    nativeDetector.detectNativeImageData.mockResolvedValue("SNP:AB3K7T29");
+    nativeDetector.detectNative.mockResolvedValue("SNP:AB3K7T29");
     act(() => root.render(<AadhaarScanner onScanned={jest.fn()} onPatientCode={onPatientCode} />));
     await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
     await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
@@ -675,7 +777,7 @@ describe("AadhaarScanner component", () => {
 
   test("a patient code that matches nobody leaves the camera scanning", async () => {
     const onPatientCode = jest.fn().mockResolvedValue(false);
-    nativeDetector.detectNativeImageData.mockResolvedValue("SNP:NOBODY99");
+    nativeDetector.detectNative.mockResolvedValue("SNP:NOBODY99");
     act(() => root.render(<AadhaarScanner onScanned={jest.fn()} onPatientCode={onPatientCode} />));
     await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
     await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
@@ -688,7 +790,7 @@ describe("AadhaarScanner component", () => {
   test("patient-code-only mode is a Failure for any other QR and never decodes it", async () => {
     const onPatientCode = jest.fn();
     const onFailure = jest.fn();
-    nativeDetector.detectNativeImageData.mockResolvedValue("2567820190301120000");
+    nativeDetector.detectNative.mockResolvedValue("2567820190301120000");
     act(() => root.render(<AadhaarScanner patientCodeOnly onPatientCode={onPatientCode} onFailure={onFailure} />));
     expect(container.querySelector('[data-testid="aadhaar-upload-button"]')).toBeNull();
     expect(container.querySelector('[data-testid="aadhaar-manual-toggle"]')).toBeNull();

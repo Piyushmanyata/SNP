@@ -5,30 +5,57 @@ import { AadhaarReviewForm } from "./aadhaar/AadhaarReviewForm";
 import {
   useAadhaarCamera,
   useAadhaarDecode,
+  decodePayload,
   AadhaarModeButtons,
   AadhaarCameraView,
   AadhaarManualInput,
   AadhaarScannerStatus,
   AadhaarFallbackPanel,
 } from "./aadhaar";
+import { primeFeedback, signalSuccess } from "../lib/feedback";
 
 const PATIENT_CODE = /^snp:[a-z0-9-]+$/i;
 const PRESCRIPTION_QR_ONLY = "Scan the QR on the prescription.";
 
-export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStart, onFailure, onScanStall, onPatientCode, patientCodeOnly = false, disabled }) {
-  const [mode, setMode] = useState("idle");
+function prefersTouch() {
+  return typeof window !== "undefined" && Boolean(window.matchMedia?.("(pointer: coarse)")?.matches);
+}
+
+export default function AadhaarScanner({
+  onScanned,
+  onTranscribed,
+  onCaptureStart,
+  onFailure,
+  onScanStall,
+  onPatientCode,
+  resolvePayload,
+  patientCodeOnly = false,
+  usbFirst = false,
+  disabled,
+}) {
+  const [touchFirst] = useState(prefersTouch);
+  const [mode, setMode] = useState(() => (usbFirst && !touchFirst ? "manual" : "idle"));
   const [fallbacksRevealed, setFallbacksRevealed] = useState(false);
+  const [hint, setHint] = useState(false);
   const fileRef = useRef(null);
   const selectedFile = useRef(null);
   const [password, setPassword] = useState("");
 
+  const classify = useCallback(async (value) => {
+    const text = String(value ?? "").trim();
+    if (onPatientCode && PATIENT_CODE.test(text)) {
+      return await onPatientCode(text)
+        ? { outcome: "card", source: "patient_code" }
+        : { outcome: "not-aadhaar", source: "patient_code", message: "No patient found for that code." };
+    }
+    if (patientCodeOnly) return { outcome: "not-aadhaar", message: PRESCRIPTION_QR_ONLY };
+    return resolvePayload ? resolvePayload(text) : decodePayload(text);
+  }, [onPatientCode, patientCodeOnly, resolvePayload]);
+
   const {
-    payload,
-    setPayload,
     error,
     setError,
     outcome,
-    setOutcome,
     source,
     busy,
     decode,
@@ -36,53 +63,33 @@ export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStar
     scanFile,
     reviewData,
     passwordRequired,
-  } = useAadhaarDecode({ onScanned, onFailure, canReview: Boolean(onTranscribed) });
-
-  const decodeAny = useCallback(async (value) => {
-    const text = String(value ?? "").trim();
-    if (onPatientCode && PATIENT_CODE.test(text)) {
-      setError("");
-      setOutcome("");
-      if (!await onPatientCode(text)) return { outcome: "not-aadhaar", message: "No patient found for that code." };
-      setMode("idle");
-      // The live scanner only tears the camera down for a result shaped like a
-      // card, so a found patient has to answer in that shape to stop the stream.
-      return { outcome: "card", source: "patient_code" };
-    }
-    if (!patientCodeOnly) return decode(text);
-    setOutcome("not-aadhaar");
-    setError(PRESCRIPTION_QR_ONLY);
-    onFailure?.("not-aadhaar");
-    return { outcome: "not-aadhaar", message: PRESCRIPTION_QR_ONLY };
-  }, [decode, onFailure, onPatientCode, patientCodeOnly, setError, setOutcome]);
+  } = useAadhaarDecode({ classify, onScanned, onFailure, canReview: Boolean(onTranscribed) });
 
   useEffect(() => {
     if (!busy && !passwordRequired) selectedFile.current = null;
   }, [busy, passwordRequired]);
 
-  useEffect(() => () => { selectedFile.current = null; }, []);
-
   const handleLock = useCallback(() => {
     setMode("idle");
+    setHint(false);
+    signalSuccess();
   }, []);
 
   const handleCameraError = useCallback(
-    (errorMsg) => {
-      setError(errorMsg);
+    (message) => {
+      setError(message);
       setMode("idle");
       onFailure?.("error");
     },
     [setError, onFailure]
   );
 
-  const handleHintFallbacks = useCallback(() => {
-    setError("Hold the card steady in bright, even light. Move slightly farther away if the QR looks blurred.");
-  }, [setError]);
+  const handleHint = useCallback(() => setHint(true), []);
 
   const handleScanStall = useCallback(() => {
     setFallbacksRevealed(true);
     onFailure?.("error");
-    if (onScanStall) onScanStall();
+    onScanStall?.();
   }, [onFailure, onScanStall]);
 
   const {
@@ -90,26 +97,29 @@ export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStar
     cameras,
     torchAvailable,
     torchOn,
+    zoom,
     startCamera: baseStartCamera,
     stopCamera: baseStopCamera,
     switchCamera: baseSwitchCamera,
     toggleTorch,
+    toggleZoom,
+    focus,
     videoRef,
   } = useAadhaarCamera({
-    decode: decodeAny,
+    decode,
     onLock: handleLock,
     onError: handleCameraError,
-    onHintFallbacks: handleHintFallbacks,
+    onHint: handleHint,
     onScanStall: handleScanStall,
   });
 
   useEffect(() => {
-    if (disabled) {
-      cancelDecode();
-      selectedFile.current = null;
-      setPassword("");
-      baseStopCamera();
-    }
+    if (!disabled) return;
+    cancelDecode();
+    selectedFile.current = null;
+    setPassword("");
+    setMode((current) => (current === "camera" ? "idle" : current));
+    baseStopCamera();
   }, [disabled, cancelDecode, baseStopCamera]);
 
   const stopCamera = useCallback(async () => {
@@ -126,20 +136,19 @@ export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStar
 
   const startCamera = useCallback(
     async (cameraIndexToUse) => {
+      primeFeedback();
       cancelDecode();
       onCaptureStart?.();
-      setError("");
-      setOutcome("");
       setFallbacksRevealed(false);
+      setHint(false);
       setMode("camera");
       await baseStartCamera(cameraIndexToUse);
     },
-    [baseStartCamera, cancelDecode, setError, setOutcome, onCaptureStart]
+    [baseStartCamera, cancelDecode, onCaptureStart]
   );
 
   const upload = async (file) => {
     onCaptureStart?.();
-    setMode("idle");
     setPassword("");
     selectedFile.current = file;
     await scanFile(file);
@@ -157,11 +166,11 @@ export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStar
     <div className={patientCodeOnly ? "mt-3" : "rounded-2xl border-2 border-dashed border-emerald-300 bg-emerald-50/50 p-4 sm:p-5"}>
       {!patientCodeOnly && (
         <>
-          <div className="flex items-center gap-2 mb-3">
-            <ScanLine className="w-5 h-5 text-emerald-600" />
+          <div className="flex items-center gap-2 mb-2">
+            <ScanLine className="w-5 h-5 text-emerald-700" />
             <p className="font-display font-bold text-slate-900">Scan Aadhaar QR</p>
           </div>
-          <p className="text-xs text-slate-500 mb-3">
+          <p className="text-xs text-slate-700 mb-3">
             {onPatientCode ? "Scan the patient's Aadhaar QR or the QR on their registration slip." : "Scan the QR or upload a photo or e-Aadhaar PDF."}{onTranscribed ? " If the QR is unreadable, review extracted text." : ""} Uploaded documents and PDF passwords are not retained. Only the last four Aadhaar digits are saved.
           </p>
         </>
@@ -194,9 +203,10 @@ export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStar
         scanFile={upload}
         fileRef={fileRef}
         cameraOnly={patientCodeOnly}
+        touchFirst={touchFirst}
       />
 
-      {busy && (
+      {busy && mode !== "manual" && (
         <Button type="button" variant="ghost" onClick={async () => { await stopCamera(); setMode("idle"); }}>Cancel reading</Button>
       )}
 
@@ -231,15 +241,17 @@ export default function AadhaarScanner({ onScanned, onTranscribed, onCaptureStar
         toggleTorch={toggleTorch}
         cameras={cameras}
         switchCamera={switchCamera}
+        zoom={zoom}
+        toggleZoom={toggleZoom}
+        focus={focus}
+        hint={hint}
       />
 
       <AadhaarManualInput
         mode={mode}
-        payload={payload}
-        setPayload={setPayload}
         disabled={disabled}
         busy={busy}
-        decode={decodeAny}
+        decode={decode}
       />
 
       <AadhaarScannerStatus

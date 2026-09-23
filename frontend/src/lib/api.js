@@ -28,6 +28,13 @@ const api = axios.create({
   timeout: 30000,
 });
 
+api.interceptors.response.use(undefined, (err) => {
+  if (err?.response?.status === 401 && err.config?.url !== "/auth/login") {
+    window.dispatchEvent(new Event("snp:unauthorized"));
+  }
+  return Promise.reject(err);
+});
+
 export function formatApiError(err) {
   const detail = err?.response?.data?.detail;
   if (detail == null) return err?.message || "Something went wrong. Please try again.";

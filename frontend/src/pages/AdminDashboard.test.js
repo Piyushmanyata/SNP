@@ -352,6 +352,70 @@ describe("AdminDashboard component", () => {
     );
   });
 
+  test("deleting a camp or a day asks first and clears an old error on success", async () => {
+    const confirm = jest.spyOn(window, "confirm").mockReturnValue(false);
+    api.delete.mockRejectedValueOnce({ response: { data: { detail: "Camp has registrations; cannot delete" } } });
+    api.delete.mockResolvedValue({ data: { ok: true } });
+    await act(async () => { root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>); });
+    await act(async () => { container.querySelector('[data-testid="admin-tab-camps"]').click(); });
+    const deleteCamp = container.querySelector('[data-testid="delete-camp-c-2"]');
+    expect(deleteCamp.getAttribute("aria-label")).toBe("Delete Inactive Camp");
+
+    await act(async () => { deleteCamp.click(); });
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(api.delete).not.toHaveBeenCalled();
+
+    confirm.mockReturnValue(true);
+    await act(async () => { deleteCamp.click(); });
+    expect(container.textContent).toContain("Camp has registrations; cannot delete");
+    await act(async () => { deleteCamp.click(); });
+    expect(api.delete).toHaveBeenLastCalledWith("/camps/c-2");
+    expect(container.textContent).not.toContain("Camp has registrations");
+
+    await act(async () => { container.querySelector('[data-testid="manage-days-c-1"]').click(); });
+    const deleteDay = container.querySelector('[data-testid="delete-day-cd-1"]');
+    expect(deleteDay.getAttribute("aria-label")).toBe("Delete camp day 27-08-2026");
+    await act(async () => { deleteDay.click(); });
+    expect(api.delete).toHaveBeenLastCalledWith("/camps/days/cd-1");
+    confirm.mockRestore();
+  });
+
+  test("a new camp cannot be submitted twice while the first create is pending", async () => {
+    let finish;
+    api.post.mockReset();
+    api.post.mockImplementationOnce(() => new Promise((done) => { finish = done; }));
+    await act(async () => { root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>); });
+    await act(async () => { container.querySelector('[data-testid="admin-tab-camps"]').click(); });
+    await act(async () => { container.querySelector('[data-testid="create-camp-button"]').click(); });
+    const type = (testid, value) => act(() => {
+      const input = document.querySelector(`[data-testid="${testid}"]`);
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    type("camp-date-input", "2026-10-01");
+    type("camp-number-input", "163");
+    const submit = document.querySelector('[data-testid="camp-create-submit"]');
+    await act(async () => { submit.click(); });
+    expect(submit.isConnected).toBe(true);
+    expect(submit.disabled).toBe(true);
+    await act(async () => { submit.click(); });
+    expect(api.post).toHaveBeenCalledTimes(1);
+    await act(async () => { finish({ data: {} }); });
+  });
+
+  test("a failed export shows the server reason in a red alert", async () => {
+    const body = JSON.stringify({ detail: "No active camp to export" });
+    api.get.mockImplementation((url) => (url === "/exports/camp-records"
+      ? Promise.reject({ message: "Request failed with status code 409", response: { status: 409, data: { text: () => Promise.resolve(body) } } })
+      : Promise.resolve({ data: {} })));
+    await act(async () => { root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>); });
+    await act(async () => { container.querySelector('[data-testid="admin-tab-exports"]').click(); });
+    await act(async () => { container.querySelector('[data-testid="export-camp-records-button"]').click(); });
+    const alert = container.querySelector('[role="alert"]');
+    expect(alert.textContent).toContain("No active camp to export");
+    expect(alert.className).toContain("rose");
+  });
+
   test("OT & Specs tab lists Specs collection days and posts create", async () => {
     api.post.mockResolvedValueOnce({ data: { specs_day: { id: "sp-2" } } });
 

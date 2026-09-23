@@ -36,27 +36,40 @@ jest.mock("../components/Layout", () => {
 const CARD_PAYLOAD = "AADHAAR|Aadhaar Scanned User|M|1984-05-12|8888|10 Downing St, Kolkata";
 
 jest.mock("../components/AadhaarScanner", () => {
-  return function MockAadhaarScanner({ onScanned, onFailure, onScanStall, onPatientCode }) {
+  const { useState } = require("react");
+  const payload = "AADHAAR|Aadhaar Scanned User|M|1984-05-12|8888|10 Downing St, Kolkata";
+  return function MockAadhaarScanner({ onScanned, resolvePayload, onFailure, onScanStall, onPatientCode, onCaptureStart, disabled }) {
+    const [resolved, setResolved] = useState("");
+    const scan = async () => {
+      if (onScanned) {
+        onScanned(
+          {
+            full_name: "Aadhaar Scanned User",
+            age: 42,
+            gender: "M",
+            address: "10 Downing St, Kolkata",
+            aadhaar_last4: "8888",
+            dob: "1984-05-12",
+          },
+          payload
+        );
+        return;
+      }
+      setResolved("");
+      try {
+        setResolved(JSON.stringify(await resolvePayload(payload)));
+      } catch (err) {
+        setResolved(`threw: ${err.message}`);
+      }
+    };
     return (
-      <div data-testid="mock-aadhaar-scanner">
-        <button
-          type="button"
-          data-testid="mock-scan-trigger"
-          onClick={() =>
-            onScanned(
-              {
-                full_name: "Aadhaar Scanned User",
-                age: 42,
-                gender: "M",
-                address: "10 Downing St, Kolkata",
-                aadhaar_last4: "8888",
-                dob: "1984-05-12",
-              },
-              "AADHAAR|Aadhaar Scanned User|M|1984-05-12|8888|10 Downing St, Kolkata"
-            )
-          }
-        >
+      <div data-testid="mock-aadhaar-scanner" data-disabled={String(Boolean(disabled))}>
+        <button type="button" data-testid="mock-scan-trigger" onClick={scan}>
           Simulate Scan
+        </button>
+        <output data-testid="mock-resolve-result">{resolved}</output>
+        <button type="button" data-testid="mock-capture-start" onClick={() => onCaptureStart && onCaptureStart()}>
+          Simulate new capture
         </button>
         <button
           type="button"
@@ -110,6 +123,19 @@ function deskScanner() {
 function modalScanner(testid) {
   return [...document.body.querySelectorAll(`[data-testid="${testid}"]`)].pop();
 }
+
+function resolveResult() {
+  const text = container.querySelector('[data-testid="mock-resolve-result"]').textContent;
+  return text.startsWith("threw: ") ? text : JSON.parse(text);
+}
+
+function apiError(detail) {
+  const err = new Error("Request failed with status code 400");
+  err.response = { status: 400, data: { detail } };
+  return err;
+}
+
+const AADHAAR_DIGITS = "2".repeat(120);
 
 function setInput(el, value) {
   const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
@@ -227,6 +253,36 @@ describe("Desk page", () => {
     expect(container.querySelector('[data-testid="door-scan-status"]')).toBeNull();
     await act(async () => finishScan({ data: { outcome: "no_match", card: { full_name: "Old scan" } } }));
     expect(container.textContent).not.toContain("Old scan");
+    expect(resolveResult()).toEqual({ outcome: "card", source: "desk_scan" });
+  });
+
+  test("starting a new capture abandons the door scan still in flight", async () => {
+    let finishScan;
+    api.post.mockImplementationOnce(() => new Promise((resolve) => { finishScan = resolve; }));
+    await renderDesk();
+    await scanAtDoor();
+    expect(container.querySelector('[data-testid="door-scan-status"]')).not.toBeNull();
+    act(() => { container.querySelector('[data-testid="mock-capture-start"]').click(); });
+    expect(container.querySelector('[data-testid="door-scan-status"]')).toBeNull();
+    await act(async () => finishScan({ data: { outcome: "no_match", card: { full_name: "Old scan" } } }));
+    expect(container.textContent).not.toContain("Old scan");
+    expect(container.querySelector('[data-testid="scan-no-match"]')).toBeNull();
+  });
+
+  test("a superseded door scan that fails hands back nothing and shows no error", async () => {
+    let failScan;
+    api.post.mockImplementationOnce(() => new Promise((_resolve, fail) => { failScan = fail; }));
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => url.startsWith("/patients/search")
+      ? Promise.resolve({ data: { results: [ARRIVED] } }) : base(url));
+    await renderDesk();
+    await scanAtDoor();
+    act(() => { setInput(container.querySelector('[data-testid="desk-find-input"]'), "Scanned"); });
+    await act(async () => { container.querySelector('[data-testid="desk-find-button"]').click(); });
+    await act(async () => failScan(new Error("Network Error")));
+    expect(resolveResult()).toBeNull();
+    expect(container.textContent).not.toContain("Network Error");
+    expect(container.querySelector('[data-testid="desk-search-results"]')).not.toBeNull();
   });
 
   test("a new scan immediately removes the previous mismatch confirmation", async () => {
@@ -290,10 +346,90 @@ describe("Desk page", () => {
     await renderDesk();
     await scanAtDoor();
 
+    expect(api.post).toHaveBeenCalledTimes(1);
     expect(api.post).toHaveBeenCalledWith("/desk/scan", { payload: CARD_PAYLOAD });
+    expect(api.post).not.toHaveBeenCalledWith("/aadhaar/decode", expect.anything());
+    expect(resolveResult()).toEqual({ outcome: "card", source: "desk_scan" });
     expect(container.querySelector('[data-testid="scan-arrived"]')).not.toBeNull();
     expect(container.textContent).toContain("Arrived: #101");
     expect(container.querySelector('[data-testid="scan-print-button"]')).not.toBeNull();
+  });
+
+  test("a door scan the server says is not a card goes back to the scanner as garbage", async () => {
+    api.post.mockRejectedValueOnce(apiError({ code: "NOT_A_CARD", message: "That QR is not an Aadhaar card." }));
+    await renderDesk();
+    await scanAtDoor();
+
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(resolveResult()).toEqual({ outcome: "garbage", message: "That QR is not an Aadhaar card." });
+    expect(container.querySelector('[data-testid="door-scan-status"]')).toBeNull();
+    expect(container.querySelector('[data-testid="desk-card-scan"] [role="alert"]')).toBeNull();
+  });
+
+  test("any other door scan failure is thrown for the scanner to show", async () => {
+    api.post.mockRejectedValueOnce(new Error("Network Error"));
+    await renderDesk();
+    await scanAtDoor();
+
+    expect(resolveResult()).toBe("threw: Network Error");
+    expect(container.querySelector('[data-testid="door-scan-status"]')).toBeNull();
+    expect(container.querySelector('[data-testid="scan-no-match"]')).toBeNull();
+  });
+
+  test("a door scan refresh failure keeps the desk and offers a retry", async () => {
+    api.post.mockResolvedValueOnce({ data: { outcome: "arrived", registration: ARRIVED } });
+    await renderDesk();
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url === "/kpis" ? Promise.reject(new Error("Network Error")) : base(url)));
+    await scanAtDoor();
+
+    const refresh = container.querySelector('[data-testid="desk-refresh-error"]');
+    expect(refresh.textContent).toContain("Could not refresh the desk: Network Error");
+    expect(container.querySelector('[data-testid="error-retry-button"]')).toBeNull();
+    expect(container.querySelector('[data-testid="scan-arrived"]')).not.toBeNull();
+    expect(container.textContent).toContain("Arrived: #101");
+
+    api.get.mockImplementation(base);
+    await act(async () => { refresh.querySelector("button").click(); });
+    expect(container.querySelector('[data-testid="desk-refresh-error"]')).toBeNull();
+    expect(container.querySelector('[data-testid="scan-arrived"]')).not.toBeNull();
+  });
+
+  test("a first load failure shows the error card", async () => {
+    api.get.mockRejectedValue(new Error("Network Error"));
+    await renderDesk();
+
+    expect(container.textContent).toContain("Network Error");
+    expect(container.querySelector('[data-testid="error-retry-button"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="desk-refresh-error"]')).toBeNull();
+    expect(container.querySelector('[data-testid="desk-card-find"]')).toBeNull();
+  });
+
+  test("an Aadhaar QR typed into find at the door is resolved as a door scan", async () => {
+    api.post.mockResolvedValueOnce({ data: { outcome: "arrived", registration: ARRIVED } });
+    await renderDesk();
+    act(() => { setInput(container.querySelector('[data-testid="desk-find-input"]'), AADHAAR_DIGITS); });
+    await act(async () => { container.querySelector('[data-testid="desk-find-button"]').click(); });
+
+    expect(api.post).toHaveBeenCalledTimes(1);
+    expect(api.post).toHaveBeenCalledWith("/desk/scan", { payload: AADHAAR_DIGITS });
+    expect(container.querySelector('[data-testid="desk-find-input"]').value).toBe("");
+    expect(container.querySelector('[data-testid="scan-arrived"]')).not.toBeNull();
+    expect(container.textContent).toContain("Arrived: #101");
+  });
+
+  test.each([
+    ["not a card", () => apiError({ code: "NOT_A_CARD", message: "That QR is not an Aadhaar card." }), "That QR is not an Aadhaar card."],
+    ["a failed", () => new Error("Network Error"), "Network Error"],
+  ])("%s Aadhaar QR typed into find at the door shows the error", async (_label, failure, message) => {
+    api.post.mockRejectedValueOnce(failure());
+    await renderDesk();
+    act(() => { setInput(container.querySelector('[data-testid="desk-find-input"]'), AADHAAR_DIGITS); });
+    await act(async () => { container.querySelector('[data-testid="desk-find-button"]').click(); });
+
+    expect(api.post).toHaveBeenCalledWith("/desk/scan", { payload: AADHAAR_DIGITS });
+    expect(container.querySelector('[data-testid="desk-card-scan"] [role="alert"]').textContent).toBe(message);
+    expect(container.querySelector('[data-testid="door-scan-status"]')).toBeNull();
   });
 
   test("a repeat door scan of a patient the doctor has seen offers no print", async () => {
@@ -422,8 +558,9 @@ describe("Desk page", () => {
     expect(container.querySelector('[data-testid="register-walk-in-button"]')).toBeNull();
     expect(document.body.querySelector('[data-testid="walk-in-note"]')).toBeNull();
     act(() => {
-      setInput(container.querySelector('[data-testid="door-phone-input"]'), "9876500001");
+      setInput(container.querySelector('[data-testid="door-phone-input"]'), "98765 00001");
     });
+    expect(container.querySelector('[data-testid="door-phone-input"]').value).toBe("9876500001");
     await act(async () => {
       container.querySelector('[data-testid="door-register-button"]').click();
     });
@@ -513,12 +650,16 @@ describe("Desk page", () => {
     await renderDesk();
     act(() => { container.querySelector('[data-testid="new-registration-button"]').click(); });
     act(() => { modalScanner("mock-scan-trigger").click(); });
-    act(() => { setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "9876500001"); });
+    act(() => { setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "+91 98765-00001 99"); });
+    expect(document.body.querySelector('[data-testid="reg-phone-input"]').value).toBe("9198765000");
+    act(() => { setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "98765-00001 99"); });
+    expect(document.body.querySelector('[data-testid="reg-phone-input"]').value).toBe("9876500001");
     await act(async () => { document.body.querySelector('[data-testid="patient-register-submit"]').click(); });
 
     expect(registerBodies()).toHaveLength(1);
     expect(registerBodies()[0].aadhaar_scanned).toBe(true);
     expect(registerBodies()[0].qr_payload).toBe(CARD_PAYLOAD);
+    expect(registerBodies()[0].phone).toBe("9876500001");
   });
 
   function revealManual() {
@@ -898,6 +1039,25 @@ describe("Desk page", () => {
     expect(document.body.textContent).not.toContain("Register anyway");
   });
 
+  test("an ambiguous Manual entry match names the candidates and asks for a door scan", async () => {
+    preRegistrationMode();
+    api.post.mockImplementation((url) => (url === "/register"
+      ? Promise.reject(apiError({
+        code: "AMBIGUOUS_MANUAL_ENTRY",
+        message: "Multiple manual entries",
+        registrations: [{ reg_no: "301" }, { reg_no: "302" }],
+      }))
+      : Promise.resolve({ data: {} })));
+    await renderDesk();
+    act(() => { container.querySelector('[data-testid="new-registration-button"]').click(); });
+    act(() => { modalScanner("mock-scan-trigger").click(); });
+    act(() => { setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "9876500001"); });
+    await act(async () => { document.body.querySelector('[data-testid="patient-register-submit"]').click(); });
+
+    expect(document.body.textContent).toContain("Multiple Manual entries match (#301, #302). Scan the card at the door to pick one.");
+    expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).not.toBeNull();
+  });
+
   test("an ambiguous scan lists the candidates and checks nobody in", async () => {
     api.post.mockResolvedValueOnce({
       data: {
@@ -963,6 +1123,21 @@ describe("Desk page", () => {
     });
     expect(container.querySelector('[data-testid="desk-card-scan"]')).toBeNull();
     expect(container.textContent).toContain("Registration not found");
+  });
+
+  test.each([
+    ["secure QR digits", AADHAAR_DIGITS],
+    ["old XML QR", '<?xml version="1.0"?><PrintLetterBarcodeData uid="xxxxxxxx8888" name="A"/>'],
+  ])("pre-registration find refuses an Aadhaar %s and points to New Registration", async (_label, value) => {
+    preRegistrationMode();
+    await renderDesk();
+    act(() => { setInput(container.querySelector('[data-testid="desk-find-input"]'), value); });
+    await act(async () => { container.querySelector('[data-testid="desk-find-button"]').click(); });
+
+    expect(api.post).not.toHaveBeenCalled();
+    expect(api.get).not.toHaveBeenCalledWith(expect.stringMatching(/^\/patients\/search/));
+    expect(container.textContent).toContain("That is an Aadhaar QR. Use New Registration to register this patient.");
+    expect(container.querySelector('[data-testid="desk-find-input"]').value).toBe("");
   });
 
   test("no camp day today is pre-registration mode", async () => {
@@ -1091,7 +1266,7 @@ describe("Desk page", () => {
     act(() => {
       setInput(container.querySelector('[data-testid="reg-fullname-input"]'), "Manual Patient");
       setInput(container.querySelector('[data-testid="reg-age-input"]'), "40");
-      setInput(container.querySelector('[data-testid="reg-phone-input"]'), "9876500002");
+      setInput(container.querySelector('[data-testid="reg-phone-input"]'), "98765-00002");
       setInput(container.querySelector('[data-testid="door-manual-reason"]'), "Scanners are down");
     });
     await act(async () => {
@@ -1099,6 +1274,7 @@ describe("Desk page", () => {
     });
     expect(api.post).toHaveBeenCalledWith("/register", expect.objectContaining({
       full_name: "Manual Patient",
+      phone: "9876500002",
       camp_day_id: "day-2",
       at_door: true,
       failed_scan_attempts: 3,
@@ -1238,6 +1414,60 @@ describe("Desk page", () => {
     expect(document.querySelector('[data-testid="reg-fullname-input"]').readOnly).toBe(false);
   });
 
+  async function openRegistrationForUsb() {
+    api.get.mockImplementation((url) => url === "/camps/active" ? Promise.resolve({ data: { camp: { id: "camp-1" }, days: [{ id: "day-1", printing_open: false }], printing_open: false } }) : Promise.resolve({ data: {} }));
+    let resolveDecode;
+    api.post.mockImplementation(() => new Promise((resolve) => { resolveDecode = resolve; }));
+    await renderDesk();
+    act(() => container.querySelector('[data-testid="new-registration-button"]').click());
+    return (response) => act(async () => resolveDecode(response));
+  }
+
+  function wedgeStatus() {
+    return document.querySelector('[data-testid="reg-wedge-status"]');
+  }
+
+  test("the registration modal says when it is receiving and reading a USB scan", async () => {
+    const finishDecode = await openRegistrationForUsb();
+    expect(wedgeStatus()).toBeNull();
+    let t = Number(performance.now()) || 0;
+    const spy = jest.spyOn(performance, "now").mockImplementation(() => t);
+    act(() => {
+      for (const ch of CARD_PAYLOAD.slice(0, 30)) {
+        t += 10;
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: ch, bubbles: true, cancelable: true }));
+      }
+    });
+    expect(wedgeStatus().getAttribute("role")).toBe("status");
+    expect(wedgeStatus().textContent).toBe("Receiving from the USB scanner…");
+    act(() => {
+      for (const ch of CARD_PAYLOAD.slice(30)) {
+        t += 10;
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: ch, bubbles: true, cancelable: true }));
+      }
+      t += 10;
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    spy.mockRestore();
+    expect(api.post).toHaveBeenCalledWith("/aadhaar/decode", { payload: CARD_PAYLOAD });
+    expect(wedgeStatus().textContent).toBe("Reading the card…");
+    await finishDecode({ data: { outcome: "card", data: { full_name: "Usb Patient", age: 42 } } });
+    expect(wedgeStatus()).toBeNull();
+    expect(document.querySelector('[data-testid="reg-fullname-input"]').value).toBe("Usb Patient");
+  });
+
+  test.each([
+    [{ outcome: "garbage", message: "That is not an Aadhaar QR." }, "That is not an Aadhaar QR."],
+    [{ outcome: "garbage" }, "Could not read that card. Scan it again."],
+  ])("a USB scan that decodes as %o shows an error", async (data, message) => {
+    const finishDecode = await openRegistrationForUsb();
+    await fireBurst(CARD_PAYLOAD);
+    await finishDecode({ data });
+    expect(wedgeStatus()).toBeNull();
+    expect(document.querySelector('[role="dialog"] [role="alert"]').textContent).toBe(message);
+    expect(document.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
+  });
+
   test("the door shows a reading status while the scan resolves", async () => {
     let resolveScan;
     api.post.mockImplementation((url) => url === "/desk/scan" ? new Promise((resolve) => { resolveScan = resolve; }) : Promise.resolve({ data: {} }));
@@ -1245,6 +1475,7 @@ describe("Desk page", () => {
     expect(container.querySelector('[data-testid="door-scan-status"]')).toBeNull();
     await act(async () => { deskScanner().click(); });
     expect(container.querySelector('[data-testid="door-scan-status"]').textContent).toContain("Reading the QR");
+    expect(container.querySelector('[data-testid="mock-aadhaar-scanner"]').getAttribute("data-disabled")).toBe("false");
     await act(async () => resolveScan({ data: { outcome: "arrived", registration: ARRIVED } }));
     expect(container.querySelector('[data-testid="door-scan-status"]')).toBeNull();
   });
