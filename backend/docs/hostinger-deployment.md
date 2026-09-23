@@ -249,7 +249,7 @@ Before the spectacles flows are configured, open Admin → OT & Specs and give t
 
 - The running `a2a4415` images were tagged `snp-backend:rollback-a2a4415c…`, `snp-frontend:rollback-a2a4415c…` and `snp-reminders:rollback-a2a4415c…`. Retag them to `:latest`, point `/opt/snp/current` back at `a2a4415`, and run `up -d --no-build` to roll back.
 - A pre-deployment archive, `snp_camps-20260923T085922Z.archive.gz`, was taken by restarting the backup container. Only backend, frontend and reminders were rebuilt and recreated; MongoDB stayed up.
-- A random `MSG91_WEBHOOK_SECRET` was generated on the VPS and appended to `/opt/snp/.env.production` (mode 600, root). It was not printed or copied off the server. The MSG91 webhook itself is still to be saved by the owner, as described above.
+- A random `MSG91_WEBHOOK_SECRET` was generated on the VPS and appended to `/opt/snp/.env.production` (mode 600, root). It was not printed or copied off the server. The owner pasted it into MSG91; the `SNPdeliveryreports` webhook (SMS, On Report Received, POST JSON to `/api/webhooks/msg91` with the `X-SNP-Webhook-Secret` header) was created on 23 September 2026. Its Test Run returned 200 `{"ok": true, "recorded": 0}`. The value also appeared once in an operator chat; rotate it by replacing the line in `.env.production`, recreating the backend, and updating the header in MSG91.
 - No migration was needed. Startup created the `provider_id_1` and `created_at_1` indexes on `reminder_ledger`.
 
 Post-deployment checks against the live host:
