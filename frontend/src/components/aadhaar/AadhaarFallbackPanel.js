@@ -29,7 +29,6 @@ export function AadhaarFallbackPanel({
             size="md"
             type="button"
             onClick={toggleTorch}
-            className="min-h-[44px]"
             data-testid="fallback-torch-button"
           >
             <Flashlight className="w-4 h-4" /> {torchOn ? "Torch off" : "Torch on"}
@@ -40,7 +39,6 @@ export function AadhaarFallbackPanel({
           size="md"
           type="button"
           onClick={onUpload}
-          className="min-h-[44px]"
           data-testid="fallback-upload-button"
         >
           <Upload className="w-4 h-4" /> Upload photo
@@ -50,7 +48,6 @@ export function AadhaarFallbackPanel({
           size="md"
           type="button"
           onClick={onManual}
-          className="min-h-[44px]"
           data-testid="fallback-manual-button"
         >
           <Keyboard className="w-4 h-4" /> USB / paste

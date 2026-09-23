@@ -209,9 +209,9 @@ export default function Team() {
                   className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                   data-testid={`staff-row-${s.id}`}
                 >
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-semibold text-slate-900">{s.name}</span>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="min-w-0 break-words font-semibold text-slate-900">{s.name}</span>
                       <Badge tone={s.role === "admin" ? "emerald" : "slate"}>
                         {ALL_ROLES.find((r) => r.value === s.role)?.label || s.role}
                       </Badge>

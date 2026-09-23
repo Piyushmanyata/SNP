@@ -157,7 +157,7 @@ export function Modal({ open, onClose, title, children, size = "md" }) {
   if (!open) return null;
   const widths = { sm: "max-w-md", md: "max-w-lg", lg: "max-w-2xl", xl: "max-w-4xl" };
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
       <div role="presentation" className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose} />
       <div
         ref={dialogRef}
@@ -165,7 +165,7 @@ export function Modal({ open, onClose, title, children, size = "md" }) {
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`relative my-0 sm:my-8 bg-white w-full ${widths[size]} rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-200 max-h-[100vh] sm:max-h-[90vh] overflow-y-auto animate-fade-up`}
+        className={`relative my-0 sm:my-8 bg-white w-full ${widths[size]} rounded-t-2xl sm:rounded-2xl shadow-2xl border border-slate-200 max-h-[100dvh] sm:max-h-[90dvh] overflow-y-auto overscroll-contain animate-fade-up`}
       >
         <div className="sticky top-0 bg-white flex items-center justify-between px-5 py-4 border-b border-slate-100 z-10">
           <h3 className="font-display font-bold text-lg text-slate-900">{title}</h3>
@@ -173,7 +173,7 @@ export function Modal({ open, onClose, title, children, size = "md" }) {
             <X className="w-5 h-5" />
           </button>}
         </div>
-        <div className="p-5">{children}</div>
+        <div className="p-5 pb-[calc(1.25rem_+_env(safe-area-inset-bottom))]">{children}</div>
       </div>
     </div>,
     document.body

@@ -35,7 +35,7 @@ export default function Layout({ children, title }) {
             </div>
           </Link>
           {user && (
-            <div className="flex items-center gap-1 sm:gap-3">
+            <div className="ml-auto flex items-center gap-1 sm:gap-3">
               <div className="hidden sm:block text-right">
                 <p className="text-sm font-semibold leading-none">{user.name}</p>
               </div>
@@ -43,7 +43,7 @@ export default function Layout({ children, title }) {
               <button
                 type="button"
                 data-testid="reset-pin-button"
-                className="min-h-[44px] px-3 rounded-xl text-sm font-semibold text-slate-200 hover:text-white hover:bg-slate-800"
+                className="min-h-[44px] px-3 rounded-xl text-sm font-semibold text-slate-200 hover:text-white hover:bg-slate-800 active:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
                 onClick={() => setChangingPin(true)}
               >
                 Reset PIN
@@ -62,7 +62,7 @@ export default function Layout({ children, title }) {
                     setLoggingOut(false);
                   }
                 }}
-                className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-slate-300 hover:text-white hover:bg-slate-800"
+                className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl text-slate-300 hover:text-white hover:bg-slate-800 active:bg-slate-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400 disabled:opacity-50"
                 data-testid="logout-button"
                 title="Logout"
                 aria-label="Logout"

@@ -25,7 +25,7 @@ export function AadhaarManualInput({ mode, disabled, busy, decode }) {
     <Field label="USB scanner or pasted QR text">
       <textarea
         ref={ref}
-        className="w-full min-h-[70px] px-3.5 py-2.5 rounded-xl border-2 border-slate-400 font-mono text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 read-only:bg-slate-100"
+        className="w-full min-h-[70px] px-3.5 py-2.5 rounded-xl border-2 border-slate-400 font-mono text-base sm:text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500 read-only:bg-slate-100"
         onInput={(e) => setFilled(Boolean(e.currentTarget.value.trim()))}
         onKeyDown={(e) => {
           if ((e.key === "Enter" && !e.shiftKey) || (e.key === "Tab" && e.currentTarget.value.trim())) {

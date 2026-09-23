@@ -20,14 +20,17 @@ export function AadhaarCameraView({
 }) {
   const zoomLabel = zoom ? `${Math.round((zoom.value / zoom.min) * 10) / 10}×` : "";
   const tapToFocus = (event) => {
-    if (!event.detail) {
+    const video = videoRef.current;
+    if (!event.detail || !video?.videoWidth) {
       focus(0.5, 0.5);
       return;
     }
     const rect = event.currentTarget.getBoundingClientRect();
+    const scale = Math.max(rect.width / video.videoWidth, rect.height / video.videoHeight);
+    const clamp = (value) => Math.min(1, Math.max(0, value));
     focus(
-      Math.min(1, Math.max(0, (event.clientX - rect.left) / (rect.width || 1))),
-      Math.min(1, Math.max(0, (event.clientY - rect.top) / (rect.height || 1))),
+      clamp(0.5 + (event.clientX - rect.left - rect.width / 2) / (video.videoWidth * scale)),
+      clamp(0.5 + (event.clientY - rect.top - rect.height / 2) / (video.videoHeight * scale)),
     );
   };
   return (
@@ -41,7 +44,7 @@ export function AadhaarCameraView({
       >
         <video
           ref={videoRef}
-          className="block w-full max-h-[65vh] object-cover bg-black"
+          className="block w-full aspect-[3/4] sm:aspect-video max-h-[65vh] object-cover bg-black"
           autoPlay
           playsInline
           muted

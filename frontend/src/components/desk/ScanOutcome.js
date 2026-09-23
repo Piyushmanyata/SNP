@@ -53,6 +53,7 @@ export function MismatchReview({ registration, diff, busy, onConfirm }) {
         Reg #{registration.reg_no} was typed in. The card is the authority on identity.
         Confirming replaces the stored values and lets the prescription print.
       </p>
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs uppercase tracking-wide text-slate-600">
@@ -74,6 +75,7 @@ export function MismatchReview({ registration, diff, busy, onConfirm }) {
           })}
         </tbody>
       </table>
+      </div>
       <p className="text-xs text-slate-600 mt-3">
         Household phone, camp day and registration number are kept.
       </p>
