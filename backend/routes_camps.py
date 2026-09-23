@@ -294,8 +294,8 @@ async def list_days(camp_id: str, actor: dict = Depends(require_any)) -> Dict[st
 
 
 @router.patch("/days/{day_id}")
-async def update_camp_day(day_id: str, body: CampDayBody, actor: dict = Depends(require_admin),
-                          background_tasks: BackgroundTasks | None = None) -> Dict[str, Any]:
+async def update_camp_day(day_id: str, body: CampDayBody, background_tasks: BackgroundTasks,
+                          actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     if not ObjectId.is_valid(day_id) or not ObjectId.is_valid(body.camp_id):
         raise HTTPException(status_code=400, detail="Invalid camp or day ID")

@@ -11,6 +11,20 @@ from models import CampDayBody, OtScheduleBody
 from test_camp_lifecycle import _mock, _recorder, _register, _seed_camp, OTHER_DAY, TODAY
 
 
+async def _update_camp_day(*args, **kwargs):
+    tasks = BackgroundTasks()
+    result = await routes_camps.update_camp_day(*args, **kwargs, background_tasks=tasks)
+    await tasks()
+    return result
+
+
+async def _update_ot_day(*args, **kwargs):
+    tasks = BackgroundTasks()
+    result = await routes_clinical.update_ot_day(*args, **kwargs, background_tasks=tasks)
+    await tasks()
+    return result
+
+
 def test_camp_day_list_reports_bookings_above_reduced_seats(monkeypatch):
     async def run():
         db = _mock(monkeypatch)
@@ -52,7 +66,7 @@ def test_camp_day_move_keeps_bookings_and_sends_new_date(monkeypatch):
         assert len(sent) == 2
         assert all(s["type"] == "registration" and s["date"] == "05-09-2026" for s in sent)
         assert sent[0]["reg_no"] == registered["reg_no"]
-        await routes_camps.update_camp_day(
+        await _update_camp_day(
             str(day_id), CampDayBody(camp_id=str(camp_id), day_date=OTHER_DAY, seat_limit=2), actor={}
         )
         assert len(sent) == 4
@@ -70,7 +84,7 @@ def test_ot_day_seats_cannot_drop_below_assigned(monkeypatch):
                                                "venue": "Old Hospital", "venue_sms": None,
                                                "seat_limit": 3, "seats_taken": 2})
         with pytest.raises(HTTPException) as exc:
-            await routes_clinical.update_ot_day(
+            await _update_ot_day(
                 str(day_id), OtScheduleBody(camp_id=str(camp_id), day_date="2026-09-05",
                                             seat_limit=1, venue="New Hospital", venue_sms=None), actor={}
             )
@@ -89,7 +103,7 @@ def test_completed_ot_day_cannot_move(monkeypatch):
                                                "venue": "Old Hospital", "seat_limit": 3, "seats_taken": 1})
         await db.fulfilments.insert_one({"ot_schedule_day_id": day_id, "item_type": "ot", "status": "completed"})
         with pytest.raises(HTTPException) as exc:
-            await routes_clinical.update_ot_day(
+            await _update_ot_day(
                 str(day_id), OtScheduleBody(camp_id=str(camp_id), day_date="2026-09-05",
                                             seat_limit=3, venue="Old Hospital", venue_sms=None), actor={}
             )
@@ -105,7 +119,7 @@ def test_camp_day_with_arrival_cannot_move(monkeypatch):
         await db.patients.insert_one({"camp_id": camp_id, "booked_camp_day_id": day_id,
                                       "camp_day_id": day_id, "arrived_at": TODAY})
         with pytest.raises(HTTPException) as exc:
-            await routes_camps.update_camp_day(
+            await _update_camp_day(
                 str(day_id), CampDayBody(camp_id=str(camp_id), day_date="2026-09-05", seat_limit=20), actor={}
             )
         assert exc.value.status_code == 409
@@ -118,7 +132,7 @@ def test_camp_day_edit_rejects_malformed_ids(monkeypatch):
     async def run():
         _mock(monkeypatch)
         with pytest.raises(HTTPException) as exc:
-            await routes_camps.update_camp_day(
+            await _update_camp_day(
                 "not-an-id", CampDayBody(camp_id="not-an-id", day_date=OTHER_DAY, seat_limit=20), actor={}
             )
         assert exc.value.status_code == 400
@@ -141,12 +155,12 @@ def test_camp_day_retry_finishes_notifications_after_interruption(monkeypatch):
         monkeypatch.setattr(sms, "send_patient_sms", interrupted)
         body = CampDayBody(camp_id=str(camp_id), day_date="2026-09-05", seat_limit=20)
         with pytest.raises(RuntimeError):
-            await routes_camps.update_camp_day(str(day_id), body, actor={})
+            await _update_camp_day(str(day_id), body, actor={})
         assert (await db.camp_days.find_one({"_id": day_id}))["day_date"] == "2026-09-05"
 
         monkeypatch.setattr(sms, "send_patient_sms", actual_send)
-        await routes_camps.update_camp_day(str(day_id), body, actor={})
-        await routes_camps.update_camp_day(str(day_id), body, actor={})
+        await _update_camp_day(str(day_id), body, actor={})
+        await _update_camp_day(str(day_id), body, actor={})
         assert [item["date"] for item in sent] == ["05-09-2026"]
 
     asyncio.run(run())
@@ -177,12 +191,12 @@ def test_ot_day_retry_finishes_slip_and_notification_after_interruption(monkeypa
         body = OtScheduleBody(camp_id=str(camp_id), day_date="2026-09-05",
                              seat_limit=2, venue="New Hospital", venue_sms=None)
         with pytest.raises(RuntimeError):
-            await routes_clinical.update_ot_day(str(day_id), body, actor={})
+            await _update_ot_day(str(day_id), body, actor={})
         assert (await db.deferred_slips.find_one({"patient_id": patient_id}))["collection_date"] == OTHER_DAY
 
         monkeypatch.setattr(db.deferred_slips, "update_many", actual_update)
-        await routes_clinical.update_ot_day(str(day_id), body, actor={})
-        await routes_clinical.update_ot_day(str(day_id), body, actor={})
+        await _update_ot_day(str(day_id), body, actor={})
+        await _update_ot_day(str(day_id), body, actor={})
         assert (await db.deferred_slips.find_one({"patient_id": patient_id}))["collection_date"] == "2026-09-05"
         assert (await db.fulfilments.find_one({"transcription_id": transcription_id}))["collection_date"] == "2026-09-05"
         assert [item["date"] for item in sent] == ["05-09-2026"]
@@ -212,7 +226,7 @@ def test_ot_day_move_updates_current_appointment_and_sends_new_token(monkeypatch
                                    "ot_token", OTHER_DAY, "Old Hospital")
         sent.clear()
 
-        result = await routes_clinical.update_ot_day(
+        result = await _update_ot_day(
             str(day_id), OtScheduleBody(camp_id=str(camp_id), day_date="2026-09-05",
                                         seat_limit=1, venue="New Hospital", venue_sms=None), actor={}
         )
@@ -221,7 +235,7 @@ def test_ot_day_move_updates_current_appointment_and_sends_new_token(monkeypatch
         assert (await db.fulfilments.find_one({"transcription_id": transcription_id}))["collection_venue"] == "New Hospital"
         assert sent == [{"type": "ot_token", "mobile": "9876500001", "reg_no": 501,
                          "camp_no": "162", "date": "05-09-2026", "venue": "New Hospital"}]
-        await routes_clinical.update_ot_day(
+        await _update_ot_day(
             str(day_id), OtScheduleBody(camp_id=str(camp_id), day_date=OTHER_DAY,
                                         seat_limit=1, venue="New Hospital", venue_sms=None), actor={}
         )

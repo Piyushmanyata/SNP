@@ -1170,8 +1170,8 @@ async def list_ot_days(actor: dict = Depends(require_any)) -> Dict[str, Any]:
 
 
 @router.patch("/ot-days/{day_id}")
-async def update_ot_day(day_id: str, body: OtScheduleBody, actor: dict = Depends(require_admin),
-                        background_tasks: BackgroundTasks | None = None) -> Dict[str, Any]:
+async def update_ot_day(day_id: str, body: OtScheduleBody, background_tasks: BackgroundTasks,
+                        actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     camp_id = _oid_or_400(body.camp_id)
     oid = _oid_or_400(day_id)
