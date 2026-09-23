@@ -1,6 +1,6 @@
 export const WASM_LOAD_TIMEOUT_MS = 45000;
 export const WASM_DETECT_TIMEOUT_MS = 4000;
-export const WASM_PHOTO_TIMEOUT_MS = 20000;
+const WASM_PHOTO_TIMEOUT_MS = 20000;
 
 let worker = null;
 let ready = null;

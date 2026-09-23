@@ -3,7 +3,7 @@ import api, { formatApiError } from "../../lib/api";
 import * as nativeDetector from "./liveScan/nativeDetector";
 import * as wasmDetector from "./liveScan/wasmDetector";
 
-export const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
 const SERVER_ONLY_TYPE = /^(application\/pdf|image\/hei[cf])/i;
 const SERVER_ONLY_NAME = /\.(pdf|heic|heif)$/i;
 
@@ -41,7 +41,7 @@ async function photoDimensions(file) {
   return null;
 }
 
-export const MAX_LOCAL_PHOTO_PIXELS = 16 * 1024 * 1024;
+const MAX_LOCAL_PHOTO_PIXELS = 16 * 1024 * 1024;
 
 async function readableLocally(file) {
   const size = await photoDimensions(file).catch(() => null);
@@ -69,7 +69,7 @@ async function readPhotoQr(file, live) {
   return wasmDetector.detectWasmPhoto(file);
 }
 
-export function useAadhaarDecode({ classify, onScanned, onFailure, canReview = true } = {}) {
+export function useAadhaarDecode({ classify, resolveCard, onScanned, onFailure, canReview = true }) {
   const [error, setError] = useState("");
   const [outcome, setOutcome] = useState("");
   const [source, setSource] = useState("");
@@ -81,6 +81,8 @@ export function useAadhaarDecode({ classify, onScanned, onFailure, canReview = t
   const uploadRef = useRef(null);
   const classifyRef = useRef(classify);
   classifyRef.current = classify;
+  const resolveCardRef = useRef(resolveCard);
+  resolveCardRef.current = resolveCard;
 
   const cancelDecode = useCallback(() => {
     requestRef.current += 1;
@@ -118,7 +120,7 @@ export function useAadhaarDecode({ classify, onScanned, onFailure, canReview = t
 
   const current = useCallback((request) => mountedRef.current && request === requestRef.current, []);
 
-  const resolve = useCallback((text) => (classifyRef.current || decodePayload)(text), []);
+  const resolve = useCallback((text) => classifyRef.current(text), []);
 
   const accept = useCallback((data, text = "") => {
     if (data.source === "patient_code") return;
@@ -187,8 +189,8 @@ export function useAadhaarDecode({ classify, onScanned, onFailure, canReview = t
         timeout: 35000,
       });
       if (!live()) return;
-      if (classifyRef.current && data.outcome === "card" && data.payload) {
-        const resolved = await resolve(data.payload);
+      if (resolveCardRef.current && data.outcome === "card" && data.payload) {
+        const resolved = await resolveCardRef.current(data.payload);
         if (live()) accept(resolved, data.payload);
         return;
       }

@@ -2,7 +2,7 @@ import React, { useRef } from "react";
 import { Button, Spinner } from "../ui";
 import { Camera, Upload, X, Keyboard, Aperture } from "lucide-react";
 
-export const UPLOAD_ACCEPT = "image/*,.heic,.heif,application/pdf,.pdf";
+const UPLOAD_ACCEPT = "image/*,.heic,.heif,application/pdf,.pdf";
 
 function pick(event, scanFile) {
   const file = event.target.files?.[0];

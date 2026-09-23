@@ -20,7 +20,6 @@ export function AadhaarCameraView({
 }) {
   const zoomLabel = zoom ? `${Math.round((zoom.value / zoom.min) * 10) / 10}×` : "";
   const tapToFocus = (event) => {
-    if (!focus) return;
     if (!event.detail) {
       focus(0.5, 0.5);
       return;

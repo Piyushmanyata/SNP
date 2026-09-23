@@ -1,6 +1,6 @@
 import logger from "../../lib/logger";
 
-export function classifyCameraError(err) {
+function classifyCameraError(err) {
   const msg = String(err?.message || err || "");
   const name = String(err?.name || "");
   if (typeof window !== "undefined" && window.isSecureContext === false) {

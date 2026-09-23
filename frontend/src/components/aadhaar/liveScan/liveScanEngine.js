@@ -5,15 +5,14 @@ export const TICK_MS = 80;
 export const READER_UNAVAILABLE = "QR reader unavailable. Retry the camera, upload a photo, or use a USB scanner.";
 
 export function createLiveScanEngine({
-  lanes = [],
+  lanes,
   decode,
   now = () => Date.now(),
   onLock,
-  onFailure,
   onHint,
   onScanStall,
   onError,
-} = {}) {
+}) {
   let session = 0;
   let running = false;
   let holding = false;
@@ -61,7 +60,6 @@ export function createLiveScanEngine({
       return;
     }
     ignoredUntil.set(payload, now() + PAYLOAD_IGNORE_MS);
-    onFailure?.(result);
   }
 
   async function run(slot, mine) {
@@ -108,10 +106,6 @@ export function createLiveScanEngine({
     stalled = false;
     ignoredUntil.clear();
     for (const slot of slots) slot.failed = false;
-    if (!slots.length) {
-      running = false;
-      onError?.(READER_UNAVAILABLE);
-    }
   }
 
   function stop() {
@@ -120,13 +114,5 @@ export function createLiveScanEngine({
     holding = false;
   }
 
-  function getState() {
-    return {
-      running,
-      holding,
-      lanes: slots.map(({ busy, loaded, failed }) => ({ busy, loaded, failed })),
-    };
-  }
-
-  return { start, stop, tick, getState };
+  return { start, stop, tick };
 }

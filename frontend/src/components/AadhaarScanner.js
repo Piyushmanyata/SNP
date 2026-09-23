@@ -26,7 +26,6 @@ export default function AadhaarScanner({
   onTranscribed,
   onCaptureStart,
   onFailure,
-  onScanStall,
   onPatientCode,
   resolvePayload,
   patientCodeOnly = false,
@@ -34,7 +33,8 @@ export default function AadhaarScanner({
   disabled,
 }) {
   const [touchFirst] = useState(prefersTouch);
-  const [mode, setMode] = useState(() => (usbFirst && !touchFirst ? "manual" : "idle"));
+  const restMode = usbFirst && !touchFirst ? "manual" : "idle";
+  const [mode, setMode] = useState(restMode);
   const [fallbacksRevealed, setFallbacksRevealed] = useState(false);
   const [hint, setHint] = useState(false);
   const fileRef = useRef(null);
@@ -63,25 +63,25 @@ export default function AadhaarScanner({
     scanFile,
     reviewData,
     passwordRequired,
-  } = useAadhaarDecode({ classify, onScanned, onFailure, canReview: Boolean(onTranscribed) });
+  } = useAadhaarDecode({ classify, resolveCard: resolvePayload, onScanned, onFailure, canReview: Boolean(onTranscribed) });
 
   useEffect(() => {
     if (!busy && !passwordRequired) selectedFile.current = null;
   }, [busy, passwordRequired]);
 
   const handleLock = useCallback(() => {
-    setMode("idle");
+    setMode(restMode);
     setHint(false);
     signalSuccess();
-  }, []);
+  }, [restMode]);
 
   const handleCameraError = useCallback(
     (message) => {
       setError(message);
-      setMode("idle");
+      setMode(restMode);
       onFailure?.("error");
     },
-    [setError, onFailure]
+    [setError, onFailure, restMode]
   );
 
   const handleHint = useCallback(() => setHint(true), []);
@@ -89,8 +89,7 @@ export default function AadhaarScanner({
   const handleScanStall = useCallback(() => {
     setFallbacksRevealed(true);
     onFailure?.("error");
-    onScanStall?.();
-  }, [onFailure, onScanStall]);
+  }, [onFailure]);
 
   const {
     cameraState,
@@ -118,9 +117,9 @@ export default function AadhaarScanner({
     cancelDecode();
     selectedFile.current = null;
     setPassword("");
-    setMode((current) => (current === "camera" ? "idle" : current));
+    setMode((current) => (current === "camera" ? restMode : current));
     baseStopCamera();
-  }, [disabled, cancelDecode, baseStopCamera]);
+  }, [disabled, cancelDecode, baseStopCamera, restMode]);
 
   const stopCamera = useCallback(async () => {
     cancelDecode();
@@ -159,7 +158,7 @@ export default function AadhaarScanner({
     selectedFile.current = null;
     setPassword("");
     onCaptureStart?.();
-    setMode(nextMode);
+    setMode(nextMode === "idle" && mode === "camera" ? restMode : nextMode);
   };
 
   return (
@@ -207,7 +206,7 @@ export default function AadhaarScanner({
       />
 
       {busy && mode !== "manual" && (
-        <Button type="button" variant="ghost" onClick={async () => { await stopCamera(); setMode("idle"); }}>Cancel reading</Button>
+        <Button type="button" variant="ghost" onClick={async () => { await stopCamera(); setMode(restMode); }}>Cancel reading</Button>
       )}
 
       {passwordRequired && (

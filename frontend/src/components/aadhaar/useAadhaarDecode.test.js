@@ -1,7 +1,7 @@
 import React, { act } from "react";
 import ReactDOM from "react-dom/client";
 import api, { formatApiError } from "../../lib/api";
-import { useAadhaarDecode } from "./useAadhaarDecode";
+import { decodePayload, useAadhaarDecode } from "./useAadhaarDecode";
 import * as nativeDetector from "./liveScan/nativeDetector";
 import * as wasmDetector from "./liveScan/wasmDetector";
 
@@ -24,9 +24,10 @@ function photoFile(width = 8, height = 8) {
 }
 
 let classify;
+let resolveCard;
 
 function Harness() {
-  scanner = useAadhaarDecode({ onScanned, classify });
+  scanner = useAadhaarDecode({ onScanned, classify: classify || decodePayload, resolveCard });
   return null;
 }
 
@@ -36,6 +37,7 @@ beforeEach(() => {
   root = ReactDOM.createRoot(container);
   onScanned = jest.fn();
   classify = undefined;
+  resolveCard = undefined;
   global.createImageBitmap = jest.fn().mockResolvedValue({ width: 8, height: 8, close: jest.fn() });
   nativeDetector.hasNativeBarcodeDetector.mockReturnValue(false);
   wasmDetector.loadZxingWorker.mockResolvedValue();
@@ -97,13 +99,22 @@ test("a patient code photo that matches nobody is not uploaded for OCR", async (
 });
 
 test("a card read by the server is resolved by the page resolver too", async () => {
-  classify = jest.fn().mockResolvedValue({ outcome: "card", source: "desk_scan" });
+  resolveCard = jest.fn().mockResolvedValue({ outcome: "card", source: "desk_scan" });
   act(() => root.render(<Harness />));
   const file = new File(["pdf"], "card.pdf", { type: "application/pdf" });
   api.post.mockResolvedValueOnce({ data: { outcome: "card", data: { full_name: "Test Person" }, payload: "server-card" } });
   await act(async () => scanner.scanFile(file));
-  expect(classify).toHaveBeenCalledWith("server-card");
+  expect(resolveCard).toHaveBeenCalledWith("server-card");
+  expect(api.post).toHaveBeenCalledTimes(1);
   expect(scanner.outcome).toBe("card");
+});
+
+test("without a page resolver a server-read card is accepted without a second decode", async () => {
+  const file = new File(["pdf"], "card.pdf", { type: "application/pdf" });
+  api.post.mockResolvedValueOnce({ data: { outcome: "card", data: { full_name: "Test Person" }, payload: "server-card" } });
+  await act(async () => scanner.scanFile(file));
+  expect(api.post).toHaveBeenCalledTimes(1);
+  expect(onScanned).toHaveBeenCalledWith({ full_name: "Test Person" }, "server-card");
 });
 
 test("a resolver failure is shown and counted as an error", async () => {

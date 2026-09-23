@@ -24,7 +24,6 @@ function makeEngine({ lanes, decode = jest.fn().mockResolvedValue({ outcome: "ga
   const wasm = { load: jest.fn().mockResolvedValue(), regions: ["roi", "full"], detect: jest.fn().mockResolvedValue(null) };
   const callbacks = {
     onLock: jest.fn(),
-    onFailure: jest.fn(),
     onHint: jest.fn(),
     onScanStall: jest.fn(),
     onError: jest.fn(),
@@ -120,14 +119,10 @@ describe("createLiveScanEngine", () => {
     await flush();
     expect(onError).toHaveBeenCalledTimes(1);
     expect(onError).toHaveBeenCalledWith(READER_UNAVAILABLE);
-    expect(engine.getState().running).toBe(false);
-  });
-
-  test("an engine without lanes reports the reader as unavailable", () => {
-    const { engine, onError } = makeEngine({ lanes: [] });
-    engine.start();
-    expect(onError).toHaveBeenCalledWith(READER_UNAVAILABLE);
-    expect(engine.getState().running).toBe(false);
+    engine.tick();
+    await flush();
+    expect(native.load).toHaveBeenCalledTimes(1);
+    expect(wasm.load).toHaveBeenCalledTimes(1);
   });
 
   test("Lock only when Decode returns card, then stops detecting", async () => {
@@ -157,7 +152,6 @@ describe("createLiveScanEngine", () => {
     engine.start();
     engine.tick();
     await flush();
-    expect(engine.getState().holding).toBe(true);
     wasmHit.resolve("SECOND");
     await flush();
     engine.tick();
@@ -166,18 +160,20 @@ describe("createLiveScanEngine", () => {
     expect(native.detect).toHaveBeenCalledTimes(1);
     pending.resolve({ outcome: "garbage" });
     await flush();
-    expect(engine.getState().holding).toBe(false);
+    engine.tick();
+    await flush();
+    expect(native.detect).toHaveBeenCalledTimes(2);
   });
 
   test("Failure resumes scanning and ignores that exact payload for a moment", async () => {
-    const { engine, native, decode, onFailure, advance } = makeEngine();
+    const { engine, native, decode, onLock, advance } = makeEngine();
     native.detect.mockResolvedValue("BAD");
     engine.start();
     engine.tick();
     await flush();
     await flush();
     expect(decode).toHaveBeenCalledTimes(1);
-    expect(onFailure).toHaveBeenCalledWith({ outcome: "garbage" });
+    expect(onLock).not.toHaveBeenCalled();
     engine.tick();
     await flush();
     expect(decode).toHaveBeenCalledTimes(1);
@@ -190,15 +186,17 @@ describe("createLiveScanEngine", () => {
 
   test("a Decode that throws counts as a Failure, not a crash", async () => {
     const decode = jest.fn().mockRejectedValue(new Error("offline"));
-    const { engine, native, onFailure, onError } = makeEngine({ decode });
+    const { engine, native, onLock, onError } = makeEngine({ decode });
     native.detect.mockResolvedValueOnce("CARD");
     engine.start();
     engine.tick();
     await flush();
     await flush();
-    expect(onFailure).toHaveBeenCalledWith(null);
+    expect(onLock).not.toHaveBeenCalled();
     expect(onError).not.toHaveBeenCalled();
-    expect(engine.getState().running).toBe(true);
+    engine.tick();
+    await flush();
+    expect(native.detect).toHaveBeenCalledTimes(2);
   });
 
   test("a detect arriving after stop and restart neither decodes nor locks", async () => {
