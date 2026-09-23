@@ -386,6 +386,7 @@ class TestSmsDoesNotBlockTheLoop:
         async def run():
             mock_db = setup_mock_db(monkeypatch)
             monkeypatch.setattr(sms.msg91, "configured", lambda: True)
+            monkeypatch.setenv("MSG91_TEMPLATE_REGISTRATION", "test-flow")
             started = asyncio.Event()
             release = asyncio.Event()
             loop = asyncio.get_running_loop()

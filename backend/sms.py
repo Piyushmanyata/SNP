@@ -119,7 +119,7 @@ async def deliver_patient_sms(
     row = None
     accepted = False
     try:
-        if not msg91.configured():
+        if not msg91.configured() or not msg91.template_id(message_type):
             return "skipped"
         number = valid_phone(patient.get("phone_normalized") or patient.get("phone"))
         reg_no = patient.get("reg_no")

@@ -197,6 +197,27 @@ class TestReminderCronHttp:
         assert r.json()["ok"] is True
         assert r.json()["sent"] == 0
 
+    def test_approved_reminder_sends_while_specs_template_is_unavailable(self, monkeypatch):
+        mock_db = setup_mock_db(monkeypatch)
+        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
+        configured = msg91.configured
+        captured = _calls(monkeypatch)
+        monkeypatch.setattr(msg91, "configured", configured)
+        client = _client(monkeypatch, mock_db)
+        monkeypatch.delenv("MSG91_TEMPLATE_SPECS_TOKEN")
+        monkeypatch.delenv("MSG91_TEMPLATE_SPECS")
+
+        response = _post(client)
+
+        assert response.status_code == 200, response.text
+        assert response.json()["sent"] == 1
+        assert [call["type"] for call in captured] == ["camp"]
+        patient = mock_db.patients.docs[0]
+        assert asyncio.run(sms.deliver_patient_sms(
+            mock_db, patient, "specs", TOMORROW, "Hall A", "10:00", "17:00",
+        )) == "skipped"
+        assert [row["message_type"] for row in mock_db.reminder_ledger.docs] == ["camp"]
+
     def test_household_of_four_sends_four_camp_reminders(self, monkeypatch):
         mock_db = setup_mock_db(monkeypatch)
         asyncio.run(_seed_camp_household(mock_db, n_patients=4, phone=HOUSEHOLD, venue="Hall A"))

@@ -12,10 +12,12 @@
     "end_time": "Specs only: window end in 12-hour HH:MM, read after the fixed word शाम (e.g. 17:00 is sent as 05:00)",
     "venue": "Camp, hospital or distribution venue name. For surgery this is the OT Schedule Day's venue_sms when set, else its full venue (ADR 0040)"
   },
-  "dlt_portal_note": "dlt_portal_body is the text to register on the DLT portal; each {#var#} is filled in the order listed in variables. dlt_body is the same text in MSG91 flow syntax. Spacing, including the double spaces in the specs templates, is exactly as approved.",
+  "dlt_portal_note": "dlt_portal_body is the text to register on the DLT portal; each {#var#} is filled in the order listed in variables. dlt_body is the same text in MSG91 flow syntax. The four non-specs templates were approved on SmartPing and verified in MSG91 on 23 September 2026. The specs copies remain rejected and must not be configured for sending.",
   "templates": [
     {
       "key": "registration",
+      "dlt_template_id": "1777179007816189198",
+      "msg91_flow_id": "6ab370c6d55d312c820a45b2",
       "env_var": "MSG91_TEMPLATE_REGISTRATION",
       "purpose": "Sent at desk registration",
       "variables": [
@@ -30,6 +32,8 @@
     },
     {
       "key": "camp",
+      "dlt_template_id": "1777179007827129431",
+      "msg91_flow_id": "6ab370e5b71eb555af00f332",
       "env_var": "MSG91_TEMPLATE_CAMP",
       "purpose": "Day-before camp reminder",
       "variables": [
@@ -44,6 +48,8 @@
     },
     {
       "key": "ot_token",
+      "dlt_template_id": "1777179007834602257",
+      "msg91_flow_id": "6ab370fd399fe26902048663",
       "env_var": "MSG91_TEMPLATE_OT_TOKEN",
       "purpose": "Surgery scheduled confirmation",
       "variables": [
@@ -58,6 +64,8 @@
     },
     {
       "key": "ot",
+      "dlt_template_id": "1777179007842240402",
+      "msg91_flow_id": "6ab37114f26f65c7be0bd5b3",
       "env_var": "MSG91_TEMPLATE_OT",
       "purpose": "Day-before surgery reminder",
       "variables": [
@@ -72,6 +80,8 @@
     },
     {
       "key": "specs_token",
+      "dlt_template_id": "1777179007849908726",
+      "dlt_status": "Rejected: Variable can be reduce to static information.",
       "env_var": "MSG91_TEMPLATE_SPECS_TOKEN",
       "purpose": "Spectacle collection scheduled",
       "variables": [
@@ -89,6 +99,8 @@
     },
     {
       "key": "specs",
+      "dlt_template_id": "1777179007858053123",
+      "dlt_status": "Rejected: Variable can be reduce to static information.",
       "env_var": "MSG91_TEMPLATE_SPECS",
       "purpose": "Day-before spectacle collection reminder",
       "variables": [
