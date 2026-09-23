@@ -1,5 +1,7 @@
 # Reviewed Aadhaar transcription on the existing backend
 
+Historical decision. The OCR and reviewed-text portions were superseded on 23 September 2026 by [0005](0005-qr-only-aadhaar-capture.md).
+
 Design decision accepted during the 8 September 2026 discussion; implemented on the same date.
 
 Unreadable QR codes must not prevent registration. Add OCR suggestions with mandatory review and immediate manual entry to staff and public registration. Run extraction on the existing backend to reduce processing demands on low-end phones, and do not retain uploaded documents or PDF passwords. Cover phone photos and e-Aadhaar PDFs. Browser-only OCR was declined because it places recognition work on the phone; third-party OCR was declined in favor of the existing backend.

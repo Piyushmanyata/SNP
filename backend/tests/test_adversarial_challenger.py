@@ -102,6 +102,9 @@ class MockCollection:
                 if isinstance(v, dict) and "$gt" in v:
                     if not (doc.get("seats_taken", 0) > v["$gt"]):
                         return False
+                elif isinstance(v, dict) and "$lte" in v:
+                    if not (doc.get("seats_taken", 0) <= v["$lte"]):
+                        return False
                 elif doc.get(k) != v:
                     return False
             else:

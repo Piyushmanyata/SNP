@@ -32,10 +32,9 @@ async function selectPdf() {
   return file;
 }
 
-test("encrypted PDF retries transiently and requires review before returning details", async () => {
-  const onTranscribed = jest.fn();
+test("encrypted PDF retries transiently and returns only QR details", async () => {
   const onScanned = jest.fn();
-  act(() => root.render(<AadhaarScanner onScanned={onScanned} onTranscribed={onTranscribed} />));
+  act(() => root.render(<AadhaarScanner onScanned={onScanned} />));
   api.post.mockRejectedValueOnce({ response: { data: { detail: { code: "PDF_PASSWORD_REQUIRED", message: "Enter the PDF password." } } } });
   const file = await selectPdf();
   const input = container.querySelector('[data-testid="aadhaar-pdf-password"]');
@@ -44,41 +43,27 @@ test("encrypted PDF retries transiently and requires review before returning det
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, "TEST1990");
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  api.post.mockResolvedValueOnce({ data: { outcome: "review", data: { full_name: "Test Patient", age: 36 } } });
+  api.post.mockResolvedValueOnce({ data: { outcome: "card", data: { full_name: "Test Patient", age: 36 }, payload: "pdf-qr" } });
   await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "Open PDF").click());
   expect(api.post).toHaveBeenLastCalledWith("/aadhaar/extract", file, expect.objectContaining({ headers: expect.objectContaining({ "X-PDF-Password": "TEST1990" }) }));
   expect(container.querySelector('[data-testid="aadhaar-pdf-password"]')).toBeNull();
-  expect(onTranscribed).not.toHaveBeenCalled();
-  act(() => container.querySelector('[data-testid="aadhaar-review-check"]').click());
-  act(() => container.querySelector('[data-testid="aadhaar-review-confirm"]').click());
-  expect(onTranscribed).toHaveBeenCalledWith(expect.objectContaining({ full_name: "Test Patient" }));
-  expect(onScanned).not.toHaveBeenCalled();
+  expect(onScanned).toHaveBeenCalledWith(expect.objectContaining({ full_name: "Test Patient" }), "pdf-qr");
 });
 
-test("the scanner offers no manual entry until a read has been attempted", async () => {
-  const onTranscribed = jest.fn();
-  act(() => root.render(<AadhaarScanner onScanned={jest.fn()} onTranscribed={onTranscribed} />));
-  expect(container.querySelector('[data-testid="aadhaar-enter-details"]')).toBeNull();
+test("an unreadable PDF reports a manual-entry fallback without OCR review", async () => {
+  act(() => root.render(<AadhaarScanner onScanned={jest.fn()} />));
   expect(container.querySelector('[data-testid="aadhaar-review-form"]')).toBeNull();
-  api.post.mockResolvedValueOnce({ data: { outcome: "review", data: {} } });
-  await selectPdf();
-  expect(container.querySelector('[data-testid="aadhaar-review-form"]')).not.toBeNull();
-});
-
-test("a scanner with no transcription route treats a review outcome as a failed read", async () => {
-  const onFailure = jest.fn();
-  act(() => root.render(<AadhaarScanner onScanned={jest.fn()} onFailure={onFailure} />));
-  api.post.mockResolvedValueOnce({ data: { outcome: "review", data: { full_name: "Test Patient", age: 36 } } });
+  api.post.mockRejectedValueOnce({ response: { data: { detail: { code: "QR_NOT_FOUND", message: "No readable Aadhaar QR was found. Enter details manually at the desk." } } } });
   await selectPdf();
   expect(container.querySelector('[data-testid="aadhaar-review-form"]')).toBeNull();
-  expect(onFailure).toHaveBeenCalledWith("review");
+  expect(container.textContent).toMatch(/enter details manually/i);
 });
 
 test("cancelling a read aborts the upload and ignores a late result", async () => {
   let resolveUpload;
   api.post.mockImplementation(() => new Promise((resolve) => { resolveUpload = resolve; }));
   const onScanned = jest.fn();
-  act(() => root.render(<AadhaarScanner onScanned={onScanned} onTranscribed={jest.fn()} />));
+  act(() => root.render(<AadhaarScanner onScanned={onScanned} />));
   await selectPdf();
   const signal = api.post.mock.calls[0][2].signal;
   await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "Cancel reading").click());

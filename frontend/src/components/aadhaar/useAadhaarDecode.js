@@ -69,12 +69,11 @@ async function readPhotoQr(file, live) {
   return wasmDetector.detectWasmPhoto(file);
 }
 
-export function useAadhaarDecode({ classify, resolveCard, onScanned, onFailure, canReview = true }) {
+export function useAadhaarDecode({ classify, resolveCard, onScanned, onFailure }) {
   const [error, setError] = useState("");
   const [outcome, setOutcome] = useState("");
   const [source, setSource] = useState("");
   const [busy, setBusy] = useState(false);
-  const [reviewData, setReviewData] = useState(null);
   const [passwordRequired, setPasswordRequired] = useState(false);
   const mountedRef = useRef(true);
   const requestRef = useRef(0);
@@ -92,7 +91,6 @@ export function useAadhaarDecode({ classify, resolveCard, onScanned, onFailure, 
     setError("");
     setOutcome("");
     setSource("");
-    setReviewData(null);
     setPasswordRequired(false);
   }, []);
 
@@ -112,7 +110,6 @@ export function useAadhaarDecode({ classify, resolveCard, onScanned, onFailure, 
     setError("");
     setOutcome("");
     setSource("");
-    setReviewData(null);
     setPasswordRequired(false);
     setBusy(true);
     return request;
@@ -128,13 +125,11 @@ export function useAadhaarDecode({ classify, resolveCard, onScanned, onFailure, 
     setSource(data.source || "");
     if (data.outcome === "card") {
       if (data.data) onScanned?.(data.data, text);
-    } else if (data.outcome === "review" && canReview) {
-      setReviewData(data.data);
     } else {
       setError(data.message || "Unable to read Aadhaar details. Try another photo or enter details manually.");
       onFailure?.(data.outcome);
     }
-  }, [onScanned, onFailure, canReview]);
+  }, [onScanned, onFailure]);
 
   const decode = useCallback(async (text) => {
     if (!text || !mountedRef.current) return null;
@@ -219,7 +214,6 @@ export function useAadhaarDecode({ classify, resolveCard, onScanned, onFailure, 
     outcome,
     source,
     busy,
-    reviewData,
     passwordRequired,
     decode,
     cancelDecode,

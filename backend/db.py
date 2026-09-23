@@ -34,7 +34,8 @@ PERSON_CAMP_INDEX: dict[str, Any] = {
 }
 TRANSCRIPTION_PATIENT_INDEX: dict[str, Any] = {"keys": "patient_id", "unique": True}
 
-LEDGER_INDEX_NAME = "patient_id_1_message_type_1_event_date_1"
+LEGACY_LEDGER_INDEX_NAME = "patient_id_1_message_type_1_event_date_1"
+LEDGER_INDEX_NAME = "patient_id_1_message_type_1_event_date_1_event_key_1"
 LEDGER_PARTIAL_FILTER = {"patient_id": {"$exists": True}}
 HOUSEHOLD_LEDGER_INDEX_NAME = "number_1_reminder_type_1_event_date_1_send_date_1"
 SETUP_REQUEST_INDEX_NAME = "setup_request_id_1"
@@ -175,6 +176,8 @@ async def init_indexes() -> None:
     ledger_indexes = await db.reminder_ledger.index_information()
     if should_drop_household_ledger_index(ledger_indexes):
         await db.reminder_ledger.drop_index(HOUSEHOLD_LEDGER_INDEX_NAME)
+    if LEGACY_LEDGER_INDEX_NAME in ledger_indexes:
+        await db.reminder_ledger.drop_index(LEGACY_LEDGER_INDEX_NAME)
     if should_drop_ledger_index(ledger_indexes):
         await db.reminder_ledger.drop_index(LEDGER_INDEX_NAME)
     await db.reminder_ledger.create_index(
@@ -182,6 +185,7 @@ async def init_indexes() -> None:
             ("patient_id", ASCENDING),
             ("message_type", ASCENDING),
             ("event_date", ASCENDING),
+            ("event_key", ASCENDING),
         ],
         unique=True,
         partialFilterExpression=LEDGER_PARTIAL_FILTER,

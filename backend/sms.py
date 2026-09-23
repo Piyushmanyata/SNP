@@ -5,6 +5,7 @@ import string
 from datetime import timedelta
 from typing import Any, Dict, Optional
 
+from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import DuplicateKeyError
 
@@ -74,6 +75,7 @@ async def _claim(
     patient_id: Any,
     message_type: str,
     event_date: str,
+    event_key: Optional[str],
     number: str,
     venue: str,
     copy: str,
@@ -83,6 +85,7 @@ async def _claim(
         "patient_id": patient_id,
         "message_type": message_type,
         "event_date": event_date,
+        "event_key": event_key,
     })
     if existing:
         status = existing.get("status")
@@ -108,6 +111,7 @@ async def _claim(
         "patient_id": patient_id,
         "message_type": message_type,
         "event_date": event_date,
+        "event_key": event_key,
         "number": number,
         "venue": venue,
         "copy": copy,
@@ -125,12 +129,13 @@ async def _claim(
 
 
 async def _record_paused(
-    db: AsyncIOMotorDatabase, patient_id: Any, message_type: str, event_date: str,
+    db: AsyncIOMotorDatabase, patient_id: Any, message_type: str, event_date: str, event_key: Optional[str],
     number: str, venue: str, copy: str,
 ) -> None:
     try:
         await db.reminder_ledger.insert_one({
             "patient_id": patient_id, "message_type": message_type, "event_date": event_date,
+            "event_key": event_key,
             "number": number, "venue": venue, "copy": copy, "status": "paused", "attempts": 0,
             "provider_id": None, "created_at": helpers.now_utc(),
         })
@@ -156,6 +161,7 @@ async def deliver_patient_sms(
     end_time: Optional[str] = None,
     end_date: Optional[str] = None,
     retry_after: Optional[timedelta] = None,
+    event_key: Optional[str] = None,
 ) -> str:
     """Returns sent, failed, uncertain, rejected, paused, or skipped. Never raises."""
     row = None
@@ -168,6 +174,11 @@ async def deliver_patient_sms(
         reg_no = patient.get("reg_no")
         if not number or reg_no is None:
             return "skipped"
+        registrar_id = patient.get("created_by")
+        if registrar_id and ObjectId.is_valid(str(registrar_id)):
+            registrar = await db.users.find_one({"_id": ObjectId(str(registrar_id))})
+            if registrar and helpers.normalize_phone(registrar.get("phone")) == number:
+                return "skipped"
         if message_type in ("specs_token", "specs") and not specs_pickup_hours_match(start_time, end_time):
             return "skipped"
         camp = await db.camps.find_one({"_id": patient["camp_id"]}) if patient.get("camp_id") else None
@@ -193,10 +204,10 @@ async def deliver_patient_sms(
             return "skipped"
         copy = template.format(**variables)
         if await paused(db, message_type):
-            await _record_paused(db, patient["_id"], message_type, event_date, number, venue, copy)
+            await _record_paused(db, patient["_id"], message_type, event_date, event_key, number, venue, copy)
             return "paused"
         row = await _claim(
-            db, patient["_id"], message_type, event_date, number, venue, copy,
+            db, patient["_id"], message_type, event_date, event_key, number, venue, copy,
             retry_after=retry_after,
         )
         if not row:
@@ -242,6 +253,7 @@ async def send_patient_sms(
     start_time: Optional[str] = None,
     end_time: Optional[str] = None,
     end_date: Optional[str] = None,
+    event_key: Optional[str] = None,
 ) -> bool:
     """Best-effort per-patient DLT send, recorded once per patient/type/event date.
 
@@ -250,6 +262,7 @@ async def send_patient_sms(
     """
     return (await deliver_patient_sms(
         db, patient, message_type, event_date, venue, start_time, end_time, end_date,
+        event_key=event_key,
     )) in ("sent", "uncertain")
 
 

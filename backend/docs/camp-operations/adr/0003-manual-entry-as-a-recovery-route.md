@@ -1,5 +1,7 @@
 # Manual Aadhaar entry is a recovery route, not a starting option
 
+Historical decision. Its OCR review route was superseded on 23 September 2026 by [0005](0005-qr-only-aadhaar-capture.md). Staff manual entry remains available after unreadable QR capture.
+
 Decision accepted 8 September 2026. Supersedes the "allow immediate manual registration" clause of [0002](0002-reviewed-aadhaar-capture.md) for the public page, and removes the scanner's own manual-entry control everywhere.
 
 `AadhaarScanner` offered "Enter details manually" alongside the camera, upload and USB buttons. The desk pages already own an equivalent toggle, so the desk rendered the scanner's copy suppressed and its own visible — two controls, one label, two meanings. At the desk the toggle also pauses USB wedge capture, because the desk workflow is manual entry first and a card scan afterwards to correct it.

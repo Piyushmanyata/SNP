@@ -84,6 +84,121 @@ def test_disabling_and_reenabling_staff_keeps_prior_sessions_revoked(monkeypatch
     asyncio.run(run())
 
 
+def test_deleting_staff_hides_roster_and_allows_name_reuse_without_losing_history(monkeypatch):
+    async def run():
+        db = setup_mock_db(monkeypatch)
+        monkeypatch.setattr(routes_staff, "get_db", lambda: db)
+        monkeypatch.setattr(routes_staff, "hash_pin", lambda _: "hash")
+        admin = {"_id": ObjectId(), "role": "admin"}
+        staff_id = ObjectId()
+        await db.users.insert_one({
+            "_id": staff_id, "name": "Vol One", "name_normalized": "vol one",
+            "role": "volunteer", "phone": "9876500001", "disabled_at": None,
+        })
+        patient_id = ObjectId()
+        await db.patients.insert_one({"_id": patient_id, "created_by": str(staff_id)})
+
+        await routes_staff.delete_staff(str(staff_id), admin)
+
+        original = await db.users.find_one({"_id": staff_id})
+        assert original["name"] == "Vol One"
+        assert original["deleted_at"] is not None
+        assert original["disabled_at"] is not None
+        assert (await db.patients.find_one({"_id": patient_id}))["created_by"] == str(staff_id)
+        assert all(row["id"] != str(staff_id) for row in (await routes_staff.list_staff(admin))["staff"])
+        replacement = await routes_staff.create_staff(CreateStaffBody(name="Vol One", role="volunteer"), admin)
+        assert replacement["staff"]["id"] != str(staff_id)
+
+    asyncio.run(run())
+
+
+def test_team_lead_deletion_requires_reassigning_volunteers(monkeypatch):
+    async def run():
+        db = setup_mock_db(monkeypatch)
+        monkeypatch.setattr(routes_staff, "get_db", lambda: db)
+        admin = {"_id": ObjectId(), "role": "admin"}
+        old_lead_id, new_lead_id, volunteer_id = ObjectId(), ObjectId(), ObjectId()
+        await db.users.insert_one({"_id": old_lead_id, "name": "Old Lead", "role": "team_lead", "disabled_at": None})
+        await db.users.insert_one({"_id": new_lead_id, "name": "New Lead", "role": "team_lead", "disabled_at": None})
+        await db.users.insert_one({
+            "_id": volunteer_id, "name": "Volunteer", "role": "volunteer",
+            "team_lead_id": str(old_lead_id), "disabled_at": None,
+        })
+        patient_id = ObjectId()
+        await db.patients.insert_one({"_id": patient_id, "registrar_team_lead_id": str(old_lead_id)})
+
+        with pytest.raises(HTTPException) as blocked:
+            await routes_staff.delete_staff(str(old_lead_id), admin)
+        assert blocked.value.status_code == 409
+
+        await routes_staff.reassign_volunteer(
+            str(volunteer_id), routes_staff.PatchStaffTeamLeadBody(team_lead_id=str(new_lead_id)), admin,
+        )
+        await routes_staff.delete_staff(str(old_lead_id), admin)
+
+        assert (await db.users.find_one({"_id": volunteer_id}))["team_lead_id"] == str(new_lead_id)
+        assert (await db.patients.find_one({"_id": patient_id}))["registrar_team_lead_id"] == str(old_lead_id)
+
+    asyncio.run(run())
+
+
+def test_delete_staff_rejects_invalid_id(monkeypatch):
+    async def run():
+        db = setup_mock_db(monkeypatch)
+        monkeypatch.setattr(routes_staff, "get_db", lambda: db)
+        with pytest.raises(HTTPException) as rejected:
+            await routes_staff.delete_staff("not-an-id", {"_id": ObjectId(), "role": "admin"})
+        assert rejected.value.status_code == 400
+
+    asyncio.run(run())
+
+
+def test_concurrent_admin_deletes_leave_an_enabled_admin(monkeypatch):
+    async def run():
+        db = setup_mock_db(monkeypatch)
+        monkeypatch.setattr(routes_staff, "get_db", lambda: db)
+        first_id, second_id = ObjectId(), ObjectId()
+        for uid, name in ((first_id, "First Admin"), (second_id, "Second Admin")):
+            await db.users.insert_one({
+                "_id": uid, "name": name, "name_normalized": name.lower(),
+                "role": "admin", "disabled_at": None, "deleted_at": None,
+            })
+        original_update = db.users.update_one
+        original_count = db.users.count_documents
+        both_deleted = asyncio.Event()
+        delete_count = 0
+        count_calls = 0
+
+        async def concurrent_count(query):
+            nonlocal count_calls
+            count_calls += 1
+            if count_calls <= 2:
+                return 2
+            return await original_count(query)
+
+        async def interleaved_update(query, update):
+            nonlocal delete_count
+            result = await original_update(query, update)
+            if update.get("$set", {}).get("deleted_at") is not None:
+                delete_count += 1
+                if delete_count == 2:
+                    both_deleted.set()
+                await both_deleted.wait()
+            return result
+
+        monkeypatch.setattr(db.users, "update_one", interleaved_update)
+        monkeypatch.setattr(db.users, "count_documents", concurrent_count)
+        await asyncio.gather(
+            routes_staff.delete_staff(str(second_id), {"_id": first_id, "role": "admin"}),
+            routes_staff.delete_staff(str(first_id), {"_id": second_id, "role": "admin"}),
+            return_exceptions=True,
+        )
+
+        assert await db.users.count_documents({"role": "admin", "disabled_at": None, "deleted_at": None}) >= 1
+
+    asyncio.run(run())
+
+
 def test_concurrent_staff_creation_returns_a_name_conflict(monkeypatch):
     async def run():
         db = setup_mock_db(monkeypatch)

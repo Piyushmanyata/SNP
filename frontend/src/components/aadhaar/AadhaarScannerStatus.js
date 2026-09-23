@@ -20,7 +20,7 @@ export function AadhaarScannerStatus({
         </div>
       )}
 
-      {outcome && outcome !== "card" && outcome !== "review" && (
+      {outcome && outcome !== "card" && (
         <Alert tone="amber" className="mt-3">
           {error}
         </Alert>

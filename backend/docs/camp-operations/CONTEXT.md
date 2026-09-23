@@ -20,6 +20,14 @@ _Avoid_: separate camp
 The original registrar's attribution for registering a patient in a Camp, belonging to the registrar's team at registration even if the registrar later changes teams.
 _Avoid_: door-scan credit
 
+**Deleted staff**:
+A former staff account with no access or active roster entry. Its past registration and team credit remain attributable to the original person, and its name can be used for a new account.
+_Avoid_: erased staff history
+
+**Staff phone substitution**:
+A patient contact number that matches the recorded phone of the staff member who registered that patient. Registration remains valid, but patient SMS is suppressed for that number.
+_Avoid_: invalid registration
+
 **Prize point**:
 One point earned by the original registrar when their registered patient is confirmed Doctor seen, at most once per patient per Camp.
 _Avoid_: arrival point, repeat-visit point

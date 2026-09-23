@@ -458,10 +458,6 @@ function DoorScanCard({
         disabled={noCamp || busy}
         onCaptureStart={clearScan}
         onFailure={(kind) => { if (kind === "error") onTerminalAttempt(); }}
-        onTranscribed={manualOpen ? (details) => {
-          clearScan();
-          setDoorForm({ ...EMPTY_REG_FORM, ...details, phone: doorPhone });
-        } : undefined}
       />
       {scanning && (
         <div data-testid="door-scan-status" role="status" aria-live="polite" aria-atomic="true" className="flex items-center gap-2 mt-3 min-h-[44px] text-slate-900 font-semibold">
@@ -711,13 +707,7 @@ export function RegisterModal({ open, onClose, days, onDone, setBanner, onRegist
     <Modal open={open} onClose={onClose} title="New Registration" size="lg">
       <div className="space-y-4">
         <AadhaarScanner onScanned={onScan} onFailure={onFailure} disabled={busy || manualMode}
-          onCaptureStart={() => { scanRequest.current += 1; setWedgeReading(false); setQrPayload(""); setForm((prev) => ({ ...EMPTY_REG_FORM, phone: prev.phone })); }}
-          onTranscribed={(details) => {
-            setForm((prev) => ({ ...EMPTY_REG_FORM, ...details, phone: prev.phone }));
-            setQrPayload("");
-            setManualMode(true);
-            setReqId(v4());
-          }} />
+          onCaptureStart={() => { scanRequest.current += 1; setWedgeReading(false); setQrPayload(""); setForm((prev) => ({ ...EMPTY_REG_FORM, phone: prev.phone })); }} />
         {(receiving || wedgeReading) && (
           <div role="status" aria-live="polite" className="flex items-center gap-2 min-h-[44px] font-semibold text-slate-900" data-testid="reg-wedge-status">
             <Spinner className="w-5 h-5 text-emerald-700" />

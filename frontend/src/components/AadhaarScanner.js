@@ -1,7 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from "react";
 import { ScanLine } from "lucide-react";
 import { Button, Field, Input } from "./ui";
-import { AadhaarReviewForm } from "./aadhaar/AadhaarReviewForm";
 import {
   useAadhaarCamera,
   useAadhaarDecode,
@@ -25,7 +24,6 @@ function prefersTouch() {
 
 export default function AadhaarScanner({
   onScanned,
-  onTranscribed,
   onCaptureStart,
   onFailure,
   onPatientCode,
@@ -63,9 +61,8 @@ export default function AadhaarScanner({
     decode,
     cancelDecode,
     scanFile,
-    reviewData,
     passwordRequired,
-  } = useAadhaarDecode({ classify, resolveCard: resolvePayload, onScanned, onFailure, canReview: Boolean(onTranscribed) });
+  } = useAadhaarDecode({ classify, resolveCard: resolvePayload, onScanned, onFailure });
 
   useEffect(() => {
     if (!busy && !passwordRequired) selectedFile.current = null;
@@ -174,7 +171,7 @@ export default function AadhaarScanner({
             <p className="font-display font-bold text-slate-900">Scan Aadhaar QR</p>
           </div>
           <p className="text-xs text-slate-700 mb-3">
-            {onPatientCode ? "Scan the patient's Aadhaar QR or the QR on their registration slip." : "Scan the QR or upload a photo or e-Aadhaar PDF."}{onTranscribed ? " If the QR is unreadable, review extracted text." : ""} Uploaded documents and PDF passwords are not retained. Only the last four Aadhaar digits are saved.
+            {onPatientCode ? "Scan the patient's Aadhaar QR or the QR on their registration slip." : "Scan the QR or upload a photo or e-Aadhaar PDF."} If the QR is unreadable, enter details manually at the desk. Uploaded documents and PDF passwords are not retained. Only the last four Aadhaar digits are saved.
           </p>
         </>
       )}
@@ -224,15 +221,6 @@ export default function AadhaarScanner({
             await scanFile(selectedFile.current, value);
           }}>Open PDF</Button>
         </div>
-      )}
-
-      {!busy && reviewData && (
-        <AadhaarReviewForm initial={reviewData} disabled={disabled} onConfirm={(details) => {
-          cancelDecode();
-          selectedFile.current = null;
-          setMode("idle");
-          onTranscribed?.(details);
-        }} />
       )}
 
       <AadhaarCameraView

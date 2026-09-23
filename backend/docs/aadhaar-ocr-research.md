@@ -1,5 +1,7 @@
 # Backend Aadhaar OCR fallback research
 
+Archived research. OCR was removed on 23 September 2026; see [QR-only capture](camp-operations/adr/0005-qr-only-aadhaar-capture.md). The options below describe the former decision and are not current behavior.
+
 Research date: 2026-09-08. Status: implementation reference. See [the implemented interface and limits](aadhaar-document-extraction.md); recognition accuracy and production capacity remain unmeasured.
 
 ## Decision and scope
