@@ -195,11 +195,17 @@ Keep the explicit `-p snp` project name across releases so the existing database
 - Mypy passes all 24 production Python modules. Checked JavaScript passes the six utility modules explicitly listed in `frontend/tsconfig.json`; React component static coverage remains incomplete.
 - The isolated verification project and its synthetic database were removed after the checks.
 
+## Data wipe — 22 September 2026
+
+The owner ordered a full wipe of the live test data, including backups. `snp_camps` was dropped with `db.dropDatabase()` through authenticated `mongosh`. The `mongo_data` volume was not removed. Startup recreated the single `admin` account from a newly generated `ADMIN_BOOTSTRAP_PIN`, again with `must_change_pin`. The new PIN is only in `/opt/snp/initial-admin.txt` and `C:\Users\piyus\.ssh\snp-initial-admin.txt`.
+
+Every archive under the `snp_backups` volume and `/opt/snp/backup-export/` was deleted, the unused `snp_snp_backups` volume was removed, and the operator copies `snp-pre-audit-1385476.archive.gz` and `snp-pre-hospital-outcomes-730112c.archive.gz` were deleted. There is no off-box backup destination. The backup container was started again; its next dump is of the empty database. Do not treat any archive named in the sections above as restorable.
+
 ## Backups and remaining integrations
 
 The owner requested daily backups. `/opt/snp/.env.production` now sets `BACKUP_INTERVAL_SECONDS=86400`, and the recreated backup container reports that value. The worker creates a compressed archive on startup, then waits 24 hours after each backup; this is not a fixed midnight schedule. It retains 14 days in the `snp_backups` Docker volume. Set this environment override on any replacement server, because the Compose fallback remains hourly.
 
-A post-bootstrap archive, `snp_camps-20260908T072922Z.archive.gz`, was restored into a separate MongoDB instance: one user, zero patients, zero persons, and zero camps. The restore instance was removed afterward. An export is held at `/opt/snp/backup-export/`. The backup container also completed a new archive after its daily-interval restart.
+A post-bootstrap archive, `snp_camps-20260908T072922Z.archive.gz`, was restored into a separate MongoDB instance: one user, zero patients, zero persons, and zero camps. The restore instance was removed afterward. The backup container also completed a new archive after its daily-interval restart. Both archives were deleted in the 22 September wipe above.
 
 An ongoing off-machine backup destination is still required. Archives on the VPS do not protect against loss of that VPS. Follow the root README's backup instructions; `docs/ops/backups.md` refers to a `backup-sync` service and `BACKUP_REMOTE` variable that the current Compose file does not implement.
 
