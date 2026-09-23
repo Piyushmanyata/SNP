@@ -253,7 +253,7 @@ describe("Desk page", () => {
     expect(container.querySelector('[data-testid="door-scan-status"]')).toBeNull();
     await act(async () => finishScan({ data: { outcome: "no_match", card: { full_name: "Old scan" } } }));
     expect(container.textContent).not.toContain("Old scan");
-    expect(resolveResult()).toEqual({ outcome: "card", source: "desk_scan" });
+    expect(resolveResult()).toEqual({ outcome: "card", quiet: true });
   });
 
   test("starting a new capture abandons the door scan still in flight", async () => {
@@ -269,7 +269,7 @@ describe("Desk page", () => {
     expect(container.querySelector('[data-testid="scan-no-match"]')).toBeNull();
   });
 
-  test("a superseded door scan that fails hands back nothing and shows no error", async () => {
+  test("a superseded door scan that fails stops quietly and shows no error", async () => {
     let failScan;
     api.post.mockImplementationOnce(() => new Promise((_resolve, fail) => { failScan = fail; }));
     const base = api.get.getMockImplementation();
@@ -280,7 +280,7 @@ describe("Desk page", () => {
     act(() => { setInput(container.querySelector('[data-testid="desk-find-input"]'), "Scanned"); });
     await act(async () => { container.querySelector('[data-testid="desk-find-button"]').click(); });
     await act(async () => failScan(new Error("Network Error")));
-    expect(resolveResult()).toBeNull();
+    expect(resolveResult()).toEqual({ outcome: "card", quiet: true });
     expect(container.textContent).not.toContain("Network Error");
     expect(container.querySelector('[data-testid="desk-search-results"]')).not.toBeNull();
   });

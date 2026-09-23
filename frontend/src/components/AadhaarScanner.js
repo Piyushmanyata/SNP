@@ -5,6 +5,7 @@ import { AadhaarReviewForm } from "./aadhaar/AadhaarReviewForm";
 import {
   useAadhaarCamera,
   useAadhaarDecode,
+  useWedgeBurst,
   decodePayload,
   AadhaarModeButtons,
   AadhaarCameraView,
@@ -45,8 +46,8 @@ export default function AadhaarScanner({
     const text = String(value ?? "").trim();
     if (onPatientCode && PATIENT_CODE.test(text)) {
       return await onPatientCode(text)
-        ? { outcome: "card", source: "patient_code" }
-        : { outcome: "not-aadhaar", source: "patient_code", message: "No patient found for that code." };
+        ? { outcome: "card", quiet: true }
+        : { outcome: "not-aadhaar", quiet: true };
     }
     if (patientCodeOnly) return { outcome: "not-aadhaar", message: PRESCRIPTION_QR_ONLY };
     return resolvePayload ? resolvePayload(text) : decodePayload(text);
@@ -68,6 +69,8 @@ export default function AadhaarScanner({
   useEffect(() => {
     if (!busy && !passwordRequired) selectedFile.current = null;
   }, [busy, passwordRequired]);
+
+  useWedgeBurst({ enabled: usbFirst && !disabled, onBurst: decode });
 
   const handleLock = useCallback(() => {
     setMode(restMode);

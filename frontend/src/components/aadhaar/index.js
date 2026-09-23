@@ -5,4 +5,4 @@ export { AadhaarCameraView } from "./AadhaarCameraView";
 export { AadhaarManualInput } from "./AadhaarManualInput";
 export { AadhaarScannerStatus } from "./AadhaarScannerStatus";
 export { AadhaarFallbackPanel } from "./AadhaarFallbackPanel";
-export { useWedgeBurst, scrubActiveInput } from "./useWedgeBurst";
+export { useWedgeBurst } from "./useWedgeBurst";

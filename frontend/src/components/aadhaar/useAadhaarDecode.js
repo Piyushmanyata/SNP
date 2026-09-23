@@ -123,7 +123,7 @@ export function useAadhaarDecode({ classify, resolveCard, onScanned, onFailure, 
   const resolve = useCallback((text) => classifyRef.current(text), []);
 
   const accept = useCallback((data, text = "") => {
-    if (data.source === "patient_code") return;
+    if (data.quiet) return;
     setOutcome(data.outcome);
     setSource(data.source || "");
     if (data.outcome === "card") {
@@ -147,7 +147,7 @@ export function useAadhaarDecode({ classify, resolveCard, onScanned, onFailure, 
     } catch (err) {
       if (current(request)) {
         setError(formatApiError(err));
-        onFailure?.("error");
+        onFailure?.("request");
       }
       return null;
     } finally {
@@ -173,7 +173,7 @@ export function useAadhaarDecode({ classify, resolveCard, onScanned, onFailure, 
         if (text) {
           const data = await resolve(text);
           if (!live()) return;
-          if (data?.outcome === "card" || data?.source === "patient_code") {
+          if (data?.outcome === "card" || data?.quiet) {
             accept(data, text);
             return;
           }
@@ -191,7 +191,7 @@ export function useAadhaarDecode({ classify, resolveCard, onScanned, onFailure, 
       if (!live()) return;
       if (resolveCardRef.current && data.outcome === "card" && data.payload) {
         const resolved = await resolveCardRef.current(data.payload);
-        if (live()) accept(resolved, data.payload);
+        if (live() && resolved) accept(resolved, data.payload);
         return;
       }
       accept(data, data.payload || "");

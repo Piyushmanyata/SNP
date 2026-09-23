@@ -131,7 +131,7 @@ export default function Desk() {
     setScanning(true);
     try {
       const { data } = await api.post("/desk/scan", { payload });
-      if (request !== findSequence.current) return { outcome: "card", source: "desk_scan" };
+      if (request !== findSequence.current) return { outcome: "card", quiet: true };
       setScanResult(data);
       if (data.outcome === "arrived") {
         const extra = data.overwritten ? " (card details updated)" : "";
@@ -140,7 +140,7 @@ export default function Desk() {
       }
       return { outcome: "card", source: "desk_scan" };
     } catch (err) {
-      if (request !== findSequence.current) return null;
+      if (request !== findSequence.current) return { outcome: "card", quiet: true };
       clearScan();
       const detail = errorPayload(err);
       if (detail?.code === "NOT_A_CARD") return { outcome: "garbage", message: detail.message };

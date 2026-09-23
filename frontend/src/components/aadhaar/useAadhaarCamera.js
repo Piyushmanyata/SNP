@@ -40,7 +40,6 @@ export function useAadhaarCamera({
   const engineRef = useRef(null);
   const loopRef = useRef(null);
   const mountedRef = useRef(true);
-  const isStartingRef = useRef(false);
   const sessionRef = useRef(0);
 
   const stopLoop = useCallback(() => {
@@ -137,8 +136,6 @@ export function useAadhaarCamera({
 
   const startCamera = useCallback(
     async (cameraIndexToUse) => {
-      if (isStartingRef.current) return;
-      isStartingRef.current = true;
       wasmDetector.loadZxingWorker().catch(() => {});
       await stopCamera();
       const session = sessionRef.current;
@@ -163,7 +160,7 @@ export function useAadhaarCamera({
         const range = zoomRange(stream);
         if (range && range.near > range.min && await applyZoom(stream, range.near)) {
           if (session === sessionRef.current) setZoom({ ...range, value: range.near });
-        } else if (range) {
+        } else if (range && session === sessionRef.current) {
           setZoom({ ...range, value: range.min });
         }
         if (!mountedRef.current || session !== sessionRef.current) return;
@@ -179,8 +176,6 @@ export function useAadhaarCamera({
           setCameraState("error");
           callbacks.current.onError?.(cameraErrorMessage(err));
         }
-      } finally {
-        isStartingRef.current = false;
       }
     },
     [refreshCameras, startLoop, stopCamera]

@@ -90,7 +90,7 @@ test("a page resolver classifies the photo payload instead of the default decode
 });
 
 test("a patient code photo that matches nobody is not uploaded for OCR", async () => {
-  classify = jest.fn().mockResolvedValue({ outcome: "not-aadhaar", source: "patient_code", message: "No patient found for that code." });
+  classify = jest.fn().mockResolvedValue({ outcome: "not-aadhaar", quiet: true });
   act(() => root.render(<Harness />));
   wasmDetector.detectWasmPhoto.mockResolvedValueOnce("snp:unknown1");
   await act(async () => scanner.scanFile(photoFile()));
@@ -117,11 +117,28 @@ test("without a page resolver a server-read card is accepted without a second de
   expect(onScanned).toHaveBeenCalledWith({ full_name: "Test Person" }, "server-card");
 });
 
-test("a resolver failure is shown and counted as an error", async () => {
-  classify = jest.fn().mockRejectedValue(new Error("offline"));
-  act(() => root.render(<Harness />));
+test("a resolver failure is shown but reported as a request failure, not an unreadable card", async () => {
+  const onFailure = jest.fn();
+  function FailureHarness() {
+    scanner = useAadhaarDecode({ classify: jest.fn().mockRejectedValue(new Error("offline")), onFailure });
+    return null;
+  }
+  act(() => root.render(<FailureHarness />));
   await act(async () => { await scanner.decode("card"); });
   expect(scanner.error).toBe("Request failed");
+  expect(scanner.busy).toBe(false);
+  expect(onFailure).toHaveBeenCalledWith("request");
+  expect(onFailure).not.toHaveBeenCalledWith("error");
+});
+
+test("a page resolver that hands back nothing for a server-read card is ignored", async () => {
+  resolveCard = jest.fn().mockResolvedValue(null);
+  act(() => root.render(<Harness />));
+  const file = new File(["pdf"], "card.pdf", { type: "application/pdf" });
+  api.post.mockResolvedValueOnce({ data: { outcome: "card", data: { full_name: "Test Person" }, payload: "server-card" } });
+  await act(async () => scanner.scanFile(file));
+  expect(scanner.error).toBe("");
+  expect(scanner.outcome).toBe("");
   expect(scanner.busy).toBe(false);
 });
 

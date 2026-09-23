@@ -705,6 +705,76 @@ describe("AadhaarScanner component", () => {
     expect(container.querySelector('[data-testid="aadhaar-qr-input"]')).toBeNull();
   });
 
+  test("at the door a USB burst into another field is read as a scan and the field keeps its value", async () => {
+    let now = 0;
+    jest.spyOn(performance, "now").mockImplementation(() => now);
+    const resolvePayload = jest.fn().mockResolvedValue({ outcome: "card", source: "desk_scan" });
+    const phone = document.createElement("input");
+    phone.value = "98765";
+    document.body.appendChild(phone);
+    try {
+      act(() => root.render(<AadhaarScanner usbFirst resolvePayload={resolvePayload} />));
+      phone.focus();
+      const payload = "4".repeat(60);
+      for (const ch of payload) {
+        now += 3;
+        const ev = new KeyboardEvent("keydown", { key: ch, bubbles: true, cancelable: true });
+        act(() => { phone.dispatchEvent(ev); });
+        if (!ev.defaultPrevented) phone.value = `${phone.value}${ch}`.slice(0, 10);
+      }
+      const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+      await act(async () => { phone.dispatchEvent(enter); });
+      expect(enter.defaultPrevented).toBe(true);
+      expect(resolvePayload).toHaveBeenCalledWith(payload);
+      expect(phone.value).toBe("98765");
+      expect(container.textContent).toContain("Identity locked from card");
+    } finally {
+      phone.remove();
+    }
+  });
+
+  test("the door's USB listener is off while the door is busy", async () => {
+    let now = 0;
+    jest.spyOn(performance, "now").mockImplementation(() => now);
+    const resolvePayload = jest.fn();
+    act(() => root.render(<AadhaarScanner usbFirst disabled resolvePayload={resolvePayload} />));
+    for (const ch of "4".repeat(40)) {
+      now += 3;
+      act(() => { document.dispatchEvent(new KeyboardEvent("keydown", { key: ch, bubbles: true, cancelable: true })); });
+    }
+    act(() => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })); });
+    expect(resolvePayload).not.toHaveBeenCalled();
+  });
+
+  test("a quiet result from the page stops the camera without claiming a card", async () => {
+    const resolvePayload = jest.fn().mockResolvedValue({ outcome: "card", quiet: true });
+    nativeDetector.detectNative.mockResolvedValue("superseded-card");
+    act(() => root.render(<AadhaarScanner resolvePayload={resolvePayload} />));
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+    expect(resolvePayload).toHaveBeenCalledWith("superseded-card");
+    expect(container.querySelector('[data-testid="aadhaar-camera-button"]')).not.toBeNull();
+    expect(container.textContent).not.toContain("Identity locked");
+  });
+
+  test("start, stop and start again while the camera is still starting ends with a live camera", async () => {
+    const grants = [];
+    navigator.mediaDevices.getUserMedia.mockImplementation(() => new Promise((resolve) => { grants.push(resolve); }));
+    const firstTrack = { ...mediaTrack, stop: jest.fn() };
+    const firstStream = { getTracks: () => [firstTrack], getVideoTracks: () => [firstTrack] };
+    act(() => root.render(<AadhaarScanner />));
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-stop"]').click());
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+    expect(grants).toHaveLength(2);
+    await act(async () => grants[0](firstStream));
+    await act(async () => grants[1](mediaStream));
+    expect(firstTrack.stop).toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="aadhaar-camera-region"]').srcObject).toBe(mediaStream);
+    expect(container.querySelector('[data-testid="aadhaar-camera-stop"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="aadhaar-focus-area"]')).not.toBeNull();
+  });
+
   test("a USB terminator sent as Tab also decodes", async () => {
     const resolvePayload = jest.fn().mockResolvedValue({ outcome: "garbage", message: "Not a card" });
     act(() => root.render(<AadhaarScanner usbFirst resolvePayload={resolvePayload} />));

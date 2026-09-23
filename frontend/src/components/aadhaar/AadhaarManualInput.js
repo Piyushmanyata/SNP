@@ -37,6 +37,7 @@ export function AadhaarManualInput({ mode, disabled, busy, decode }) {
         readOnly={locked}
         aria-busy={busy}
         spellCheck={false}
+        data-usb-box=""
         autoComplete="off"
         autoCapitalize="off"
         autoCorrect="off"
