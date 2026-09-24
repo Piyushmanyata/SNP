@@ -300,3 +300,29 @@ Checks against the live host:
 1. Replace `ADMIN_BOOTSTRAP_PIN` in `/opt/snp/.env.production` with 6 digits that are not one digit repeated or a straight run such as `123456`, and update `/opt/snp/initial-admin.txt` and its private copy. The existing `admin` account keeps its PIN; the new value applies when the database is next wiped. A 4-digit value stops the backend at startup on an empty database.
 2. `up -d --build --wait`.
 3. Existing Admins and Team Leads keep signing in with 4 digits until they next change their PIN, which then needs 6.
+
+## Issue #50 S2–S15 — 25 September 2026
+
+[PR 59](https://github.com/Piyushmanyata/SNP/pull/59) (S2–S8) and [PR 67](https://github.com/Piyushmanyata/SNP/pull/67) (S9–S15) were deployed together from a `git archive` of merge commit `20469794e7cbf10cbe719f371b48ec6991e074b2` into `/opt/snp/releases/20469794…`. CI run [36072690394](https://github.com/Piyushmanyata/SNP/actions/runs/36072690394) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify. Perf p95 at concurrency 8: board 199 ms, leaderboard 120 ms, KPIs 53 ms, desk scan 134 ms.
+
+Before the update:
+
+- The running `b5f2940` images were tagged `snp-{backend,frontend,reminders}:rollback-b5f2940102c50d1a0ad2e95c15dc10cb4cca3f17`. To roll back, retag them to `:latest`, point `/opt/snp/current` at `/opt/snp/releases/b5f2940…`, and run `up -d --no-build`. The backup service there is the old `mongo:7` image, so it rebuilds nothing.
+- Final archive of the old backup format: `/opt/snp/archive/snp_camps-20260924T233806Z.archive.gz`. The database held one user and no camps, patients, persons or ledger rows.
+- `/opt/snp/.env.production` was copied to `.env.production.pre-s15`. A 64-hex `RESTIC_PASSWORD` was appended; its only off-VPS copy is `C:\Users\piyus\.ssh\snp-restic-password.txt`. `ADMIN_BOOTSTRAP_PIN` was replaced with a random 6-digit value that passes the S4 rule. The new PIN is appended to `/opt/snp/initial-admin.txt` and its private copy. The existing `admin` account keeps its current PIN.
+- `snp_backup` was given `snpOpsStatusWriter` and lost `restore`, as [backups](../../docs/ops/backups.md) describes for older deployments.
+
+The stack started with `up -d --build --wait`, and `/opt/snp/current` now points at the new release. Afterwards the patient indexes `{camp_id, arrived_at}` and `{camp_id, created_by}` were dropped. Covering indexes replace them, and the planner could otherwise pick the old ones and fetch every patient.
+
+Checks against the live host:
+
+- All six services were healthy or running, and the backend log had no errors.
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":0}`. The homepage returned 200, HTTP redirected with 308, and the responses carry the CSP, HSTS and `X-Frame-Options: DENY` headers.
+- `snp_app` is refused `listDatabases` with `authorizedDatabases: false`.
+- The backup container wrote the first restic snapshot (`patients=0`), recorded success in Ops status with `interval_seconds: 86400` and no remote, and `restore-drill.sh` printed `DRILL OK`.
+
+Still open:
+
+- No off-VPS restic remote (`RESTIC_REMOTE_REPOSITORY`) is configured.
+- The old plain archives under the `snp_backups` volume (`/backups/snp_camps-*.archive.gz`) are no longer written or pruned. They can be deleted by the operator now that the drill has passed.
+- The `ot_change` and `specs_change` SMS templates still need DLT and MSG91 registration, as PR 59 notes.
