@@ -133,6 +133,20 @@ describe("TemplateEditor", () => {
     expect(preview.textContent).toContain("Sponsorer :");
   });
 
+  test("the editor states the server's limits and stops adding at six logos", async () => {
+    const six = Array.from({ length: 6 }, (_, i) => ({ ...LOGO, id: `logo-${i}`, order: i }));
+    api.get.mockImplementation((url) => (url === "/camps"
+      ? Promise.resolve({ data: { camps: [{ id: "camp-1", name: "Kolkata Eye Camp", venue: "Rotary Club", is_active: true }] } })
+      : Promise.resolve({ data: { logos: six } })));
+    await act(async () => { root.render(<TemplateEditor />); });
+    const limits = container.querySelector('[data-testid="tpl-logo-limits"]').textContent;
+    expect(limits).toContain("Up to 6 logos");
+    expect(limits).toContain("2 MB");
+    expect(limits).toContain("600 px");
+    expect(container.querySelector('[data-testid="tpl-logo-input"]').disabled).toBe(true);
+    expect(container.textContent).toContain("6 of 6");
+  });
+
   test("surfaces a save failure", async () => {
     api.put.mockRejectedValueOnce({ response: { data: { detail: "Each logo must be 2 MB or smaller." } } });
     await render();

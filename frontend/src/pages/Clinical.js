@@ -1,5 +1,4 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { useNavigate } from "react-router-dom";
 import api, { formatApiError, errorPayload } from "../lib/api";
 import logger from "../lib/logger";
 import { v4 } from "../lib/uuid";
@@ -58,7 +57,6 @@ function rxFromTranscription(transcription) {
 }
 
 export default function Clinical() {
-  const navigate = useNavigate();
   const { user } = useAuth();
   const [line, setLine] = useState(() => effectiveLine(user));
   const [picking, setPicking] = useState(() => !effectiveLine(user));
@@ -453,7 +451,6 @@ export default function Clinical() {
                   specsDays={specsDays}
                   powers={powers}
                   onDone={clearPatient}
-                  navigate={navigate}
                   setBanner={setBanner}
                   onBusyChange={setBusy}
                 />

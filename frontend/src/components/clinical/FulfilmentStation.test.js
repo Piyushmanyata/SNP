@@ -30,7 +30,14 @@ const FIXED = { fixed_power_r: 2, fixed_power_l: 2 };
 let container = null;
 let root = null;
 
+let printedText = [];
+
 beforeEach(() => {
+  printedText = [];
+  window.print = jest.fn(() => {
+    printedText.push(document.getElementById("print-root")?.textContent);
+    window.dispatchEvent(new Event("afterprint"));
+  });
   container = document.createElement("div");
   document.body.appendChild(container);
   root = ReactDOM.createRoot(container);
@@ -51,7 +58,6 @@ async function renderStation(props) {
     root.render(
       <FulfilmentStation
         onDone={jest.fn()}
-        navigate={jest.fn()}
         setBanner={jest.fn()}
         {...props}
       />
@@ -68,7 +74,6 @@ async function renderSection(data, otDays = [], specsDays = [], line = "medicine
         otDays={otDays}
         specsDays={specsDays}
         onDone={jest.fn()}
-        navigate={jest.fn()}
         setBanner={jest.fn()}
       />
     );
@@ -274,9 +279,14 @@ describe("Fulfilment lines", () => {
     expect(container.querySelector('[data-testid="station-ot-save"]').disabled).toBe(true);
   });
 
-  test("a prescribed IOL surgery is scheduled with a printed token", async () => {
-    const navigate = jest.fn();
+  test("a prescribed IOL surgery is scheduled with a Token printed on the spot", async () => {
+    const onDone = jest.fn();
     api.post.mockResolvedValueOnce({ data: { slip: { id: "hospital-token" } } });
+    api.get.mockResolvedValueOnce({ data: {
+      slip: { id: "hospital-token", item_type: "ot", ot_eye: "R", collection_date: "2026-10-02", collection_venue: "Bajaj Hospital" },
+      registration: { id: "r", reg_no: 101, full_name: "Aparna Sen" },
+      camp_name: "SNP Camp Nadia",
+    } });
     await renderStation({
       line: "ot",
       data: {
@@ -286,7 +296,7 @@ describe("Fulfilment lines", () => {
         fulfilments: [],
       },
       otDays: [{ id: "ot-1", day_date: "2026-10-02", venue: "Bajaj Hospital", seats_free: 5 }],
-      navigate,
+      onDone,
     });
     expect(container.textContent).not.toContain("Done at camp");
     const picker = container.querySelector('[data-testid="ot_schedule_day_id-select"]');
@@ -301,11 +311,14 @@ describe("Fulfilment lines", () => {
     expect(api.post).toHaveBeenCalledWith("/clinical/fulfilment", expect.objectContaining({
       item_type: "ot", status: "deferred", ot_schedule_day_id: "ot-1",
     }));
-    expect(navigate).toHaveBeenCalledWith("/print/slip/hospital-token");
+    expect(api.get).toHaveBeenCalledWith("/clinical/slip/hospital-token");
+    expect(window.print).toHaveBeenCalledTimes(1);
+    expect(printedText[0]).toContain("Aparna Sen");
+    expect(printedText[0]).toContain("Bajaj Hospital");
+    expect(onDone).toHaveBeenCalled();
   });
 
   test("Patient declined records the refusal with no day and prints nothing", async () => {
-    const navigate = jest.fn();
     const onDone = jest.fn();
     const setBanner = jest.fn();
     await renderStation({
@@ -317,7 +330,6 @@ describe("Fulfilment lines", () => {
         fulfilments: [],
       },
       otDays: [{ id: "ot-1", day_date: "2026-10-02", venue: "Bajaj Hospital", seats_free: 0 }],
-      navigate,
       onDone,
       setBanner,
     });
@@ -329,7 +341,7 @@ describe("Fulfilment lines", () => {
     expect(api.post).toHaveBeenCalledWith("/clinical/fulfilment", expect.objectContaining({
       item_type: "ot", status: "declined", ot_schedule_day_id: null, paper_reviewed: true,
     }));
-    expect(navigate).not.toHaveBeenCalled();
+    expect(window.print).not.toHaveBeenCalled();
     expect(onDone).toHaveBeenCalled();
     expect(setBanner).toHaveBeenCalledWith("Hospital: Surgery declined");
   });

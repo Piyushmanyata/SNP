@@ -20,7 +20,7 @@ export default class ErrorBoundary extends React.Component {
   render() {
     if (!this.state.failed) return this.props.children;
     return (
-      <div role="alert" className="no-print min-h-screen flex items-center justify-center bg-white p-6">
+      <div role="alert" className="min-h-screen flex items-center justify-center bg-white p-6">
         <div className="max-w-md text-center">
           <AlertTriangle className="w-10 h-10 mx-auto text-rose-700" />
           <h1 className="mt-3 text-xl font-bold text-slate-900">This screen could not be opened</h1>

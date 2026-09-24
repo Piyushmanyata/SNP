@@ -1,11 +1,15 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import api, { formatApiError, errorPayload } from "../lib/api";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import AadhaarScanner from "../components/AadhaarScanner";
 import { useWedgeBurst } from "../components/aadhaar";
 import { ScanOutcome, MismatchReview } from "../components/desk/ScanOutcome";
+import { PaperCheck } from "../components/desk/PaperCheck";
+import { PrescriptionSheet } from "../components/print/PrescriptionSheet";
+import { printDocument, IMAGE_WAIT_MS } from "../lib/printJob";
+import { loadLogos } from "../lib/logoCache";
 import { PhoneInput } from "../components/PhoneInput";
 import { v4 } from "../lib/uuid";
 import { normalizePhone } from "../lib/phone";
@@ -52,6 +56,19 @@ function registrationError(err) {
   return formatApiError(err);
 }
 
+function logosWithin(campId) {
+  let timer;
+  return Promise.race([
+    loadLogos(campId).catch(() => []),
+    new Promise((resolve) => { timer = setTimeout(() => resolve([]), IMAGE_WAIT_MS); }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+async function printPrescription(rx) {
+  const logos = await logosWithin(rx.camp_id);
+  await printDocument(<PrescriptionSheet rx={rx} logos={logos} />, { pageSize: "A4" });
+}
+
 async function registerPatient({ form, qrPayload, dayId, reqId, manualReason, atDoor, reviewConfirmedId }) {
   const scanned = Boolean(qrPayload);
   const { data } = await api.post("/register", {
@@ -74,7 +91,6 @@ async function registerPatient({ form, qrPayload, dayId, reqId, manualReason, at
 }
 
 export default function Desk() {
-  const navigate = useNavigate();
   const { user } = useAuth();
   const [kpi, setKpi] = useState(null);
   const [loadErr, setLoadErr] = useState("");
@@ -98,6 +114,11 @@ export default function Desk() {
   const findSequence = useRef(0);
   const loadSequence = useRef(0);
   const [preRegPayload, setPreRegPayload] = useState("");
+  const [paperCheck, setPaperCheck] = useState(null);
+  const [printNote, setPrintNote] = useState("");
+  const [logoState, setLogoState] = useState("loading");
+  const printing = useRef(false);
+  const focusUsbBox = useRef(false);
   const [printingOpen, setPrintingOpen] = useState(false);
   const [operatingDayId, setOperatingDayId] = useState("");
   const campDayMode = printingOpen;
@@ -111,6 +132,9 @@ export default function Desk() {
       setLoadErr("");
       setKpi(k.data);
       setCamp(a.data.camp);
+      if (a.data.camp) {
+        loadLogos(a.data.camp.id).then(() => setLogoState("ready"), () => setLogoState("failed"));
+      }
       setDays(a.data.days || []);
       const today = (a.data.days || []).find((d) => d.is_today);
       const open = a.data.printing_open != null
@@ -152,7 +176,7 @@ export default function Desk() {
 
   const resolveDoorScan = useCallback(async (payload) => {
     const request = ++findSequence.current;
-    setBanner(""); setError(""); setSearchResults(null); setFound(null);
+    setBanner(""); setError(""); setSearchResults(null); setFound(null); setPaperCheck(null);
     clearScan();
     setDoorPhone("");
     setScanPayload(payload);
@@ -203,7 +227,7 @@ export default function Desk() {
   const lookupValue = useCallback(async (value) => {
     const request = ++findSequence.current;
     setScanning(false);
-    setBanner(""); setError(""); setSearchResults(null); setFound(null);
+    setBanner(""); setError(""); setSearchResults(null); setFound(null); setPaperCheck(null);
     clearScan();
     try {
       const { data } = await api.post("/desk/lookup", { value });
@@ -254,15 +278,65 @@ export default function Desk() {
     }
   }, [findVal, lookupValue, clearScan, campDayMode, resolveDoorScan]);
 
-  const print = useCallback(async (reg) => {
-    setError("");
+  const print = useCallback(async (reg, known) => {
+    if (printing.current) return;
+    printing.current = true;
+    const request = findSequence.current;
+    setError(""); setPrintNote("");
     try {
-      if (!reg.arrived_at) await api.post(`/desk/arrive/${reg.id}`);
-      navigate(`/print/prescription/${reg.id}`);
+      let rx = known;
+      if (!reg.arrived_at) rx = (await api.post(`/desk/arrive/${reg.id}`)).data.prescription;
+      if (!rx) rx = (await api.get(`/desk/print/${reg.id}`)).data.prescription;
+      if (request !== findSequence.current) return;
+      await printPrescription(rx);
+      if (request === findSequence.current) setPaperCheck({ reg, rx, request, busy: false, error: "" });
     } catch (err) {
-      setError(formatApiError(err));
+      if (request === findSequence.current) setError(formatApiError(err));
+    } finally {
+      printing.current = false;
     }
-  }, [navigate]);
+  }, []);
+
+  const printScanned = useCallback((reg) => print(reg, scanResult?.prescription), [print, scanResult]);
+
+  const confirmPaper = useCallback(async () => {
+    const check = paperCheck;
+    if (check.request !== findSequence.current) {
+      setPaperCheck(null);
+      return;
+    }
+    setPaperCheck({ ...check, busy: true, error: "" });
+    try {
+      const { data } = await api.post(`/desk/print/${check.reg.id}`);
+      setPaperCheck(null);
+      if (check.request !== findSequence.current) return;
+      findSequence.current += 1;
+      clearScan();
+      setFound(null);
+      setBanner(`Printed #${data.registration.reg_no} — ${data.registration.full_name}. Next patient.`);
+      focusUsbBox.current = true;
+    } catch (err) {
+      setPaperCheck({ ...check, busy: false, error: formatApiError(err) });
+    }
+  }, [paperCheck, clearScan]);
+
+  const dismissPaper = useCallback((note) => {
+    setPaperCheck(null);
+    setScanResult((result) => result && { ...result, prescription: null });
+    setPrintNote(note);
+  }, []);
+
+  const reprint = useCallback(() => {
+    const check = paperCheck;
+    dismissPaper("");
+    print(check.reg);
+  }, [paperCheck, dismissPaper, print]);
+
+  useEffect(() => {
+    if (paperCheck || !focusUsbBox.current) return;
+    focusUsbBox.current = false;
+    document.querySelector("[data-usb-box]")?.focus();
+  }, [paperCheck]);
 
   const confirmIdentity = useCallback(async (reg, reason) => {
     setError("");
@@ -328,7 +402,7 @@ export default function Desk() {
       walkAttempt.current = { key: "", reqId: "", patientId: "" };
       if (request !== findSequence.current) return;
       const reg = arrived.data.registration;
-      setScanResult({ outcome: "arrived", registration: reg });
+      setScanResult({ outcome: "arrived", registration: reg, prescription: arrived.data.prescription });
       setScanPayload("");
       setBanner(`Registered and arrived: #${reg.reg_no} — ${reg.full_name}`);
       setDoorPhone("");
@@ -414,7 +488,7 @@ export default function Desk() {
         banner={banner}
         scanResult={scanResult}
         busy={busy}
-        print={print}
+        print={printScanned}
         confirmMismatch={confirmMismatch}
         confirmPatient={confirmPatient}
         doorPhone={doorPhone}
@@ -429,6 +503,15 @@ export default function Desk() {
         setDoorReason={setDoorReason}
         clearScan={abandonScan}
       />}
+
+      {printNote && <Alert tone="amber" className="mb-5">{printNote}</Alert>}
+      {camp && logoState !== "ready" && (
+        <p role="status" className="mb-5 text-sm font-semibold text-amber-800" data-testid="logo-status">
+          {logoState === "loading"
+            ? "Sponsor logos loading…"
+            : "Sponsor logos unavailable. Prescriptions print without them."}
+        </p>
+      )}
 
       <Card className="mb-5" data-desk-card="find" data-testid="desk-card-find">
         <h3 className="font-display font-bold text-slate-900 mb-3">Find one patient</h3>
@@ -459,6 +542,14 @@ export default function Desk() {
           </div>
         )}
       </Card>
+
+      <PaperCheck
+        check={paperCheck}
+        onConfirm={confirmPaper}
+        onReprint={reprint}
+        onProblem={() => dismissPaper("Printer problem. Nothing was recorded. Fix the printer, then press Print again.")}
+        onClose={() => dismissPaper("Not recorded as printed. Press Print again when the paper is ready.")}
+      />
 
       <RegisterModal
         open={showReg}

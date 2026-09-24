@@ -181,8 +181,16 @@ The trust's own printed eye-camp form, photographed in the repository root. It i
 _Avoid_: template, Rx template, sample prescription
 
 **Sponsor logo**:
-An image of the camp's sponsor, printed in the prescription footer under "Sponsorer :". The only stored template data and the only part of the printed form an admin can change.
+An image of the camp's sponsor, printed in the prescription footer under "Sponsorer :". The only stored template data and the only part of the printed form an admin can change. At most six per camp. Each upload is up to 2 MB and is stored resized to at most 600 px and 150 KB. A desk downloads a camp's logos once and refreshes them after ten minutes. A prescription never waits more than 3 seconds for them: without them it still prints, and the desk says the logos are unavailable.
 _Avoid_: logo (the trust's own emblems are fixed masthead artwork, not sponsor logos), header image
+
+**Paper check**:
+The dialog that follows every prescription print at the desk. "Printed — next patient" records Print Prescription (`printed_at`), clears the card and returns the cursor to the USB box. "Reprint" asks the server for the sheet again and prints it. "Printer problem" and Escape record nothing and keep the patient on the card. A new scan closes the Paper check without recording anything. The browser's print event alone never records a print, because it fires for a cancelled dialog too.
+_Avoid_: print confirmation, printed flag, auto-stamp
+
+**Print Prescription**:
+The paper in the patient's hand, recorded by the Paper check as `printed_at`. The desk prints in the page, with no navigation. An attempted print that is not confirmed is not Print Prescription. Refused after Doctor seen and while an identity hold stands.
+_Avoid_: print attempt, printed (for a dialog that was cancelled)
 
 **Print window**:
 Server-derived printing availability for the active camp: automatic on the IST calendar camp day, or one admin-selected day, or off. Manual enable/disable expires at the next IST midnight. A stored per-day boolean is not the authority. Chooses Desk mode via the operating day. While it is closed the desk withdraws Print and says so rather than offering a control that fails; a sheet that has already printed keeps its reprint.

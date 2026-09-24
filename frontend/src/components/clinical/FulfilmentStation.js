@@ -5,6 +5,8 @@ import { Alert, Button, Badge } from "../ui";
 import { Pill, Glasses, Scissors, Printer } from "lucide-react";
 import { FixedPowerPicker, formatPower } from "./FixedPowerPicker";
 import { displayDateRange, displayTimeRange } from "../../lib/dates";
+import { printDocument } from "../../lib/printJob";
+import { TokenSheet } from "../print/TokenSheet";
 
 export const FULFILMENT_LINES = {
   medicine: {
@@ -185,6 +187,14 @@ function PowerSubstitution({ transcription, powers, issued, onChange, disabled }
   );
 }
 
+async function printToken(slipId) {
+  const { data } = await api.get(`/clinical/slip/${slipId}`);
+  await printDocument(
+    <TokenSheet slip={data.slip} registration={data.registration} campName={data.camp_name} />,
+    { pageSize: "A6" },
+  );
+}
+
 export function FulfilmentStation({
   line: lineKey,
   data,
@@ -192,7 +202,6 @@ export function FulfilmentStation({
   specsDays = [],
   powers = [],
   onDone,
-  navigate,
   setBanner,
   onBusyChange,
 }) {
@@ -271,17 +280,18 @@ export function FulfilmentStation({
       issueOpRef.current = null;
       setBanner(`${line.label}: ${statusLabel(line, res.fulfilment?.status || nextStatus)}`);
       if (res.slip) {
-        navigate(`/print/slip/${res.slip.id}`);
-      } else {
-        onDone();
+        await printToken(res.slip.id).catch((err) => {
+          setError(`Saved. The Token did not print: ${formatApiError(err)} Use Reprint Token.`);
+        });
       }
+      onDone();
     } catch (err) {
       setError(formatApiError(err));
     } finally {
       setBusy(false);
       onBusyChange?.(false);
     }
-  }, [data?.transcription?.id, data?.committed_revision?.id, data?.clinical_generation, data?.registration?.clinical_generation, line, dayId, paperReviewed, outcomes, issued, navigate, onDone, setBanner, onBusyChange]);
+  }, [data?.transcription?.id, data?.committed_revision?.id, data?.clinical_generation, data?.registration?.clinical_generation, line, dayId, paperReviewed, outcomes, issued, onDone, setBanner, onBusyChange]);
 
   const header = (
     <div className="flex items-center gap-2 mb-3">
@@ -325,7 +335,7 @@ export function FulfilmentStation({
             size="sm"
             variant="outline"
             className="w-full mt-2"
-            onClick={() => navigate(`/print/slip/${slip.id}`)}
+            onClick={() => printToken(slip.id).catch((err) => setError(formatApiError(err)))}
             data-testid={`station-${lineKey}-print-token`}
           >
             <Printer className="w-4 h-4" /> Reprint Token

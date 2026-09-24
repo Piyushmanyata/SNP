@@ -1,3 +1,4 @@
+export const MAX_LOGOS = 6;
 export const MAX_LOGO_SIZE = 2 * 1024 * 1024;
 export const ALLOWED_LOGO_TYPES = ["image/png", "image/jpeg", "image/webp"];
 

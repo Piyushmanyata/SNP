@@ -9,7 +9,6 @@ export function FulfilmentSection({
   specsDays,
   powers,
   onDone,
-  navigate,
   setBanner,
   onBusyChange,
 }) {
@@ -24,7 +23,6 @@ export function FulfilmentSection({
         specsDays={specsDays}
         powers={powers}
         onDone={onDone}
-        navigate={navigate}
         setBanner={setBanner}
         onBusyChange={onBusyChange}
       />

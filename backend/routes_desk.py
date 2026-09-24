@@ -203,7 +203,11 @@ async def scan(
     own = next((h for h in scanned_hits if person and h.get("person_id") == person["_id"]), None)
     if own:
         arrived = await _stamp_arrival(db, own, str(actor["_id"]), camp, state)
-        return {"outcome": "arrived", "registration": ser_patient(arrived)}
+        return {
+            "outcome": "arrived",
+            "registration": ser_patient(arrived),
+            "prescription": await _printable_prescription(db, arrived, camp, state),
+        }
     if scanned_hits:
         return {
             "outcome": "mismatch_review",
@@ -223,6 +227,7 @@ async def scan(
             return {
                 "outcome": "arrived",
                 "registration": ser_patient(arrived),
+                "prescription": await _printable_prescription(db, arrived, camp, state),
                 "overwritten": True,
             }
         return {
@@ -261,7 +266,11 @@ async def scan_confirm(
     if _is_manual(patient):
         patient = await _apply_overwrite(db, patient, card)
     arrived = await _stamp_arrival(db, patient, str(actor["_id"]), camp, state)
-    return {"outcome": "arrived", "registration": ser_patient(arrived)}
+    return {
+        "outcome": "arrived",
+        "registration": ser_patient(arrived),
+        "prescription": await _printable_prescription(db, arrived, camp, state),
+    }
 
 
 @router.post("/arrive/{patient_id}")
@@ -280,37 +289,45 @@ async def arrive(
             "code": "IDENTITY_CHECK_REQUIRED",
             "message": "Scan this patient's Aadhaar card, or ask an admin to record an identity check, before Arrival.",
         })
-    arrived = await _stamp_arrival(db, p, str(actor["_id"]), camp)
-    return {"registration": ser_patient(arrived)}
+    state = await (_printing_state(db, camp) if p.get("arrived_at") else _require_door_open(db, camp))
+    arrived = await _stamp_arrival(db, p, str(actor["_id"]), camp, state)
+    return {"registration": ser_patient(arrived), "prescription": await _printable_prescription(db, arrived, camp, state)}
 
 
-async def _prescription_payload(db, p: dict, actor: dict, stamp: bool) -> Dict[str, Any]:
+def _print_refusal(p: dict, state: dict) -> Optional[HTTPException]:
     if p.get("queue_status") == "seen":
-        raise HTTPException(status_code=409, detail={
+        return HTTPException(status_code=409, detail={
             "code": "ALREADY_SEEN",
             "message": "The doctor has already seen this patient. The prescription cannot be printed again.",
         })
     if not p.get("arrived_at"):
-        raise HTTPException(status_code=409, detail={
+        return HTTPException(status_code=409, detail={
             "code": "NOT_ARRIVED",
             "message": "Scan the patient in at the door before printing.",
         })
-    day = await db.camp_days.find_one({"_id": p["camp_day_id"]})
-    if not day:
-        raise HTTPException(status_code=404, detail="Camp day not found")
-    camp = await db.camps.find_one({"_id": p["camp_id"]})
-    days = await db.camp_days.find({"camp_id": p["camp_id"]}).to_list(100)
-    state = effective_printing(camp, days)
-    if not p.get("printed_at") and not state.get("printing_open"):
-        raise HTTPException(status_code=409, detail={
+    if p.get("printed_at"):
+        return None
+    if not state.get("printing_open"):
+        return HTTPException(status_code=409, detail={
             "code": "PRINT_WINDOW_CLOSED",
             "message": "The print window is closed.",
         })
-    if p.get("identity_recheck_required") and stamp and not p.get("printed_at"):
-        raise HTTPException(status_code=409, detail={
-            "code": "identity_recheck_required",
+    if p.get("identity_recheck_required"):
+        return HTTPException(status_code=409, detail={
+            "code": "IDENTITY_CHECK_REQUIRED",
             "message": "Confirm identity before printing.",
         })
+    return None
+
+
+async def _prescription_payload(db, p: dict, actor: dict, stamp: bool) -> Dict[str, Any]:
+    camp = await db.camps.find_one({"_id": p["camp_id"]})
+    refusal = _print_refusal(p, await _printing_state(db, camp))
+    if refusal:
+        raise refusal
+    day = await db.camp_days.find_one({"_id": p["camp_day_id"]})
+    if not day:
+        raise HTTPException(status_code=404, detail="Camp day not found")
     if stamp and not p.get("printed_at"):
         stamped = await db.patients.find_one_and_update(
             {
@@ -331,23 +348,30 @@ async def _prescription_payload(db, p: dict, actor: dict, stamp: bool) -> Dict[s
                 "code": "PRINT_CONFLICT",
                 "message": "This registration changed while printing. Try again.",
             })
-    camp = await db.camps.find_one({"_id": p["camp_id"]})
+    return {"registration": ser_patient(p), "prescription": _prescription(p, camp, day["day_date"])}
+
+
+def _prescription(p: dict, camp: Optional[dict], day_date: str) -> Dict[str, Any]:
     return {
-        "registration": ser_patient(p),
-        "prescription": {
-            "camp_id": str(p["camp_id"]),
-            "camp_name": camp["name"] if camp else None,
-            "venue": camp["venue"] if camp else None,
-            "reg_no": p["reg_no"],
-            "full_name": p["full_name"],
-            "address": p.get("address"),
-            "age": p.get("age"),
-            "gender": p.get("gender"),
-            "phone": p.get("phone"),
-            "date": day["day_date"],
-            "patient_qr": p["patient_qr"],
-        },
+        "camp_id": str(p["camp_id"]),
+        "camp_name": camp["name"] if camp else None,
+        "venue": camp["venue"] if camp else None,
+        "reg_no": p["reg_no"],
+        "full_name": p["full_name"],
+        "address": p.get("address"),
+        "age": p.get("age"),
+        "gender": p.get("gender"),
+        "phone": p.get("phone"),
+        "date": day_date,
+        "patient_qr": p["patient_qr"],
     }
+
+
+async def _printable_prescription(db: AsyncDatabase, p: dict, camp: dict, state: dict) -> Optional[Dict[str, Any]]:
+    if _print_refusal(p, state):
+        return None
+    day = await db.camp_days.find_one({"_id": p["camp_day_id"]})
+    return _prescription(p, camp, day["day_date"]) if day else None
 
 
 @router.get("/print/{patient_id}")

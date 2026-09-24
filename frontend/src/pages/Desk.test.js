@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import Desk from "./Desk";
 import api from "../lib/api";
+import { forgetLogos } from "../lib/logoCache";
 
 const mockAuth = { user: { id: "u1", name: "Lead", role: "team_lead" } };
 
@@ -64,6 +65,7 @@ jest.mock("../components/AadhaarScanner", () => {
     };
     return (
       <div data-testid="mock-aadhaar-scanner" data-disabled={String(Boolean(disabled))}>
+        <textarea data-usb-box="" aria-label="USB scanner" data-testid="mock-usb-box" />
         <button type="button" data-testid="mock-scan-trigger" onClick={scan}>
           Simulate Scan
         </button>
@@ -99,6 +101,11 @@ jest.mock("../components/AadhaarScanner", () => {
     );
   };
 });
+
+const RX = {
+  camp_id: "camp-1", camp_name: "Howrah Eye Camp", venue: "Community Hall", reg_no: "101",
+  full_name: "Aadhaar Scanned User", patient_qr: "qr-101", date: "2026-08-27", age: 42, gender: "M",
+};
 
 const ARRIVED = {
   id: "p-1",
@@ -143,8 +150,17 @@ function setInput(el, value) {
   el.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+let printedText = [];
+
 beforeEach(() => {
   window.HTMLElement.prototype.scrollIntoView = jest.fn();
+  window.HTMLImageElement.prototype.decode = () => Promise.resolve();
+  printedText = [];
+  window.print = jest.fn(() => {
+    printedText.push(document.getElementById("print-root")?.textContent);
+    window.dispatchEvent(new Event("afterprint"));
+  });
+  forgetLogos("camp-1");
   container = document.createElement("div");
   document.body.appendChild(container);
   root = ReactDOM.createRoot(container);
@@ -839,6 +855,7 @@ describe("Desk page", () => {
     }
     api.post.mockImplementation((url) => {
       if (url === "/desk/lookup") return Promise.resolve({ data: { registration } });
+      if (url.startsWith("/desk/arrive/")) return Promise.resolve({ data: { registration: { ...registration, arrived_at: "2026-09-01T04:00:00Z" }, prescription: RX } });
       return Promise.resolve({ data: {} });
     });
     await renderDesk();
@@ -1853,5 +1870,207 @@ describe("Desk page", () => {
     const review = container.querySelector('[data-testid="mismatch-review"]').textContent;
     expect(review).toContain("registered from another card");
     expect(review).not.toContain("replaces the stored values");
+  });
+
+  const ARRIVED_SCAN = { data: { outcome: "arrived", registration: ARRIVED, prescription: RX } };
+
+  function stampCalls() {
+    return api.post.mock.calls.filter(([url]) => url.startsWith("/desk/print/"));
+  }
+
+  function paperCheck() {
+    return document.querySelector('[data-testid="paper-check"]');
+  }
+
+  function paperButton(name) {
+    return document.querySelector(`[data-testid="paper-check-${name}"]`);
+  }
+
+  async function printFromDoor() {
+    await scanAtDoor();
+    await act(async () => { container.querySelector('[data-testid="scan-print-button"]').click(); });
+  }
+
+  test("Print stays on the Desk, prints the scanned prescription and asks for a Paper check", async () => {
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN);
+    await renderDesk();
+    await printFromDoor();
+    expect(window.print).toHaveBeenCalledTimes(1);
+    expect(printedText[0]).toContain("Aadhaar Scanned User");
+    expect(printedText[0]).toContain("#101");
+    expect(api.get).not.toHaveBeenCalledWith("/desk/print/p-1");
+    expect(stampCalls()).toHaveLength(0);
+    expect(paperCheck().textContent).toContain("#101");
+    expect(document.activeElement).toBe(paperButton("confirm"));
+    expect(document.getElementById("print-root")).toBeNull();
+  });
+
+  test("Escape on the Paper check records nothing and keeps the patient", async () => {
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN);
+    await renderDesk();
+    await printFromDoor();
+    act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+    expect(paperCheck()).toBeNull();
+    expect(stampCalls()).toHaveLength(0);
+    expect(container.querySelector('[data-testid="scan-arrived"]')).not.toBeNull();
+    expect(container.textContent).toContain("Not recorded as printed");
+  });
+
+  test("Printed — next patient sends one stamp, clears the card and puts the cursor in the USB box", async () => {
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN)
+      .mockResolvedValueOnce({ data: { registration: { ...ARRIVED, printed_at: "2026-09-01T05:00:00Z" }, prescription: RX } });
+    await renderDesk();
+    await printFromDoor();
+    await act(async () => { paperButton("confirm").click(); });
+    expect(stampCalls()).toEqual([["/desk/print/p-1"]]);
+    expect(paperCheck()).toBeNull();
+    expect(container.querySelector('[data-testid="scan-arrived"]')).toBeNull();
+    expect(container.textContent).toContain("Printed #101");
+    expect(document.activeElement).toBe(container.querySelector('[data-testid="mock-usb-box"]'));
+  });
+
+  test("a failed stamp offers Retry and never advances", async () => {
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN)
+      .mockRejectedValueOnce(new Error("Network Error"))
+      .mockResolvedValueOnce({ data: { registration: { ...ARRIVED, printed_at: "2026-09-01T05:00:00Z" }, prescription: RX } });
+    await renderDesk();
+    await printFromDoor();
+    await act(async () => { paperButton("confirm").click(); });
+    expect(paperCheck().textContent).toContain("Network Error");
+    expect(paperButton("confirm").textContent).toBe("Retry");
+    expect(container.querySelector('[data-testid="scan-arrived"]')).not.toBeNull();
+    await act(async () => { paperButton("confirm").click(); });
+    expect(stampCalls()).toHaveLength(2);
+    expect(paperCheck()).toBeNull();
+  });
+
+  test("Reprint prints again and still records nothing", async () => {
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url === "/desk/print/p-1"
+      ? Promise.resolve({ data: { registration: ARRIVED, prescription: RX } }) : base(url)));
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN);
+    await renderDesk();
+    await printFromDoor();
+    await act(async () => { paperButton("reprint").click(); });
+    expect(window.print).toHaveBeenCalledTimes(2);
+    expect(paperCheck()).not.toBeNull();
+    expect(stampCalls()).toHaveLength(0);
+  });
+
+  test("Printer problem keeps the patient on the card and says nothing was recorded", async () => {
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN);
+    await renderDesk();
+    await printFromDoor();
+    await act(async () => { paperButton("problem").click(); });
+    expect(paperCheck()).toBeNull();
+    expect(stampCalls()).toHaveLength(0);
+    expect(container.querySelector('[data-testid="scan-print-button"]')).not.toBeNull();
+    expect(container.textContent).toContain("Nothing was recorded");
+  });
+
+  test("two patients in a row fetch the sponsor logos once", async () => {
+    const stamped = { data: { registration: { ...ARRIVED, printed_at: "2026-09-01T05:00:00Z" }, prescription: RX } };
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN).mockResolvedValueOnce(stamped)
+      .mockResolvedValueOnce(ARRIVED_SCAN).mockResolvedValueOnce(stamped);
+    await renderDesk();
+    for (let i = 0; i < 2; i += 1) {
+      await printFromDoor();
+      await act(async () => { paperButton("confirm").click(); });
+    }
+    expect(window.print).toHaveBeenCalledTimes(2);
+    expect(api.get.mock.calls.filter(([url]) => url.startsWith("/templates/logos"))).toHaveLength(1);
+  });
+
+  test("a patient switch while the print is pending never stamps the old patient", async () => {
+    window.print = jest.fn();
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN).mockResolvedValueOnce({
+      data: { outcome: "no_match", card: { full_name: "Next Patient" } },
+    });
+    await renderDesk();
+    await printFromDoor();
+    expect(window.print).toHaveBeenCalledTimes(1);
+    await scanAtDoor();
+    await act(async () => { window.dispatchEvent(new Event("afterprint")); });
+    expect(paperCheck()).toBeNull();
+    expect(stampCalls()).toHaveLength(0);
+    expect(container.querySelector('[data-testid="door-card-name"]').textContent).toContain("Next Patient");
+  });
+
+  test("a found patient prints from the server's prescription", async () => {
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url === "/desk/print/p-1"
+      ? Promise.resolve({ data: { registration: ARRIVED, prescription: RX } }) : base(url)));
+    await lookup(ARRIVED);
+    await act(async () => { container.querySelector('[data-testid="print-button-101"]').click(); });
+    expect(api.get).toHaveBeenCalledWith("/desk/print/p-1");
+    expect(window.print).toHaveBeenCalledTimes(1);
+    expect(paperCheck()).not.toBeNull();
+  });
+
+  test("sponsor logos that cannot load are named on the Desk, and the prescription still prints", async () => {
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url.startsWith("/templates/logos") ? Promise.reject(new Error("down")) : base(url)));
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN);
+    await renderDesk();
+    expect(container.querySelector('[data-testid="logo-status"]').textContent).toContain("Sponsor logos unavailable");
+    await printFromDoor();
+    expect(window.print).toHaveBeenCalledTimes(1);
+    expect(paperCheck()).not.toBeNull();
+  });
+
+  test("after Printer problem, Print asks the server again instead of reusing the scanned sheet", async () => {
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url === "/desk/print/p-1"
+      ? Promise.reject(apiError({ code: "PRINT_WINDOW_CLOSED", message: "The print window is closed." })) : base(url)));
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN);
+    await renderDesk();
+    await printFromDoor();
+    await act(async () => { paperButton("problem").click(); });
+    await act(async () => { container.querySelector('[data-testid="scan-print-button"]').click(); });
+    expect(api.get).toHaveBeenCalledWith("/desk/print/p-1");
+    expect(window.print).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("The print window is closed.");
+  });
+
+  test("Reprint asks the server again and a second tap cannot start a second print", async () => {
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url === "/desk/print/p-1"
+      ? Promise.resolve({ data: { registration: ARRIVED, prescription: RX } }) : base(url)));
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN);
+    await renderDesk();
+    await printFromDoor();
+    window.print = jest.fn();
+    await act(async () => { paperButton("reprint").click(); });
+    expect(api.get).toHaveBeenCalledWith("/desk/print/p-1");
+    expect(window.print).toHaveBeenCalledTimes(1);
+    await act(async () => { container.querySelector('[data-testid="scan-print-button"]').click(); });
+    expect(window.print).toHaveBeenCalledTimes(1);
+    await act(async () => { window.dispatchEvent(new Event("afterprint")); });
+    expect(paperCheck()).not.toBeNull();
+  });
+
+  test("a scan while the Paper check is open closes it without a stamp", async () => {
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN).mockResolvedValueOnce({
+      data: { outcome: "no_match", card: { full_name: "Next Patient" } },
+    });
+    await renderDesk();
+    await printFromDoor();
+    await scanAtDoor();
+    expect(paperCheck()).toBeNull();
+    expect(stampCalls()).toHaveLength(0);
+  });
+
+  test("a space from a scanner burst never confirms the Paper check", async () => {
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN);
+    await renderDesk();
+    await printFromDoor();
+    for (const type of ["keydown", "keyup"]) {
+      const space = new KeyboardEvent(type, { key: " ", bubbles: true, cancelable: true });
+      paperButton("confirm").dispatchEvent(space);
+      expect(space.defaultPrevented).toBe(true);
+    }
+    const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    paperButton("confirm").dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(false);
   });
 });

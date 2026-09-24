@@ -16,3 +16,9 @@ Paste the volunteer names into Admin → Roster (one name per line) for the acti
 Team leads sign each laptop in as its Desk account. The access token lasts twelve hours, so a laptop signed in at 07:00 needs a fresh login at 19:00.
 
 When a volunteer sits down they pick their name. Hand over clears the pick for the next person. Team leads and admins keep personal accounts and never see the picker.
+
+## Desk laptops and printers
+
+Each desk prints in the page and never leaves the Desk screen. To remove the print dialog, start Chrome with `--kiosk-printing` and set the desk's A4 printer as the default. The browser still reports when printing ends, so the Paper check opens after each sheet.
+
+After every sheet, the volunteer checks the paper in hand. **Printed — next patient** (Enter) records it. **Reprint** prints again. **Printer problem** or Escape records nothing, so the patient can be printed again once the printer works.
