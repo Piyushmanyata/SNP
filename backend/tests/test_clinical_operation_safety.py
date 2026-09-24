@@ -4,19 +4,17 @@ import pytest
 from bson import ObjectId
 from fastapi import HTTPException
 
-from test_camp_operations_matrix import (
-    CLINICAL, _complete_body, _issue_body, _mock, _printed_patient,
-)
 import routes_clinical
 from models import CorrectionBody, TranscriptionBody, UndoCompletionBody
+from seed import day, patient_doc, run_camp
+from test_camp_operations_matrix import CLINICAL, _complete_body, _issue_body, _printed_patient, intercept
 
 
 @pytest.mark.parametrize("foreign_patient", [False, True])
 def test_orphan_revision_operation_rejects_a_different_request(monkeypatch, foreign_patient):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, first = await _printed_patient(db)
-        second = {**first, "_id": ObjectId(), "full_name": "Different Patient"}
+        second = {**first, **patient_doc(_id=ObjectId(), full_name="Different Patient")}
         await db.patients.insert_one(second)
         original = routes_clinical.commit_completion
 
@@ -37,20 +35,19 @@ def test_orphan_revision_operation_rejects_a_different_request(monkeypatch, fore
         current = await db.patients.find_one({"_id": target["_id"]})
         assert not current.get("committed_revision_id")
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 @pytest.mark.parametrize("foreign_patient", [False, True])
 def test_issue_operation_rejects_a_different_request(monkeypatch, foreign_patient):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
         done = await routes_clinical.complete_prescription(_complete_body(patient["_id"], "complete"), actor=CLINICAL)
         await routes_clinical.record_fulfilment(
             _issue_body(done["transcription"]["id"], done["revision"]["id"], 1, "issue"), actor=CLINICAL,
          background_tasks=None)
         if foreign_patient:
-            other = {**patient, "_id": ObjectId(), "full_name": "Different Patient"}
+            other = {**patient, **patient_doc(_id=ObjectId(), full_name="Different Patient")}
             await db.patients.insert_one(other)
             done = await routes_clinical.complete_prescription(_complete_body(other["_id"], "complete-other"), actor=CLINICAL)
         with pytest.raises(HTTPException) as exc:
@@ -62,13 +59,12 @@ def test_issue_operation_rejects_a_different_request(monkeypatch, foreign_patien
         assert exc.value.detail["code"] == "operation_conflict"
         assert await db.fulfilments.count_documents({}) == 1
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 @pytest.mark.parametrize("paused_function", ["_record_fulfilment", "_ensure_transcription_locked"])
 def test_duplicate_inflight_issue_keeps_first_authorization(monkeypatch, paused_function):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
         done = await routes_clinical.complete_prescription(_complete_body(patient["_id"], "complete"), actor=CLINICAL)
         body = _issue_body(done["transcription"]["id"], done["revision"]["id"], 1, "issue")
@@ -94,12 +90,11 @@ def test_duplicate_inflight_issue_keeps_first_authorization(monkeypatch, paused_
             proceed.set()
             await pending
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_correction_can_clear_prescribed_lines_and_content(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
         done = await routes_clinical.complete_prescription(_complete_body(patient["_id"], "complete"), actor=CLINICAL)
         result = await routes_clinical.add_correction(CorrectionBody(
@@ -114,27 +109,25 @@ def test_correction_can_clear_prescribed_lines_and_content(monkeypatch):
         assert result["revision"]["bp"] is None
         assert result["revision"]["diagnosis_options"] == []
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_draft_write_racing_completion_cannot_unlock_issued_prescription(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
         draft = await routes_clinical.create_transcription(
             TranscriptionBody(patient_id=str(patient["_id"]), bp="110/70"), actor=CLINICAL,
         )
         entered = asyncio.Event()
         proceed = asyncio.Event()
-        original = db.transcriptions.find_one_and_update
 
-        async def paused(query, update, **kwargs):
+        async def paused(find_one_and_update, query, update, *args, **kwargs):
             if update.get("$set", {}).get("locked") is False:
                 entered.set()
                 await proceed.wait()
-            return await original(query, update, **kwargs)
+            return await find_one_and_update(query, update, *args, **kwargs)
 
-        monkeypatch.setattr(db.transcriptions, "find_one_and_update", paused)
+        intercept(monkeypatch, "transcriptions", "find_one_and_update", paused)
         pending = asyncio.create_task(routes_clinical.create_transcription(
             TranscriptionBody(patient_id=str(patient["_id"]), bp="999/99"), actor=CLINICAL,
         ))
@@ -153,12 +146,11 @@ def test_draft_write_racing_completion_cannot_unlock_issued_prescription(monkeyp
         assert current["locked"] is True
         assert current["bp"] == "120/80"
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_draft_write_cannot_overwrite_active_clinical_claim(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
         draft = await routes_clinical.create_transcription(
             TranscriptionBody(patient_id=str(patient["_id"]), bp="110/70"), actor=CLINICAL,
@@ -172,12 +164,11 @@ def test_draft_write_cannot_overwrite_active_clinical_claim(monkeypatch):
         current = await db.transcriptions.find_one({"_id": ObjectId(draft["transcription"]["id"])})
         assert current["bp"] == "110/70"
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_undo_cannot_race_a_completed_issue(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
         done = await routes_clinical.complete_prescription(_complete_body(patient["_id"], "complete"), actor=CLINICAL)
         entered = asyncio.Event()
@@ -206,12 +197,11 @@ def test_undo_cannot_race_a_completed_issue(monkeypatch):
             await pending
         assert await db.fulfilments.count_documents({}) == 0
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_correction_without_transcription_id_obeys_the_write_claim(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
         done = await routes_clinical.complete_prescription(_complete_body(patient["_id"], "complete"), actor=CLINICAL)
         async with routes_clinical._clinical_write(db, done["transcription"]["id"]):
@@ -224,13 +214,12 @@ def test_correction_without_transcription_id_obeys_the_write_claim(monkeypatch):
         current = await db.patients.find_one({"_id": patient["_id"]})
         assert current["clinical_generation"] == 1
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 @pytest.mark.parametrize("failure_stage", ["transcription", "ledger"])
 def test_completion_retry_recovers_writes_after_patient_commit(monkeypatch, failure_stage):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
         body = _complete_body(patient["_id"], "complete")
         target = "_upsert_transcription" if failure_stage == "transcription" else "save_operation"
@@ -253,12 +242,11 @@ def test_completion_retry_recovers_writes_after_patient_commit(monkeypatch, fail
         assert await db.prescription_revisions.count_documents({}) == 1
         assert await routes_clinical.complete_prescription(body, actor=CLINICAL) == result
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_completion_obeys_an_existing_clinical_write_claim(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
         draft = await routes_clinical.create_transcription(
             TranscriptionBody(patient_id=str(patient["_id"]), bp="110/70"), actor=CLINICAL,
@@ -270,13 +258,12 @@ def test_completion_obeys_an_existing_clinical_write_claim(monkeypatch):
         current = await db.patients.find_one({"_id": patient["_id"]})
         assert not current.get("committed_revision_id")
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 @pytest.mark.parametrize("failure_stage", ["transcription", "audit", "ledger"])
 def test_correction_retry_applies_one_generation(monkeypatch, failure_stage):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
         done = await routes_clinical.complete_prescription(
             _complete_body(patient["_id"], "complete"), actor=CLINICAL,
@@ -297,13 +284,11 @@ def test_correction_retry_applies_one_generation(monkeypatch, failure_stage):
             monkeypatch.setattr(routes_clinical, "_upsert_transcription", failed)
             restore = lambda: monkeypatch.setattr(routes_clinical, "_upsert_transcription", original)
         elif failure_stage == "audit":
-            original_insert = db.corrections.insert_one
 
             async def failed(*args, **kwargs):
                 raise RuntimeError("injected correction failure")
 
-            monkeypatch.setattr(db.corrections, "insert_one", failed)
-            restore = lambda: monkeypatch.setattr(db.corrections, "insert_one", original_insert)
+            restore = intercept(monkeypatch, "corrections", "insert_one", failed)
         else:
             original = routes_clinical.save_operation
 
@@ -329,12 +314,11 @@ def test_correction_retry_applies_one_generation(monkeypatch, failure_stage):
             await routes_clinical.add_correction(changed, actor=CLINICAL)
         assert exc.value.detail["code"] == "operation_conflict"
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_a_stale_correction_retry_cannot_replace_a_newer_correction(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
         done = await routes_clinical.complete_prescription(
             _complete_body(patient["_id"], "complete"), actor=CLINICAL,
@@ -373,12 +357,11 @@ def test_a_stale_correction_retry_cannot_replace_a_newer_correction(monkeypatch)
         assert committed["operation_id"] == "newer"
         assert committed["blood_sugar"] == "140"
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_undo_retry_clears_one_completion(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
         done = await routes_clinical.complete_prescription(
             _complete_body(patient["_id"], "complete"), actor=CLINICAL,
@@ -408,12 +391,11 @@ def test_undo_retry_clears_one_completion(monkeypatch):
         current = await db.patients.find_one({"_id": patient["_id"]})
         assert current["clinical_generation"] == 2
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_malformed_correction_content_is_rejected_before_processing(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
         done = await routes_clinical.complete_prescription(_complete_body(patient["_id"], "complete"), actor=CLINICAL)
         with pytest.raises(HTTPException) as exc:
@@ -425,12 +407,11 @@ def test_malformed_correction_content_is_rejected_before_processing(monkeypatch)
         assert exc.value.status_code == 400
         assert (await db.patients.find_one({"_id": patient["_id"]}))["clinical_generation"] == 1
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_late_issue_retry_preserves_the_newer_outcome(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
         done = await routes_clinical.complete_prescription(_complete_body(patient["_id"], "complete"), actor=CLINICAL)
         first = _issue_body(done["transcription"]["id"], done["revision"]["id"], 1, "issue-a", status="not_available")
@@ -443,12 +424,11 @@ def test_late_issue_retry_preserves_the_newer_outcome(monkeypatch):
         assert current["operation_id"] == "issue-b"
         assert current["status"] == "fulfilled"
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_paused_pending_issue_rechecks_history_after_retry_and_newer_issue(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
         done = await routes_clinical.complete_prescription(_complete_body(patient["_id"], "complete"), actor=CLINICAL)
         first = _issue_body(done["transcription"]["id"], done["revision"]["id"], 1, "issue-a", status="not_available")
@@ -478,24 +458,22 @@ def test_paused_pending_issue_rechecks_history_after_retry_and_newer_issue(monke
         assert resumed == replayed
         assert (await db.patients.find_one({"_id": patient["_id"]}))["issue_auth_op"] is None
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 @pytest.mark.parametrize("failure_stage", ["before_release", "after_release"])
 def test_issue_retry_finishes_failed_cleanup_without_releasing_ot_twice(monkeypatch, failure_stage):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         camp, _, patient = await _printed_patient(db)
         done = await routes_clinical.complete_prescription(_complete_body(
             patient["_id"], "complete", prescribed_lines=["ot"],
             prescribed_medicine_ids=[], ot_eye="right", ot_outcome="iol_surgery",
         ), actor=CLINICAL)
         old_day, new_day = ObjectId(), ObjectId()
-        for day in (old_day, new_day):
-            await db.ot_schedule_days.insert_one({
-                "_id": day, "camp_id": camp, "day_date": "2099-10-02",
-                "venue": "OT", "seat_limit": 10, "seats_taken": 0,
-            })
+        await db.ot_schedule_days.insert_many([
+            {"_id": day_id, "camp_id": camp, "day_date": day(offset), "venue": "OT", "seat_limit": 10, "seats_taken": 0}
+            for offset, day_id in ((3, old_day), (4, new_day))
+        ])
         first = _issue_body(done["transcription"]["id"], done["revision"]["id"], 1, "ot-a",
                             item_type="ot", status="deferred", ot_schedule_day_id=str(old_day))
         second = _issue_body(done["transcription"]["id"], done["revision"]["id"], 1, "ot-b",
@@ -507,23 +485,21 @@ def test_issue_retry_finishes_failed_cleanup_without_releasing_ot_twice(monkeypa
         async def fail_lock(*args, **kwargs):
             raise RuntimeError("injected finalization failure")
 
-        original_update = db.ot_schedule_days.update_one
-
-        async def fail_release(query, update, **kwargs):
+        async def fail_release(update_one, query, update, *args, **kwargs):
             if query.get("_id") == old_day and update.get("$inc", {}).get("seats_taken") == -1:
                 raise RuntimeError("injected finalization failure")
-            return await original_update(query, update, **kwargs)
+            return await update_one(query, update, *args, **kwargs)
 
         if failure_stage == "after_release":
             monkeypatch.setattr(routes_clinical, "_ensure_transcription_locked", fail_lock)
+            restore = lambda: monkeypatch.setattr(routes_clinical, "_ensure_transcription_locked", original)
         else:
-            monkeypatch.setattr(db.ot_schedule_days, "update_one", fail_release)
+            restore = intercept(monkeypatch, "ot_schedule_days", "update_one", fail_release)
         with pytest.raises(RuntimeError):
             await routes_clinical.record_fulfilment(second, actor=CLINICAL, background_tasks=None)
         current = await db.patients.find_one({"_id": patient["_id"]})
         assert current["issue_auth_op"] == "ot-b"
-        monkeypatch.setattr(routes_clinical, "_ensure_transcription_locked", original)
-        monkeypatch.setattr(db.ot_schedule_days, "update_one", original_update)
+        restore()
         result = await routes_clinical.record_fulfilment(second, actor=CLINICAL, background_tasks=None)
         assert result["fulfilment"]["status"] == "deferred"
         current = await db.patients.find_one({"_id": patient["_id"]})
@@ -534,4 +510,4 @@ def test_issue_retry_finishes_failed_cleanup_without_releasing_ot_twice(monkeypa
         assert await db.deferred_slips.count_documents({"ot_schedule_day_id": old_day, "active": True}) == 0
         assert await routes_clinical.record_fulfilment(second, actor=CLINICAL, background_tasks=None) == result
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)

@@ -1,400 +1,228 @@
 """Specs collection days are date/venue/time windows with no capacity."""
-import asyncio
-import os
-import sys
-from datetime import datetime, timedelta
-from pathlib import Path
-
-backend_dir = Path(__file__).resolve().parents[1]
-if str(backend_dir) not in sys.path:
-    sys.path.insert(0, str(backend_dir))
-
-os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
-os.environ.setdefault("DB_NAME", "snp_test")
-os.environ.setdefault("JWT_SECRET", "test-jwt-secret")
-os.environ.setdefault("AADHAAR_HASH_PEPPER", "test-pepper")
-os.environ.setdefault("COOKIE_SECURE", "false")
-
+import httpx
+import pytest
 from bson import ObjectId
-from fastapi.testclient import TestClient
+from fastapi import HTTPException
 
-import db as db_module
 import helpers
-import routes_auth
 import routes_clinical
-import routes_desk
-import routes_registration
-import routes_reports
-import routes_staff
 import security
-import server as server_mod
-from helpers import IST
+import server
 from routes_clinical import record_fulfilment
-from security import hash_pin
-from test_adversarial_challenger import setup_mock_db
-from test_camp_lifecycle import RX, _fulfil, _recorder, _seen_patient_with_transcription
+from seed import CLINICAL, TODAY, day, fulfil, recorder, run_camp, seed_camp, seen_patient, user_doc
+
+FUTURE = day(7)
 
 
-def _async_noop():
-    async def _inner(*_a, **_k):
-        return None
-    return _inner
+def _headers(monkeypatch, user_id, role):
+    monkeypatch.setenv("JWT_SECRET", "test-jwt-secret-of-at-least-32-bytes")
+    return {"Authorization": f"Bearer {security.create_access_token(str(user_id), role, role)}"}
 
 
-def _patch_db(monkeypatch, mock_db):
-    for mod in (
-        db_module, routes_staff, routes_auth, routes_clinical, routes_reports,
-        routes_desk, routes_registration, security,
-    ):
-        monkeypatch.setattr(mod, "get_db", lambda: mock_db)
-    return mock_db
+def _client():
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test")
 
 
-def _client(monkeypatch, mock_db):
-    monkeypatch.setattr(server_mod, "init_indexes", _async_noop())
-    monkeypatch.setattr(server_mod, "seed_admin", _async_noop())
-    _patch_db(monkeypatch, mock_db)
-    server_mod.app.router.on_startup.clear()
-    return TestClient(server_mod.app, raise_server_exceptions=True)
+def _post_specs_day(client, headers, camp_id, **fields):
+    return client.post("/api/clinical/specs-days", json={
+        "camp_id": str(camp_id), "day_date": FUTURE, **fields,
+    }, headers=headers)
 
 
-def _auth(user_id, name, role):
-    token = security.create_access_token(str(user_id), name, role)
-    return {"Authorization": f"Bearer {token}"}
-
-
-async def _admin(mock_db):
-    admin_id = ObjectId()
-    await mock_db.users.insert_one({
-        "_id": admin_id, "name": "admin", "name_normalized": "admin",
-        "pin_hash": hash_pin("2468"), "role": "admin", "disabled_at": None,
-    })
-    return admin_id
-
-
-async def _active_camp(mock_db, name="Sikar Camp"):
-    camp_id = ObjectId()
-    await mock_db.camps.insert_one({
-        "_id": camp_id, "name": name, "venue": "Sikar Bhawan", "is_active": True,
-    })
+async def _camp_with_admin(database, admin_id):
+    await database.users.insert_one(user_doc("admin", role="admin", _id=admin_id))
+    camp_id, _ = await seed_camp(database, days=())
     return camp_id
 
 
-def _future_date():
-    return (datetime.now(IST) + timedelta(days=7)).strftime("%Y-%m-%d")
+def _defer(seen, day_id, operation_id):
+    return record_fulfilment(fulfil(
+        seen["trans_id"], seen["rev_id"], item_type="specs_made", status="deferred",
+        specs_collection_day_id=str(day_id), operation_id=operation_id,
+    ), actor=CLINICAL, background_tasks=None)
 
 
 def test_specs_create_update_list_window_contract(monkeypatch):
-    async def run():
-        mock_db = setup_mock_db(monkeypatch)
-        admin_id = await _admin(mock_db)
-        camp_id = await _active_camp(mock_db)
-        client = _client(monkeypatch, mock_db)
-        headers = _auth(admin_id, "admin", "admin")
-        day = _future_date()
+    admin_id = ObjectId()
+    headers = _headers(monkeypatch, admin_id, "admin")
 
-        created = client.post("/api/clinical/specs-days", json={
-            "camp_id": str(camp_id), "day_date": day, "venue": "Optical",
-        }, headers=headers)
-        assert created.status_code == 200
-        assert created.json()["specs_day"]["start_time"] == "10:00"
-        assert created.json()["specs_day"]["end_time"] == "17:00"
+    async def body(database):
+        camp_id = await _camp_with_admin(database, admin_id)
+        async with _client() as client:
+            created = await _post_specs_day(client, headers, camp_id, venue="Optical")
+            assert created.status_code == 200
+            assert created.json()["specs_day"]["start_time"] == "10:00"
+            assert created.json()["specs_day"]["end_time"] == "17:00"
 
-        inverted = client.post("/api/clinical/specs-days", json={
-            "camp_id": str(camp_id), "day_date": day, "venue": "  Optical Desk  ",
-            "start_time": "14:00", "end_time": "14:00",
-        }, headers=headers)
-        assert inverted.status_code == 400
+            inverted = await _post_specs_day(client, headers, camp_id, venue="  Optical Desk  ",
+                                             start_time="14:00", end_time="14:00")
+            assert inverted.status_code == 400
 
-        created = client.post("/api/clinical/specs-days", json={
-            "camp_id": str(camp_id), "day_date": day, "venue": "  Optical Desk  ",
-            "seat_limit": 12,
-        }, headers=headers)
-        assert created.status_code == 200
-        row = created.json()["specs_day"]
-        assert row["venue"] == "Optical Desk"
-        assert row["start_time"] == "10:00"
-        assert row["end_time"] == "17:00"
-        assert row["day_date"] == day
-        assert "seat_limit" not in row
-        assert "seats_taken" not in row
-        assert "seats_free" not in row
-        stored = await mock_db.specs_collection_days.find_one({"_id": ObjectId(row["id"])})
-        assert "seat_limit" not in stored
-        assert "seats_taken" not in stored
+            created = await _post_specs_day(client, headers, camp_id, venue="  Optical Desk  ", seat_limit=12)
+            assert created.status_code == 200
+            row = created.json()["specs_day"]
+            assert row["venue"] == "Optical Desk"
+            assert row["start_time"] == "10:00"
+            assert row["end_time"] == "17:00"
+            assert row["day_date"] == FUTURE
+            assert "seat_limit" not in row
+            assert "seats_taken" not in row
+            assert "seats_free" not in row
+            stored = await database.specs_collection_days.find_one({"_id": ObjectId(row["id"])})
+            assert "seat_limit" not in stored
+            assert "seats_taken" not in stored
 
-        rejected = client.post("/api/clinical/specs-days", json={
-            "camp_id": str(camp_id), "day_date": day, "venue": "New Optical",
-            "start_time": "11:00", "end_time": "13:00",
-        }, headers=headers)
-        assert rejected.status_code == 400
-        updated = client.post("/api/clinical/specs-days", json={
-            "camp_id": str(camp_id), "day_date": day, "venue": "New Optical",
-        }, headers=headers)
-        assert updated.status_code == 200
-        assert updated.json()["specs_day"]["id"] == row["id"]
-        assert updated.json()["specs_day"]["venue"] == "New Optical"
-        assert updated.json()["specs_day"]["start_time"] == "10:00"
-        listed = client.get("/api/clinical/specs-days", headers=headers)
-        assert listed.status_code == 200
-        days = listed.json()["specs_days"]
-        assert len(days) == 1
-        assert "seat_limit" not in days[0]
-        assert days[0]["end_time"] == "17:00"
-    asyncio.run(run())
+            rejected = await _post_specs_day(client, headers, camp_id, venue="New Optical",
+                                             start_time="11:00", end_time="13:00")
+            assert rejected.status_code == 400
+            updated = await _post_specs_day(client, headers, camp_id, venue="New Optical")
+            assert updated.status_code == 200
+            assert updated.json()["specs_day"]["id"] == row["id"]
+            assert updated.json()["specs_day"]["venue"] == "New Optical"
+            assert updated.json()["specs_day"]["start_time"] == "10:00"
+            listed = await client.get("/api/clinical/specs-days", headers=headers)
+            assert listed.status_code == 200
+            days = listed.json()["specs_days"]
+            assert len(days) == 1
+            assert "seat_limit" not in days[0]
+            assert days[0]["end_time"] == "17:00"
+
+    run_camp(monkeypatch, body)
 
 
 def test_specs_rejects_inactive_past_malformed_and_same_day_ended_window(monkeypatch):
-    async def run():
-        mock_db = setup_mock_db(monkeypatch)
-        admin_id = await _admin(mock_db)
-        camp_id = await _active_camp(mock_db)
-        other = ObjectId()
-        await mock_db.camps.insert_one({
-            "_id": other, "name": "Other", "venue": "X", "is_active": False,
-        })
-        client = _client(monkeypatch, mock_db)
-        headers = _auth(admin_id, "admin", "admin")
-        future = _future_date()
+    admin_id = ObjectId()
+    headers = _headers(monkeypatch, admin_id, "admin")
 
-        inactive = client.post("/api/clinical/specs-days", json={
-            "camp_id": str(other), "day_date": future, "venue": "Hall",
-            "start_time": "09:00", "end_time": "11:00",
-        }, headers=headers)
-        assert inactive.status_code == 400
+    async def body(database):
+        camp_id = await _camp_with_admin(database, admin_id)
+        other = (await database.camps.insert_one({"name": "Other", "venue": "X", "is_active": False})).inserted_id
+        window = {"venue": "Hall", "start_time": "09:00", "end_time": "11:00"}
+        async with _client() as client:
+            assert (await _post_specs_day(client, headers, other, **window)).status_code == 400
+            assert (await _post_specs_day(client, headers, "not-an-id", **window)).status_code == 400
+            assert (await _post_specs_day(client, headers, camp_id, **{**window, "day_date": day(-1)})).status_code == 400
+            ended = await _post_specs_day(client, headers, camp_id, day_date=TODAY, venue="Hall",
+                                          start_time="08:00", end_time="08:59")
+            assert ended.status_code == 400
 
-        malformed = client.post("/api/clinical/specs-days", json={
-            "camp_id": "not-an-id", "day_date": future, "venue": "Hall",
-            "start_time": "09:00", "end_time": "11:00",
-        }, headers=headers)
-        assert malformed.status_code == 400
-
-        yesterday = (datetime.now(IST) - timedelta(days=1)).strftime("%Y-%m-%d")
-        past = client.post("/api/clinical/specs-days", json={
-            "camp_id": str(camp_id), "day_date": yesterday, "venue": "Hall",
-            "start_time": "09:00", "end_time": "11:00",
-        }, headers=headers)
-        assert past.status_code == 400
-
-        today = datetime.now(IST).strftime("%Y-%m-%d")
-        now = datetime.now(IST).replace(second=0, microsecond=0)
-        ended = (now - timedelta(minutes=1)).strftime("%H:%M")
-        earlier = (now - timedelta(hours=1)).strftime("%H:%M")
-        if earlier < ended:
-            same_day = client.post("/api/clinical/specs-days", json={
-                "camp_id": str(camp_id), "day_date": today, "venue": "Hall",
-                "start_time": earlier, "end_time": ended,
-            }, headers=headers)
-            assert same_day.status_code == 400
-    asyncio.run(run())
+    run_camp(monkeypatch, body)
 
 
 def test_many_specs_assignments_do_not_refuse_or_mutate_seats(monkeypatch):
-    async def run():
-        mock_db = setup_mock_db(monkeypatch)
-        _patch_db(monkeypatch, mock_db)
-        camp_id, _pid, trans_a = await _seen_patient_with_transcription(mock_db, RX)
-        trans_b = ObjectId()
-        p_b = ObjectId()
-        await mock_db.patients.insert_one({
-            "_id": p_b, "camp_id": camp_id, "camp_day_id": ObjectId(), "reg_no": 502,
-            "queue_status": "seen", "arrived_at": helpers.now_utc(),
-            "printed_at": helpers.now_utc(), "seen_at": helpers.now_utc(),
-        })
-        await mock_db.transcriptions.insert_one({
-            "_id": trans_b, "patient_id": p_b, "camp_id": camp_id,
-            "locked": False, "specs_measurements": RX,
-        })
-        day_id = ObjectId()
-        await mock_db.specs_collection_days.insert_one({
-            "_id": day_id, "camp_id": camp_id, "day_date": _future_date(),
-            "venue": "Optical Desk", "start_time": "10:00", "end_time": "17:00",
-        })
-        actor = {"_id": ObjectId(), "role": "clinical_desk_operator"}
-        rev_b = ObjectId()
-        await mock_db.patients.update_one({"_id": p_b}, {"$set": {
-            "committed_revision_id": rev_b, "clinical_generation": 1, "issue_auth_op": None,
-        }})
-        await mock_db.prescription_revisions.insert_one({
-            "_id": rev_b, "patient_id": p_b,
-            "prescribed_lines": ["specs_made"], "none_prescribed": False,
-            "specs_measurements": RX,
-        })
-        first = await record_fulfilment(_fulfil(
-            trans_a, mock_db.last_rev_id, item_type="specs_made", status="deferred",
-            specs_collection_day_id=str(day_id), operation_id="op-a",
-        ), actor=actor, background_tasks=None)
-        second = await record_fulfilment(_fulfil(
-            trans_b, rev_b, item_type="specs_made", status="deferred",
-            specs_collection_day_id=str(day_id), operation_id="op-b",
-        ), actor=actor, background_tasks=None)
-        assert first["slip"]["collection_date"]
-        assert second["slip"]["collection_date"]
-        day = await mock_db.specs_collection_days.find_one({"_id": day_id})
-        assert day.get("seats_taken") in (None, 0)
-        assert "seats_taken" not in day or day["seats_taken"] == 0
-    asyncio.run(run())
+    async def body(database):
+        camp_id = ObjectId()
+        first, second = await seen_patient(database, camp_id), await seen_patient(database, camp_id)
+        day_id = (await database.specs_collection_days.insert_one({
+            "camp_id": camp_id, "day_date": FUTURE, "venue": "Optical Desk", "start_time": "10:00", "end_time": "17:00",
+        })).inserted_id
+        assert (await _defer(first, day_id, "op-a"))["slip"]["collection_date"]
+        assert (await _defer(second, day_id, "op-b"))["slip"]["collection_date"]
+        assert "seats_taken" not in await database.specs_collection_days.find_one({"_id": day_id})
+
+    run_camp(monkeypatch, body)
 
 
 def test_clinical_specs_picker_rejects_ended_cross_camp_legacy_and_malformed(monkeypatch):
-    async def run():
-        mock_db = setup_mock_db(monkeypatch)
-        _patch_db(monkeypatch, mock_db)
-        camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db, RX)
-        other_camp = ObjectId()
-        ended = ObjectId()
-        legacy = ObjectId()
-        valid = ObjectId()
-        future = _future_date()
-        yesterday = (datetime.now(IST) - timedelta(days=1)).strftime("%Y-%m-%d")
-        await mock_db.specs_collection_days.insert_one({
-            "_id": ended, "camp_id": camp_id, "day_date": yesterday,
-            "venue": "Old Hall", "start_time": "09:00", "end_time": "10:00",
-        })
-        await mock_db.specs_collection_days.insert_one({
-            "_id": legacy, "camp_id": camp_id, "day_date": future,
-            "venue": "Needs Window",
-        })
-        afternoon = ObjectId()
-        await mock_db.specs_collection_days.insert_one({
-            "_id": afternoon, "camp_id": camp_id, "day_date": future,
-            "venue": "Saved Before The Hours Rule", "start_time": "14:00", "end_time": "17:00",
-        })
-        assert routes_clinical.ser_specs_day(
-            await mock_db.specs_collection_days.find_one({"_id": afternoon}),
-        )["window_required"] is True
-        old_hours = ObjectId()
-        await mock_db.specs_collection_days.insert_one({
-            "_id": old_hours, "camp_id": camp_id, "day_date": future,
-            "venue": "Old Hours", "start_time": "10:00", "end_time": "15:00",
-        })
-        assert routes_clinical.ser_specs_day(
-            await mock_db.specs_collection_days.find_one({"_id": old_hours}),
-        )["window_required"] is True
-        await mock_db.specs_collection_days.insert_one({
-            "_id": ObjectId(), "camp_id": other_camp, "day_date": future,
-            "venue": "Other Camp", "start_time": "09:00", "end_time": "13:00",
-        })
-        await mock_db.specs_collection_days.insert_one({
-            "_id": valid, "camp_id": camp_id, "day_date": future,
-            "venue": "Optical Desk", "start_time": "10:00", "end_time": "17:00",
-        })
-        actor = {"_id": ObjectId(), "role": "clinical_desk_operator"}
+    async def body(database):
+        seen = await seen_patient(database)
+        camp_id = seen["camp_id"]
+        window = {"start_time": "10:00", "end_time": "17:00"}
+        days = await database.specs_collection_days.insert_many([
+            {"camp_id": camp_id, "day_date": day(-1), "venue": "Old Hall", "start_time": "09:00", "end_time": "10:00"},
+            {"camp_id": camp_id, "day_date": day(7), "venue": "Needs Window"},
+            {"camp_id": camp_id, "day_date": day(8), "venue": "Saved Before The Hours Rule",
+             "start_time": "14:00", "end_time": "17:00"},
+            {"camp_id": camp_id, "day_date": day(9), "venue": "Old Hours", "start_time": "10:00", "end_time": "15:00"},
+            {"camp_id": ObjectId(), "day_date": day(7), "venue": "Other Camp", "start_time": "09:00", "end_time": "13:00"},
+            {"camp_id": camp_id, "day_date": day(10), "venue": "Optical Desk", **window},
+        ])
+        ended, legacy, afternoon, old_hours, other_camp, valid = days.inserted_ids
+        for hours_rule_breaker in (afternoon, old_hours):
+            stored = await database.specs_collection_days.find_one({"_id": hours_rule_breaker})
+            assert routes_clinical.ser_specs_day(stored)["window_required"] is True
 
-        for bad_id in (str(ended), str(legacy), str(afternoon), str(old_hours), "not-an-id"):
-            with __import__("pytest").raises(__import__("fastapi").HTTPException) as exc:
-                await record_fulfilment(_fulfil(
-                    trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",
-                    specs_collection_day_id=bad_id, operation_id=str(bad_id),
-                ), actor=actor, background_tasks=None)
+        for bad_id in (str(ended), str(legacy), str(afternoon), str(old_hours), "not-an-id", str(other_camp)):
+            with pytest.raises(HTTPException) as exc:
+                await _defer(seen, bad_id, bad_id)
             assert exc.value.status_code == 400
 
-        other_day = await mock_db.specs_collection_days.find_one({"venue": "Other Camp"})
-        with __import__("pytest").raises(__import__("fastapi").HTTPException) as exc:
-            await record_fulfilment(_fulfil(
-                trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",
-                specs_collection_day_id=str(other_day["_id"]), operation_id="op-other",
-            ), actor=actor, background_tasks=None)
-        assert exc.value.status_code == 400
-
-        ok = await record_fulfilment(_fulfil(
-            trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",
-            specs_collection_day_id=str(valid), operation_id="op-ok",
-        ), actor=actor, background_tasks=None)
+        ok = await _defer(seen, valid, "op-ok")
         assert ok["slip"]["collection_start_time"] == "10:00"
         assert ok["slip"]["collection_end_time"] == "17:00"
         assert ok["slip"]["collection_venue"] == "Optical Desk"
-    asyncio.run(run())
+
+    run_camp(monkeypatch, body)
 
 
 def test_specs_token_snapshot_survives_later_schedule_edit(monkeypatch):
-    async def run():
-        mock_db = setup_mock_db(monkeypatch)
-        admin_id = await _admin(mock_db)
-        camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db, RX)
-        await mock_db.camps.insert_one({
-            "_id": camp_id, "name": "Sikar Camp", "venue": "Sikar Bhawan", "is_active": True,
-        })
-        client = _client(monkeypatch, mock_db)
-        headers = _auth(admin_id, "admin", "admin")
-        day = _future_date()
-        created = client.post("/api/clinical/specs-days", json={
-            "camp_id": str(camp_id), "day_date": day, "venue": "Optical Desk",
-        }, headers=headers)
-        day_id = created.json()["specs_day"]["id"]
-        out = await record_fulfilment(_fulfil(
-            trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",
-            specs_collection_day_id=day_id, operation_id="op-snap",
-        ), actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
-        assert out["slip"]["collection_start_time"] == "10:00"
-        assert out["slip"]["collection_end_time"] == "17:00"
-        client.post("/api/clinical/specs-days", json={
-            "camp_id": str(camp_id), "day_date": day, "venue": "Moved Hall",
-        }, headers=headers)
-        slip = await mock_db.deferred_slips.find_one({"_id": ObjectId(out["slip"]["id"])})
-        assert slip["collection_venue"] == "Optical Desk"
-        assert slip["collection_start_time"] == "10:00"
-        assert slip["collection_end_time"] == "17:00"
-        reprint = client.get(f"/api/clinical/slip/{out['slip']['id']}", headers=_auth(
-            ObjectId(), "Op", "clinical_desk_operator",
-        ))
-        assert reprint.status_code in (200, 401, 403)
-        if reprint.status_code == 200:
+    admin_id, operator_id = ObjectId(), ObjectId()
+    headers = _headers(monkeypatch, admin_id, "admin")
+    operator = _headers(monkeypatch, operator_id, "clinical_desk_operator")
+
+    async def body(database):
+        camp_id = await _camp_with_admin(database, admin_id)
+        await database.users.insert_one(user_doc("Op", role="clinical_desk_operator", _id=operator_id))
+        seen = await seen_patient(database, camp_id)
+        async with _client() as client:
+            created = await _post_specs_day(client, headers, camp_id, venue="Optical Desk")
+            out = await _defer(seen, created.json()["specs_day"]["id"], "op-snap")
+            assert out["slip"]["collection_start_time"] == "10:00"
+            assert out["slip"]["collection_end_time"] == "17:00"
+            moved = await _post_specs_day(client, headers, camp_id, venue="Moved Hall")
+            assert moved.status_code == 200
+            slip = await database.deferred_slips.find_one({"_id": ObjectId(out["slip"]["id"])})
+            assert slip["collection_venue"] == "Optical Desk"
+            assert slip["collection_start_time"] == "10:00"
+            assert slip["collection_end_time"] == "17:00"
+            reprint = await client.get(f"/api/clinical/slip/{out['slip']['id']}", headers=operator)
+            assert reprint.status_code == 200
             assert reprint.json()["slip"]["collection_start_time"] == "10:00"
             assert reprint.json()["slip"]["collection_venue"] == "Optical Desk"
-    asyncio.run(run())
+
+    run_camp(monkeypatch, body)
 
 
 def test_specs_window_spans_days_from_a_morning_start_to_an_evening_end(monkeypatch):
-    async def run():
-        mock_db = setup_mock_db(monkeypatch)
-        admin_id = await _admin(mock_db)
-        camp_id = await _active_camp(mock_db)
-        client = _client(monkeypatch, mock_db)
-        headers = _auth(admin_id, "admin", "admin")
-        start = _future_date()
-        until = (datetime.now(IST) + timedelta(days=14)).strftime("%Y-%m-%d")
+    admin_id = ObjectId()
+    headers = _headers(monkeypatch, admin_id, "admin")
+    until = day(14)
 
-        def post(**overrides):
-            return client.post("/api/clinical/specs-days", json={
-                "camp_id": str(camp_id), "day_date": start, "end_date": until,
-                "venue": "SNP कार्यालय, देवघर", "start_time": "10:00", "end_time": "17:00", **overrides,
-            }, headers=headers)
+    async def body(database):
+        camp_id = await _camp_with_admin(database, admin_id)
+        async with _client() as client:
+            def post(**overrides):
+                return _post_specs_day(client, headers, camp_id, **{
+                    "end_date": until, "venue": "SNP कार्यालय, देवघर", "start_time": "10:00", "end_time": "17:00",
+                    **overrides,
+                })
 
-        before_start = (datetime.now(IST) + timedelta(days=6)).strftime("%Y-%m-%d")
-        assert post(end_date=before_start).status_code == 400
-        assert post(end_date="14-09-2026").status_code == 400
-        assert post(start_time="13:00").status_code == 400
-        assert post(end_time="11:30").status_code == 400
-        created = post()
-        assert created.status_code == 200, created.text
-        assert created.json()["specs_day"]["end_date"] == until
-        single = post(day_date=until, end_date=None)
-        assert single.status_code == 200, single.text
-        assert single.json()["specs_day"]["end_date"] == until
-    asyncio.run(run())
+            assert (await post(end_date=day(6))).status_code == 400
+            assert (await post(end_date="14-09-2026")).status_code == 400
+            assert (await post(start_time="13:00")).status_code == 400
+            assert (await post(end_time="11:30")).status_code == 400
+            created = await post()
+            assert created.status_code == 200, created.text
+            assert created.json()["specs_day"]["end_date"] == until
+            single = await post(day_date=until, end_date=None)
+            assert single.status_code == 200, single.text
+            assert single.json()["specs_day"]["end_date"] == until
+
+    run_camp(monkeypatch, body)
 
 
 def test_started_window_stays_selectable_and_token_sms_states_the_range(monkeypatch):
-    async def run():
-        mock_db = setup_mock_db(monkeypatch)
-        _patch_db(monkeypatch, mock_db)
-        sent = _recorder(monkeypatch)
-        camp_id, _pid, trans_id = await _seen_patient_with_transcription(mock_db, RX)
-        await mock_db.camps.insert_one({
-            "_id": camp_id, "name": "Sikar Camp", "venue": "Sikar Bhawan", "is_active": True, "camp_number": 162,
-        })
-        yesterday = (datetime.now(IST) - timedelta(days=1)).strftime("%Y-%m-%d")
-        until = _future_date()
-        day_id = ObjectId()
-        await mock_db.specs_collection_days.insert_one({
-            "_id": day_id, "camp_id": camp_id, "day_date": yesterday, "end_date": until,
+    sent = recorder(monkeypatch)
+
+    async def body(database):
+        camp_id, _ = await seed_camp(database, days=())
+        seen = await seen_patient(database, camp_id, reg_no=501)
+        yesterday, until = day(-1), FUTURE
+        day_id = (await database.specs_collection_days.insert_one({
+            "camp_id": camp_id, "day_date": yesterday, "end_date": until,
             "venue": "SNP कार्यालय, देवघर", "start_time": "10:00", "end_time": "17:00",
-        })
-        out = await record_fulfilment(_fulfil(
-            trans_id, mock_db.last_rev_id, item_type="specs_made", status="deferred",
-            specs_collection_day_id=str(day_id), operation_id="op-range",
-        ), actor={"_id": ObjectId(), "role": "clinical_desk_operator"}, background_tasks=None)
+        })).inserted_id
+        out = await _defer(seen, day_id, "op-range")
         assert out["slip"]["collection_date"] == yesterday
         assert out["slip"]["collection_end_date"] == until
         assert sent == [{
@@ -402,4 +230,5 @@ def test_started_window_stays_selectable_and_token_sms_states_the_range(monkeypa
             "date": helpers.display_date(yesterday), "end_date": helpers.display_date(until),
             "venue": "SNP कार्यालय, देवघर",
         }]
-    asyncio.run(run())
+
+    run_camp(monkeypatch, body)

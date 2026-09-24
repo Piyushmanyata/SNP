@@ -3,40 +3,26 @@ import asyncio
 import pytest
 from bson import ObjectId
 from fastapi import HTTPException
-from pymongo.errors import DuplicateKeyError
 
-from test_camp_operations_matrix import (
-    CLINICAL, _complete_body, _mock, _printed_patient,
-)
 import routes_clinical
 from models import TranscriptionBody
+from seed import run_camp
+from test_camp_operations_matrix import CLINICAL, _complete_body, _printed_patient, intercept
 
 
-def _unique_patient_index(db, monkeypatch):
-    original = db.transcriptions.insert_one
-
-    async def guarded(doc):
-        if await db.transcriptions.find_one({"patient_id": doc["patient_id"]}):
-            raise DuplicateKeyError("transcriptions.patient_id")
-        return await original(doc)
-
-    monkeypatch.setattr(db.transcriptions, "insert_one", guarded)
-
-
-def _hold_first_insert(db, monkeypatch):
-    original = db.transcriptions.insert_one
+def _hold_first_insert(monkeypatch):
     entered = asyncio.Event()
     proceed = asyncio.Event()
     seen = []
 
-    async def held(doc):
+    async def held(insert_one, doc, *args, **kwargs):
         if not seen:
             seen.append(doc)
             entered.set()
             await proceed.wait()
-        return await original(doc)
+        return await insert_one(doc, *args, **kwargs)
 
-    monkeypatch.setattr(db.transcriptions, "insert_one", held)
+    intercept(monkeypatch, "transcriptions", "insert_one", held)
     return entered, proceed
 
 
@@ -48,8 +34,7 @@ async def _save_draft(patient, version, bp):
 
 
 def test_second_operator_at_the_same_version_gets_a_draft_conflict(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
         created = await _save_draft(patient, 0, "110/70")
         loaded = (await _save_draft(patient, created["transcription"]["draft_version"], "120/80"))
@@ -65,12 +50,11 @@ def test_second_operator_at_the_same_version_gets_a_draft_conflict(monkeypatch):
         assert current["bp"] == "130/90"
         assert current["draft_version"] == 3
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_legacy_draft_without_a_version_accepts_one_save_then_requires_the_stamp(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
         await db.transcriptions.insert_one({
             "_id": ObjectId(), "patient_id": patient["_id"], "person_id": patient.get("person_id"),
@@ -85,15 +69,13 @@ def test_legacy_draft_without_a_version_accepts_one_save_then_requires_the_stamp
         current = await db.transcriptions.find_one({"patient_id": patient["_id"]})
         assert current["bp"] == "110/70"
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_simultaneous_new_draft_creation_resolves_to_one_draft(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
-        _unique_patient_index(db, monkeypatch)
-        entered, proceed = _hold_first_insert(db, monkeypatch)
+        entered, proceed = _hold_first_insert(monkeypatch)
         first = asyncio.create_task(_save_draft(patient, 0, "110/70"))
         await entered.wait()
         second = asyncio.create_task(_save_draft(patient, 0, "120/80"))
@@ -108,15 +90,13 @@ def test_simultaneous_new_draft_creation_resolves_to_one_draft(monkeypatch):
         current = await db.transcriptions.find_one({"patient_id": patient["_id"]})
         assert current["bp"] == "120/80"
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_late_initial_save_cannot_overwrite_a_completed_prescription(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
-        _unique_patient_index(db, monkeypatch)
-        entered, proceed = _hold_first_insert(db, monkeypatch)
+        entered, proceed = _hold_first_insert(monkeypatch)
         late = asyncio.create_task(_save_draft(patient, 0, "110/70"))
         await entered.wait()
         await _save_draft(patient, 0, "120/80")
@@ -134,12 +114,11 @@ def test_late_initial_save_cannot_overwrite_a_completed_prescription(monkeypatch
         assert current["bp"] == "120/80"
         assert current["locked"] is True
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_completion_cannot_apply_a_stale_draft_over_a_newer_save(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
         await _save_draft(patient, 0, "110/70")
         await _save_draft(patient, 1, "120/80")
@@ -162,12 +141,11 @@ def test_completion_cannot_apply_a_stale_draft_over_a_newer_save(monkeypatch):
         assert done["registration"]["clinical_generation"] == 1
         assert done["transcription"]["locked"] is True
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_a_lone_operator_can_edit_then_complete_without_sending_a_version(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _camp, _day, patient = await _printed_patient(db)
         pid = str(patient["_id"])
 
@@ -186,12 +164,11 @@ def test_a_lone_operator_can_edit_then_complete_without_sending_a_version(monkey
         )
         assert done["transcription"]["locked"] is True
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_an_unversioned_save_still_advances_the_version_for_versioned_clients(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _camp, _day, patient = await _printed_patient(db)
         pid = str(patient["_id"])
 
@@ -212,12 +189,11 @@ def test_an_unversioned_save_still_advances_the_version_for_versioned_clients(mo
         assert exc.value.status_code == 409
         assert exc.value.detail["code"] == "draft_version_conflict"
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_a_draft_predating_the_version_field_can_still_be_saved(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _camp, _day, patient = await _printed_patient(db)
         pid = str(patient["_id"])
 
@@ -241,12 +217,11 @@ def test_a_draft_predating_the_version_field_can_still_be_saved(monkeypatch):
         )
         assert saved["transcription"]["draft_version"] == 1
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_two_operators_who_opened_a_patient_with_no_draft_cannot_overwrite_each_other(monkeypatch):
-    async def run():
-        db = _mock(monkeypatch)
+    async def run(db):
         _, _, patient = await _printed_patient(db)
         first = await _save_draft(patient, 0, "110/70")
         assert first["transcription"]["draft_version"] == 1
@@ -259,4 +234,4 @@ def test_two_operators_who_opened_a_patient_with_no_draft_cannot_overwrite_each_
         current = await db.transcriptions.find_one({"patient_id": patient["_id"]})
         assert current["bp"] == "110/70"
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)

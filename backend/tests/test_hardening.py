@@ -5,41 +5,26 @@ Each test names the failure it prevents, not the code it covers.
 import asyncio
 import gzip
 import io
-import os
 import sys
 import zlib
-from pathlib import Path
-
-backend_dir = Path(__file__).resolve().parents[1]
-if str(backend_dir) not in sys.path:
-    sys.path.insert(0, str(backend_dir))
-
-os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
-os.environ.setdefault("DB_NAME", "snp_test")
-os.environ.setdefault("AADHAAR_HASH_PEPPER", "test-pepper")
-os.environ.setdefault("JWT_SECRET", "test-jwt-secret")
-os.environ.setdefault("ADMIN_EMAIL", "admin@example.org")
-os.environ.setdefault("ADMIN_PASSWORD", "TestAdmin@2026x")
 
 import pytest
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import HTTPException
-from pymongo.errors import DuplicateKeyError
 
 import helpers
+import routes_camps
 import routes_desk
 import routes_registration
 import server
 import sms
 from aadhaar import MAX_DECOMPRESSED_BYTES, MAX_SECURE_QR_DIGITS, _decompress, decode_aadhaar
+from conftest import CommandLog
 from models import FulfilmentBody
 from routes_clinical import _deferred_day_id
 from routes_staff import enable_staff
-from test_adversarial_challenger import setup_mock_db
-
-ACTOR = {"_id": ObjectId(), "role": "volunteer"}
-CARD = '<PrintLetterBarcodeData name="Sunita Devi" gender="F" dob="1975-06-14" uid="123456781234" street="12 Station Road Sikar"/>'
+from seed import ACTOR, ADMIN, CARD, NOW, TODAY, day, patient_doc, run_camp, seed_camp
 
 
 def _digits_for(raw: bytes) -> str:
@@ -147,41 +132,23 @@ class TestDeferralSeatFields:
 
 class TestConflictsAreNotCrashes:
     def test_confirming_a_card_already_held_in_this_camp_is_a_409(self, monkeypatch):
-        async def run():
-            mock_db = setup_mock_db(monkeypatch)
-            monkeypatch.setattr(routes_desk, "get_db", lambda: mock_db)
-            camp_id = ObjectId()
-            day_id = ObjectId()
-            await mock_db.camps.insert_one({"_id": camp_id, "is_active": True, "venue": "V"})
-            await mock_db.camp_days.insert_one({
-                "_id": day_id, "camp_id": camp_id, "day_date": helpers.today_ist_str(),
-                "seat_limit": 50, "booked": 0,
-            })
+        async def body(database):
+            camp_id, _ = await seed_camp(database)
+            person, _ = await routes_registration._resolve_person(routes_desk._decode_card(CARD))
             manual_id = ObjectId()
-            await mock_db.patients.insert_one({
-                "_id": manual_id, "camp_id": camp_id, "camp_day_id": ObjectId(),
-                "reg_no": 1, "full_name": "Sunita Devi", "full_name_normalized": "sunita devi",
-                "aadhaar_last4": "1234", "manual_entry": True, "person_id": None,
-                "queue_status": "registered", "patient_qr": "qr-1",
-            })
-            holder_id = ObjectId()
-            await mock_db.patients.insert_one({
-                "_id": holder_id, "camp_id": camp_id, "camp_day_id": ObjectId(),
-                "reg_no": 2, "full_name": "Sunita Devi", "aadhaar_scanned": True,
-                "queue_status": "arrived", "patient_qr": "qr-2",
-            })
-
-            async def clashing_update(query, update, **kwargs):
-                raise DuplicateKeyError("person_id_1_camp_id_1 dup key")
-
-            async def person_holder(query):
-                if "person_id" in query:
-                    return await mock_db.patients.find_one({"_id": holder_id})
-                return await original_find_one(query)
-
-            original_find_one = mock_db.patients.find_one
-            monkeypatch.setattr(mock_db.patients, "find_one_and_update", clashing_update)
-            monkeypatch.setattr(mock_db.patients, "find_one", person_holder)
+            await database.patients.insert_many([
+                patient_doc(
+                    _id=manual_id, camp_id=camp_id, camp_day_id=ObjectId(),
+                    reg_no=1, full_name="Sunita Devi", full_name_normalized="sunita devi",
+                    aadhaar_last4="1234", manual_entry=True, person_id=None,
+                    queue_status="registered", patient_qr="qr-1",
+                ),
+                patient_doc(
+                    camp_id=camp_id, camp_day_id=ObjectId(),
+                    reg_no=2, full_name="Sunita Devi", aadhaar_scanned=True, person_id=person["_id"],
+                    queue_status="arrived", patient_qr="qr-2",
+                ),
+            ])
 
             with pytest.raises(HTTPException) as exc:
                 await routes_desk.scan_confirm(
@@ -192,66 +159,51 @@ class TestConflictsAreNotCrashes:
             assert exc.value.detail["code"] == "DUPLICATE_IN_CAMP"
             assert exc.value.detail["registration"]["reg_no"] == 2
 
-        asyncio.run(run())
+        run_camp(monkeypatch, body)
 
     def test_enabling_a_staff_member_that_does_not_exist_is_a_404(self, monkeypatch):
-        async def run():
-            mock_db = setup_mock_db(monkeypatch)
-            import routes_staff
-            monkeypatch.setattr(routes_staff, "get_db", lambda: mock_db)
-
-            class _NoMatch:
-                matched_count = 0
-
-            async def no_match(query, update):
-                return _NoMatch()
-
-            monkeypatch.setattr(mock_db.users, "update_one", no_match)
+        async def body(database):
             with pytest.raises(HTTPException) as exc:
-                await enable_staff(str(ObjectId()), actor={"_id": ObjectId(), "role": "admin"})
+                await enable_staff(str(ObjectId()), actor=ADMIN)
             assert exc.value.status_code == 404
 
-        asyncio.run(run())
+        run_camp(monkeypatch, body)
 
     def test_a_stale_print_does_not_stamp_a_row_that_now_needs_an_identity_recheck(self, monkeypatch):
-        async def run():
-            mock_db = setup_mock_db(monkeypatch)
-            camp_id, day_id, pid = ObjectId(), ObjectId(), ObjectId()
-            await mock_db.camps.insert_one({"_id": camp_id, "name": "C", "venue": "V", "is_active": True})
-            await mock_db.camp_days.insert_one({
-                "_id": day_id, "camp_id": camp_id, "day_date": helpers.today_ist_str(), "seat_limit": 50,
-            })
-            row = {
-                "_id": pid, "camp_id": camp_id, "camp_day_id": day_id, "reg_no": 1, "full_name": "P",
-                "patient_qr": "qr-1", "queue_status": "arrived", "arrived_at": helpers.now_utc(),
-                "printed_at": None,
-            }
-            await mock_db.patients.insert_one({**row, "identity_recheck_required": True})
+        async def body(database):
+            camp_id, (day_id,) = await seed_camp(database, name="C", venue="V")
+            pid = ObjectId()
+            row = patient_doc(
+                _id=pid, camp_id=camp_id, camp_day_id=day_id, reg_no=1, full_name="P",
+                patient_qr="qr-1", queue_status="arrived", arrived_at=NOW, printed_at=None,
+            )
+            await database.patients.insert_one({**row, "identity_recheck_required": True})
 
             with pytest.raises(HTTPException) as exc:
-                await routes_desk._prescription_payload(mock_db, row, ACTOR, stamp=True)
+                await routes_desk._prescription_payload(database, row, ACTOR, stamp=True)
             assert exc.value.status_code == 409
             assert exc.value.detail["code"] == "PRINT_CONFLICT"
-            assert (await mock_db.patients.find_one({"_id": pid}))["printed_at"] is None
+            assert (await database.patients.find_one({"_id": pid}))["printed_at"] is None
 
-            await mock_db.patients.update_one({"_id": pid}, {"$set": {"identity_recheck_required": False}})
+            await database.patients.update_one({"_id": pid}, {"$set": {"identity_recheck_required": False}})
             printed = await routes_desk.print_prescription(str(pid), actor=ACTOR)
             assert printed["registration"]["printed_at"]
             reprinted = await routes_desk.print_prescription(str(pid), actor=ACTOR)
             assert reprinted["registration"]["printed_at"] == printed["registration"]["printed_at"]
 
-        asyncio.run(run())
+        run_camp(monkeypatch, body)
 
     def test_the_desk_does_not_reach_a_registration_from_another_camp(self, monkeypatch):
-        async def run():
-            mock_db = setup_mock_db(monkeypatch)
-            active_id, old_id, pid = ObjectId(), ObjectId(), ObjectId()
-            await mock_db.camps.insert_one({"_id": active_id, "name": "A", "venue": "V", "is_active": True})
-            await mock_db.camps.insert_one({"_id": old_id, "name": "B", "venue": "V", "is_active": False})
-            await mock_db.patients.insert_one({
-                "_id": pid, "camp_id": old_id, "camp_day_id": ObjectId(), "reg_no": 7,
-                "patient_qr": "QR-OLD", "queue_status": "registered",
-            })
+        async def body(database):
+            old_id, pid = ObjectId(), ObjectId()
+            await database.camps.insert_many([
+                {"name": "A", "venue": "V", "is_active": True},
+                {"_id": old_id, "name": "B", "venue": "V", "is_active": False},
+            ])
+            await database.patients.insert_one(patient_doc(
+                _id=pid, camp_id=old_id, camp_day_id=ObjectId(), reg_no=7,
+                patient_qr="QR-OLD", queue_status="registered",
+            ))
 
             assert await routes_desk._resolve("7") is None
             assert await routes_desk._resolve("qr-old") is None
@@ -261,7 +213,7 @@ class TestConflictsAreNotCrashes:
                 assert exc.value.status_code == 409
                 assert exc.value.detail["code"] == "WRONG_CAMP"
 
-        asyncio.run(run())
+        run_camp(monkeypatch, body)
 
 
 # --------------------------------------------------------------------------
@@ -270,80 +222,47 @@ class TestConflictsAreNotCrashes:
 
 class TestPublicOccupancy:
     def test_the_board_counts_every_day_without_a_query_per_day(self, monkeypatch):
-        async def run():
-            import routes_camps
+        log = CommandLog()
 
-            mock_db = setup_mock_db(monkeypatch)
-            monkeypatch.setattr(routes_camps, "get_db", lambda: mock_db)
-            monkeypatch.setattr(routes_camps, "today_ist_str", lambda: "2026-09-01")
-            camp_id = ObjectId()
-            await mock_db.camps.insert_one({
-                "_id": camp_id, "name": "Sikar Camp", "venue": "Sikar Bhawan", "is_active": True,
-            })
-            today_id, later_id, empty_id = ObjectId(), ObjectId(), ObjectId()
-            for day_id, date, limit in (
-                (today_id, "2026-09-01", 50),
-                (later_id, "2026-09-02", 30),
-                (empty_id, "2026-09-03", 20),
-            ):
-                await mock_db.camp_days.insert_one({
-                    "_id": day_id, "camp_id": camp_id, "day_date": date, "seat_limit": limit,
-                })
-            for day_id, n in ((today_id, 3), (later_id, 1)):
-                for _ in range(n):
-                    await mock_db.patients.insert_one({
-                        "camp_id": camp_id, "camp_day_id": day_id, "booked_camp_day_id": day_id,
-                    })
+        async def body(database):
+            camp_id, (today_id, later_id, empty_id) = await seed_camp(database, days=(TODAY, day(1), day(2)))
+            for day_id, limit in ((today_id, 50), (later_id, 30), (empty_id, 20)):
+                await database.camp_days.update_one({"_id": day_id}, {"$set": {"seat_limit": limit}})
+            await database.patients.insert_many([
+                patient_doc(camp_id=camp_id, camp_day_id=day_id, booked_camp_day_id=day_id)
+                for day_id, n in ((today_id, 3), (later_id, 1)) for _ in range(n)
+            ])
 
-            calls = {"n": 0}
-            original_count = mock_db.patients.count_documents
-
-            async def counted(query):
-                calls["n"] += 1
-                return await original_count(query)
-
-            monkeypatch.setattr(mock_db.patients, "count_documents", counted)
-
+            log.commands.clear()
             board = await routes_camps.active_camp_public()
-            assert calls["n"] == 0
+            assert [name for name, target in log.commands if target == "patients"] == ["aggregate"]
             assert board["total_seats"] == 100
             assert board["total_registered"] == 4
             days = {d["day_date"]: d for d in board["days"]}
-            assert days["2026-09-01"] == {
-                "id": str(today_id), "day_date": "2026-09-01", "is_today": True,
+            assert days[TODAY] == {
+                "id": str(today_id), "day_date": TODAY, "is_today": True,
                 "registered": 3, "seat_limit": 50, "remaining": 47,
             }
-            assert days["2026-09-02"]["remaining"] == 29
-            assert days["2026-09-03"]["registered"] == 0
-            assert days["2026-09-03"]["is_today"] is False
+            assert days[day(1)]["remaining"] == 29
+            assert days[day(2)]["registered"] == 0
+            assert days[day(2)]["is_today"] is False
 
-        asyncio.run(run())
+        run_camp(monkeypatch, body, listener=log)
 
     def test_an_over_full_day_reports_zero_remaining_not_a_negative(self, monkeypatch):
-        async def run():
-            import routes_camps
-
-            mock_db = setup_mock_db(monkeypatch)
-            monkeypatch.setattr(routes_camps, "get_db", lambda: mock_db)
-            monkeypatch.setattr(routes_camps, "today_ist_str", lambda: "2026-09-01")
-            camp_id, day_id = ObjectId(), ObjectId()
-            await mock_db.camps.insert_one({
-                "_id": camp_id, "name": "C", "venue": "V", "is_active": True,
-            })
-            await mock_db.camp_days.insert_one({
-                "_id": day_id, "camp_id": camp_id, "day_date": "2026-09-01", "seat_limit": 1,
-            })
-            for _ in range(3):
-                await mock_db.patients.insert_one({
-                    "camp_id": camp_id, "camp_day_id": day_id, "booked_camp_day_id": day_id,
-                })
+        async def body(database):
+            camp_id, (day_id,) = await seed_camp(database, name="C", venue="V")
+            await database.camp_days.update_one({"_id": day_id}, {"$set": {"seat_limit": 1}})
+            await database.patients.insert_many([
+                patient_doc(camp_id=camp_id, camp_day_id=day_id, booked_camp_day_id=day_id) for _ in range(3)
+            ])
 
             board = await routes_camps.active_camp_public()
             assert board["days"][0]["registered"] == 3
             assert board["days"][0]["remaining"] == 0
             assert board["total_registered"] == 3
 
-        asyncio.run(run())
+        run_camp(monkeypatch, body)
 
 
 # --------------------------------------------------------------------------
@@ -352,9 +271,7 @@ class TestPublicOccupancy:
 
 class TestRateLimitWindow:
     def test_an_ip_that_stopped_knocking_is_forgotten(self, monkeypatch):
-        async def run():
-            mock_db = setup_mock_db(monkeypatch)
-            monkeypatch.setattr(routes_registration, "get_db", lambda: mock_db)
+        async def body(database):
             routes_registration._rl.clear()
             routes_registration._rl["10.0.0.1"] = [
                 helpers.now_utc() - routes_registration.timedelta(minutes=30)
@@ -369,12 +286,12 @@ class TestRateLimitWindow:
                 await routes_registration.self_register(
                     routes_registration.RegisterBody(camp_day_id=str(ObjectId()), full_name="X"),
                     _Request(),
-                 background_tasks=None)
+                    background_tasks=None)
             assert "10.0.0.1" not in routes_registration._rl
             assert routes_registration._rl["10.0.0.2"]
             assert routes_registration._rl["10.0.0.3"]
 
-        asyncio.run(run())
+        run_camp(monkeypatch, body)
 
 
 # --------------------------------------------------------------------------
@@ -383,10 +300,10 @@ class TestRateLimitWindow:
 
 class TestSmsDoesNotBlockTheLoop:
     def test_a_slow_provider_leaves_the_loop_free_for_other_work(self, monkeypatch):
-        async def run():
-            mock_db = setup_mock_db(monkeypatch)
-            monkeypatch.setattr(sms.msg91, "configured", lambda: True)
-            monkeypatch.setenv("MSG91_TEMPLATE_REGISTRATION", "test-flow")
+        monkeypatch.setattr(sms.msg91, "configured", lambda: True)
+        monkeypatch.setenv("MSG91_TEMPLATE_REGISTRATION", "test-flow")
+
+        async def body(database):
             started = asyncio.Event()
             release = asyncio.Event()
             loop = asyncio.get_running_loop()
@@ -398,18 +315,15 @@ class TestSmsDoesNotBlockTheLoop:
 
             monkeypatch.setattr(sms.msg91, "send_dlt_sms", slow_send)
             camp_id = ObjectId()
-            await mock_db.camps.insert_one({"_id": camp_id, "name": "Sikar", "venue": "Sikar", "camp_number": 162})
+            await database.camps.insert_one({"_id": camp_id, "name": "Sikar", "venue": "Sikar", "camp_number": 162})
             patient = {"_id": ObjectId(), "camp_id": camp_id, "phone_normalized": "9876500001", "reg_no": 7}
-            task = asyncio.create_task(
-                sms.send_patient_sms(mock_db, patient, "registration", "2026-09-01", "Sikar")
-            )
+            task = asyncio.create_task(sms.send_patient_sms(database, patient, "registration", TODAY, "Sikar"))
             await asyncio.wait_for(started.wait(), timeout=5)
-            # The loop is still answering while the provider call is outstanding.
             await asyncio.sleep(0)
             release.set()
             assert await asyncio.wait_for(task, timeout=5) is True
 
-        asyncio.run(run())
+        run_camp(monkeypatch, body)
 
 
 def test_csv_formula_cells_are_prefixed():

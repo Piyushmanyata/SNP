@@ -1,72 +1,65 @@
-import asyncio
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-
 import pytest
 from bson import ObjectId
 from fastapi import HTTPException
+from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.errors import DuplicateKeyError
 
-import routes_registration
-import routes_desk
 import routes_clinical
+import routes_desk
+import routes_registration
 import sms
 from models import RegisterBody
-from test_adversarial_challenger import setup_mock_db
+from seed import CLINICAL, TOMORROW, patient_doc, run_camp, seed_camp
+
+
+def _fail_ledger_updates(monkeypatch, failing):
+    real = AsyncCollection.update_one
+
+    async def update_one(self, filter, update, *args, **kwargs):
+        if self.name == "reminder_ledger" and failing(update):
+            raise RuntimeError("ledger unavailable")
+        return await real(self, filter, update, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncCollection, "update_one", update_one)
 
 
 @pytest.mark.parametrize("entry", ["e6d9244e-8d6f-40c1-8753-5717cda5d38e", "SNP:E6D9244E-8D6F-40C1-8753-5717CDA5D38E"])
 def test_legacy_patient_qr_resolves_at_desk_and_clinical_lookup(monkeypatch, entry):
-    async def run():
-        db = setup_mock_db(monkeypatch)
+    async def run(database):
+        camp_id, (day_id,) = await seed_camp(database)
         patient_id = ObjectId()
-        camp_id = ObjectId()
-        await db.camps.insert_one({"_id": camp_id, "is_active": True})
-        await db.patients.insert_one({
-            "_id": patient_id, "camp_id": camp_id, "patient_qr": "e6d9244e-8d6f-40c1-8753-5717cda5d38e",
-            "queue_status": "registered",
-        })
+        await database.patients.insert_one(patient_doc(
+            _id=patient_id, camp_id=camp_id, camp_day_id=day_id,
+            patient_qr="e6d9244e-8d6f-40c1-8753-5717cda5d38e", queue_status="registered",
+        ))
         patient = await routes_desk._resolve(entry)
         assert patient and patient["_id"] == patient_id
         with pytest.raises(HTTPException) as exc:
-            await routes_clinical.clinical_lookup(
-                {"value": entry}, {"_id": ObjectId(), "role": "clinical_desk_operator"},
-            )
+            await routes_clinical.clinical_lookup({"value": entry}, CLINICAL)
         assert exc.value.status_code == 409
         assert exc.value.detail["code"] == "not_arrived"
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_competing_arrivals_preserve_the_first_volunteer(monkeypatch):
-    async def run():
-        db = setup_mock_db(monkeypatch)
-        camp_id = ObjectId()
-        await db.camps.insert_one({"_id": camp_id})
-        target = {"_id": ObjectId(), "camp_id": camp_id, "queue_status": "registered"}
-        await db.patients.insert_one(target.copy())
-
-        async def door_open(*args):
-            return {}
-
-        monkeypatch.setattr(routes_desk, "_require_door_open", door_open)
-        first = await routes_desk._stamp_arrival(db, target, "first-volunteer")
-        retry = await routes_desk._stamp_arrival(db, target, "second-volunteer")
+    async def run(database):
+        camp_id, (day_id,) = await seed_camp(database)
+        target = patient_doc(_id=ObjectId(), camp_id=camp_id, camp_day_id=day_id, queue_status="registered")
+        await database.patients.insert_one(target.copy())
+        first = await routes_desk._stamp_arrival(database, target, "first-volunteer")
+        retry = await routes_desk._stamp_arrival(database, target, "second-volunteer")
         assert retry["arrived_by"] == "first-volunteer"
         assert retry["arrived_at"] == first["arrived_at"]
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 @pytest.mark.parametrize("path", ["registration", "door"])
 def test_stale_manual_identity_cannot_overwrite_a_completed_scan(monkeypatch, path):
-    async def run():
-        db = setup_mock_db(monkeypatch)
-        camp_id = ObjectId()
-        target = {"_id": ObjectId(), "camp_id": camp_id, "manual_entry": True, "full_name": "Patient"}
-        await db.patients.insert_one(target.copy())
+    async def run(database):
+        target = patient_doc(_id=ObjectId(), camp_id=ObjectId(), manual_entry=True, full_name="Patient")
+        await database.patients.insert_one(target.copy())
         first = RegisterBody(
             full_name="Patient", camp_day_id=str(ObjectId()), aadhaar_scanned=True,
             aadhaar_last4="1234", dob="1980-01-01", age=46, gender="M", address="Hall",
@@ -75,108 +68,96 @@ def test_stale_manual_identity_cannot_overwrite_a_completed_scan(monkeypatch, pa
 
         async def scan(body):
             if path == "door":
-                return await routes_desk._apply_overwrite(db, target, body.model_dump())
+                return await routes_desk._apply_overwrite(database, target, body.model_dump())
             person, _ = await routes_registration._resolve_person(body.model_dump())
-            return await routes_registration._overwrite_manual(db, target, body, person, body.age)
+            return await routes_registration._overwrite_manual(database, target, body, person, body.age)
 
         await scan(first)
         with pytest.raises(HTTPException) as exc:
             await scan(second)
         assert exc.value.status_code == 409
-        stored = await db.patients.find_one({"_id": target["_id"]})
+        stored = await database.patients.find_one({"_id": target["_id"]})
         assert stored["aadhaar_last4"] == "1234"
         assert stored["aadhaar_scanned"] is True
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 @pytest.mark.parametrize("key", ["patient_qr", "reg_no"])
 def test_registration_retries_only_patient_code_collisions(monkeypatch, key):
-    async def run():
-        db = setup_mock_db(monkeypatch)
-        camp_id, day_id = ObjectId(), ObjectId()
-        await db.camps.insert_one({"_id": camp_id, "is_active": True})
-        await db.camp_days.insert_one({"_id": day_id, "camp_id": camp_id, "seat_limit": 10, "booked": 0})
-        codes = iter(["AAAAAAAA", "BBBBBBBB"])
-        monkeypatch.setattr(routes_registration, "new_patient_code", lambda: next(codes))
-        insert = db.patients.insert_one
-        attempts = []
+    codes = iter(["AAAAAAAA", "BBBBBBBB"])
+    issued = []
 
-        async def collide_once(doc):
-            attempts.append(doc["patient_qr"])
-            if len(attempts) == 1:
-                raise DuplicateKeyError("duplicate", details={"keyPattern": {key: 1}})
-            return await insert(doc)
+    def next_code():
+        issued.append(next(codes))
+        return issued[-1]
 
-        monkeypatch.setattr(db.patients, "insert_one", collide_once)
+    monkeypatch.setattr(routes_registration, "new_patient_code", next_code)
+
+    async def run(database):
+        camp_id, (day_id,) = await seed_camp(database)
+        await database.counters.insert_one({"_id": "reg_no", "seq": 41})
+        taken = {"patient_qr": "AAAAAAAA", "reg_no": 42}
+        await database.patients.insert_one(patient_doc(camp_id=ObjectId(), **{key: taken[key]}))
         body = RegisterBody(full_name="Patient", age=40, camp_day_id=str(day_id))
         if key == "patient_qr":
             patient, created = await routes_registration._create_registration(body, None, False, None)
             assert created and patient["patient_qr"] == "BBBBBBBB"
-            assert attempts == ["AAAAAAAA", "BBBBBBBB"]
-            assert db.camp_days.docs[0]["booked"] == 1
-            assert len(db.patients.docs) == 1
+            assert issued == ["AAAAAAAA", "BBBBBBBB"]
+            assert (await database.camp_days.find_one({"_id": day_id}))["booked"] == 1
+            assert await database.patients.count_documents({"camp_id": camp_id}) == 1
         else:
             with pytest.raises(DuplicateKeyError):
                 await routes_registration._create_registration(body, None, False, None)
-            assert attempts == ["AAAAAAAA"]
-            assert db.camp_days.docs[0]["booked"] == 0
+            assert issued == ["AAAAAAAA"]
+            assert (await database.camp_days.find_one({"_id": day_id}))["booked"] == 0
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
-async def _patient_of_a_numbered_camp(db):
+async def _patient_of_a_numbered_camp(database):
     camp_id = ObjectId()
-    await db.camps.insert_one({"_id": camp_id, "name": "C", "venue": "Hall", "camp_number": 162})
+    await database.camps.insert_one({"_id": camp_id, "name": "C", "venue": "Hall", "camp_number": 162})
     return {"_id": ObjectId(), "camp_id": camp_id, "phone": "9876543210", "reg_no": 42}
 
 
 @pytest.mark.parametrize("provider_succeeds", [True, False])
 def test_sms_ledger_failure_does_not_escape_or_resend_an_accepted_message(monkeypatch, provider_succeeds):
-    async def run():
-        db = setup_mock_db(monkeypatch)
-        monkeypatch.setattr(sms.msg91, "configured", lambda: True)
-        monkeypatch.setenv("MSG91_TEMPLATE_REGISTRATION", "test-flow")
-        calls = []
+    monkeypatch.setattr(sms.msg91, "configured", lambda: True)
+    monkeypatch.setenv("MSG91_TEMPLATE_REGISTRATION", "test-flow")
+    calls = []
 
-        def send(*args):
-            calls.append(args)
-            if not provider_succeeds:
-                raise sms.msg91.Unsent("connection refused")
-            return "accepted"
+    def send(*args):
+        calls.append(args)
+        if not provider_succeeds:
+            raise sms.msg91.Unsent("connection refused")
+        return "accepted"
 
-        async def unavailable(*args, **kwargs):
-            raise RuntimeError("ledger unavailable")
+    monkeypatch.setattr(sms.msg91, "send_dlt_sms", send)
+    _fail_ledger_updates(monkeypatch, lambda update: True)
 
-        monkeypatch.setattr(sms.msg91, "send_dlt_sms", send)
-        monkeypatch.setattr(db.reminder_ledger, "update_one", unavailable)
-        patient = await _patient_of_a_numbered_camp(db)
-        assert await sms.send_patient_sms(db, patient, "registration", "2026-09-12", "Hall") is provider_succeeds
-        assert not await sms.send_patient_sms(db, patient, "registration", "2026-09-12", "Hall")
+    async def run(database):
+        patient = await _patient_of_a_numbered_camp(database)
+        assert await sms.send_patient_sms(database, patient, "registration", TOMORROW, "Hall") is provider_succeeds
+        assert not await sms.send_patient_sms(database, patient, "registration", TOMORROW, "Hall")
         assert len(calls) == 1
-        assert db.reminder_ledger.docs[0]["status"] == "pending"
+        assert (await database.reminder_ledger.find_one({}))["status"] == "pending"
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_accepted_sms_is_not_marked_failed_when_receipt_persistence_fails(monkeypatch):
-    async def run():
-        db = setup_mock_db(monkeypatch)
-        monkeypatch.setattr(sms.msg91, "configured", lambda: True)
-        monkeypatch.setenv("MSG91_TEMPLATE_REGISTRATION", "test-flow")
-        calls = []
-        monkeypatch.setattr(sms.msg91, "send_dlt_sms", lambda *args: calls.append(args) or "accepted")
-        update = db.reminder_ledger.update_one
+    monkeypatch.setattr(sms.msg91, "configured", lambda: True)
+    monkeypatch.setenv("MSG91_TEMPLATE_REGISTRATION", "test-flow")
+    calls = []
+    monkeypatch.setattr(sms.msg91, "send_dlt_sms", lambda *args: calls.append(args) or "accepted")
+    _fail_ledger_updates(monkeypatch, lambda update: update["$set"]["status"] == "sent")
 
-        async def lose_receipt(query, change):
-            if change["$set"]["status"] == "sent":
-                raise RuntimeError("receipt write failed")
-            return await update(query, change)
-
-        monkeypatch.setattr(db.reminder_ledger, "update_one", lose_receipt)
-        patient = await _patient_of_a_numbered_camp(db)
-        assert await sms.send_patient_sms(db, patient, "registration", "2026-09-12", "Hall")
-        assert not await sms.send_patient_sms(db, patient, "registration", "2026-09-12", "Hall")
+    async def run(database):
+        patient = await _patient_of_a_numbered_camp(database)
+        assert await sms.send_patient_sms(database, patient, "registration", TOMORROW, "Hall")
+        assert not await sms.send_patient_sms(database, patient, "registration", TOMORROW, "Hall")
         assert len(calls) == 1
+        assert (await database.reminder_ledger.find_one({}))["status"] == "pending"
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)

@@ -1,32 +1,17 @@
 """C/F/P/S/M acceptance matrix against shipped clinical/desk/camp handlers."""
 import asyncio
-import os
-import sys
 from datetime import datetime
-from pathlib import Path
-from zoneinfo import ZoneInfo
-
-backend_dir = Path(__file__).resolve().parents[1]
-if str(backend_dir) not in sys.path:
-    sys.path.insert(0, str(backend_dir))
-
-os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
-os.environ.setdefault("DB_NAME", "snp_test")
-os.environ.setdefault("JWT_SECRET", "test-jwt-secret")
-os.environ.setdefault("COOKIE_SECURE", "false")
-os.environ.setdefault("AADHAAR_HASH_PEPPER", "test-pepper")
+from functools import partial
 
 import pytest
 from bson import ObjectId
 from fastapi import HTTPException
+from pymongo.asynchronous.collection import AsyncCollection
 
-import helpers
 import routes_camps
-import routes_clinical
-import routes_desk
-import routes_registration
 import routes_reports
 import sms
+from helpers import IST
 from models import (
     CampBody,
     CompletePrescriptionBody,
@@ -47,15 +32,12 @@ from routes_clinical import (
     undo_completion,
 )
 from routes_desk import arrive, mark_seen, preview_prescription, print_prescription, record_identity_check
-from routes_registration import _create_registration, desk_register
-from test_adversarial_challenger import FIXED_POWER, MEDICINE, MEDICINE_ALT, setup_mock_db
-from test_camp_lifecycle import _Request
+from routes_registration import _create_registration
+from seed import (
+    FIXED_POWER, MEDICINE, MEDICINE_ALT, NOW, TODAY, TOMORROW, Request, day, patient_doc, register, run_camp,
+    seed_camp, user_doc,
+)
 
-from datetime import timezone as _tz
-
-IST = ZoneInfo("Asia/Kolkata")
-TODAY = "2026-09-01"
-FROZEN_IST = datetime(2026, 9, 1, 12, 0, tzinfo=IST)
 VOLUNTEER = {"_id": ObjectId(), "role": "volunteer", "name": "Vol"}
 LEAD = {"_id": ObjectId(), "role": "team_lead", "name": "Lead"}
 ADMIN = {"_id": ObjectId(), "role": "admin", "name": "Admin"}
@@ -64,66 +46,55 @@ RX = {
     "r_sph": "-1.00", "r_cyl": "-0.50", "r_axis": "90",
     "l_sph": "-1.25", "l_cyl": "-0.25", "l_axis": "85", "add": "+2.00",
 }
+OT_DATE = day(7)
 
 
-def _mock(monkeypatch):
-    mock_db = setup_mock_db(monkeypatch)
-    for mod in (routes_desk, routes_clinical, routes_camps, routes_registration, routes_reports, sms, helpers):
-        monkeypatch.setattr(mod, "get_db", lambda: mock_db, raising=False)
-    monkeypatch.setattr(helpers, "now_utc", lambda: FROZEN_IST.astimezone(_tz.utc))
-    monkeypatch.setattr(helpers, "now_ist", lambda: FROZEN_IST)
-    monkeypatch.setattr(helpers, "today_ist_str", lambda: TODAY)
-    monkeypatch.setattr(routes_camps, "now_utc", lambda: FROZEN_IST.astimezone(_tz.utc))
-    monkeypatch.setattr(routes_camps, "today_ist_str", lambda: TODAY)
-    monkeypatch.setattr(routes_clinical, "now_ist", lambda: FROZEN_IST)
-    return mock_db
+def ist(day_date, hhmm):
+    return datetime.fromisoformat(f"{day_date}T{hhmm}").replace(tzinfo=IST)
 
 
-async def _seed_camp(mock_db, day_date=TODAY, printing_open=None):
-    camp_id = ObjectId()
-    day_id = ObjectId()
-    await mock_db.camps.insert_one({
-        "_id": camp_id, "name": "Sikar Camp", "venue": "Sikar Bhawan",
-        "camp_date": day_date, "camp_number": 162, "is_active": True, "print_override": None,
-    })
-    await mock_db.camp_days.insert_one({
-        "_id": day_id, "camp_id": camp_id, "day_date": day_date,
-        "seat_limit": 50, "booked": 0,
-    })
+def intercept(monkeypatch, collection, method, hook):
+    real = getattr(AsyncCollection, method)
+
+    async def patched(self, *args, **kwargs):
+        if self.name != collection:
+            return await real(self, *args, **kwargs)
+        return await hook(partial(real, self), *args, **kwargs)
+
+    monkeypatch.setattr(AsyncCollection, method, patched)
+    return lambda: monkeypatch.setattr(AsyncCollection, method, real)
+
+
+async def _seed_camp(db, day_date=TODAY):
+    camp_id, (day_id,) = await seed_camp(db, days=(day_date,), camp_date=day_date, print_override=None)
     return camp_id, day_id
 
 
-async def _ensure_user(mock_db, actor):
-    if await mock_db.users.find_one({"_id": actor["_id"]}):
+async def _ensure_user(db, actor):
+    if await db.users.find_one({"_id": actor["_id"]}):
         return
-    await mock_db.users.insert_one({
-        "_id": actor["_id"],
-        "name": actor.get("name") or "staff",
-        "role": actor["role"],
-        "team_lead_id": actor.get("team_lead_id"),
-        "disabled_at": None,
-    })
+    await db.users.insert_one(user_doc(
+        actor["name"], actor["role"], _id=actor["_id"], team_lead_id=actor.get("team_lead_id"),
+    ))
 
 
-async def _printed_patient(mock_db, registrar=VOLUNTEER, **fields):
-    await _ensure_user(mock_db, registrar)
-    await _ensure_user(mock_db, CLINICAL)
-    await _ensure_user(mock_db, LEAD)
-    camp_id, day_id = await _seed_camp(mock_db)
-    body = RegisterBody(
-        full_name=fields.pop("full_name", "Sunita Devi"),
-        age=fields.pop("age", 51),
-        phone=fields.pop("phone", "9876500001"),
-        camp_day_id=str(day_id),
-        **fields,
-    )
-    result = await desk_register(body, _Request(), actor=registrar, background_tasks=None)
-    pid = ObjectId(result["registration"]["id"])
-    await arrive(str(pid), actor=registrar)
-    await _identity_checked(pid)
-    await print_prescription(str(pid), actor=registrar)
-    patient = await mock_db.patients.find_one({"_id": pid})
-    return camp_id, day_id, patient
+async def _register_printed(day_id, registrar=VOLUNTEER, arrived=True, printed=True, **fields):
+    pid = (await register(day_id, actor=registrar, **fields))["id"]
+    if arrived:
+        await arrive(pid, actor=registrar)
+    if printed:
+        await _identity_checked(pid)
+        await print_prescription(pid, actor=registrar)
+    return pid
+
+
+async def _printed_patient(db, registrar=VOLUNTEER, **fields):
+    await _ensure_user(db, registrar)
+    await _ensure_user(db, CLINICAL)
+    await _ensure_user(db, LEAD)
+    camp_id, day_id = await _seed_camp(db)
+    pid = await _register_printed(day_id, registrar, **fields)
+    return camp_id, day_id, await db.patients.find_one({"_id": ObjectId(pid)})
 
 
 async def _identity_checked(patient_id):
@@ -174,51 +145,47 @@ def _code(exc):
 
 class TestClinicalMatrix:
     def test_c01_lookup_after_print_before_seen(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             out = await clinical_lookup({"value": str(patient["reg_no"])}, actor=CLINICAL)
             assert out["registration"]["id"] == str(patient["_id"])
             assert out["registration"]["queue_status"] != "seen"
             assert out["transcription"] is None
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_c02_non_operator_cannot_mutate_clinical(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             body = _complete_body(patient["_id"], "op-c02")
             for actor in (VOLUNTEER, LEAD, ADMIN):
                 with pytest.raises(HTTPException) as exc:
                     await complete_prescription(body, actor=actor)
                 assert exc.value.status_code == 403
-            refreshed = await mock_db.patients.find_one({"_id": patient["_id"]})
+            refreshed = await db.patients.find_one({"_id": patient["_id"]})
             assert refreshed.get("committed_revision_id") is None
             assert refreshed.get("queue_status") != "seen"
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_c03_mark_seen_cannot_confer_seen(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             with pytest.raises(HTTPException) as exc:
                 await mark_seen(str(patient["_id"]), actor=CLINICAL)
             assert exc.value.status_code == 409
-            refreshed = await mock_db.patients.find_one({"_id": patient["_id"]})
+            refreshed = await db.patients.find_one({"_id": patient["_id"]})
             assert refreshed.get("seen_at") is None
             assert refreshed.get("committed_revision_id") is None
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_c04_draft_saves_without_seen_or_fulfilment(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             out = await create_transcription(
                 TranscriptionBody(patient_id=str(patient["_id"]), bp="110/70"),
                 actor=CLINICAL,
             )
             assert out["transcription"]["bp"] == "110/70"
-            refreshed = await mock_db.patients.find_one({"_id": patient["_id"]})
+            refreshed = await db.patients.find_one({"_id": patient["_id"]})
             assert refreshed.get("seen_at") is None
             assert refreshed.get("committed_revision_id") is None
             trans_id = out["transcription"]["id"]
@@ -228,29 +195,23 @@ class TestClinicalMatrix:
                     actor=CLINICAL,
                  background_tasks=None)
             assert exc.value.status_code == 409
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_c05_complete_without_arrival_or_print(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            camp_id, day_id = await _seed_camp(mock_db)
-            result = await desk_register(
-                RegisterBody(full_name="No Arrive", age=40, phone="9876500099", camp_day_id=str(day_id)),
-                _Request(), actor=VOLUNTEER,
-             background_tasks=None)
+        async def run(db):
+            camp_id, day_id = await _seed_camp(db)
+            pid = (await register(day_id, actor=VOLUNTEER, full_name="No Arrive", age=40, phone="9876500099"))["id"]
             with pytest.raises(HTTPException) as exc:
-                await complete_prescription(_complete_body(result["registration"]["id"], "op-c05"), actor=CLINICAL)
+                await complete_prescription(_complete_body(pid, "op-c05"), actor=CLINICAL)
             assert exc.value.status_code == 409
             assert _code(exc) in ("not_arrived", "never_printed")
-            assert await mock_db.patients.find_one({"_id": ObjectId(result["registration"]["id"])})
-            patient = await mock_db.patients.find_one({"_id": ObjectId(result["registration"]["id"])})
+            patient = await db.patients.find_one({"_id": ObjectId(pid)})
             assert patient.get("committed_revision_id") is None
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_c06_blank_completion_rejected(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             with pytest.raises(HTTPException) as exc:
                 await complete_prescription(
                     CompletePrescriptionBody(
@@ -262,14 +223,13 @@ class TestClinicalMatrix:
                 )
             assert exc.value.status_code == 400
             assert exc.value.detail["code"] == "incomplete_prescription"
-            refreshed = await mock_db.patients.find_one({"_id": patient["_id"]})
+            refreshed = await db.patients.find_one({"_id": patient["_id"]})
             assert refreshed.get("seen_at") is None
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_c07_none_prescribed_completion_awards_point(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             out = await complete_prescription(
                 CompletePrescriptionBody(
                     patient_id=str(patient["_id"]),
@@ -282,60 +242,54 @@ class TestClinicalMatrix:
             )
             assert out["registration"]["queue_status"] == "seen"
             assert out["revision"]["none_prescribed"] is True
-            refreshed = await mock_db.patients.find_one({"_id": patient["_id"]})
+            refreshed = await db.patients.find_one({"_id": patient["_id"]})
             assert refreshed.get("committed_revision_id") is not None
-            assert await mock_db.fulfilments.find_one({"patient_id": patient["_id"]}) is None
-        asyncio.run(run())
+            assert await db.fulfilments.find_one({"patient_id": patient["_id"]}) is None
+        run_camp(monkeypatch, run)
 
     def test_c08_whole_rx_completion_is_atomic(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             out = await complete_prescription(_complete_body(patient["_id"], "op-c08"), actor=CLINICAL)
             assert out["registration"]["queue_status"] == "seen"
             assert out["revision"]["id"]
             assert out["registration"]["clinical_generation"] == 1
-            refreshed = await mock_db.patients.find_one({"_id": patient["_id"]})
+            refreshed = await db.patients.find_one({"_id": patient["_id"]})
             assert str(refreshed["committed_revision_id"]) == out["revision"]["id"]
             assert refreshed["queue_status"] == "seen"
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_c09_orphan_revision_grants_nothing(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
-
-            orig = mock_db.patients.find_one_and_update
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
 
             async def boom(*_a, **_k):
                 raise RuntimeError("commit failed")
 
-            mock_db.patients.find_one_and_update = boom
+            restore = intercept(monkeypatch, "patients", "find_one_and_update", boom)
             with pytest.raises(RuntimeError):
                 await complete_prescription(_complete_body(patient["_id"], "op-c09"), actor=CLINICAL)
-            mock_db.patients.find_one_and_update = orig
-            refreshed = await mock_db.patients.find_one({"_id": patient["_id"]})
+            restore()
+            refreshed = await db.patients.find_one({"_id": patient["_id"]})
             assert refreshed.get("seen_at") is None
             assert refreshed.get("committed_revision_id") is None
-            assert await mock_db.prescription_revisions.find_one({"operation_id": "op-c09"})
+            assert await db.prescription_revisions.find_one({"operation_id": "op-c09"})
             out = await complete_prescription(_complete_body(patient["_id"], "op-c09"), actor=CLINICAL)
             assert out["registration"]["queue_status"] == "seen"
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_c10_lost_response_reconciles(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             first = await complete_prescription(_complete_body(patient["_id"], "op-c10"), actor=CLINICAL)
             second = await complete_prescription(_complete_body(patient["_id"], "op-c10"), actor=CLINICAL)
             assert first["revision"]["id"] == second["revision"]["id"]
-            assert len(mock_db.prescription_revisions.docs) == 1
-        asyncio.run(run())
+            assert await db.prescription_revisions.count_documents({}) == 1
+        run_camp(monkeypatch, run)
 
     def test_c11_concurrent_completion_one_winner(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             other = {"_id": ObjectId(), "role": "clinical_desk_operator", "name": "Clin2"}
             results = await asyncio.gather(
                 complete_prescription(
@@ -355,17 +309,16 @@ class TestClinicalMatrix:
             assert len(wins) == 1
             assert len(losses) == 1
             assert losses[0].status_code == 409
-            refreshed = await mock_db.patients.find_one({"_id": patient["_id"]})
+            refreshed = await db.patients.find_one({"_id": patient["_id"]})
             assert str(refreshed["committed_revision_id"]) == wins[0]["revision"]["id"]
-            winner_rev = await mock_db.prescription_revisions.find_one({"_id": refreshed["committed_revision_id"]})
-            trans = await mock_db.transcriptions.find_one({"patient_id": patient["_id"]})
+            winner_rev = await db.prescription_revisions.find_one({"_id": refreshed["committed_revision_id"]})
+            trans = await db.transcriptions.find_one({"patient_id": patient["_id"]})
             assert trans["prescribed_medicines"] == winner_rev["prescribed_medicines"]
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_c12_pre_issue_undo_revokes_point(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             done = await complete_prescription(_complete_body(patient["_id"], "op-c12"), actor=CLINICAL)
             out = await undo_completion(
                 UndoCompletionBody(
@@ -377,16 +330,15 @@ class TestClinicalMatrix:
                 actor=CLINICAL,
             )
             assert out["registration"]["queue_status"] == "arrived"
-            refreshed = await mock_db.patients.find_one({"_id": patient["_id"]})
+            refreshed = await db.patients.find_one({"_id": patient["_id"]})
             assert refreshed.get("committed_revision_id") is None
             assert refreshed.get("seen_at") is None
-            assert await mock_db.prescription_revisions.find_one({"operation_id": "op-c12"})
-        asyncio.run(run())
+            assert await db.prescription_revisions.find_one({"operation_id": "op-c12"})
+        run_camp(monkeypatch, run)
 
     def test_c13_old_complete_retry_after_undo(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             done = await complete_prescription(_complete_body(patient["_id"], "op-c13"), actor=CLINICAL)
             await undo_completion(
                 UndoCompletionBody(
@@ -400,14 +352,13 @@ class TestClinicalMatrix:
             with pytest.raises(HTTPException) as exc:
                 await complete_prescription(_complete_body(patient["_id"], "op-c13"), actor=CLINICAL)
             assert exc.value.status_code == 409
-            refreshed = await mock_db.patients.find_one({"_id": patient["_id"]})
+            refreshed = await db.patients.find_one({"_id": patient["_id"]})
             assert refreshed.get("committed_revision_id") is None
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_c14_undo_after_issue_rejected(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             done = await complete_prescription(_complete_body(patient["_id"], "op-c14"), actor=CLINICAL)
             await record_fulfilment(
                 _issue_body(
@@ -429,15 +380,14 @@ class TestClinicalMatrix:
                     actor=CLINICAL,
                 )
             assert exc.value.status_code == 409
-            refreshed = await mock_db.patients.find_one({"_id": patient["_id"]})
+            refreshed = await db.patients.find_one({"_id": patient["_id"]})
             assert refreshed.get("committed_revision_id") is not None
-            assert await mock_db.fulfilments.find_one({"transcription_id": ObjectId(done["transcription"]["id"])})
-        asyncio.run(run())
+            assert await db.fulfilments.find_one({"transcription_id": ObjectId(done["transcription"]["id"])})
+        run_camp(monkeypatch, run)
 
     def test_c15_correction_after_issue_keeps_history(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             done = await complete_prescription(_complete_body(patient["_id"], "op-c15"), actor=CLINICAL)
             issued = await record_fulfilment(
                 _issue_body(
@@ -466,25 +416,23 @@ class TestClinicalMatrix:
             assert corr["revision"]["bp"] == "140/90"
             assert corr["revision"]["id"] != done["revision"]["id"]
             assert issued["fulfilment"]["id"]
-            assert await mock_db.fulfilments.find_one({"_id": ObjectId(issued["fulfilment"]["id"])})
-        asyncio.run(run())
+            assert await db.fulfilments.find_one({"_id": ObjectId(issued["fulfilment"]["id"])})
+        run_camp(monkeypatch, run)
 
     def test_c16_second_complete_conflicts(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             await complete_prescription(_complete_body(patient["_id"], "op-c16a"), actor=CLINICAL)
             with pytest.raises(HTTPException) as exc:
                 await complete_prescription(_complete_body(patient["_id"], "op-c16b"), actor=CLINICAL)
             assert exc.value.status_code == 409
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
 
 class TestFulfilmentMatrix:
     def test_f01_issue_without_completion_or_review(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             draft = await create_transcription(
                 TranscriptionBody(
                     patient_id=str(patient["_id"]),
@@ -503,22 +451,14 @@ class TestFulfilmentMatrix:
                     actor=CLINICAL,
                  background_tasks=None)
             assert exc.value.status_code == 409
-            assert await mock_db.fulfilments.find_one({}) is None
-        asyncio.run(run())
+            assert await db.fulfilments.find_one({}) is None
+        run_camp(monkeypatch, run)
 
     def test_f02_foreign_revision_rejected(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, day_id, patient = await _printed_patient(mock_db)
-            other_reg = await desk_register(
-                RegisterBody(full_name="Other Person", age=40, phone="9876500002",
-                             camp_day_id=str(day_id)),
-                _Request(), actor=VOLUNTEER,
-             background_tasks=None)
-            await arrive(other_reg["registration"]["id"], actor=VOLUNTEER)
-            await _identity_checked(other_reg["registration"]["id"])
-            await print_prescription(other_reg["registration"]["id"], actor=VOLUNTEER)
-            other = await mock_db.patients.find_one({"_id": ObjectId(other_reg["registration"]["id"])})
+        async def run(db):
+            _camp, day_id, patient = await _printed_patient(db)
+            other_id = await _register_printed(day_id, full_name="Other Person", age=40, phone="9876500002")
+            other = await db.patients.find_one({"_id": ObjectId(other_id)})
             done = await complete_prescription(_complete_body(patient["_id"], "op-f02a"), actor=CLINICAL)
             other_done = await complete_prescription(
                 _complete_body(other["_id"], "op-f02b", prescribed_lines=["medicine"]),
@@ -537,12 +477,11 @@ class TestFulfilmentMatrix:
             assert exc.value.status_code in (404, 409)
             name = other["full_name"]
             assert name not in str(exc.value.detail)
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_f03_stale_review_after_new_revision(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             done = await complete_prescription(_complete_body(patient["_id"], "op-f03"), actor=CLINICAL)
             corr = await add_correction(
                 CorrectionBody(
@@ -582,12 +521,11 @@ class TestFulfilmentMatrix:
                 actor=CLINICAL,
              background_tasks=None)
             assert ok["fulfilment"]["status"] == "fulfilled"
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_f04_correction_races_issue(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             done = await complete_prescription(_complete_body(patient["_id"], "op-f04"), actor=CLINICAL)
             corr_body = CorrectionBody(
                 transcription_id=done["transcription"]["id"],
@@ -617,12 +555,11 @@ class TestFulfilmentMatrix:
             assert len(wins) == 1
             assert len(http_err) == 1
             assert http_err[0].status_code == 409
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_f05_retry_recovers_same_allocation(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            camp_id, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            camp_id, _day, patient = await _printed_patient(db)
             done = await complete_prescription(
                 _complete_body(patient["_id"], "op-f05", prescribed_lines=["ot"],
                                ot_eye="right", ot_outcome="iol_surgery",
@@ -630,8 +567,8 @@ class TestFulfilmentMatrix:
                 actor=CLINICAL,
             )
             ot_day = ObjectId()
-            await mock_db.ot_schedule_days.insert_one({
-                "_id": ot_day, "camp_id": camp_id, "day_date": "2026-10-02",
+            await db.ot_schedule_days.insert_one({
+                "_id": ot_day, "camp_id": camp_id, "day_date": OT_DATE,
                 "venue": "OT", "seat_limit": 1, "seats_taken": 0,
             })
             body = _issue_body(
@@ -642,14 +579,12 @@ class TestFulfilmentMatrix:
             first = await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
             second = await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
             assert first["fulfilment"]["id"] == second["fulfilment"]["id"]
-            day = await mock_db.ot_schedule_days.find_one({"_id": ot_day})
-            assert day["seats_taken"] == 1
-        asyncio.run(run())
+            assert (await db.ot_schedule_days.find_one({"_id": ot_day}))["seats_taken"] == 1
+        run_camp(monkeypatch, run)
 
     def test_f06_double_tap_same_issue(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             done = await complete_prescription(_complete_body(patient["_id"], "op-f06"), actor=CLINICAL)
             body = _issue_body(
                 done["transcription"]["id"], done["revision"]["id"],
@@ -658,27 +593,19 @@ class TestFulfilmentMatrix:
             a = await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
             b = await record_fulfilment(body, actor=CLINICAL, background_tasks=None)
             assert a["fulfilment"]["id"] == b["fulfilment"]["id"]
-            assert len(mock_db.fulfilments.docs) == 1
-        asyncio.run(run())
+            assert await db.fulfilments.count_documents({}) == 1
+        run_camp(monkeypatch, run)
 
     def test_f07_last_ot_slot_no_oversubscribe(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            camp_id, day_id = await _seed_camp(mock_db)
+        async def run(db):
+            camp_id, day_id = await _seed_camp(db)
             patients = []
             for i, name in enumerate(("One", "Two")):
-                result = await desk_register(
-                    RegisterBody(full_name=name, age=50, phone=f"987650001{i}", camp_day_id=str(day_id)),
-                    _Request(), actor=VOLUNTEER,
-                 background_tasks=None)
-                pid = result["registration"]["id"]
-                await arrive(pid, actor=VOLUNTEER)
-                await _identity_checked(pid)
-                await print_prescription(pid, actor=VOLUNTEER)
-                patients.append(await mock_db.patients.find_one({"_id": ObjectId(pid)}))
+                pid = await _register_printed(day_id, full_name=name, age=50, phone=f"987650001{i}")
+                patients.append(await db.patients.find_one({"_id": ObjectId(pid)}))
             ot_day = ObjectId()
-            await mock_db.ot_schedule_days.insert_one({
-                "_id": ot_day, "camp_id": camp_id, "day_date": "2026-10-02",
+            await db.ot_schedule_days.insert_one({
+                "_id": ot_day, "camp_id": camp_id, "day_date": OT_DATE,
                 "venue": "OT", "seat_limit": 1, "seats_taken": 0,
             })
             bodies = []
@@ -703,14 +630,12 @@ class TestFulfilmentMatrix:
             losses = [r for r in results if isinstance(r, HTTPException)]
             assert len(wins) == 1
             assert len(losses) == 1
-            day = await mock_db.ot_schedule_days.find_one({"_id": ot_day})
-            assert day["seats_taken"] == 1
-        asyncio.run(run())
+            assert (await db.ot_schedule_days.find_one({"_id": ot_day}))["seats_taken"] == 1
+        run_camp(monkeypatch, run)
 
     def test_f08_fixed_and_made_exclusive(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            camp_id, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            camp_id, _day, patient = await _printed_patient(db)
             done = await complete_prescription(
                 _complete_body(
                     patient["_id"], "op-f08",
@@ -721,7 +646,7 @@ class TestFulfilmentMatrix:
                 ),
                 actor=CLINICAL,
             )
-            await mock_db.prescription_revisions.update_one(
+            await db.prescription_revisions.update_one(
                 {"_id": ObjectId(done["revision"]["id"])},
                 {"$set": {"prescribed_lines": ["specs_fixed", "specs_made"]}},
             )
@@ -734,8 +659,8 @@ class TestFulfilmentMatrix:
                 actor=CLINICAL,
              background_tasks=None)
             specs_day = ObjectId()
-            await mock_db.specs_collection_days.insert_one({
-                "_id": specs_day, "camp_id": camp_id, "day_date": "2026-09-20",
+            await db.specs_collection_days.insert_one({
+                "_id": specs_day, "camp_id": camp_id, "day_date": day(15),
                 "venue": "Optical", "start_time": "09:00", "end_time": "17:00",
                 "seat_limit": 10, "seats_taken": 0,
             })
@@ -750,152 +675,117 @@ class TestFulfilmentMatrix:
                     actor=CLINICAL,
                  background_tasks=None)
             assert exc.value.status_code == 409
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_f09_reprint_does_not_confer_care(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             printed_at = patient["printed_at"]
             again = await print_prescription(str(patient["_id"]), actor=VOLUNTEER)
-            refreshed = await mock_db.patients.find_one({"_id": patient["_id"]})
+            refreshed = await db.patients.find_one({"_id": patient["_id"]})
             assert refreshed["printed_at"] == printed_at
             assert refreshed.get("seen_at") is None
             assert refreshed.get("committed_revision_id") is None
             assert again["registration"]["queue_status"] != "seen"
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
 
 class TestPrintingMatrix:
     def test_p01_ist_midnight_opens_scheduled_day(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            camp_id, day_id = await _seed_camp(mock_db, day_date="2026-09-02")
-            before = datetime(2026, 9, 1, 23, 30, tzinfo=IST)
-            after = datetime(2026, 9, 2, 0, 1, tzinfo=IST)
-            from routes_camps import effective_printing
-            camp = await mock_db.camps.find_one({"_id": camp_id})
-            days = mock_db.camp_days.docs
-            closed = effective_printing(camp, days, now=before)
-            opened = effective_printing(camp, days, now=after)
+        async def run(db):
+            camp_id, day_id = await _seed_camp(db, day_date=TOMORROW)
+            camp = await db.camps.find_one({"_id": camp_id})
+            days = await db.camp_days.find().to_list(None)
+            closed = routes_camps.effective_printing(camp, days, now=ist(TODAY, "23:30"))
+            opened = routes_camps.effective_printing(camp, days, now=ist(TOMORROW, "00:01"))
             assert closed["printing_open"] is False
             assert opened["printing_open"] is True
             assert opened["operating_day_id"] == str(day_id)
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_p02_manual_off_blocks_door_scan(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            camp_id, day_id = await _seed_camp(mock_db)
+        async def run(db):
+            camp_id, day_id = await _seed_camp(db)
             await routes_camps.toggle_print_window(str(day_id), PrintWindowBody(mode="disable"), actor=ADMIN)
-            result = await desk_register(
-                RegisterBody(full_name="Walk", age=40, phone="9876500033", camp_day_id=str(day_id)),
-                _Request(), actor=VOLUNTEER,
-             background_tasks=None)
+            pid = (await register(day_id, actor=VOLUNTEER, full_name="Walk", age=40, phone="9876500033"))["id"]
             with pytest.raises(HTTPException) as exc:
-                await arrive(result["registration"]["id"], actor=VOLUNTEER)
+                await arrive(pid, actor=VOLUNTEER)
             assert exc.value.detail["code"] == "PRINT_WINDOW_CLOSED"
-            refreshed = await mock_db.patients.find_one({"_id": ObjectId(result["registration"]["id"])})
+            refreshed = await db.patients.find_one({"_id": ObjectId(pid)})
             assert refreshed.get("arrived_at") is None
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_p03_manual_early_open_uses_selected_day(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            camp_id = ObjectId()
-            today_id, future_id = ObjectId(), ObjectId()
-            await mock_db.camps.insert_one({
-                "_id": camp_id, "name": "Camp", "venue": "Hall", "camp_date": TODAY,
-                "is_active": True, "print_override": None,
-            })
-            await mock_db.camp_days.insert_one({
-                "_id": today_id, "camp_id": camp_id, "day_date": TODAY, "seat_limit": 50, "booked": 0,
-            })
-            await mock_db.camp_days.insert_one({
-                "_id": future_id, "camp_id": camp_id, "day_date": "2026-09-10", "seat_limit": 50, "booked": 0,
-            })
+        async def run(db):
+            camp_id, (_today_id, future_id) = await seed_camp(
+                db, days=(TODAY, day(9)), name="Camp", venue="Hall", camp_date=TODAY, print_override=None,
+            )
             await routes_camps.toggle_print_window(
                 str(future_id), PrintWindowBody(mode="enable", day_id=str(future_id)), actor=ADMIN,
             )
-            camp = await mock_db.camps.find_one({"_id": camp_id})
-            state = routes_camps.effective_printing(camp, mock_db.camp_days.docs, now=datetime(2026, 9, 1, 10, tzinfo=IST))
+            camp = await db.camps.find_one({"_id": camp_id})
+            days = await db.camp_days.find().to_list(None)
+            state = routes_camps.effective_printing(camp, days, now=ist(TODAY, "10:00"))
             assert state["printing_open"] is True
             assert state["operating_day_id"] == str(future_id)
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_p04_override_expires_and_does_not_cross_camps(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            from datetime import timezone
-            camp_id, day_id = await _seed_camp(mock_db, day_date="2026-09-10")
-            now = datetime(2026, 9, 1, 10, tzinfo=IST)
-            monkeypatch.setattr(routes_camps, "now_utc", lambda: now.astimezone(timezone.utc))
-            monkeypatch.setattr(
-                routes_camps, "next_ist_midnight",
-                lambda now=None: datetime(2026, 9, 2, 0, 0, tzinfo=IST).astimezone(timezone.utc),
-            )
+        async def run(db):
+            camp_id, day_id = await _seed_camp(db, day_date=day(9))
             await routes_camps.toggle_print_window(
                 str(day_id), PrintWindowBody(mode="enable", day_id=str(day_id)), actor=ADMIN,
             )
-            camp = await mock_db.camps.find_one({"_id": camp_id})
-            expired = routes_camps.effective_printing(
-                camp, mock_db.camp_days.docs,
-                now=datetime(2026, 9, 2, 0, 1, tzinfo=IST),
-            )
+            camp = await db.camps.find_one({"_id": camp_id})
+            days = await db.camp_days.find().to_list(None)
+            assert routes_camps.effective_printing(camp, days, now=ist(TODAY, "23:59"))["printing_open"] is True
+            expired = routes_camps.effective_printing(camp, days, now=ist(TOMORROW, "00:01"))
             assert expired["printing_open"] is False
             other = ObjectId()
-            await mock_db.camps.insert_one({
+            await db.camps.insert_one({
                 "_id": other, "name": "Other", "venue": "X", "is_active": False, "print_override": None,
             })
             await routes_camps.activate_camp(str(other), actor=ADMIN)
-            other_doc = await mock_db.camps.find_one({"_id": other})
+            other_doc = await db.camps.find_one({"_id": other})
             assert not other_doc.get("print_override")
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_p05_stale_print_rejected(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            camp_id, day_id = await _seed_camp(mock_db)
-            result = await desk_register(
-                RegisterBody(full_name="Stale", age=40, phone="9876500077", camp_day_id=str(day_id)),
-                _Request(), actor=VOLUNTEER,
-             background_tasks=None)
-            await arrive(result["registration"]["id"], actor=VOLUNTEER)
+        async def run(db):
+            camp_id, day_id = await _seed_camp(db)
+            pid = await _register_printed(day_id, printed=False, full_name="Stale", age=40, phone="9876500077")
             await routes_camps.toggle_print_window(str(day_id), PrintWindowBody(mode="disable"), actor=ADMIN)
             with pytest.raises(HTTPException) as exc:
-                await print_prescription(result["registration"]["id"], actor=VOLUNTEER)
+                await print_prescription(pid, actor=VOLUNTEER)
             assert exc.value.detail["code"] == "PRINT_WINDOW_CLOSED"
-            refreshed = await mock_db.patients.find_one({"_id": ObjectId(result["registration"]["id"])})
+            refreshed = await db.patients.find_one({"_id": ObjectId(pid)})
             assert refreshed.get("printed_at") is None
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_p06_walkin_vs_repeat_scan(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, day_id, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, day_id, patient = await _printed_patient(db)
             created_by = patient["created_by"]
             await arrive(str(patient["_id"]), actor=LEAD)
-            refreshed = await mock_db.patients.find_one({"_id": patient["_id"]})
+            refreshed = await db.patients.find_one({"_id": patient["_id"]})
             assert refreshed["created_by"] == created_by
             assert refreshed.get("committed_revision_id") is None
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_p07_partial_camp_setup_no_false_success(self, monkeypatch):
-        async def run():
-            from test_adversarial_challenger import MockCollection
-            mock_db = _mock(monkeypatch)
-            calls = {"n": 0}
+        async def run(db):
+            calls = []
 
-            async def flaky(doc):
-                calls["n"] += 1
-                if calls["n"] == 2:
+            async def flaky(insert_one, doc, *args, **kwargs):
+                calls.append(doc)
+                if len(calls) == 2:
                     raise RuntimeError("day 2 failed")
-                return await MockCollection.insert_one(mock_db.camp_days, doc)
+                return await insert_one(doc, *args, **kwargs)
 
-            mock_db.camp_days.insert_one = flaky
+            restore = intercept(monkeypatch, "camp_days", "insert_one", flaky)
             days = [
                 {"day_date": TODAY, "seat_limit": 50},
-                {"day_date": "2026-09-02", "seat_limit": 50},
+                {"day_date": TOMORROW, "seat_limit": 50},
             ]
             with pytest.raises(HTTPException) as exc:
                 await routes_camps.create_camp(
@@ -906,11 +796,9 @@ class TestPrintingMatrix:
             assert exc.value.status_code == 409
             assert exc.value.detail["code"] == "camp_setup_incomplete"
             camp_id = exc.value.detail["camp_id"]
-            camp = await mock_db.camps.find_one({"_id": ObjectId(camp_id)})
+            camp = await db.camps.find_one({"_id": ObjectId(camp_id)})
             assert camp["is_active"] is False
-            mock_db.camp_days.insert_one = MockCollection.insert_one.__get__(
-                mock_db.camp_days, MockCollection,
-            )
+            restore()
             out = await routes_camps.create_camp(
                 CampBody(name="Setup", venue="Hall", camp_date=TODAY,
                          setup_request_id="setup-1", days=days),
@@ -918,12 +806,11 @@ class TestPrintingMatrix:
             )
             assert out["camp"]["id"] == camp_id
             assert out["camp"]["is_active"] is False
-            assert len(mock_db.camp_days.docs) == 2
-        asyncio.run(run())
+            assert await db.camp_days.count_documents({}) == 2
+        run_camp(monkeypatch, run)
 
     def test_p07_camp_number_is_set_at_setup_and_editable(self, monkeypatch):
-        async def run():
-            _mock(monkeypatch)
+        async def run(db):
             out = await routes_camps.create_camp(
                 CampBody(name="SNP नेत्र शिविर", venue="Hall", camp_date=TODAY, camp_number=162), actor=ADMIN,
             )
@@ -935,37 +822,25 @@ class TestPrintingMatrix:
             assert edited["camp"]["venue"] == "हंसा गार्डन, देवघर"
             with pytest.raises(ValueError):
                 CampBody(name="x", venue="y", camp_date=TODAY, camp_number=0)
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_p08_existing_arrival_no_second_booking(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            camp_id = ObjectId()
-            d1, d2 = ObjectId(), ObjectId()
-            await mock_db.camps.insert_one({
-                "_id": camp_id, "name": "Camp", "venue": "Hall", "is_active": True, "camp_date": TODAY,
-            })
-            await mock_db.camp_days.insert_one({
-                "_id": d1, "camp_id": camp_id, "day_date": TODAY, "seat_limit": 1, "booked": 0,
-            })
-            await mock_db.camp_days.insert_one({
-                "_id": d2, "camp_id": camp_id, "day_date": "2026-09-03", "seat_limit": 1, "booked": 0,
-            })
-            result = await desk_register(
-                RegisterBody(full_name="Booked", age=40, phone="9876500044", camp_day_id=str(d1)),
-                _Request(), actor=VOLUNTEER,
-             background_tasks=None)
-            await arrive(result["registration"]["id"], actor=VOLUNTEER)
-            day1 = await mock_db.camp_days.find_one({"_id": d1})
-            day2 = await mock_db.camp_days.find_one({"_id": d2})
+        async def run(db):
+            camp_id, (d1, d2) = await seed_camp(
+                db, days=(TODAY, day(2)), name="Camp", venue="Hall", camp_date=TODAY,
+            )
+            await db.camp_days.update_many({"camp_id": camp_id}, {"$set": {"seat_limit": 1}})
+            pid = (await register(d1, actor=VOLUNTEER, full_name="Booked", age=40, phone="9876500044"))["id"]
+            await arrive(pid, actor=VOLUNTEER)
+            day1 = await db.camp_days.find_one({"_id": d1})
+            day2 = await db.camp_days.find_one({"_id": d2})
             assert day1["booked"] == 1
             assert day2["booked"] == 0
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_p09_print_blocked_once_doctor_seen(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             done = await complete_prescription(_complete_body(patient["_id"], "op-p09"), actor=CLINICAL)
             assert done["registration"]["queue_status"] == "seen"
             for call in (preview_prescription, print_prescription):
@@ -984,62 +859,59 @@ class TestPrintingMatrix:
             )
             reprint = await print_prescription(str(patient["_id"]), actor=VOLUNTEER)
             assert reprint["prescription"]["reg_no"] == patient["reg_no"]
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
 
 class TestScoringAndMessages:
     def test_s01_lead_direct_no_double_count(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            camp_id, _day, patient = await _printed_patient(mock_db, registrar=LEAD)
+        async def run(db):
+            camp_id, _day, patient = await _printed_patient(db, registrar=LEAD)
             await complete_prescription(_complete_body(patient["_id"], "op-s01"), actor=CLINICAL)
             board = await routes_reports.leaderboard(actor=LEAD)
             lead = next(x for x in board["team_leads"] if x["id"] == str(LEAD["_id"]))
             assert lead["personal_points"] == 1
             assert lead["points"] == 1
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_s02_team_change_keeps_original_credit(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
+        async def run(db):
             lead_a, lead_b = ObjectId(), ObjectId()
-            await mock_db.users.insert_one({"_id": lead_a, "name": "A", "role": "team_lead"})
-            await mock_db.users.insert_one({"_id": lead_b, "name": "B", "role": "team_lead"})
             vol = {"_id": ObjectId(), "role": "volunteer", "name": "V", "team_lead_id": str(lead_a)}
-            await mock_db.users.insert_one(vol)
-            _camp, _day, patient = await _printed_patient(mock_db, registrar=vol)
+            await db.users.insert_many([
+                user_doc("A", "team_lead", _id=lead_a), user_doc("B", "team_lead", _id=lead_b),
+                user_doc("V", "volunteer", _id=vol["_id"], team_lead_id=str(lead_a)),
+            ])
+            _camp, _day, patient = await _printed_patient(db, registrar=vol)
             await complete_prescription(_complete_body(patient["_id"], "op-s02"), actor=CLINICAL)
-            await mock_db.users.update_one({"_id": vol["_id"]}, {"$set": {"team_lead_id": str(lead_b)}})
+            await db.users.update_one({"_id": vol["_id"]}, {"$set": {"team_lead_id": str(lead_b)}})
             board = await routes_reports.leaderboard(actor=ADMIN)
             leads = {x["id"]: x for x in board["team_leads"]}
             assert leads[str(lead_a)]["points"] == 1
             assert leads.get(str(lead_b), {}).get("points", 0) == 0
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_s03_self_registration_no_staff_point(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            await _ensure_user(mock_db, VOLUNTEER)
-            await _ensure_user(mock_db, CLINICAL)
-            camp_id, day_id = await _seed_camp(mock_db)
+        async def run(db):
+            await _ensure_user(db, VOLUNTEER)
+            await _ensure_user(db, CLINICAL)
+            camp_id, day_id = await _seed_camp(db)
             pid = ObjectId()
-            await mock_db.patients.insert_one({
-                "_id": pid, "camp_id": camp_id, "camp_day_id": day_id, "reg_no": 77,
-                "full_name": "Self Pat", "created_by": None, "is_self_registered": True,
-                "arrived_at": helpers.now_utc(), "printed_at": helpers.now_utc(),
-                "queue_status": "arrived", "clinical_generation": 0,
-                "committed_revision_id": None, "issue_auth_op": None,
-            })
+            await db.patients.insert_one(patient_doc(
+                _id=pid, camp_id=camp_id, camp_day_id=day_id,
+                full_name="Self Pat", created_by=None, is_self_registered=True,
+                arrived_at=NOW, printed_at=NOW,
+                queue_status="arrived", clinical_generation=0,
+                committed_revision_id=None, issue_auth_op=None,
+            ))
             await complete_prescription(_complete_body(pid, "op-s03"), actor=CLINICAL)
             board = await routes_reports.leaderboard(actor=VOLUNTEER)
             for row in board["volunteers"]:
                 assert row["points"] == 0
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_s04_point_follows_valid_completion(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, _day, patient = await _printed_patient(mock_db)
+        async def run(db):
+            _camp, _day, patient = await _printed_patient(db)
             done = await complete_prescription(_complete_body(patient["_id"], "op-s04"), actor=CLINICAL)
             board = await routes_reports.leaderboard(actor=VOLUNTEER)
             vol = next(v for v in board["volunteers"] if v["id"] == str(VOLUNTEER["_id"]))
@@ -1063,34 +935,26 @@ class TestScoringAndMessages:
             board = await routes_reports.leaderboard(actor=VOLUNTEER)
             vol = next(v for v in board["volunteers"] if v["id"] == str(VOLUNTEER["_id"]))
             assert vol["points"] == 1
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_s05_shared_mobile_not_collapsed(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            camp_id, day_id = await _seed_camp(mock_db)
-            a = await desk_register(
-                RegisterBody(full_name="One", age=40, phone="9876500066", camp_day_id=str(day_id)),
-                _Request(), actor=VOLUNTEER,
-             background_tasks=None)
-            b = await desk_register(
-                RegisterBody(full_name="Two", age=41, phone="9876500066", camp_day_id=str(day_id)),
-                _Request(), actor=VOLUNTEER,
-             background_tasks=None)
-            assert a["registration"]["id"] != b["registration"]["id"]
-        asyncio.run(run())
+        async def run(db):
+            camp_id, day_id = await _seed_camp(db)
+            a = await register(day_id, actor=VOLUNTEER, full_name="One", age=40, phone="9876500066")
+            b = await register(day_id, actor=VOLUNTEER, full_name="Two", age=41, phone="9876500066")
+            assert a["id"] != b["id"]
+        run_camp(monkeypatch, run)
 
     def test_m01_self_register_requires_mobile(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp, day_id = await _seed_camp(mock_db)
+        async def run(db):
+            _camp, day_id = await _seed_camp(db)
             with pytest.raises(HTTPException) as exc:
                 await _create_registration(
                     RegisterBody(full_name="No Phone", age=40, camp_day_id=str(day_id)),
-                    None, True, _Request(),
+                    None, True, Request(),
                 )
             assert exc.value.status_code == 400
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_m02_reminder_includes_aadhaar_hindi(self, monkeypatch):
         text = sms.REGISTRATION_CONFIRMATION + sms.CAMP_REMINDER

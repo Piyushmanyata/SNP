@@ -1,32 +1,17 @@
-import os
-import sys
-from pathlib import Path
-
-backend_dir = Path(__file__).resolve().parents[1]
-if str(backend_dir) not in sys.path:
-    sys.path.insert(0, str(backend_dir))
-
-os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
-os.environ.setdefault("DB_NAME", "snp_test")
-os.environ.setdefault("ADMIN_EMAIL", "admin@snpcamps.org")
-os.environ.setdefault("ADMIN_PASSWORD", "TestPass@12345")
-os.environ.setdefault("JWT_SECRET", "test-jwt-secret")
-os.environ.setdefault("AADHAAR_HASH_PEPPER", "test-pepper")
-
-import asyncio
 import json
 import re
 import string
+from datetime import timedelta
+from pathlib import Path
 
+import httpx
 from bson import ObjectId
-from fastapi.testclient import TestClient
 
-import db as db_module
-import helpers
 import msg91
 import routes_reminders
-import server as server_mod
+import server
 import sms
+from seed import TOMORROW, day, patient_doc, recorder, run_camp, seed_camp
 from sms import (
     CAMP_REMINDER,
     OT_REMINDER,
@@ -35,11 +20,9 @@ from sms import (
     SPECS_REMINDER,
     SPECS_TOKEN,
 )
-from test_adversarial_challenger import setup_mock_db
 
-TODAY = "2026-09-01"
-TOMORROW = "2026-09-02"
-TOMORROW_SHOWN = "02-09-2026"
+backend_dir = Path(__file__).resolve().parents[1]
+TOMORROW_SHOWN = "06-10-2026"
 SECRET = "cron-test-secret"
 HOUSEHOLD = "9876500001"
 
@@ -53,27 +36,14 @@ TEMPLATE_ENV = {
 }
 
 
-def _async_noop():
-    async def _inner(*_a, **_k):
-        return None
-    return _inner
-
-
 async def _open_canary(*_args):
     return "open"
 
 
-def _client(monkeypatch, mock_db, *, msg91_on=True, secret=SECRET, canary=False):
+def _run(monkeypatch, body, *, msg91_on=True, canary=False):
     if not canary:
         monkeypatch.setattr(routes_reminders, "_canary", _open_canary)
-    monkeypatch.setattr(server_mod, "init_indexes", _async_noop())
-    monkeypatch.setattr(server_mod, "seed_admin", _async_noop())
-    monkeypatch.setattr(helpers, "today_ist_str", lambda: TODAY)
-    monkeypatch.setattr(helpers, "tomorrow_ist_str", lambda: TOMORROW)
-    monkeypatch.setattr(routes_reminders, "helpers", helpers)
-    monkeypatch.setattr(db_module, "get_db", lambda: mock_db)
-    monkeypatch.setattr(routes_reminders, "get_db", lambda: mock_db)
-    monkeypatch.setenv("CRON_SECRET", secret)
+    monkeypatch.setenv("CRON_SECRET", SECRET)
     if msg91_on:
         monkeypatch.setenv("MSG91_AUTH_KEY", "auth")
         for name, value in TEMPLATE_ENV.items():
@@ -82,51 +52,48 @@ def _client(monkeypatch, mock_db, *, msg91_on=True, secret=SECRET, canary=False)
         monkeypatch.delenv("MSG91_AUTH_KEY", raising=False)
         for name in TEMPLATE_ENV:
             monkeypatch.delenv(name, raising=False)
-    server_mod.app.router.on_startup.clear()
-    return TestClient(server_mod.app, raise_server_exceptions=True)
+
+    async def with_client(database):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test") as client:
+            return await body(database, client)
+
+    return run_camp(monkeypatch, with_client)
 
 
-def _calls(monkeypatch):
-    captured = []
-
-    def fake_send(message_type, mobile, variables):
-        captured.append({"type": message_type, "mobile": mobile, **variables})
-        return f"id-{len(captured)}"
-
-    monkeypatch.setattr(msg91, "send_dlt_sms", fake_send)
-    monkeypatch.setattr(sms.msg91, "send_dlt_sms", fake_send)
-    monkeypatch.setattr(sms.msg91, "configured", lambda: True)
-    monkeypatch.setattr(routes_reminders.msg91, "configured", lambda: True)
-    return captured
-
-
-async def _seed_camp_household(mock_db, n_patients=4, phone=HOUSEHOLD, venue="Hall A", camp_number=162):
-    camp_id = ObjectId()
-    day_id = ObjectId()
-    await mock_db.camps.insert_one({
-        "_id": camp_id, "name": "Nadia Camp", "venue": venue, "is_active": True, "camp_number": camp_number,
-    })
-    await mock_db.camp_days.insert_one({
-        "_id": day_id, "camp_id": camp_id, "day_date": TOMORROW, "seat_limit": 50,
-    })
-    ids = []
-    for i in range(n_patients):
-        pid = ObjectId()
-        await mock_db.patients.insert_one({
-            "_id": pid,
-            "camp_id": camp_id,
-            "camp_day_id": day_id,
-            "phone": phone,
-            "phone_normalized": phone,
-            "full_name": f"P{i}",
-            "reg_no": 1000 + i,
-        })
-        ids.append(pid)
+async def _seed_camp_household(database, n_patients=4, phone=HOUSEHOLD, venue="Hall A", camp_number=162):
+    camp_id, (day_id,) = await seed_camp(
+        database, days=(TOMORROW,), name="Nadia Camp", venue=venue, camp_number=camp_number,
+    )
+    ids = [ObjectId() for _ in range(n_patients)]
+    if ids:
+        await database.patients.insert_many([
+            patient_doc(
+                _id=pid, camp_id=camp_id, camp_day_id=day_id, phone=phone, phone_normalized=phone,
+                full_name=f"P{i}", reg_no=1000 + i,
+            )
+            for i, pid in enumerate(ids)
+        ])
     return camp_id, day_id, ids
 
 
-def _post(client, secret=SECRET):
-    return client.post("/api/cron/reminders", headers={"X-Cron-Secret": secret})
+async def _numbered_camp(database):
+    camp_id = ObjectId()
+    await database.camps.insert_one({"_id": camp_id, "name": "C", "venue": "Hall A", "camp_number": 162})
+    return camp_id
+
+
+async def _post(client, secret=SECRET):
+    return await client.post("/api/cron/reminders", headers={"X-Cron-Secret": secret})
+
+
+async def _ledger(database):
+    return await database.reminder_ledger.find().sort("_id", 1).to_list(None)
+
+
+async def _age_ledger(database, by):
+    await database.reminder_ledger.update_many(
+        {}, [{"$set": {"created_at": {"$subtract": ["$created_at", by // timedelta(milliseconds=1)]}}}],
+    )
 
 
 class TestMessageCopy:
@@ -161,327 +128,336 @@ class TestMessageCopy:
 
 class TestReminderCronHttp:
     def test_failed_provider_call_is_reported_and_retried_without_duplicate_success(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
-        captured = _calls(monkeypatch)
-        client = _client(monkeypatch, mock_db)
+        captured = recorder(monkeypatch)
         provider = msg91.send_dlt_sms
 
         def fail(*args, **kwargs):
             raise msg91.Unsent("connection refused")
 
-        monkeypatch.setattr(msg91, "send_dlt_sms", fail)
-        first = _post(client).json()
-        assert first["ok"] is False
-        assert first["failed"] == 1
-        monkeypatch.setattr(msg91, "send_dlt_sms", provider)
-        mock_db.reminder_ledger.docs[0]["created_at"] -= sms.RETRY_AFTER
-        retry = _post(client).json()
-        assert retry["ok"] is True
-        assert retry["sent"] == 1
-        assert len(mock_db.reminder_ledger.docs) == 1
-        assert _post(client).json()["sent"] == 0
-        assert len(captured) == 1
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=1)
+            monkeypatch.setattr(msg91, "send_dlt_sms", fail)
+            first = (await _post(client)).json()
+            assert first["ok"] is False
+            assert first["failed"] == 1
+            monkeypatch.setattr(msg91, "send_dlt_sms", provider)
+            await _age_ledger(database, sms.RETRY_AFTER)
+            retry = (await _post(client)).json()
+            assert retry["ok"] is True
+            assert retry["sent"] == 1
+            assert await database.reminder_ledger.count_documents({}) == 1
+            assert (await _post(client)).json()["sent"] == 0
+            assert len(captured) == 1
+
+        _run(monkeypatch, body)
 
     def test_wrong_secret_refused(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        client = _client(monkeypatch, mock_db)
-        r = _post(client, secret="nope")
-        assert r.status_code == 401
+        async def body(database, client):
+            assert (await _post(client, secret="nope")).status_code == 401
+
+        _run(monkeypatch, body)
 
     def test_missing_secret_refused(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        client = _client(monkeypatch, mock_db)
-        r = client.post("/api/cron/reminders")
-        assert r.status_code == 401
+        async def body(database, client):
+            assert (await client.post("/api/cron/reminders")).status_code == 401
+
+        _run(monkeypatch, body)
 
     def test_msg91_unset_does_not_500(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        client = _client(monkeypatch, mock_db, msg91_on=False)
-        r = _post(client)
-        assert r.status_code == 200, r.text
-        assert r.json()["ok"] is True
-        assert r.json()["sent"] == 0
+        async def body(database, client):
+            r = await _post(client)
+            assert r.status_code == 200, r.text
+            assert r.json()["ok"] is True
+            assert r.json()["sent"] == 0
+
+        _run(monkeypatch, body, msg91_on=False)
 
     def test_approved_reminder_sends_while_specs_template_is_unavailable(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
         configured = msg91.configured
-        captured = _calls(monkeypatch)
+        captured = recorder(monkeypatch)
         monkeypatch.setattr(msg91, "configured", configured)
-        client = _client(monkeypatch, mock_db)
-        monkeypatch.delenv("MSG91_TEMPLATE_SPECS_TOKEN")
-        monkeypatch.delenv("MSG91_TEMPLATE_SPECS")
 
-        response = _post(client)
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=1)
+            monkeypatch.delenv("MSG91_TEMPLATE_SPECS_TOKEN")
+            monkeypatch.delenv("MSG91_TEMPLATE_SPECS")
 
-        assert response.status_code == 200, response.text
-        assert response.json()["sent"] == 1
-        assert [call["type"] for call in captured] == ["camp"]
-        patient = mock_db.patients.docs[0]
-        assert asyncio.run(sms.deliver_patient_sms(
-            mock_db, patient, "specs", TOMORROW, "Hall A", "10:00", "17:00",
-        )) == "skipped"
-        assert [row["message_type"] for row in mock_db.reminder_ledger.docs] == ["camp"]
+            response = await _post(client)
+
+            assert response.status_code == 200, response.text
+            assert response.json()["sent"] == 1
+            assert [call["type"] for call in captured] == ["camp"]
+            patient = await database.patients.find_one()
+            assert await sms.deliver_patient_sms(
+                database, patient, "specs", TOMORROW, "Hall A", "10:00", "17:00",
+            ) == "skipped"
+            assert [row["message_type"] for row in await _ledger(database)] == ["camp"]
+
+        _run(monkeypatch, body)
 
     def test_household_of_four_sends_four_camp_reminders(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=4, phone=HOUSEHOLD, venue="Hall A"))
-        captured = _calls(monkeypatch)
-        client = _client(monkeypatch, mock_db)
-        r = _post(client)
-        assert r.status_code == 200, r.text
-        assert r.json()["sent"] == 4
-        assert [c["mobile"] for c in captured] == [HOUSEHOLD] * 4
-        assert sorted(c["reg_no"] for c in captured) == [1000, 1001, 1002, 1003]
-        assert {c["type"] for c in captured} == {"camp"}
-        assert {c["date"] for c in captured} == {TOMORROW_SHOWN}
-        assert len(mock_db.reminder_ledger.docs) == 4
+        captured = recorder(monkeypatch)
+
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=4, phone=HOUSEHOLD, venue="Hall A")
+            r = await _post(client)
+            assert r.status_code == 200, r.text
+            assert r.json()["sent"] == 4
+            assert [c["mobile"] for c in captured] == [HOUSEHOLD] * 4
+            assert sorted(c["reg_no"] for c in captured) == [1000, 1001, 1002, 1003]
+            assert {c["type"] for c in captured} == {"camp"}
+            assert {c["date"] for c in captured} == {TOMORROW_SHOWN}
+            assert await database.reminder_ledger.count_documents({}) == 4
+
+        _run(monkeypatch, body)
 
     def test_camp_reminder_ledger_row_carries_reg_no_copy(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=1, phone=HOUSEHOLD, venue="Hall A"))
-        _calls(monkeypatch)
-        client = _client(monkeypatch, mock_db)
-        assert _post(client).status_code == 200
-        row = mock_db.reminder_ledger.docs[0]
-        assert row["message_type"] == "camp"
-        assert row["event_date"] == TOMORROW
-        assert row["number"] == HOUSEHOLD
-        assert row["status"] == "sent"
-        assert row["provider_id"] == "id-1"
-        assert row["copy"] == CAMP_REMINDER.format(reg_no=1000, camp_no=162, date=TOMORROW_SHOWN, venue="Hall A")
+        recorder(monkeypatch)
+
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=1, phone=HOUSEHOLD, venue="Hall A")
+            assert (await _post(client)).status_code == 200
+            [row] = await _ledger(database)
+            assert row["message_type"] == "camp"
+            assert row["event_date"] == TOMORROW
+            assert row["number"] == HOUSEHOLD
+            assert row["status"] == "sent"
+            assert row["provider_id"] == "id-1"
+            assert row["copy"] == CAMP_REMINDER.format(reg_no=1000, camp_no=162, date=TOMORROW_SHOWN, venue="Hall A")
+
+        _run(monkeypatch, body)
 
     def test_same_patient_camp_and_ot_sends_two(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
+        captured = recorder(monkeypatch)
 
-        async def seed():
-            camp_id, _day_id, ids = await _seed_camp_household(mock_db, n_patients=1, phone=HOUSEHOLD, venue="Hall A")
+        async def body(database, client):
+            camp_id, _day_id, ids = await _seed_camp_household(database, n_patients=1, phone=HOUSEHOLD, venue="Hall A")
             ot_day = ObjectId()
-            await mock_db.ot_schedule_days.insert_one({
+            await database.ot_schedule_days.insert_one({
                 "_id": ot_day, "camp_id": camp_id, "day_date": TOMORROW,
                 "venue": "OT Theatre", "seat_limit": 5, "seats_taken": 1,
             })
-            await mock_db.deferred_slips.insert_one({
+            await database.deferred_slips.insert_one({
                 "patient_id": ids[0], "item_type": "ot", "active": True, "cancelled": False,
                 "collection_date": TOMORROW, "collection_venue": "stale",
                 "ot_schedule_day_id": ot_day, "version": 1,
             })
-        asyncio.run(seed())
-        captured = _calls(monkeypatch)
-        client = _client(monkeypatch, mock_db)
-        r = _post(client)
-        assert r.status_code == 200, r.text
-        assert r.json()["sent"] == 2
-        assert {(c["type"], c["venue"]) for c in captured} == {("camp", "Hall A"), ("ot", "OT Theatre")}
+            r = await _post(client)
+            assert r.status_code == 200, r.text
+            assert r.json()["sent"] == 2
+            assert {(c["type"], c["venue"]) for c in captured} == {("camp", "Hall A"), ("ot", "OT Theatre")}
+
+        _run(monkeypatch, body)
 
     def test_cancelled_token_excluded_from_ot_and_specs(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
+        captured = recorder(monkeypatch)
 
-        async def seed():
-            camp_id = ObjectId()
+        async def body(database, client):
+            camp_id = await _numbered_camp(database)
             pid = ObjectId()
-            await mock_db.camps.insert_one({"_id": camp_id, "name": "C", "venue": "Hall A"})
-            await mock_db.patients.insert_one({
-                "_id": pid, "camp_id": camp_id, "camp_day_id": ObjectId(), "reg_no": 7,
-                "phone": HOUSEHOLD, "phone_normalized": HOUSEHOLD,
-            })
-            await mock_db.deferred_slips.insert_one({
-                "patient_id": pid, "item_type": "ot", "active": False, "cancelled": True,
-                "collection_date": TOMORROW, "collection_venue": "OT Theatre", "version": 1,
-            })
-            await mock_db.deferred_slips.insert_one({
-                "patient_id": pid, "item_type": "specs_made", "active": False, "cancelled": True,
-                "collection_date": TOMORROW, "collection_venue": "Optical", "version": 1,
-            })
-        asyncio.run(seed())
-        captured = _calls(monkeypatch)
-        client = _client(monkeypatch, mock_db)
-        r = _post(client)
-        assert r.status_code == 200, r.text
-        assert captured == []
-        assert r.json()["sent"] == 0
+            await database.patients.insert_one(patient_doc(
+                _id=pid, camp_id=camp_id, camp_day_id=ObjectId(), reg_no=7,
+                phone=HOUSEHOLD, phone_normalized=HOUSEHOLD,
+            ))
+            await database.deferred_slips.insert_many([
+                {
+                    "patient_id": pid, "item_type": "ot", "active": False, "cancelled": True,
+                    "collection_date": TOMORROW, "collection_venue": "OT Theatre", "version": 1,
+                },
+                {
+                    "patient_id": pid, "item_type": "specs_made", "active": False, "cancelled": True,
+                    "collection_date": TOMORROW, "collection_venue": "Optical", "version": 1,
+                    "collection_start_time": "10:00", "collection_end_time": "17:00",
+                },
+            ])
+            r = await _post(client)
+            assert r.status_code == 200, r.text
+            assert captured == []
+            assert r.json()["sent"] == 0
+
+        _run(monkeypatch, body)
 
     def test_missing_and_invalid_numbers_skipped(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
+        captured = recorder(monkeypatch)
 
-        async def seed():
-            camp_id = ObjectId()
-            day_id = ObjectId()
-            await mock_db.camps.insert_one({"_id": camp_id, "name": "C", "venue": "Hall A"})
-            await mock_db.camp_days.insert_one({"_id": day_id, "camp_id": camp_id, "day_date": TOMORROW})
-            for reg_no, phone in ((1, None), (2, "9999999999"), (3, "123")):
-                await mock_db.patients.insert_one({
-                    "_id": ObjectId(), "camp_id": camp_id, "camp_day_id": day_id, "reg_no": reg_no,
-                    "phone": phone, "phone_normalized": phone,
-                })
-        asyncio.run(seed())
-        captured = _calls(monkeypatch)
-        client = _client(monkeypatch, mock_db)
-        r = _post(client)
-        assert r.status_code == 200, r.text
-        assert captured == []
-        assert mock_db.reminder_ledger.docs == []
+        async def body(database, client):
+            camp_id, (day_id,) = await seed_camp(database, days=(TOMORROW,), venue="Hall A")
+            await database.patients.insert_many([
+                patient_doc(camp_id=camp_id, camp_day_id=day_id, reg_no=reg_no, phone=phone, phone_normalized=phone)
+                for reg_no, phone in ((1, None), (2, "9999999999"), (3, "123"))
+            ])
+            r = await _post(client)
+            assert r.status_code == 200, r.text
+            assert captured == []
+            assert await _ledger(database) == []
+
+        _run(monkeypatch, body)
 
     def test_second_run_same_event_date_emits_nothing_extra(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=4, phone=HOUSEHOLD, venue="Hall A"))
-        captured = _calls(monkeypatch)
-        client = _client(monkeypatch, mock_db)
-        r1 = _post(client)
-        r2 = _post(client)
-        assert r1.json()["sent"] == 4
-        assert r2.json()["sent"] == 0
-        assert len(captured) == 4
-        assert len(mock_db.reminder_ledger.docs) == 4
+        captured = recorder(monkeypatch)
+
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=4, phone=HOUSEHOLD, venue="Hall A")
+            r1 = await _post(client)
+            r2 = await _post(client)
+            assert r1.json()["sent"] == 4
+            assert r2.json()["sent"] == 0
+            assert len(captured) == 4
+            assert await database.reminder_ledger.count_documents({}) == 4
+
+        _run(monkeypatch, body)
 
     def test_specs_reminder_states_the_token_window_range_and_hours(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
+        captured = recorder(monkeypatch)
 
-        async def seed():
+        async def body(database, client):
             pid = ObjectId()
-            camp_id = ObjectId()
+            camp_id = await _numbered_camp(database)
             specs_day = ObjectId()
-            await mock_db.camps.insert_one({"_id": camp_id, "name": "C", "venue": "Hall A", "camp_number": 162})
-            await mock_db.patients.insert_one({
-                "_id": pid, "camp_id": camp_id, "camp_day_id": ObjectId(), "reg_no": 42,
-                "phone": HOUSEHOLD, "phone_normalized": HOUSEHOLD,
-            })
-            await mock_db.specs_collection_days.insert_one({
-                "_id": specs_day, "day_date": TOMORROW, "end_date": "2026-09-12", "venue": "Optical Desk",
+            await database.patients.insert_one(patient_doc(
+                _id=pid, camp_id=camp_id, camp_day_id=ObjectId(), reg_no=42,
+                phone=HOUSEHOLD, phone_normalized=HOUSEHOLD,
+            ))
+            await database.specs_collection_days.insert_one({
+                "_id": specs_day, "day_date": TOMORROW, "end_date": day(11), "venue": "Optical Desk",
                 "start_time": "09:00", "end_time": "16:00", "camp_id": camp_id,
             })
-            await mock_db.deferred_slips.insert_one({
+            await database.deferred_slips.insert_one({
                 "patient_id": pid, "item_type": "specs_made", "active": True, "cancelled": False,
-                "collection_date": TOMORROW, "collection_end_date": "2026-09-09",
+                "collection_date": TOMORROW, "collection_end_date": day(8),
                 "collection_venue": "Token Hall",
                 "collection_start_time": "10:00", "collection_end_time": "17:00",
                 "specs_collection_day_id": specs_day, "version": 1,
             })
-        asyncio.run(seed())
-        captured = _calls(monkeypatch)
-        client = _client(monkeypatch, mock_db)
-        r = _post(client)
-        assert r.status_code == 200, r.text
-        assert captured == [{
-            "type": "specs", "mobile": HOUSEHOLD, "reg_no": 42, "camp_no": "162",
-            "date": TOMORROW_SHOWN, "end_date": "09-09-2026",
-            "venue": "Token Hall",
-        }]
-        assert mock_db.reminder_ledger.docs[0]["copy"] == (
-            "Sikar Zilla Welfare Trust के 162 वे शिविर के चश्मे बनकर तैयार हैं। चश्मे 02-09-2026 से 09-09-2026 तक "
-            "प्रतिदिन 10:00 AM से 5:00 PM तक Token Hall आकर ले जाएँ। टोकन क्रमांक 42 अवश्य साथ लाएँ।"
-        )
+            r = await _post(client)
+            assert r.status_code == 200, r.text
+            assert captured == [{
+                "type": "specs", "mobile": HOUSEHOLD, "reg_no": 42, "camp_no": "162",
+                "date": TOMORROW_SHOWN, "end_date": "13-10-2026",
+                "venue": "Token Hall",
+            }]
+            [row] = await _ledger(database)
+            assert row["copy"] == (
+                "Sikar Zilla Welfare Trust के 162 वे शिविर के चश्मे बनकर तैयार हैं। चश्मे 06-10-2026 से 13-10-2026 तक "
+                "प्रतिदिन 10:00 AM से 5:00 PM तक Token Hall आकर ले जाएँ। टोकन क्रमांक 42 अवश्य साथ लाएँ।"
+            )
+
+        _run(monkeypatch, body)
 
     def test_a_single_day_legacy_token_reads_as_a_one_day_range(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
+        captured = recorder(monkeypatch)
 
-        async def seed():
+        async def body(database, client):
             pid = ObjectId()
-            camp_id = ObjectId()
-            await mock_db.camps.insert_one({"_id": camp_id, "name": "C", "venue": "Hall A", "camp_number": 162})
-            await mock_db.patients.insert_one({
-                "_id": pid, "camp_id": camp_id, "camp_day_id": ObjectId(), "reg_no": 42,
-                "phone": HOUSEHOLD, "phone_normalized": HOUSEHOLD,
-            })
-            await mock_db.deferred_slips.insert_one({
+            camp_id = await _numbered_camp(database)
+            await database.patients.insert_one(patient_doc(
+                _id=pid, camp_id=camp_id, camp_day_id=ObjectId(), reg_no=42,
+                phone=HOUSEHOLD, phone_normalized=HOUSEHOLD,
+            ))
+            await database.deferred_slips.insert_one({
                 "patient_id": pid, "item_type": "specs_made", "active": True, "cancelled": False,
                 "collection_date": TOMORROW, "collection_venue": "Token Hall",
                 "collection_start_time": "10:00", "collection_end_time": "17:00", "version": 1,
             })
-        asyncio.run(seed())
-        captured = _calls(monkeypatch)
-        _post(_client(monkeypatch, mock_db))
-        assert [(c["date"], c["end_date"]) for c in captured] == [
-            (TOMORROW_SHOWN, TOMORROW_SHOWN),
-        ]
+            await _post(client)
+            assert [(c["date"], c["end_date"]) for c in captured] == [
+                (TOMORROW_SHOWN, TOMORROW_SHOWN),
+            ]
+
+        _run(monkeypatch, body)
 
     def test_specs_token_without_fixed_pickup_hours_is_not_sent(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
+        captured = recorder(monkeypatch)
 
-        async def seed():
-            camp_id = ObjectId()
-            await mock_db.camps.insert_one({"_id": camp_id, "name": "C", "venue": "Hall A", "camp_number": 162})
+        async def body(database, client):
+            camp_id = await _numbered_camp(database)
             for reg_no, hours in ((42, {}), (43, {"collection_start_time": "10:00", "collection_end_time": "15:00"})):
                 pid = ObjectId()
-                await mock_db.patients.insert_one({
-                    "_id": pid, "camp_id": camp_id, "camp_day_id": ObjectId(), "reg_no": reg_no,
-                    "phone": HOUSEHOLD, "phone_normalized": HOUSEHOLD,
-                })
-                await mock_db.deferred_slips.insert_one({
+                await database.patients.insert_one(patient_doc(
+                    _id=pid, camp_id=camp_id, camp_day_id=ObjectId(), reg_no=reg_no,
+                    phone=HOUSEHOLD, phone_normalized=HOUSEHOLD,
+                ))
+                await database.deferred_slips.insert_one({
                     "patient_id": pid, "item_type": "specs_made", "active": True, "cancelled": False,
                     "collection_date": TOMORROW, "collection_venue": "Token Hall", "version": 1, **hours,
                 })
-        asyncio.run(seed())
-        captured = _calls(monkeypatch)
-        r = _post(_client(monkeypatch, mock_db))
-        assert r.json()["sent"] == 0
-        assert captured == []
-        assert mock_db.reminder_ledger.docs == []
+            r = await _post(client)
+            assert r.json()["sent"] == 0
+            assert captured == []
+            assert await _ledger(database) == []
+
+        _run(monkeypatch, body)
 
     def test_camp_without_a_number_sends_nothing_until_the_admin_sets_it(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        camp_id, _day, _ids = asyncio.run(_seed_camp_household(mock_db, n_patients=1, camp_number=None))
-        captured = _calls(monkeypatch)
-        client = _client(monkeypatch, mock_db)
-        assert _post(client).json()["sent"] == 0
-        assert captured == []
-        assert mock_db.reminder_ledger.docs == []
-        asyncio.run(mock_db.camps.update_one({"_id": camp_id}, {"$set": {"camp_number": 162}}))
-        assert _post(client).json()["sent"] == 1
-        assert captured[0]["camp_no"] == "162"
+        captured = recorder(monkeypatch)
+
+        async def body(database, client):
+            camp_id, _day, _ids = await _seed_camp_household(database, n_patients=1, camp_number=None)
+            assert (await _post(client)).json()["sent"] == 0
+            assert captured == []
+            assert await _ledger(database) == []
+            await database.camps.update_one({"_id": camp_id}, {"$set": {"camp_number": 162}})
+            assert (await _post(client)).json()["sent"] == 1
+            assert captured[0]["camp_no"] == "162"
+
+        _run(monkeypatch, body)
 
     def test_venue_over_dlt_variable_limit_is_not_submitted_or_charged(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=1, venue="A" * 31))
-        captured = _calls(monkeypatch)
+        captured = recorder(monkeypatch)
 
-        result = _post(_client(monkeypatch, mock_db)).json()
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=1, venue="A" * 31)
 
-        assert result["sent"] == 0
-        assert captured == []
-        assert mock_db.reminder_ledger.docs == []
+            result = (await _post(client)).json()
+
+            assert result["sent"] == 0
+            assert captured == []
+            assert await _ledger(database) == []
+
+        _run(monkeypatch, body)
 
     def test_camp_reminder_uses_short_sms_venue(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        camp_id, _day, _ids = asyncio.run(_seed_camp_household(mock_db, n_patients=1, venue="A" * 64))
-        asyncio.run(mock_db.camps.update_one({"_id": camp_id}, {"$set": {"venue_sms": "Short Camp Venue"}}))
-        captured = _calls(monkeypatch)
+        captured = recorder(monkeypatch)
 
-        result = _post(_client(monkeypatch, mock_db)).json()
+        async def body(database, client):
+            camp_id, _day, _ids = await _seed_camp_household(database, n_patients=1, venue="A" * 64)
+            await database.camps.update_one({"_id": camp_id}, {"$set": {"venue_sms": "Short Camp Venue"}})
 
-        assert result["sent"] == 1
-        assert captured[0]["venue"] == "Short Camp Venue"
+            result = (await _post(client)).json()
+
+            assert result["sent"] == 1
+            assert captured[0]["venue"] == "Short Camp Venue"
+
+        _run(monkeypatch, body)
 
     def test_ot_reminder_prefers_the_short_sms_venue(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
         long_venue = "Vimla Ramkrishna Bajaj Eye Hospital, Near Canara Bank, Bilasi Mod, Deoghar 814112 (Jharkhand)"
+        captured = recorder(monkeypatch)
 
-        async def seed():
+        async def body(database, client):
             pid = ObjectId()
             ot_day = ObjectId()
-            camp_id = ObjectId()
-            await mock_db.camps.insert_one({"_id": camp_id, "name": "C", "venue": "Hall A", "camp_number": 162})
-            await mock_db.patients.insert_one({
-                "_id": pid, "camp_id": camp_id, "camp_day_id": ObjectId(), "reg_no": 11,
-                "phone": HOUSEHOLD, "phone_normalized": HOUSEHOLD,
-            })
-            await mock_db.ot_schedule_days.insert_one({
+            camp_id = await _numbered_camp(database)
+            await database.patients.insert_one(patient_doc(
+                _id=pid, camp_id=camp_id, camp_day_id=ObjectId(), reg_no=11,
+                phone=HOUSEHOLD, phone_normalized=HOUSEHOLD,
+            ))
+            await database.ot_schedule_days.insert_one({
                 "_id": ot_day, "day_date": TOMORROW, "camp_id": ObjectId(),
                 "venue": long_venue, "venue_sms": "बजाज हॉस्पिटल, देवघर",
             })
-            await mock_db.deferred_slips.insert_one({
+            await database.deferred_slips.insert_one({
                 "patient_id": pid, "item_type": "ot", "active": True, "cancelled": False,
                 "collection_date": TOMORROW, "collection_venue": long_venue,
                 "ot_schedule_day_id": ot_day, "version": 1,
             })
-        asyncio.run(seed())
-        captured = _calls(monkeypatch)
-        client = _client(monkeypatch, mock_db)
-        r = _post(client)
-        assert r.status_code == 200, r.text
-        assert captured == [{
-            "type": "ot", "mobile": HOUSEHOLD, "reg_no": 11, "camp_no": "162",
-            "date": TOMORROW_SHOWN, "venue": "बजाज हॉस्पिटल, देवघर",
-        }]
-        assert long_venue not in mock_db.reminder_ledger.docs[0]["copy"]
+            r = await _post(client)
+            assert r.status_code == 200, r.text
+            assert captured == [{
+                "type": "ot", "mobile": HOUSEHOLD, "reg_no": 11, "camp_no": "162",
+                "date": TOMORROW_SHOWN, "venue": "बजाज हॉस्पिटल, देवघर",
+            }]
+            [row] = await _ledger(database)
+            assert long_venue not in row["copy"]
+
+        _run(monkeypatch, body)

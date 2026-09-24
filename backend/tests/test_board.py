@@ -51,6 +51,20 @@ class TestCampDayBoard:
 
         run_camp(monkeypatch, body)
 
+    def test_awaiting_print_and_awaiting_seen_follow_paper_then_doctor(self, monkeypatch):
+        async def body(database):
+            camp_id, _ = await seed_camp(database)
+            arrived = NOW - timedelta(minutes=30)
+            await database.patients.insert_many([
+                patient_doc(camp_id=camp_id, arrived_at=arrived),
+                patient_doc(camp_id=camp_id, arrived_at=arrived, printed_at=arrived),
+                patient_doc(camp_id=camp_id, arrived_at=arrived, printed_at=arrived, seen_at=arrived),
+            ])
+            return (await camp_day_board(actor=ADMIN))["stages"]
+
+        stages = run_camp(monkeypatch, body)
+        assert (stages["arrived"], stages["awaiting_print"], stages["awaiting_seen"], stages["seen"]) == (3, 1, 1, 1)
+
     def test_scoped_kpis_quiet_activity_and_no_patient_names(self, monkeypatch):
         async def body(database):
             camp_id, _ = await seed_camp(database)

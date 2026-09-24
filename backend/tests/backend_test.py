@@ -6,7 +6,7 @@ never_printed, PRINT_WINDOW_CLOSED), clinical (seen-only, transcription lock,
 corrections, OT seats), staff management, reports/exports.
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from xml.etree.ElementTree import Element, tostring
 
@@ -15,7 +15,15 @@ import requests
 
 from conftest import API
 
-TODAY_IST = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d")
+NOW_IST = datetime.now(ZoneInfo("Asia/Kolkata"))
+TODAY_IST = NOW_IST.strftime("%Y-%m-%d")
+
+
+def future(days):
+    return (NOW_IST.date() + timedelta(days=days)).isoformat()
+
+
+DAY_A, DAY_B, DAY_C, DAY_D, DAY_E = future(60), future(64), future(77), future(78), future(81)
 TAG = uuid.uuid4().hex[:6]
 STATE = {}
 
@@ -530,7 +538,7 @@ class TestClinical:
 
     def test_create_ot_day(self, admin):
         r = admin.post(f"{API}/clinical/ot-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-01",
+            "camp_id": STATE["camp_id"], "day_date": DAY_A,
             "venue": "TEST OT Hospital", "seat_limit": 1,
         }, timeout=30)
         assert r.status_code == 200, r.text
@@ -540,21 +548,21 @@ class TestClinical:
 
     def test_create_list_upsert_specs_collection_days(self, admin):
         r = admin.post(f"{API}/clinical/specs-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-05",
+            "camp_id": STATE["camp_id"], "day_date": DAY_B,
             "venue": "TEST Optical",
         }, timeout=30)
         assert r.status_code == 200, r.text
         d = r.json()["specs_day"]
         assert "seat_limit" not in d and "seats_taken" not in d and "seats_free" not in d
         assert d["start_time"] == "10:00" and d["end_time"] == "17:00"
-        assert d["day_date"] == "2026-12-05"
+        assert d["day_date"] == DAY_B
         STATE["specs_day_id"] = d["id"]
 
         listed = admin.get(f"{API}/clinical/specs-days", timeout=30).json()["specs_days"]
         assert any(x["id"] == d["id"] and x["start_time"] == "10:00" for x in listed)
 
         r = admin.post(f"{API}/clinical/specs-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-05",
+            "camp_id": STATE["camp_id"], "day_date": DAY_B,
             "venue": "TEST Optical Hall",
         }, timeout=30)
         assert r.status_code == 200, r.text
@@ -616,7 +624,7 @@ class TestClinical:
 
         r = clin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": STATE["trans_id"], "item_type": "specs_made", "status": "deferred",
-            "collection_date": "2026-12-05", "collection_venue": "TEST Optical",
+            "collection_date": DAY_B, "collection_venue": "TEST Optical",
             "paper_reviewed": True, "reviewed_revision_id": STATE["rev_id"],
             "reviewed_generation": STATE["gen"], "operation_id": f"op-specs-miss2-{TAG}",
         }, timeout=30)
@@ -633,7 +641,7 @@ class TestClinical:
         assert r.status_code == 200, r.text
         slip = r.json()["slip"]
         assert slip["item_type"] == "specs_made"
-        assert slip["collection_date"] == "2026-12-05"
+        assert slip["collection_date"] == DAY_B
         assert slip["collection_venue"] == STATE["specs_day_venue"]
         assert slip["active"] == True
         STATE["specs_slip_id"] = slip["id"]
@@ -645,12 +653,12 @@ class TestClinical:
 
     def test_specs_window_can_be_updated_after_assignment(self, admin):
         invalid = admin.post(f"{API}/clinical/specs-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-05",
+            "camp_id": STATE["camp_id"], "day_date": DAY_B,
             "venue": "TEST Optical Hall", "start_time": "10:00", "end_time": "16:00",
         }, timeout=30)
         assert invalid.status_code == 400, invalid.text
         r = admin.post(f"{API}/clinical/specs-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-05",
+            "camp_id": STATE["camp_id"], "day_date": DAY_B,
             "venue": "TEST Optical Hall",
         }, timeout=30)
         assert r.status_code == 200, r.text
@@ -678,7 +686,7 @@ class TestClinical:
         assert r.status_code == 200, r.text
         slip = r.json()["slip"]
         assert slip["item_type"] == "ot"
-        assert slip["collection_date"] == "2026-12-01"
+        assert slip["collection_date"] == DAY_A
         STATE["ot_slip_id"] = slip["id"]
 
         days = admin.get(f"{API}/clinical/ot-days", timeout=30).json()["ot_days"]
@@ -692,7 +700,7 @@ class TestClinical:
 
     def test_seat_limit_below_assigned(self, admin):
         r = admin.post(f"{API}/clinical/ot-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-01",
+            "camp_id": STATE["camp_id"], "day_date": DAY_A,
             "venue": "TEST OT Hospital", "seat_limit": 0,
         }, timeout=30)
         assert r.status_code == 400, r.text
@@ -975,10 +983,10 @@ class TestFixRegressions:
     def test_ot_seat_released_on_rerecord(self, admin):
         # two OT days with free seats
         a = admin.post(f"{API}/clinical/ot-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-18",
+            "camp_id": STATE["camp_id"], "day_date": DAY_C,
             "venue": "TEST OT A", "seat_limit": 3}, timeout=30)
         b = admin.post(f"{API}/clinical/ot-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-19",
+            "camp_id": STATE["camp_id"], "day_date": DAY_D,
             "venue": "TEST OT B", "seat_limit": 3}, timeout=30)
         assert a.status_code == 200 and b.status_code == 200, (a.text, b.text)
         day_a, day_b = a.json()["ot_day"]["id"], b.json()["ot_day"]["id"]
@@ -1011,10 +1019,10 @@ class TestFixRegressions:
 
     def test_specs_rerecord_replaces_active_token_without_capacity(self, admin):
         a = admin.post(f"{API}/clinical/specs-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-18",
+            "camp_id": STATE["camp_id"], "day_date": DAY_C,
             "venue": "TEST Specs A"}, timeout=30)
         b = admin.post(f"{API}/clinical/specs-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-19",
+            "camp_id": STATE["camp_id"], "day_date": DAY_D,
             "venue": "TEST Specs B"}, timeout=30)
         assert a.status_code == 200 and b.status_code == 200, (a.text, b.text)
         day_a, day_b = a.json()["specs_day"]["id"], b.json()["specs_day"]["id"]
@@ -1059,7 +1067,7 @@ class TestFixRegressions:
 
     def test_specs_choice_is_exclusive_and_collection_has_no_capacity_limit(self, admin):
         c = admin.post(f"{API}/clinical/specs-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-22",
+            "camp_id": STATE["camp_id"], "day_date": DAY_E,
             "venue": "TEST Specs C"}, timeout=30)
         assert c.status_code == 200, c.text
         day_c = c.json()["specs_day"]["id"]

@@ -1,24 +1,11 @@
 """Trivial diff: silent Aadhaar overwrite + Arrival vs Mismatch review."""
-import asyncio
-import os
-import sys
-from pathlib import Path
 from xml.etree.ElementTree import Element, tostring
-
-backend_dir = Path(__file__).resolve().parents[1]
-if str(backend_dir) not in sys.path:
-    sys.path.insert(0, str(backend_dir))
-
-os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
-os.environ.setdefault("DB_NAME", "snp_test")
-os.environ.setdefault("AADHAAR_HASH_PEPPER", "test-pepper")
 
 from bson import ObjectId
 
-from models import RegisterBody, ScanBody
+from models import ScanBody
 from routes_desk import _material_diff, print_prescription, scan
-from routes_registration import desk_register
-from test_camp_lifecycle import ACTOR, _Request, _mock, _seed_camp
+from seed import ACTOR, register, run_camp, seed_camp
 
 CARD_NAME = "Sunita Devi"
 CARD_GENDER = "F"
@@ -44,17 +31,8 @@ def card_dict(**over):
     return base
 
 
-async def _manual(day_id, phone="9876500001", **fields):
-    body = RegisterBody(
-        full_name=fields.pop("full_name", CARD_NAME),
-        age=fields.pop("age", 51),
-        phone=fields.pop("phone", phone),
-        camp_day_id=str(day_id),
-        manual_entry=True,
-        **fields,
-    )
-    result = await desk_register(body, _Request(), actor=ACTOR, background_tasks=None)
-    return result["registration"]
+async def _manual(day_id, **fields):
+    return await register(day_id, manual_entry=True, **fields)
 
 
 def _assert_silent(out, stored, expected_name=CARD_NAME):
@@ -119,9 +97,8 @@ class TestMaterialDiffUnit:
 
 class TestCardClearsTheIdentityHold:
     def test_a_door_scan_that_overwrites_a_manual_entry_can_print(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp_id, (day_id,) = await _seed_camp(mock_db)
+        async def run(database):
+            _camp_id, (day_id,) = await seed_camp(database)
             reg = await _manual(day_id, aadhaar_last4="1234", dob=CARD_DOB, gender="F")
             assert reg["identity_recheck_required"] is True
             out = await scan(ScanBody(payload=payload()), actor=ACTOR)
@@ -129,132 +106,118 @@ class TestCardClearsTheIdentityHold:
             assert out["registration"]["identity_recheck_required"] is False
             printed = await print_prescription(reg["id"], actor=ACTOR)
             assert printed["registration"]["printed_at"]
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_a_desk_registration_that_overwrites_a_manual_entry_clears_the_hold(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp_id, (day_id,) = await _seed_camp(mock_db)
+        async def run(database):
+            _camp_id, (day_id,) = await seed_camp(database)
             reg = await _manual(day_id, aadhaar_last4="1234", dob=CARD_DOB, gender="F")
-            result = await desk_register(RegisterBody(
-                full_name=CARD_NAME, phone="9876500001", camp_day_id=str(day_id),
-                aadhaar_scanned=True, qr_payload=payload(),
-            ), _Request(), actor=ACTOR, background_tasks=None)
-            assert result["registration"]["id"] == reg["id"]
-            stored = await mock_db.patients.find_one({"_id": ObjectId(reg["id"])})
+            again = await register(day_id, aadhaar_scanned=True, qr_payload=payload())
+            assert again["id"] == reg["id"]
+            stored = await database.patients.find_one({"_id": ObjectId(reg["id"])})
             assert stored["aadhaar_scanned"] is True
             assert stored["identity_recheck_required"] is False
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
 
 class TestScanTrivialAndMaterial:
     def test_name_case_checks_in_silently(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp_id, (day_id,) = await _seed_camp(mock_db)
+        async def run(database):
+            _camp_id, (day_id,) = await seed_camp(database)
             reg = await _manual(day_id, full_name="ramesh kumar", aadhaar_last4="1234",
                                 dob=CARD_DOB, gender="F")
             out = await scan(ScanBody(payload=payload(name="Ramesh Kumar")), actor=ACTOR)
-            stored = await mock_db.patients.find_one({"_id": ObjectId(reg["id"])})
+            stored = await database.patients.find_one({"_id": ObjectId(reg["id"])})
             _assert_silent(out, stored, expected_name="Ramesh Kumar")
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_name_token_order_checks_in_silently(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp_id, (day_id,) = await _seed_camp(mock_db)
+        async def run(database):
+            _camp_id, (day_id,) = await seed_camp(database)
             reg = await _manual(day_id, full_name="Kumar Ramesh", aadhaar_last4="1234",
                                 dob=CARD_DOB, gender="F")
             out = await scan(ScanBody(payload=payload(name="Ramesh Kumar")), actor=ACTOR)
-            stored = await mock_db.patients.find_one({"_id": ObjectId(reg["id"])})
+            stored = await database.patients.find_one({"_id": ObjectId(reg["id"])})
             _assert_silent(out, stored, expected_name="Ramesh Kumar")
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_material_name_is_mismatch_review(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp_id, (day_id,) = await _seed_camp(mock_db)
+        async def run(database):
+            _camp_id, (day_id,) = await seed_camp(database)
             await _manual(day_id, full_name="Ramesh Kumar", aadhaar_last4="1234",
                           dob=CARD_DOB, gender="F", age=51)
             out = await scan(ScanBody(payload=payload()), actor=ACTOR)
             assert out["outcome"] == "mismatch_review"
             assert [d["field"] for d in out["diff"]] == ["full_name"]
-            stored = await mock_db.patients.find_one({"_id": ObjectId(out["registration"]["id"])})
+            stored = await database.patients.find_one({"_id": ObjectId(out["registration"]["id"])})
             assert stored["full_name"] == "Ramesh Kumar"
             assert stored["arrived_at"] is None
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_age_within_one_year_checks_in_silently(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp_id, (day_id,) = await _seed_camp(mock_db)
+        async def run(database):
+            _camp_id, (day_id,) = await seed_camp(database)
             reg = await _manual(day_id, age=50, aadhaar_last4="1234", dob=CARD_DOB, gender="F")
             out = await scan(ScanBody(payload=payload()), actor=ACTOR)
-            stored = await mock_db.patients.find_one({"_id": ObjectId(reg["id"])})
+            stored = await database.patients.find_one({"_id": ObjectId(reg["id"])})
             _assert_silent(out, stored)
             assert stored["age"] == 51
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_age_two_years_apart_is_mismatch_review(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp_id, (day_id,) = await _seed_camp(mock_db)
+        async def run(database):
+            _camp_id, (day_id,) = await seed_camp(database)
             await _manual(day_id, age=48, aadhaar_last4="1234", dob=CARD_DOB, gender="F")
             out = await scan(ScanBody(payload=payload()), actor=ACTOR)
             assert out["outcome"] == "mismatch_review"
             assert [d["field"] for d in out["diff"]] == ["age"]
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_gender_case_checks_in_silently(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp_id, (day_id,) = await _seed_camp(mock_db)
+        async def run(database):
+            _camp_id, (day_id,) = await seed_camp(database)
             reg = await _manual(day_id, gender="female", aadhaar_last4="1234", dob=CARD_DOB)
             out = await scan(ScanBody(payload=payload()), actor=ACTOR)
-            stored = await mock_db.patients.find_one({"_id": ObjectId(reg["id"])})
+            stored = await database.patients.find_one({"_id": ObjectId(reg["id"])})
             _assert_silent(out, stored)
             assert stored["gender"] == "F"
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_different_gender_is_mismatch_review(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp_id, (day_id,) = await _seed_camp(mock_db)
+        async def run(database):
+            _camp_id, (day_id,) = await seed_camp(database)
             await _manual(day_id, gender="M", aadhaar_last4="1234", dob=CARD_DOB)
             out = await scan(ScanBody(payload=payload()), actor=ACTOR)
             assert out["outcome"] == "mismatch_review"
             assert [d["field"] for d in out["diff"]] == ["gender"]
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_different_dob_is_mismatch_review(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp_id, (day_id,) = await _seed_camp(mock_db)
+        async def run(database):
+            _camp_id, (day_id,) = await seed_camp(database)
             await _manual(day_id, aadhaar_last4="1234", dob="1970-01-01", gender="F")
             out = await scan(ScanBody(payload=payload()), actor=ACTOR)
             assert out["outcome"] == "mismatch_review"
             assert [d["field"] for d in out["diff"]] == ["dob"]
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_empty_and_address_differences_check_in_silently(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            _camp_id, (day_id,) = await _seed_camp(mock_db)
+        async def run(database):
+            _camp_id, (day_id,) = await seed_camp(database)
             reg = await _manual(day_id, aadhaar_last4="1234", dob=CARD_DOB, address="village")
             out = await scan(ScanBody(payload=payload()), actor=ACTOR)
-            stored = await mock_db.patients.find_one({"_id": ObjectId(reg["id"])})
+            stored = await database.patients.find_one({"_id": ObjectId(reg["id"])})
             _assert_silent(out, stored)
             assert stored["address"] == CARD_ADDR
             assert stored["gender"] == "F"
-        asyncio.run(run())
+        run_camp(monkeypatch, run)
 
     def test_two_manual_matches_stay_ambiguous(self, monkeypatch):
-        async def run():
-            mock_db = _mock(monkeypatch)
-            camp_id, (day_id,) = await _seed_camp(mock_db)
+        async def run(database):
+            camp_id, (day_id,) = await seed_camp(database)
             a = await _manual(day_id, aadhaar_last4="1234", dob=CARD_DOB)
-            await mock_db.patients.insert_one({
-                "_id": ObjectId(), "camp_id": camp_id, "camp_day_id": day_id, "reg_no": 999,
+            await database.patients.insert_one({
+                "camp_id": camp_id, "camp_day_id": day_id, "reg_no": 999,
                 "full_name": CARD_NAME, "full_name_normalized": "sunita devi",
                 "age": 51, "aadhaar_last4": "1234", "dob": CARD_DOB,
                 "aadhaar_scanned": False, "manual_entry": True,
@@ -263,4 +226,4 @@ class TestScanTrivialAndMaterial:
             out = await scan(ScanBody(payload=payload()), actor=ACTOR)
             assert out["outcome"] == "ambiguous"
             assert {r["reg_no"] for r in out["registrations"]} == {a["reg_no"], 999}
-        asyncio.run(run())
+        run_camp(monkeypatch, run)

@@ -13,8 +13,11 @@ import os
 import pytest
 from aadhaar import (
     decode_aadhaar,
+    parse_xml_qr,
     _to_iso_dob,
     _calc_age,
+    _clean_date_string,
+    _extract_delimited_segments,
     _normalize_gender,
     _parse_xml_attributes,
     _extract_xml_address,
@@ -42,6 +45,65 @@ def build_secure_qr(values, use_gzip=True):
 def test_decode_empty():
     assert decode_aadhaar("") == {"outcome": "not-aadhaar", "message": "No data captured."}
     assert decode_aadhaar(None) == {"outcome": "not-aadhaar", "message": "No data captured."}
+    assert decode_aadhaar("   \t\n  ")["outcome"] == "not-aadhaar"
+    assert decode_aadhaar("﻿")["outcome"] == "not-aadhaar"
+
+
+def test_decode_near_miss_payloads_are_garbage():
+    assert decode_aadhaar("1234567890")["outcome"] == "garbage"
+    assert decode_aadhaar("<PrintLetterBarcodeData />")["outcome"] == "garbage"
+
+
+@pytest.mark.parametrize("name", [None, "   "])
+def test_xml_qr_without_a_name_is_rejected(name):
+    named = f' name="{name}"' if name is not None else ""
+    with pytest.raises(ValueError, match="No name in XML QR"):
+        parse_xml_qr(f'<PrintLetterBarcodeData uid="123412345678"{named} gender="M" yob="1990"/>')
+
+
+def test_xml_qr_without_a_uid_is_rejected():
+    with pytest.raises(ValueError, match="Aadhaar number"):
+        parse_xml_qr('<PrintLetterBarcodeData name="Sunita" gender="F" yob="1990"/>')
+
+
+def test_xml_qr_hindi_script():
+    res = parse_xml_qr('<PrintLetterBarcodeData uid="555566667777" name="राजेश शर्मा" gender="M" yob="1982" dist="वाराणसी" pc="221001"/>')
+    assert res["full_name"] == "राजेश शर्मा"
+    assert res["gender"] == "M"
+    assert res["dob"] == "1982-01-01"
+    assert "वाराणसी" in res["address"]
+
+
+def test_xml_qr_short_address_attribute_names():
+    res = parse_xml_qr('<PrintLetterBarcodeData uid="111122223333" name="Mohan Lal" gender="Male" yob="1990" lm="Shiv Mandir" loc="Sector 2" village="Khed" subdist="Haveli" dist="Pune" pc="411001"/>')
+    for part in ("Shiv Mandir", "Sector 2", "Khed", "Haveli", "Pune", "411001"):
+        assert part in res["address"]
+
+
+def test_xml_qr_external_entity_is_never_resolved():
+    res = parse_xml_qr(
+        '<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>'
+        '<PrintLetterBarcodeData uid="111122224444" name="&xxe; Hacked" gender="M" dob="1980-01-01"/>'
+    )
+    assert res["full_name"] == "&xxe; Hacked"
+    assert res["aadhaar_last4"] == "4444"
+
+
+def test_extract_delimited_segments_with_fewer_delimiters_than_fields():
+    data = b"ind\xffref1234\xffJohn Doe\xff1990-01-01"
+    res = _extract_delimited_segments(data, ["indicator", "referenceid", "name", "dob", "gender", "careof"])
+    assert res["indicator"] == "ind"
+    assert res["referenceid"] == "ref1234"
+    assert res["name"] == "John Doe"
+    assert "gender" not in res
+
+
+def test_clean_date_string_strips_quotes_times_and_notes():
+    assert _clean_date_string(" '1990-05-12' ") == "1990-05-12"
+    assert _clean_date_string("`15/08/1947`") == "15/08/1947"
+    assert _clean_date_string("1980-01-01T15:30:00.000Z") == "1980-01-01"
+    assert _clean_date_string("1980-01-01 00:00:00") == "1980-01-01"
+    assert _clean_date_string("1985 (approx)") == "1985"
 
 
 def test_decode_patient_qr():
@@ -119,7 +181,7 @@ def test_decode_versioned_secure_qr(version, use_gzip):
 
 @pytest.mark.parametrize("index,value", [
     (0, "9"), (1, "2"), (1, "abcd20241021140214946"),
-    (2, "432120241021140214946"), (2, "Name\x00Hidden"),
+    (2, "432120241021140214946"), (2, "Name\x00Hidden"), (2, ""),
     (3, "31-02-1980"), (3, "9999"), (3, ""),
     (4, "Unexpected"), (4, ""),
 ])
@@ -291,7 +353,12 @@ def test_decode_additional_date_formats():
     assert _to_iso_dob("1975") == "1975-01-01"
     assert _to_iso_dob("1985-04-12T10:30:00") == "1985-04-12"
     assert _to_iso_dob("1985-04-12 00:00:00") == "1985-04-12"
+    assert _to_iso_dob("15 August 1985") == "1985-08-15"
+    assert _to_iso_dob("01-Jan-2000") == "2000-01-01"
+    assert _to_iso_dob(" '1990-05-12' ") == "1990-05-12"
     assert _to_iso_dob("invalid") is None
+    assert _to_iso_dob("") is None
+    assert _to_iso_dob(None) is None
 
 
 def test_decode_age_calculation():
@@ -343,7 +410,9 @@ def test_normalize_gender_helper():
     assert _normalize_gender("m") == "M"
     assert _normalize_gender("F") == "F"
     assert _normalize_gender("Female") == "F"
+    assert _normalize_gender("f") == "F"
     assert _normalize_gender("Other") == "O"
+    assert _normalize_gender("Transgender") == "O"
     assert _normalize_gender("") == "O"
     assert _normalize_gender(None) == "O"
 
