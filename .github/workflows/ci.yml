@@ -68,6 +68,8 @@ jobs:
           APP_DOMAIN: ci.example.com
           TLS_EMAIL: ci@example.com
           MONGO_PASSWORD: ci-mongo-password
+          MONGO_APP_PASSWORD: ci-mongo-app-password
+          MONGO_BACKUP_PASSWORD: ci-mongo-backup-password
           DB_NAME: snp_ci
           JWT_SECRET: ci-jwt-secret-at-least-thirty-two-characters
           AADHAAR_HASH_PEPPER: ci-aadhaar-pepper
@@ -77,13 +79,13 @@ jobs:
           docker compose -f docker-compose.prod.yml config --quiet
           docker run --rm -e APP_DOMAIN -e TLS_EMAIL -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
       - name: Start isolated production images
-        run: docker compose --env-file .env.example -p snp-ci up -d --build --wait --wait-timeout 180
-      - run: docker compose --env-file .env.example -p snp-ci exec -T frontend nginx -t
+        run: docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.ci.yml -p snp-ci up -d --build --wait --wait-timeout 180
+      - run: docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.ci.yml -p snp-ci exec -T frontend nginx -t
       - name: Full backend suite with real HTTP and MongoDB
         run: python -m pytest backend/tests -q --strict-markers --strict-config --junitxml=backend/test-results.xml --cov=backend --cov-config=backend/.coveragerc --cov-report=xml:backend/coverage.xml --cov-report=term:skip-covered
       - name: Container diagnostics
         if: failure()
-        run: docker compose --env-file .env.example -p snp-ci logs --no-color --tail=100
+        run: docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.ci.yml -p snp-ci logs --no-color --tail=100
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -94,7 +96,7 @@ jobs:
           retention-days: 14
       - name: Remove isolated services
         if: always()
-        run: docker compose --env-file .env.example -p snp-ci down -v
+        run: docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.ci.yml -p snp-ci down -v
 
   dependencies:
     runs-on: ubuntu-24.04

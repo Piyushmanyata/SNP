@@ -2,7 +2,7 @@ from typing import Any, Dict
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
-from db import get_db
+from db import aggregate_list, get_db
 from models import CampBody, CampDayBody, DoorManualBody, PrintWindowBody
 from helpers import IST, as_utc, iso, next_ist_midnight, now_utc, today_ist_str
 from security import require_admin, require_any
@@ -179,10 +179,10 @@ async def active_camp_public() -> Dict[str, Any]:
     if not c:
         return {"camp": None, "days": []}
     days = await db.camp_days.find({"camp_id": c["_id"]}).sort("day_date", 1).to_list(100)
-    grouped = await db.patients.aggregate([
+    grouped = await aggregate_list(db.patients, [
         {"$match": {"camp_id": c["_id"]}},
         {"$group": {"_id": "$booked_camp_day_id", "n": {"$sum": 1}}},
-    ]).to_list(1000)
+    ])
     per_day = {g["_id"]: g["n"] for g in grouped}
     today = today_ist_str()
     out = []

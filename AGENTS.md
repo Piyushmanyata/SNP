@@ -208,7 +208,7 @@ State assumptions in one line. Ask only when the answer changes what you build.
 
 The authoritative application stack consists of:
 - `frontend/`: React single-page application (React 18 + Tailwind CSS + Lucide)
-- `backend/`: FastAPI async Python application with Motor MongoDB driver
+- `backend/`: FastAPI async Python application with the PyMongo Async driver on a single-node MongoDB replica set
 - `memory/`: PRD specifications and test credentials
 - `docker-compose.prod.yml`: Hostinger KVM deployment, reminder worker, TLS and backups
 
@@ -217,6 +217,6 @@ The root Next.js + Supabase application is legacy and has been retired.
 ## Rules & Boundaries
 
 - All development must take place exclusively within `frontend/` and `backend/`.
-- Backend uses MongoDB async driver (Motor). Invariants are maintained via unique indexes and atomic conditional operations.
+- Backend uses the PyMongo Async driver. Invariants are maintained via unique indexes, atomic conditional operations and multi-document transactions.
 - Desk actions: Registration -> Print Prescription (`printed_at` presence) -> Mark Seen -> Clinical Fulfilment.
 - Accessibility: High contrast, 44x44 minimum touch targets, responsive field-ready layout.

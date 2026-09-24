@@ -5,7 +5,8 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pymongo.errors import DuplicateKeyError
 from pydantic import ValidationError
 from bson import ObjectId
-from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
+from pymongo.asynchronous.collection import AsyncCollection
+from pymongo.asynchronous.database import AsyncDatabase
 from db import get_db
 from models import (
     TranscriptionBody, FulfilmentBody, CorrectionBody, OtScheduleBody, SpecsScheduleBody,
@@ -32,7 +33,7 @@ router = APIRouter(prefix="/api/clinical", tags=["clinical"])
 
 
 @asynccontextmanager
-async def _clinical_write(db: AsyncIOMotorDatabase, transcription_id: str):
+async def _clinical_write(db: AsyncDatabase, transcription_id: str):
     token = str(ObjectId())
     claimed = await db.transcriptions.find_one_and_update(
         {"_id": ObjectId(transcription_id), "$or": [
@@ -150,7 +151,7 @@ async def diagnosis_options(actor: dict = Depends(require_any)) -> Dict[str, Any
     return {"options": DIAGNOSIS_OPTIONS}
 
 
-async def _fetch_clinical_bundle(db: AsyncIOMotorDatabase, patient: dict) -> Dict[str, Any]:
+async def _fetch_clinical_bundle(db: AsyncDatabase, patient: dict) -> Dict[str, Any]:
     person = await db.persons.find_one({"_id": patient["person_id"]}) if patient.get("person_id") else None
     trans = await db.transcriptions.find_one({"patient_id": patient["_id"]})
     fulfilments = await db.fulfilments.find({"transcription_id": trans["_id"]}).to_list(20) if trans else []
@@ -512,7 +513,7 @@ async def resolve_issued_powers(db, revision: dict, body: FulfilmentBody) -> tup
     return await stocked_power(db, right), await stocked_power(db, left)
 
 
-async def _consume_seat(collection: AsyncIOMotorCollection, day_id: str) -> Optional[dict]:
+async def _consume_seat(collection: AsyncCollection, day_id: str) -> Optional[dict]:
     return await collection.find_one_and_update(
         {"_id": ObjectId(day_id),
          "$expr": {"$lt": ["$seats_taken", "$seat_limit"]}},
@@ -550,7 +551,7 @@ DEFERRAL_CONFIG = {
 }
 
 
-async def _refuse_full(collection: AsyncIOMotorCollection, day: dict, cfg: dict) -> NoReturn:
+async def _refuse_full(collection: AsyncCollection, day: dict, cfg: dict) -> NoReturn:
     """A single full day is a retry; every day of the type full is an admin problem."""
     free = await collection.count_documents({
         "camp_id": day.get("camp_id"),
@@ -600,7 +601,7 @@ def _specs_window_selectable(day: dict) -> bool:
 
 
 async def _load_deferral_day(
-    db: AsyncIOMotorDatabase, t: dict, body: FulfilmentBody, cfg: dict, prior: dict | None,
+    db: AsyncDatabase, t: dict, body: FulfilmentBody, cfg: dict, prior: dict | None,
 ) -> dict:
     target_day_id = getattr(body, cfg["id_field"])
     if not target_day_id:
@@ -637,7 +638,7 @@ async def _load_deferral_day(
     return day
 
 
-async def _process_deferral(db: AsyncIOMotorDatabase, t: dict, body: FulfilmentBody, prior: dict | None = None) -> Optional[dict]:
+async def _process_deferral(db: AsyncDatabase, t: dict, body: FulfilmentBody, prior: dict | None = None) -> Optional[dict]:
     if body.status != "deferred" or body.item_type not in DEFERRAL_CONFIG:
         return None
     cfg = DEFERRAL_CONFIG[body.item_type]
@@ -660,7 +661,7 @@ async def _process_deferral(db: AsyncIOMotorDatabase, t: dict, body: FulfilmentB
         raise
 
 
-async def persist_fulfilment(db: AsyncIOMotorDatabase, prior: dict | None, doc: dict) -> dict:
+async def persist_fulfilment(db: AsyncDatabase, prior: dict | None, doc: dict) -> dict:
     if prior:
         await db.fulfilments.update_one({"_id": prior["_id"]}, {"$set": doc})
         doc["_id"] = prior["_id"]
@@ -704,7 +705,7 @@ def _build_fulfilment_doc(
     }
 
 
-async def _ensure_transcription_locked(db: AsyncIOMotorDatabase, transcription: dict) -> None:
+async def _ensure_transcription_locked(db: AsyncDatabase, transcription: dict) -> None:
     if not transcription.get("locked"):
         await db.transcriptions.update_one({"_id": transcription["_id"]}, {"$set": {"locked": True}})
 
@@ -1148,12 +1149,12 @@ async def create_ot_day(body: OtScheduleBody, actor: dict = Depends(require_admi
         if not d:
             raise HTTPException(status_code=409, detail="Seats changed; reload before reducing capacity")
     else:
-        res = await db.ot_schedule_days.insert_one({
+        d = {
             "camp_id": camp_id, "day_date": body.day_date,
             "venue": venue, "venue_sms": venue_sms, "seat_limit": body.seat_limit, "seats_taken": 0,
             "created_at": now_utc(),
-        })
-        d = await db.ot_schedule_days.find_one({"_id": res.inserted_id})
+        }
+        d["_id"] = (await db.ot_schedule_days.insert_one(d)).inserted_id
     return {"ot_day": ser_ot_day(d)}
 
 

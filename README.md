@@ -32,7 +32,7 @@ Hospital default: Vimla Ramkrishna Bajaj Eye Hospital, Near Canara Bank, Bilasi 
 
 Use a Linux KVM with Docker Engine and the Compose plugin. Hostinger provides an [Ubuntu Docker template](https://www.hostinger.com/support/1583571-what-are-the-available-operating-systems-for-vps-at-hostinger/). Point your domain's DNS to the KVM, and allow TCP 80/443 through the firewall.
 
-Copy `.env.production.example` to `.env.production`. Set the domain, TLS email, a private 4-digit bootstrap PIN other than 1234, and four independent random secrets. Generate each secret using `openssl rand -hex 32`; use hex for MONGO_PASSWORD so the database URL needs no escaping. Keep this file private.
+Copy `.env.production.example` to `.env.production`. Set the domain, TLS email, a private 4-digit bootstrap PIN other than 1234, and six independent random secrets: `JWT_SECRET`, `AADHAAR_HASH_PEPPER`, `CRON_SECRET`, `MONGO_PASSWORD` (root, operator only), `MONGO_APP_PASSWORD` (the API) and `MONGO_BACKUP_PASSWORD` (backups). Generate each using `openssl rand -hex 32`; hex keeps the database URLs free of escaping. Keep this file private.
 
 ```sh
 docker compose --env-file .env.production -f docker-compose.prod.yml config --quiet

@@ -9,16 +9,24 @@ services:
     image: mongo:7
     restart: unless-stopped
     logging: *logging
+    entrypoint: ["sh", "/usr/local/bin/snp-mongo-entrypoint.sh"]
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--keyFile", "/data/configdb/keyfile"]
     environment:
       MONGO_INITDB_ROOT_USERNAME: snp
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?set MONGO_PASSWORD to a random hex value}
+      DB_NAME: ${DB_NAME:?set DB_NAME}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?set MONGO_APP_PASSWORD to a random hex value}
+      MONGO_BACKUP_PASSWORD: ${MONGO_BACKUP_PASSWORD:?set MONGO_BACKUP_PASSWORD to a random hex value}
     volumes:
       - mongo_data:/data/db
+      - mongo_config:/data/configdb
+      - ./ops/mongo/entrypoint.sh:/usr/local/bin/snp-mongo-entrypoint.sh:ro
+      - ./ops/mongo/init-users.js:/docker-entrypoint-initdb.d/init-users.js:ro
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD-SHELL", "mongosh --quiet -u \"$$MONGO_INITDB_ROOT_USERNAME\" -p \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval \"try { rs.status().myState } catch (e) { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]}); 0 }\" | grep -qx 1"]
       interval: 10s
-      timeout: 5s
-      retries: 20
+      timeout: 10s
+      retries: 30
 
   backend:
     build: ./backend
@@ -27,7 +35,7 @@ services:
     security_opt:
       - no-new-privileges:true
     environment:
-      MONGO_URL: mongodb://snp:${MONGO_PASSWORD}@mongo:27017/?authSource=admin
+      MONGO_URL: mongodb://snp_app:${MONGO_APP_PASSWORD}@mongo:27017/${DB_NAME}?replicaSet=rs0&authSource=${DB_NAME}
       DB_NAME: ${DB_NAME:?set DB_NAME}
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET}
       AADHAAR_HASH_PEPPER: ${AADHAAR_HASH_PEPPER:?set AADHAAR_HASH_PEPPER}
@@ -48,7 +56,7 @@ services:
       mongo:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/ready', timeout=3)"]
       interval: 15s
       timeout: 5s
       retries: 10
@@ -108,7 +116,7 @@ services:
     logging: *logging
     environment:
       DB_NAME: ${DB_NAME}
-      MONGO_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_BACKUP_PASSWORD: ${MONGO_BACKUP_PASSWORD}
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-3600}
       BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
     volumes:
@@ -121,6 +129,7 @@ services:
 
 volumes:
   mongo_data:
+  mongo_config:
   caddy_data:
   caddy_config:
   backups:

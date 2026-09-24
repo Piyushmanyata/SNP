@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 from db import get_db
 from models import IdentityCheckBody, QrLookupBody, ScanBody, ScanConfirmBody, RegisterBody
 from helpers import now_utc, age_from_dob, normalize_name, parse_patient_identifier, person_key
@@ -78,7 +78,7 @@ def _card_as_register_body(card: dict) -> RegisterBody:
     )
 
 
-async def _known_person(db: AsyncIOMotorDatabase, card: dict) -> Optional[dict]:
+async def _known_person(db: AsyncDatabase, card: dict) -> Optional[dict]:
     """Look up the Person this card belongs to. A scan never creates one."""
     if not (card["aadhaar_last4"] and card["full_name"]):
         return None
@@ -86,7 +86,7 @@ async def _known_person(db: AsyncIOMotorDatabase, card: dict) -> Optional[dict]:
     return await db.persons.find_one({"aadhaar_key": key})
 
 
-async def _active_camp(db: AsyncIOMotorDatabase) -> dict:
+async def _active_camp(db: AsyncDatabase) -> dict:
     camp = await db.camps.find_one({"is_active": True})
     if not camp:
         raise HTTPException(status_code=409, detail="No active camp")
@@ -117,7 +117,7 @@ def _require_in_camp(patient: dict, camp: dict) -> None:
 
 
 async def _stamp_arrival(
-    db: AsyncIOMotorDatabase, patient: dict, actor_id: str,
+    db: AsyncDatabase, patient: dict, actor_id: str,
     camp: Optional[dict] = None, state: Optional[dict] = None,
 ) -> Dict[str, Any]:
     """Arrival is a presence. It never consults camp-day capacity."""
@@ -180,7 +180,7 @@ def _material_diff(card: dict, stored: dict) -> List[Dict[str, Any]]:
     return diff
 
 
-async def _apply_overwrite(db: AsyncIOMotorDatabase, patient: dict, card: dict) -> dict:
+async def _apply_overwrite(db: AsyncDatabase, patient: dict, card: dict) -> dict:
     person = None
     if card["aadhaar_last4"] and card["dob"]:
         person, _ = await _resolve_person({

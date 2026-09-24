@@ -1,5 +1,5 @@
 import { AxiosError } from "axios";
-import api, { backendOrigin } from "./api";
+import api, { backendOrigin, formatApiError } from "./api";
 
 const ORIGINAL_ENV = process.env.REACT_APP_BACKEND_URL;
 
@@ -36,6 +36,14 @@ test("IPv6 page uses its same origin", () => {
 test("a production build without a configured API uses HTTPS on the page origin", () => {
   delete process.env.REACT_APP_BACKEND_URL;
   expect(backendOrigin(mockLocation("camps.example.org", "https:"))).toBe("https://camps.example.org");
+});
+
+test("a server fault shows its message with the reference code the admin can match to a log line", () => {
+  const err = { response: { data: { detail: {
+    code: "INTERNAL", message: "Something went wrong. Quote this code to the admin.", request_id: "a1b2c3d4e5f6",
+  } } } };
+  expect(formatApiError(err)).toBe("Something went wrong. Quote this code to the admin. (ref a1b2c3d4e5f6)");
+  expect(formatApiError({ response: { data: { detail: { code: "X", message: "Plain." } } } })).toBe("Plain.");
 });
 
 test("a 401 outside sign-in announces that the session ended", async () => {

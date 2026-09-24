@@ -99,14 +99,15 @@ async def change_pin(body: ChangePinBody, response: Response, user: dict = Depen
         raise HTTPException(status_code=400, detail="Current PIN is incorrect")
     new_hash = await asyncio.to_thread(hash_pin, body.new_pin)
     hash_field = "pin_hash" if user.get("pin_hash") else "password_hash"
-    user = await db.users.find_one_and_update(
+    updated = await db.users.find_one_and_update(
         {"_id": user["_id"], hash_field: current_hash},
         {"$set": {"pin_hash": new_hash, "must_change_pin": False}, "$unset": {"password_hash": ""},
          "$inc": {"session_version": 1}},
         return_document=True,
     )
-    if not user:
+    if not updated:
         raise HTTPException(status_code=409, detail="PIN changed in another session; sign in again")
+    user = updated
     await db.login_attempts.delete_one({"identifier": identifier})
     access = create_access_token(str(user["_id"]), user.get("name", ""), user["role"], user["session_version"])
     set_auth_cookie(response, access)

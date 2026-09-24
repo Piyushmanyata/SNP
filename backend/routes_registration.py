@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, HTTPException, Depends, Request, BackgroundTasks
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 from db import get_db, next_seq
 from models import AadhaarDecodeBody, RegisterBody, DuplicateCheckBody
 from helpers import (
@@ -79,7 +79,7 @@ async def _resolve_person(data: dict) -> Tuple[Dict[str, Any], bool]:
     return doc, True
 
 
-async def _validate_camp_and_day(db: AsyncIOMotorDatabase, camp_day_id: str) -> tuple[dict, dict]:
+async def _validate_camp_and_day(db: AsyncDatabase, camp_day_id: str) -> tuple[dict, dict]:
     camp = await db.camps.find_one({"is_active": True})
     if not camp:
         raise HTTPException(status_code=409, detail="No active camp")
@@ -127,7 +127,7 @@ def _build_duplicate_queries(body: RegisterBody, person: dict | None = None) -> 
 
 
 async def _duplicate_hits(
-    db: AsyncIOMotorDatabase,
+    db: AsyncDatabase,
     camp_id: ObjectId | str,
     body: RegisterBody,
     person: dict | None = None,
@@ -144,7 +144,7 @@ async def _duplicate_hits(
     return hits
 
 
-async def _assert_capacity(db: AsyncIOMotorDatabase, day: dict, enforce_limit: bool = True) -> None:
+async def _assert_capacity(db: AsyncDatabase, day: dict, enforce_limit: bool = True) -> None:
     limit = day.get("seat_limit") or 0
     if limit <= 0:
         return
@@ -163,7 +163,7 @@ async def _assert_capacity(db: AsyncIOMotorDatabase, day: dict, enforce_limit: b
         })
 
 
-async def _release_capacity(db: AsyncIOMotorDatabase, day_id) -> None:
+async def _release_capacity(db: AsyncDatabase, day_id) -> None:
     await db.camp_days.update_one(
         {"_id": day_id, "booked": {"$gt": 0}},
         {"$inc": {"booked": -1}},
@@ -171,7 +171,7 @@ async def _release_capacity(db: AsyncIOMotorDatabase, day_id) -> None:
 
 
 async def _overwrite_manual(
-    db: AsyncIOMotorDatabase,
+    db: AsyncDatabase,
     target: dict,
     body: RegisterBody,
     person: Optional[dict],
@@ -275,7 +275,7 @@ def _build_patient_document(
 
 
 async def _resolve_registration_conflict(
-    db: AsyncIOMotorDatabase,
+    db: AsyncDatabase,
     hits: list[dict],
     body: RegisterBody,
     person: dict | None,
@@ -321,7 +321,7 @@ def _replay_registration(existing: dict, body: RegisterBody, camp_id: ObjectId |
 
 
 async def _insert_patient_document(
-    db: AsyncIOMotorDatabase,
+    db: AsyncDatabase,
     doc: dict,
     body: RegisterBody,
     person: dict | None,

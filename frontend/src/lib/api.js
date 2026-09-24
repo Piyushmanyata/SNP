@@ -41,8 +41,10 @@ export function formatApiError(err) {
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail))
     return detail.map((e) => (e && typeof e.msg === "string" ? e.msg : JSON.stringify(e))).join(" ");
-  if (detail && typeof detail === "object")
-    return detail.message || detail.code || JSON.stringify(detail);
+  if (detail && typeof detail === "object") {
+    const text = detail.message || detail.code || JSON.stringify(detail);
+    return detail.request_id ? `${text} (ref ${detail.request_id})` : text;
+  }
   return String(detail);
 }
 

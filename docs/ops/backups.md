@@ -20,22 +20,22 @@ List dumps:
 docker compose --env-file .env.production -f docker-compose.prod.yml exec backup ls -1 /backups
 ```
 
-Restore one dump into a side database (replace `<file>`). The backup container already holds `MONGO_PASSWORD` and `DB_NAME`, and authenticates as `snp` like `ops/backup.sh`:
+Restore one dump into a side database (replace `<file>`). The backup container already holds `MONGO_BACKUP_PASSWORD` and `DB_NAME`, and authenticates as the limited `snp_backup` user like `ops/backup.sh`:
 
 ```sh
-docker compose --env-file .env.production -f docker-compose.prod.yml exec backup sh -c 'mongorestore --host mongo --username snp --password "$MONGO_PASSWORD" --authenticationDatabase admin --gzip --archive=/backups/<file> --nsFrom "$DB_NAME.*" --nsTo "${DB_NAME}_drill.*"'
+docker compose --env-file .env.production -f docker-compose.prod.yml exec backup sh -c 'mongorestore --uri "mongodb://snp_backup:$MONGO_BACKUP_PASSWORD@mongo:27017/?authSource=admin&replicaSet=rs0" --gzip --archive=/backups/<file> --nsFrom "$DB_NAME.*" --nsTo "${DB_NAME}_drill.*"'
 ```
 
 Verify the `patients` count in the side database:
 
 ```sh
-docker compose --env-file .env.production -f docker-compose.prod.yml exec backup sh -c 'mongosh --host mongo --username snp --password "$MONGO_PASSWORD" --authenticationDatabase admin --quiet --eval "db.getSiblingDB(\"${DB_NAME}_drill\").patients.countDocuments()"'
+docker compose --env-file .env.production -f docker-compose.prod.yml exec backup sh -c 'mongosh "mongodb://snp_backup:$MONGO_BACKUP_PASSWORD@mongo:27017/?authSource=admin&replicaSet=rs0" --quiet --eval "db.getSiblingDB(\"${DB_NAME}_drill\").patients.countDocuments()"'
 ```
 
-Drop the side database:
+Drop the side database. `snp_backup` may not drop databases, so this step runs as the operator's root user inside the `mongo` container:
 
 ```sh
-docker compose --env-file .env.production -f docker-compose.prod.yml exec backup sh -c 'mongosh --host mongo --username snp --password "$MONGO_PASSWORD" --authenticationDatabase admin --quiet --eval "db.getSiblingDB(\"${DB_NAME}_drill\").dropDatabase()"'
+docker compose --env-file .env.production -f docker-compose.prod.yml exec mongo sh -c 'mongosh -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --quiet --eval "db.getSiblingDB(\"${DB_NAME}_drill\").dropDatabase()"'
 ```
 
 ## Drill log

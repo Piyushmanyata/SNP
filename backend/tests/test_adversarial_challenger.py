@@ -227,7 +227,7 @@ class MockCollection:
         async with self._lock:
             return sum(1 for d in self.docs if self._matches(d, query))
 
-    def aggregate(self, pipeline):
+    async def aggregate(self, pipeline):
         self.db.query_count += 1
         docs = self.docs
         for stage in pipeline:
