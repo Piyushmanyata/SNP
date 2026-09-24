@@ -21,7 +21,7 @@ from clinical_state import (
     serialize_revision, validate_completion,
 )
 from helpers import (
-    now_utc, iso, DIAGNOSIS_OPTIONS, now_ist, ist_local_instant, as_utc,
+    api_error,    now_utc, iso, DIAGNOSIS_OPTIONS, now_ist, ist_local_instant, as_utc,
     normalize_name, normalize_phone, parse_patient_identifier,
 )
 from bson.errors import InvalidId
@@ -41,7 +41,7 @@ async def _claim_patient(db: AsyncDatabase, patient_id: ObjectId, session) -> di
         {"_id": patient_id}, {"$inc": {"clinical_seq": 1}}, return_document=True, session=session,
     )
     if not patient:
-        raise HTTPException(status_code=404, detail="Registration not found")
+        raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
     return patient
 
 
@@ -169,18 +169,12 @@ async def clinical_lookup(body: dict, actor: dict = Depends(require_clinical)) -
         if not p and value.isdecimal() and len(value) <= 12:
             p = await db.patients.find_one({"camp_id": camp["_id"], "reg_no": int(value)})
     if not p:
-        raise HTTPException(status_code=404, detail="No matching registration found")
+        raise api_error(404, "NO_MATCHING_REGISTRATION_FOUND", 'No matching registration found')
     gate = arrival_ready(p)
     if gate == "not_arrived":
-        raise HTTPException(status_code=409, detail={
-            "code": "not_arrived",
-            "message": "This patient has not arrived at the door yet.",
-        })
+        raise api_error(409, "NOT_ARRIVED", 'This patient has not arrived at the door yet.')
     if gate == "never_printed":
-        raise HTTPException(status_code=409, detail={
-            "code": "never_printed",
-            "message": "This patient's prescription was never printed.",
-        })
+        raise api_error(409, "NEVER_PRINTED", "This patient's prescription was never printed.")
     bundle = await _fetch_clinical_bundle(db, p)
     rev = None
     if p.get("committed_revision_id"):
@@ -239,7 +233,7 @@ def _require_printed(p: dict) -> dict:
 async def _require_printed_patient(db, patient_id: str) -> dict:
     p = await db.patients.find_one({"_id": ObjectId(patient_id)})
     if not p:
-        raise HTTPException(status_code=404, detail="Registration not found")
+        raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
     return _require_printed(p)
 
 
@@ -376,11 +370,11 @@ async def undo_completion(
     assert_clinical_operator(actor)
     reason = (body.reason or "").strip()
     if not reason:
-        raise HTTPException(status_code=400, detail="Undo requires a reason")
+        raise api_error(400, "UNDO_REQUIRES_A_REASON", 'Undo requires a reason')
     db = get_db()
     p = await db.patients.find_one({"_id": ObjectId(body.patient_id)})
     if not p:
-        raise HTTPException(status_code=404, detail="Registration not found")
+        raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
     digest = payload_hash("undo", {"patient_id": str(p["_id"]), "reason": reason})
     done = await recover_operation(db, body.operation_id, "undo", digest)
     if done:
@@ -422,7 +416,7 @@ def _validate_fulfilment_matrix(item_type: str, status: str) -> None:
         "ot": {"deferred", "declined"},
     }
     if item_type not in valid or status not in valid[item_type]:
-        raise HTTPException(status_code=400, detail="Invalid fulfilment item/status")
+        raise api_error(400, "INVALID_FULFILMENT_ITEM_STATUS", 'Invalid fulfilment item/status')
 
 
 def match_medicine_outcomes(revision: dict, outcomes) -> list[dict]:
@@ -430,10 +424,7 @@ def match_medicine_outcomes(revision: dict, outcomes) -> list[dict]:
     prescribed = {m["medicine_id"]: m["name"] for m in (revision.get("prescribed_medicines") or [])}
     supplied = {o.medicine_id: bool(o.given) for o in (outcomes or [])}
     if not prescribed or len(supplied) != len(outcomes or []) or set(supplied) != set(prescribed):
-        raise HTTPException(status_code=400, detail={
-            "code": "MEDICINE_OUTCOMES_MISMATCH",
-            "message": "Record given or not available for every prescribed medicine.",
-        })
+        raise api_error(400, "MEDICINE_OUTCOMES_MISMATCH", 'Record given or not available for every prescribed medicine.')
     return [{"medicine_id": mid, "name": name, "given": supplied[mid]} for mid, name in prescribed.items()]
 
 
@@ -451,10 +442,7 @@ async def resolve_issued_powers(db, revision: dict, body: FulfilmentBody) -> tup
     right = body.issued_power_r if body.issued_power_r is not None else revision.get("fixed_power_r")
     left = body.issued_power_l if body.issued_power_l is not None else revision.get("fixed_power_l")
     if right is None or left is None:
-        raise HTTPException(status_code=400, detail={
-            "code": "FIXED_POWER_REQUIRED",
-            "message": "Select the fixed power for both eyes before issuing.",
-        })
+        raise api_error(400, "FIXED_POWER_REQUIRED", 'Select the fixed power for both eyes before issuing.')
     return await stocked_power(db, right, active_only=True), await stocked_power(db, left, active_only=True)
 
 
@@ -505,11 +493,8 @@ async def _refuse_full(collection: AsyncCollection, day: dict, cfg: dict, sessio
         "$expr": {"$lt": ["$seats_taken", "$seat_limit"]},
     }, session=session)
     if free == 0:
-        raise HTTPException(status_code=409, detail={
-            "code": "NO_CLINICAL_DAY_AVAILABLE",
-            "message": cfg["none_free_err"],
-        })
-    raise HTTPException(status_code=409, detail=cfg["full_err"])
+        raise api_error(409, "NO_CLINICAL_DAY_AVAILABLE", cfg["none_free_err"])
+    raise api_error(409, "DAY_FULL", cfg["full_err"])
 
 
 def _assert_specs_prescription(item_type: str, transcription: dict) -> None:
@@ -517,23 +502,17 @@ def _assert_specs_prescription(item_type: str, transcription: dict) -> None:
     if item_type == "specs_made":
         m = transcription.get("specs_measurements") or {}
         if not (str(m.get("r_sph") or "").strip() and str(m.get("l_sph") or "").strip()):
-            raise HTTPException(status_code=400, detail={
-                "code": "SPECS_MEASUREMENTS_REQUIRED",
-                "message": "Record the prescribed power for both eyes before recording a spectacles line.",
-            })
+            raise api_error(400, "SPECS_MEASUREMENTS_REQUIRED", 'Record the prescribed power for both eyes before recording a spectacles line.')
     elif item_type == "specs_fixed":
         if transcription.get("fixed_power_r") is None or transcription.get("fixed_power_l") is None:
-            raise HTTPException(status_code=400, detail={
-                "code": "FIXED_POWER_REQUIRED",
-                "message": "Select the fixed power for both eyes before recording a spectacles line.",
-            })
+            raise api_error(400, "FIXED_POWER_REQUIRED", 'Select the fixed power for both eyes before recording a spectacles line.')
 
 
 def _oid_or_400(raw: str) -> ObjectId:
     try:
         return ObjectId(raw)
     except (InvalidId, TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid schedule day")
+        raise api_error(400, "INVALID_SCHEDULE_DAY", 'Invalid schedule day')
 
 
 def _specs_window_open(day: dict) -> bool:
@@ -545,7 +524,7 @@ async def _load_deferral_day(
 ) -> dict:
     target_day_id = getattr(body, cfg["id_field"])
     if not target_day_id:
-        raise HTTPException(status_code=400, detail=cfg["missing_err"])
+        raise api_error(400, "DAY_REQUIRED", cfg["missing_err"])
     oid = _oid_or_400(target_day_id)
     collection = getattr(db, cfg["collection_attr"])
     if body.item_type == "specs_made":
@@ -553,19 +532,19 @@ async def _load_deferral_day(
             {"_id": oid}, {"$inc": {"booking_seq": 1}}, return_document=True, session=session,
         )
         if not target:
-            raise HTTPException(status_code=400, detail=cfg["full_err"])
+            raise api_error(404, "DAY_NOT_FOUND", "That day is not on this camp.")
         if target.get("camp_id") != patient.get("camp_id"):
-            raise HTTPException(status_code=400, detail="Specs collection day belongs to another camp")
+            raise api_error(400, "SPECS_COLLECTION_DAY_BELONGS_TO_ANOTHER_CAMP", 'Specs collection day belongs to another camp')
         if not _specs_window_open(target):
-            raise HTTPException(status_code=400, detail="Specs collection window is not selectable")
+            raise api_error(400, "SPECS_COLLECTION_WINDOW_IS_NOT_SELECTABLE", 'Specs collection window is not selectable')
         return target
     target = await collection.find_one({"_id": oid}, session=session)
     if not target:
-        raise HTTPException(status_code=409, detail=cfg["full_err"])
+        raise api_error(404, "DAY_NOT_FOUND", "That day is not on this camp.")
     if target.get("day_date", "") < now_ist().date().isoformat():
-        raise HTTPException(status_code=400, detail="Surgery date has passed; choose today or a later day")
+        raise api_error(400, "SURGERY_DATE_HAS_PASSED_CHOOSE_TODAY_OR_A_LATER_DAY", 'Surgery date has passed; choose today or a later day')
     if target.get("camp_id") != patient.get("camp_id"):
-        raise HTTPException(status_code=400, detail="Schedule day belongs to another camp")
+        raise api_error(400, "SCHEDULE_DAY_BELONGS_TO_ANOTHER_CAMP", 'Schedule day belongs to another camp')
     if prior and prior.get("status") == "deferred" and prior.get(cfg["id_field"]) == oid:
         return target
     day = await _consume_seat(collection, oid, session)
@@ -642,10 +621,10 @@ async def record_fulfilment(
     db = get_db()
     t = await db.transcriptions.find_one({"_id": ObjectId(body.transcription_id)})
     if not t:
-        raise HTTPException(status_code=404, detail="Transcription not found")
+        raise api_error(404, "TRANSCRIPTION_NOT_FOUND", 'Transcription not found')
     patient = await db.patients.find_one({"_id": t["patient_id"]}) if t.get("patient_id") else None
     if not patient:
-        raise HTTPException(status_code=404, detail="Registration not found")
+        raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
     if not patient.get("committed_revision_id") or patient.get("queue_status") != "seen":
         raise conflict("not_completed", "Issue requires a completed prescription.")
     if not body.paper_reviewed or not body.reviewed_revision_id or body.reviewed_generation is None:
@@ -656,9 +635,9 @@ async def record_fulfilment(
     if not revision:
         raise conflict("not_completed", "Issue requires a completed prescription.")
     if str(revision.get("patient_id")) != str(patient["_id"]):
-        raise HTTPException(status_code=404, detail="Transcription not found")
+        raise conflict("stale_review", "The reviewed prescription is no longer current. Review the paper again.")
     if body.item_type not in PRESCRIBED_LINE_KEYS:
-        raise HTTPException(status_code=400, detail="Invalid fulfilment item/status")
+        raise api_error(400, "INVALID_FULFILMENT_ITEM_STATUS", 'Invalid fulfilment item/status')
     if revision.get("none_prescribed") or body.item_type not in (revision.get("prescribed_lines") or []):
         raise conflict("line_not_prescribed", "This line is not prescribed on the completed prescription.")
     if body.item_type == "ot" and revision.get("ot_outcome") != "iol_surgery":
@@ -688,15 +667,12 @@ async def record_fulfilment(
             raise conflict("stale_review", "The reviewed prescription is no longer current. Review the paper again.")
         trans = await db.transcriptions.find_one({"_id": t["_id"]}, session=session)
         if not trans:
-            raise HTTPException(status_code=404, detail="Transcription not found")
+            raise api_error(404, "TRANSCRIPTION_NOT_FOUND", 'Transcription not found')
         other = SPECS_EXCLUSION.get(body.item_type)
         if other and await db.fulfilments.find_one(
             {"transcription_id": t["_id"], "item_type": other[0], "status": {"$ne": "cancelled"}}, session=session,
         ):
-            raise HTTPException(status_code=409, detail={
-                "code": "SPECS_LINE_EXCLUSIVE",
-                "message": f"This patient already has a {other[1]} record.",
-            })
+            raise api_error(409, "SPECS_LINE_EXCLUSIVE", f'This patient already has a {other[1]} record.')
         _assert_specs_prescription(body.item_type, trans)
         prior = await db.fulfilments.find_one({"transcription_id": t["_id"], "item_type": body.item_type}, session=session)
         slip = await _process_deferral(db, current, trans, body, prior, session)
@@ -706,6 +682,8 @@ async def record_fulfilment(
             "reviewed_revision_id": current["committed_revision_id"],
             "reviewed_generation": generation_of(current),
             "slip_id": slip["_id"] if slip else None,
+            "camp_id": current.get("camp_id"),
+            "patient_seen_at": current.get("seen_at"),
         })
         doc = await persist_fulfilment(db, prior, doc, session)
         if doc["status"] != "deferred":
@@ -779,7 +757,7 @@ async def get_slip(slip_id: str, actor: dict = Depends(require_clinical)) -> Dic
     db = get_db()
     s = await db.deferred_slips.find_one({"_id": ObjectId(slip_id)})
     if not s:
-        raise HTTPException(status_code=404, detail="Slip not found")
+        raise api_error(404, "SLIP_NOT_FOUND", 'Slip not found')
     p = await db.patients.find_one({"_id": s["patient_id"]})
     camp = await db.camps.find_one({"_id": p["camp_id"]}) if p and p.get("camp_id") else None
     surgery: dict = {}
@@ -800,22 +778,22 @@ async def add_correction(
     assert_clinical_operator(actor)
     reason = (body.reason or "").strip()
     if not reason:
-        raise HTTPException(status_code=400, detail="Correction requires a reason")
+        raise api_error(400, "CORRECTION_REQUIRES_A_REASON", 'Correction requires a reason')
     db = get_db()
     t = None
     if body.transcription_id:
         t = await db.transcriptions.find_one({"_id": ObjectId(body.transcription_id)})
         if not t:
-            raise HTTPException(status_code=404, detail="Transcription not found")
+            raise api_error(404, "TRANSCRIPTION_NOT_FOUND", 'Transcription not found')
     p = None
     if body.patient_id:
         p = await db.patients.find_one({"_id": ObjectId(body.patient_id)})
     elif t:
         p = await db.patients.find_one({"_id": t["patient_id"]})
     if not p:
-        raise HTTPException(status_code=404, detail="Registration not found")
+        raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
     if t and t.get("patient_id") != p["_id"]:
-        raise HTTPException(status_code=404, detail="Transcription not found")
+        raise api_error(404, "TRANSCRIPTION_NOT_FOUND", 'Transcription not found')
     op_id = body.operation_id or str(ObjectId())
     base_id = p.get("committed_revision_id")
     if not base_id:
@@ -842,7 +820,7 @@ async def add_correction(
             "full_transcription_confirmed": confirmed, "prescribed_lines": lines, "none_prescribed": none,
         })
     except ValidationError:
-        raise HTTPException(status_code=400, detail="Invalid prescription correction")
+        raise api_error(400, "INVALID_PRESCRIPTION_CORRECTION", 'Invalid prescription correction')
     view.prescribed_medicines = await resolve_medicines(
         db, [m.get("medicine_id") for m in view.prescribed_medicines], active_only=False,
     )
@@ -961,7 +939,7 @@ async def _edit_day(
             {"$set": updates}, return_document=True, session=session,
         )
         if not changed:
-            raise HTTPException(status_code=409, detail="The day changed; reload and try again")
+            raise api_error(409, "THE_DAY_CHANGED_RELOAD_AND_TRY_AGAIN", 'The day changed; reload and try again')
         if material:
             return changed, await _supersede_tokens(db, day_field, changed, message_type, session)
         await db.deferred_slips.update_many(
@@ -985,16 +963,16 @@ async def create_ot_day(body: OtScheduleBody, actor: dict = Depends(require_admi
     try:
         day_date = datetime.strptime(body.day_date, "%Y-%m-%d").date()
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid day_date")
+        raise api_error(400, "INVALID_DAY_DATE", 'Invalid day_date')
     if day_date.isoformat() != body.day_date or day_date < now_ist().date():
-        raise HTTPException(status_code=400, detail="Surgery date must be today or later")
+        raise api_error(400, "SURGERY_DATE_MUST_BE_TODAY_OR_LATER", 'Surgery date must be today or later')
     if body.seat_limit <= 0:
-        raise HTTPException(status_code=400, detail="Seat limit must be positive")
+        raise api_error(400, "SEAT_LIMIT_MUST_BE_POSITIVE", 'Seat limit must be positive')
     venue = (body.venue or "").strip()
     if not venue:
-        raise HTTPException(status_code=400, detail="Venue is required")
+        raise api_error(400, "VENUE_IS_REQUIRED", 'Venue is required')
     if not await db.camps.find_one({"_id": camp_id, "is_active": True}):
-        raise HTTPException(status_code=400, detail="Camp is not active")
+        raise api_error(400, "CAMP_IS_NOT_ACTIVE", 'Camp is not active')
     d = {
         "camp_id": camp_id, "day_date": body.day_date,
         "venue": venue, "venue_sms": body.venue_sms, "seat_limit": body.seat_limit, "seats_taken": 0,
@@ -1027,23 +1005,20 @@ async def update_ot_day(day_id: str, body: OtScheduleBody, background_tasks: Bac
     oid = _oid_or_400(day_id)
     day = await db.ot_schedule_days.find_one({"_id": oid, "camp_id": camp_id})
     if not day:
-        raise HTTPException(status_code=404, detail="OT day not found")
+        raise api_error(404, "DAY_NOT_FOUND", 'OT day not found')
     try:
         date = datetime.strptime(body.day_date, "%Y-%m-%d").date()
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid day_date")
+        raise api_error(400, "INVALID_DAY_DATE", 'Invalid day_date')
     if date.isoformat() != body.day_date or date < now_ist().date() or day["day_date"] < now_ist().date().isoformat():
-        raise HTTPException(status_code=409, detail="Past OT days cannot be edited")
+        raise api_error(409, "PAST_OT_DAYS_CANNOT_BE_EDITED", 'Past OT days cannot be edited')
     if body.seat_limit <= 0:
-        raise HTTPException(status_code=400, detail="Seat limit must be positive")
+        raise api_error(400, "SEAT_LIMIT_MUST_BE_POSITIVE", 'Seat limit must be positive')
     venue = (body.venue or "").strip()
     if not venue:
-        raise HTTPException(status_code=400, detail="Venue is required")
+        raise api_error(400, "VENUE_IS_REQUIRED", 'Venue is required')
     if body.seat_limit < day.get("seats_taken", 0):
-        raise HTTPException(status_code=409, detail={
-            "code": "SEAT_LIMIT_BELOW_ASSIGNED",
-            "message": f"Cannot set below {day.get('seats_taken', 0)} already-assigned seats",
-        })
+        raise api_error(409, "SEAT_LIMIT_BELOW_ASSIGNED", f"Cannot set below {day.get('seats_taken', 0)} already-assigned seats")
     changed = await _edit_day(
         db.ot_schedule_days, day,
         {"day_date": body.day_date, "seat_limit": body.seat_limit, "venue": venue, "venue_sms": body.venue_sms},
@@ -1055,21 +1030,21 @@ async def update_ot_day(day_id: str, body: OtScheduleBody, background_tasks: Bac
 def _validated_specs_window(body: SpecsScheduleBody) -> tuple[ObjectId, str, str, str]:
     venue = (body.venue or "").strip()
     if not venue:
-        raise HTTPException(status_code=400, detail="Venue is required")
+        raise api_error(400, "VENUE_IS_REQUIRED", 'Venue is required')
     camp_oid = _oid_or_400(body.camp_id)
     end_date = body.end_date or body.day_date
     try:
         first_day = datetime.strptime(body.day_date, "%Y-%m-%d")
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid day_date")
+        raise api_error(400, "INVALID_DAY_DATE", 'Invalid day_date')
     try:
         last_day = datetime.strptime(end_date, "%Y-%m-%d")
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid end_date")
+        raise api_error(400, "INVALID_END_DATE", 'Invalid end_date')
     if last_day < first_day:
-        raise HTTPException(status_code=400, detail="end_date must not be before day_date")
+        raise api_error(400, "END_DATE_MUST_NOT_BE_BEFORE_DAY_DATE", 'end_date must not be before day_date')
     if ist_local_instant(end_date, sms.SPECS_PICKUP_END_TIME) <= now_ist():
-        raise HTTPException(status_code=400, detail="Window end must be after now")
+        raise api_error(400, "WINDOW_END_MUST_BE_AFTER_NOW", 'Window end must be after now')
     return camp_oid, body.day_date, end_date, venue
 
 
@@ -1078,7 +1053,7 @@ async def create_specs_day(body: SpecsScheduleBody, actor: dict = Depends(requir
     db = get_db()
     camp_oid, day_date, end_date, venue = _validated_specs_window(body)
     if not await db.camps.find_one({"_id": camp_oid, "is_active": True}):
-        raise HTTPException(status_code=400, detail="Camp is not active")
+        raise api_error(400, "CAMP_IS_NOT_ACTIVE", 'Camp is not active')
     d = {"camp_id": camp_oid, "day_date": day_date, "end_date": end_date, "venue": venue,
          "venue_sms": body.venue_sms, "created_at": now_utc()}
     try:
@@ -1095,9 +1070,9 @@ async def update_specs_day(day_id: str, body: SpecsScheduleBody, background_task
     camp_oid, day_date, end_date, venue = _validated_specs_window(body)
     day = await db.specs_collection_days.find_one({"_id": _oid_or_400(day_id), "camp_id": camp_oid})
     if not day:
-        raise HTTPException(status_code=404, detail="Specs collection day not found")
+        raise api_error(404, "DAY_NOT_FOUND", 'Specs collection day not found')
     if not _specs_window_open(day):
-        raise HTTPException(status_code=409, detail="Past specs collection days cannot be edited")
+        raise api_error(409, "PAST_SPECS_COLLECTION_DAYS_CANNOT_BE_EDITED", 'Past specs collection days cannot be edited')
     changed = await _edit_day(
         db.specs_collection_days, {**day, "end_date": day.get("end_date") or day["day_date"]},
         {"day_date": day_date, "end_date": end_date, "venue": venue, "venue_sms": body.venue_sms},
@@ -1171,5 +1146,5 @@ async def mark_notice_contacted(slip_id: str, actor: dict = Depends(require_admi
         {"$set": {"contacted_at": now_utc(), "contacted_by": str(actor["_id"])}},
     )
     if not res.matched_count:
-        raise HTTPException(status_code=404, detail="Notice not found")
+        raise api_error(404, "NOTICE_NOT_FOUND", 'Notice not found')
     return {"ok": True}

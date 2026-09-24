@@ -18,7 +18,7 @@ For phone camera testing, use a trusted HTTPS address; see [local HTTPS setup](d
 
 1. Admin creates/activates the camp, opens camp days and the print window, and creates team leads and operators.
 2. A patient registers, then a desk volunteer scans their Aadhaar to record arrival. Manual fallback remains available to desk staff.
-3. Staff prints the prescription, the doctor examines the patient, and staff marks them Seen.
+3. Staff prints the prescription. Paper check records that the paper is in the patient's hand. A clinical operator copies the paper and saves the prescription, which marks the patient Seen.
 4. A clinical operator chooses Medicine, Fixed-power specs, Spectacles to be made, or Hospital. At that same desk they transcribe the paper prescription, then issue supplies or schedule collection/hospital treatment.
 5. A scheduled IOL surgery and later spectacle collection produce a short A6 token. A Hospital referral or Surgery declined produces none. IOL surgery is the only operation arranged, and it is performed at the hospital only.
 
@@ -43,7 +43,7 @@ Caddy obtains and renews TLS certificates. Only ports 80/443 are published; Mong
 
 Configure the MSG91 key and approved DLT template IDs before using real SMS. Without them, sending is reported as skipped. Register the six texts from `dlt_portal_body` in `backend/docs/msg91-templates.json`, which a test keeps identical to `backend/sms.py`. Every message names the camp number, so a camp sends no SMS until an admin sets its number on the Camps tab. Real carrier delivery requires a live provider test.
 
-The reminder container dispatches day-before reminders at 10:00 Asia/Kolkata and retries failures. Details: [reminder worker](backend/docs/reminder-worker.md).
+The reminder container dispatches day-before reminders at 10:00 and 20:00 Asia/Kolkata and retries failures. Details: [reminder worker](backend/docs/reminder-worker.md).
 
 ## Backups and recovery
 
@@ -57,4 +57,4 @@ Backend: install `backend/requirements-dev.txt`, run `python -m compileall -q ba
 
 The complete backend suite includes live HTTP tests. Run it serially against a fresh isolated Docker project with `SNP_LIVE_API=http://localhost:3000`, `SNP_TEST_ADMIN_NAME=admin`, and `SNP_TEST_ADMIN_PIN=864200`. It changes the bootstrap PIN and creates synthetic camp records. Without a live endpoint, those integration tests are explicitly skipped.
 
-See [audit evidence and limits](frontend/docs/production-audit.md), [clinical workflow](frontend/docs/clinical-workflow.md) and [scanner audit](frontend/docs/scanner-audit.md). Automated tests do not replace checking the real A6 printer, older phones and SMS carrier before the camp.
+See [clinical workflow](frontend/docs/clinical-workflow.md). Automated tests do not replace checking the real A6 printer, older phones and SMS carrier before the camp.

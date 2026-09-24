@@ -180,7 +180,7 @@ def test_concurrent_staff_creation_returns_a_name_conflict(monkeypatch):
         conflicts = [r for r in results if isinstance(r, HTTPException)]
         assert len(conflicts) == 1
         assert conflicts[0].status_code == 409
-        assert conflicts[0].detail == "Name already exists"
+        assert conflicts[0].detail["message"] == "Name already exists"
         assert await database.users.count_documents({"name_normalized": "staff"}) == 1
 
     run_db(run)

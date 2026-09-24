@@ -192,13 +192,13 @@ def test_a_retired_medicine_or_power_cannot_be_newly_prescribed_or_issued(monkey
             await record_fulfilment(_issue_body(done["transcription"]["id"], done["revision"]["id"], 1, "issue",
                                                 item_type="specs_fixed", status="fulfilled"),
                                     actor=CLINICAL, background_tasks=None)
-        assert exc.value.detail["code"] == "unknown_power"
+        assert exc.value.detail["code"] == "UNKNOWN_POWER"
         await undo_completion(UndoCompletionBody(
             patient_id=str(patient["_id"]), expected_generation=1, reason="Wrong lines", operation_id="undo",
         ), actor=CLINICAL)
         with pytest.raises(HTTPException) as exc:
             await complete_prescription(_complete_body(patient["_id"], "again", expected_generation=2), actor=CLINICAL)
-        assert exc.value.detail["code"] == "unknown_medicine"
+        assert exc.value.detail["code"] == "UNKNOWN_MEDICINE"
 
     run_camp(monkeypatch, run)
 

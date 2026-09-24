@@ -235,12 +235,6 @@ class TestRegistration:
         results = r.json()["results"]
         assert any(x["id"] == STATE["p1"]["id"] for x in results)
 
-    def test_duplicate_check(self, admin):
-        r = admin.post(f"{API}/register/duplicate-check",
-                       json={"full_name": f"TESTPATIENT Alpha {TAG}", "age": 55}, timeout=30)
-        assert r.status_code == 200, r.text
-        assert len(r.json()["likely_duplicates"]) >= 1
-
     def test_second_registration_for_clinical_flow(self, admin):
         r = admin.post(f"{API}/register", json={
             "full_name": f"TESTPATIENT Beta {TAG}", "age": 62, "gender": "F",
@@ -299,11 +293,6 @@ class TestDeskPrintWindow:
         assert r.status_code == 409, r.text
         assert r.json()["detail"]["code"] == "NOT_ARRIVED"
 
-    def test_mark_seen_blocked_before_arrival(self, admin):
-        r = admin.post(f"{API}/desk/mark-seen/{STATE['p1']['id']}", timeout=30)
-        assert r.status_code == 409, r.text
-        assert r.json()["detail"]["code"] == "completion_required"
-
     def test_arrival_stamps_presence(self, admin):
         r = admin.post(f"{API}/desk/arrive/{STATE['p1']['id']}", timeout=30)
         assert r.status_code == 200, r.text
@@ -318,11 +307,6 @@ class TestDeskPrintWindow:
         r = admin.post(f"{API}/desk/print/{STATE['p1']['id']}", timeout=30)
         assert r.status_code == 409, r.text
         assert r.json()["detail"]["code"] == "PRINT_WINDOW_CLOSED"
-
-    def test_mark_seen_refused_when_never_printed(self, admin):
-        r = admin.post(f"{API}/desk/mark-seen/{STATE['p1']['id']}", timeout=30)
-        assert r.status_code == 409, r.text
-        assert r.json()["detail"]["code"] == "completion_required"
 
     def test_open_print_window(self, admin):
         r = admin.patch(f"{API}/camps/days/{STATE['day_id']}/print-window",
@@ -365,23 +349,6 @@ class TestDeskPrintWindow:
     def test_lookup_unknown_404(self, admin):
         r = admin.post(f"{API}/desk/lookup", json={"value": "99999999"}, timeout=30)
         assert r.status_code == 404
-
-    def test_mark_seen_and_idempotency(self, admin):
-        r = admin.post(f"{API}/desk/mark-seen/{STATE['p1']['id']}", timeout=30)
-        assert r.status_code == 409, r.text
-        assert r.json()["detail"]["code"] == "completion_required"
-        looked = admin.post(f"{API}/desk/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
-        assert looked.json()["registration"]["queue_status"] != "seen"
-
-    def test_undo_seen_within_window(self, admin):
-        r = admin.post(f"{API}/desk/undo-seen/{STATE['p1']['id']}", timeout=30)
-        assert r.status_code == 409, r.text
-        assert r.json()["detail"]["code"] == "completion_required"
-
-    def test_undo_seen_on_not_seen_patient(self, admin):
-        r = admin.post(f"{API}/desk/undo-seen/{STATE['p2']['id']}", timeout=30)
-        assert r.status_code == 409, r.text
-
 
 def _catalogue(admin):
     if "medicine_id" not in STATE:
@@ -479,7 +446,7 @@ class TestClinical:
         r = clin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p2"]["reg_no"])}, timeout=30)
         assert r.status_code == 409, r.text
         detail = r.json()["detail"]
-        assert detail["code"] in ("not_arrived", "never_printed")
+        assert detail["code"] in ("NOT_ARRIVED", "NEVER_PRINTED")
         assert STATE["p2"]["full_name"] not in r.text
 
     def test_lookup_printed_before_seen(self, admin):
@@ -676,7 +643,7 @@ class TestClinical:
         r = _defer(_clinical(admin), STATE["trans_id"], STATE["rev_id"], STATE["gen"], f"op-referral-{TAG}",
                    item_type="ot", ot_schedule_day_id=STATE["ot_day_id"])
         assert r.status_code == 409, r.text
-        assert r.json()["detail"]["code"] == "hospital_referral"
+        assert r.json()["detail"]["code"] == "HOSPITAL_REFERRAL"
 
     def test_iol_surgery_deferral_consumes_seat_and_prints_slip(self, admin):
         assert admin.post(f"{API}/desk/arrive/{STATE['p2']['id']}", timeout=30).status_code == 200
@@ -766,10 +733,6 @@ class TestClinical:
         r = clin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
         assert r.json()["transcription"]["bp"] == "140/90"
         assert r.json()["committed_revision"]["reason"] == "TEST typo in BP"
-
-    def test_undo_seen_blocked_after_transcription(self, admin):
-        r = admin.post(f"{API}/desk/undo-seen/{STATE['p1']['id']}", timeout=30)
-        assert r.status_code == 409, f"expected block, got {r.status_code}: {r.text[:200]}"
 
     def test_history_by_person(self, admin):
         # p_self has a person_id (aadhaar scanned)
@@ -941,36 +904,6 @@ class TestFixRegressions:
         }, timeout=30)
         assert r.status_code == 400, r.text
 
-    # undo-seen keeps printed_at (presence recorded once)
-    def test_undo_seen_keeps_printed_at(self, admin):
-        rid = str(uuid.uuid4())
-        r = admin.post(f"{API}/register", json={
-            "full_name": f"TESTUNDO Gamma {TAG}", "age": 44, "gender": "M",
-            "phone": "9876500011", "camp_day_id": STATE["day_id"],
-            "registration_request_id": rid,
-            "manual_reason": "scanner unavailable",
-        }, timeout=30)
-        assert r.status_code == 200, r.text
-        pid = r.json()["registration"]["id"]
-        _identity_checked(admin, pid)
-        assert admin.post(f"{API}/desk/arrive/{pid}", timeout=30).status_code == 200
-        pr = admin.post(f"{API}/desk/print/{pid}", timeout=30)
-        assert pr.status_code == 200, pr.text
-        printed_at = pr.json()["registration"]["printed_at"]
-        assert printed_at
-        seen = admin.post(f"{API}/desk/mark-seen/{pid}", timeout=30)
-        assert seen.status_code == 409, seen.text
-        assert seen.json()["detail"]["code"] == "completion_required"
-        u = admin.post(f"{API}/desk/undo-seen/{pid}", timeout=30)
-        assert u.status_code == 409, u.text
-        assert u.json()["detail"]["code"] == "completion_required"
-        g = admin.post(f"{API}/desk/lookup", json={"value": str(r.json()["registration"]["reg_no"])}, timeout=30)
-        reg = g.json()["registration"]
-        assert reg["queue_status"] == "arrived"
-        assert reg["printed_at"] == printed_at
-        assert reg.get("seen_at") in (None, "")
-        STATE["p_undo"] = reg
-
     # OT seat must be released when an OT deferral is re-recorded on another day
     def test_ot_seat_released_on_rerecord(self, admin):
         # two OT days with free seats
@@ -1050,7 +983,7 @@ class TestFixRegressions:
             "reviewed_generation": STATE["gen"], "operation_id": f"op-rerecord-sp-fix-{TAG}",
         }, timeout=30)
         assert r.status_code == 409, r.text
-        assert r.json()["detail"]["code"] == "line_not_prescribed"
+        assert r.json()["detail"]["code"] == "LINE_NOT_PRESCRIBED"
         assert seats(day_b) == 0
         looked = clin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
         assert looked.status_code == 200, looked.text

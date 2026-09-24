@@ -7,9 +7,15 @@ import secrets
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, overload
+
+from fastapi import HTTPException
 from uuid import UUID
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+def api_error(status: int, code: str, message: str, **extra: Any) -> HTTPException:
+    return HTTPException(status_code=status, detail={"code": code, "message": message, **extra})
 
 # ---- time helpers ----
 
@@ -66,16 +72,6 @@ def next_ist_midnight(now: datetime | None = None):
     ist = as_utc(now or now_utc()).astimezone(IST)
     nxt = ist.date() + timedelta(days=1)
     return datetime(nxt.year, nxt.month, nxt.day, tzinfo=IST).astimezone(timezone.utc)
-
-
-HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
-
-
-def parse_hhmm(value: str | None) -> str:
-    raw = (value or "").strip()
-    if not HHMM_RE.fullmatch(raw):
-        raise ValueError("Times must be HH:MM")
-    return raw
 
 
 def ist_local_instant(day_date: str, hhmm: str) -> datetime:
@@ -153,7 +149,7 @@ def parse_patient_identifier(raw_value: str) -> str:
 
 # ---- labellers (never render raw enums) ----
 
-STATUS_LABELS = {"registered": "Registered", "arrived": "Arrived", "seen": "Seen", "waiting": "Registered"}
+STATUS_LABELS = {"registered": "Registered", "arrived": "Arrived", "seen": "Seen"}
 GENDER_LABELS = {"M": "Male", "F": "Female", "O": "Other", "male": "Male", "female": "Female"}
 
 DIAGNOSIS_OPTIONS = [
@@ -170,7 +166,9 @@ DIAGNOSIS_OPTIONS = [
 ]
 
 
-def age_from_dob(dob: str) -> int | None:
+def age_from_dob(dob: str | None) -> int | None:
+    if not dob:
+        return None
     try:
         d = datetime.strptime(dob, "%Y-%m-%d")
         today = datetime.now(IST)

@@ -76,23 +76,20 @@ def test_leaderboard_keeps_attribution_and_response_shape(monkeypatch):
 
         assert set(board) == {"volunteers", "team_leads"}
         vol = next(v for v in board["volunteers"] if v["id"] == str(volunteers[0][0]))
-        assert set(vol) == {"id", "name", "registrations", "doctor_seen", "arrivals", "points", "team_lead_id"}
+        assert set(vol) == {"id", "name", "registrations", "completed", "team_lead_id"}
         assert vol["registrations"] == 2
-        assert vol["points"] == 1
-        assert vol["doctor_seen"] == 1
-        assert vol["arrivals"] == 1
+        assert vol["completed"] == 1
         assert vol["team_lead_id"] == str(lead_id)
 
-        lead = next(l for l in board["team_leads"] if l["id"] == str(lead_id))
+        lead = next(row for row in board["team_leads"] if row["id"] == str(lead_id))
         assert set(lead) == {
-            "id", "name", "personal_registrations", "personal_points",
-            "registrations", "doctor_seen", "points",
+            "id", "name", "personal_registrations", "personal_completed",
+            "registrations", "completed",
         }
         assert lead["personal_registrations"] == 1
-        assert lead["personal_points"] == 1
+        assert lead["personal_completed"] == 1
         assert lead["registrations"] == 6
-        assert lead["points"] == 3
-        assert lead["doctor_seen"] == 3
+        assert lead["completed"] == 3
 
     run_camp(monkeypatch, body)
 

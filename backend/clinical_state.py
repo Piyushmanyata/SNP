@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
 
-from helpers import now_utc
+from helpers import api_error, now_utc
 
 CLINICAL_ROLE = "clinical_desk_operator"
 PRESCRIBED_LINE_KEYS = ("medicine", "specs_fixed", "specs_made", "ot")
@@ -37,7 +37,7 @@ def normalize_ot_eye(value: Any) -> Optional[str]:
 
 def assert_clinical_operator(actor: dict | None) -> dict:
     if not actor or actor.get("role") != CLINICAL_ROLE:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+        raise api_error(403, "INSUFFICIENT_PERMISSIONS", 'Insufficient permissions')
     return actor
 
 
@@ -79,10 +79,7 @@ def prescribed_lines_of(body: Any) -> Tuple[List[str], bool]:
     lines = [k for k in raw if k in PRESCRIBED_LINE_KEYS]
     unknown = [k for k in raw if k not in PRESCRIBED_LINE_KEYS]
     if unknown:
-        raise HTTPException(status_code=400, detail={
-            "code": "incomplete_prescription",
-            "fields": {"prescribed_lines": "Unknown prescribed line."},
-        })
+        raise api_error(400, "INCOMPLETE_PRESCRIPTION", "Unknown prescribed line.", fields={"prescribed_lines": "Unknown prescribed line."})
     return lines, none
 
 
@@ -107,10 +104,7 @@ def _hospital_errors(content: dict, lines: List[str]) -> Dict[str, str]:
 
 def validate_completion(body: Any) -> Tuple[dict, List[str], bool]:
     if not getattr(body, "full_transcription_confirmed", False):
-        raise HTTPException(status_code=400, detail={
-            "code": "incomplete_prescription",
-            "fields": {"full_transcription_confirmed": "Confirm that every instruction on the paper has been copied."},
-        })
+        raise api_error(400, "INCOMPLETE_PRESCRIPTION", "Confirm that every instruction on the paper has been copied.", fields={"full_transcription_confirmed": "Confirm that every instruction on the paper has been copied."})
     lines, none = prescribed_lines_of(body)
     content = extract_content(body)
     if "medicine" not in lines:
@@ -120,20 +114,11 @@ def validate_completion(body: Any) -> Tuple[dict, List[str], bool]:
     if "specs_made" not in lines:
         content["specs_measurements"] = None
     if none and lines:
-        raise HTTPException(status_code=400, detail={
-            "code": "incomplete_prescription",
-            "fields": {"prescribed_lines": "Do not select fulfilment lines when recording no fulfilment."},
-        })
+        raise api_error(400, "INCOMPLETE_PRESCRIPTION", "Do not select fulfilment lines when recording no fulfilment.", fields={"prescribed_lines": "Do not select fulfilment lines when recording no fulfilment."})
     if not none and not lines:
-        raise HTTPException(status_code=400, detail={
-            "code": "incomplete_prescription",
-            "fields": {"prescribed_lines": "Select prescribed lines or record that no fulfilment was prescribed."},
-        })
+        raise api_error(400, "INCOMPLETE_PRESCRIPTION", "Select prescribed lines or record that no fulfilment was prescribed.", fields={"prescribed_lines": "Select prescribed lines or record that no fulfilment was prescribed."})
     if not none and is_blank_content(content):
-        raise HTTPException(status_code=400, detail={
-            "code": "incomplete_prescription",
-            "fields": {"content": "The prescription is blank."},
-        })
+        raise api_error(400, "INCOMPLETE_PRESCRIPTION", "The prescription is blank.", fields={"content": "The prescription is blank."})
     errors: Dict[str, str] = {}
     if "medicine" in lines and _blank(content.get("prescribed_medicines")):
         errors["prescribed_medicines"] = "Select every medicine written on the paper."
@@ -154,10 +139,7 @@ def validate_completion(body: Any) -> Tuple[dict, List[str], bool]:
         errors["prescribed_lines"] = f"{', '.join(labels[:-1])} and {labels[-1]} cannot be on one prescription."
     content["ot_eye"] = normalize_ot_eye(content.get("ot_eye"))
     if errors:
-        raise HTTPException(status_code=400, detail={
-            "code": "incomplete_prescription",
-            "fields": errors,
-        })
+        raise api_error(400, "INCOMPLETE_PRESCRIPTION", "Check the highlighted fields.", fields=errors)
     return content, lines, none
 
 
@@ -175,14 +157,12 @@ def arrival_ready(patient: dict) -> Optional[str]:
 
 
 def conflict(code: str, message: str, **extra: Any) -> HTTPException:
-    detail: Dict[str, Any] = {"code": code, "message": message}
-    detail.update(extra)
-    return HTTPException(status_code=409, detail=detail)
+    return api_error(409, code.upper(), message, **extra)
 
 
 async def recover_operation(db, operation_id: str, kind: str, digest: str, session=None) -> Optional[dict]:
     if not operation_id:
-        raise HTTPException(status_code=400, detail="operation_id is required")
+        raise api_error(400, "OPERATION_ID_IS_REQUIRED", 'operation_id is required')
     existing = await db.clinical_operations.find_one({"operation_id": operation_id}, session=session)
     if existing is None:
         return None

@@ -1,0 +1,12 @@
+# CI overlay. Localhost makes Caddy use its internal CA. Ports stay on the loopback.
+services:
+  caddy:
+    environment:
+      APP_DOMAIN: localhost
+    ports: !override
+      - "127.0.0.1:80:80"
+      - "127.0.0.1:443:443"
+      - "127.0.0.1:443:443/udp"
+  backup:
+    environment:
+      BACKUP_INTERVAL_SECONDS: "30"

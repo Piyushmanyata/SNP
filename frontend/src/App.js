@@ -4,6 +4,7 @@ import { AuthProvider, useAuth, roleHome } from "./context/AuthContext";
 import { ADMIN_ROLES, DESK_ROLES, CLINICAL_ROLES, LEAD_ROLES } from "./constants/roles";
 import { Spinner } from "./components/ui";
 import ErrorBoundary from "./components/ErrorBoundary";
+import Layout from "./components/Layout";
 import Login from "./pages/Login";
 const SelfRegister = lazy(() => import("./pages/SelfRegister"));
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
@@ -25,6 +26,7 @@ function Protected({ roles, children }) {
   if (loading || user === null) return <FullLoader />;
   if (!user) return <Navigate to="/login" replace />;
   if (roles && !roles.includes(user.role)) return <Navigate to={roleHome(user.role)} replace />;
+  if (user.must_change_pin) return <Layout />;
   return children;
 }
 

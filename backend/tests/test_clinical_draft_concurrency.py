@@ -45,7 +45,7 @@ def test_second_operator_at_the_same_version_gets_a_draft_conflict(monkeypatch):
         with pytest.raises(HTTPException) as exc:
             await _save_draft(patient, version, "999/99")
         assert exc.value.status_code == 409
-        assert exc.value.detail["code"] == "draft_version_conflict"
+        assert exc.value.detail["code"] == "DRAFT_VERSION_CONFLICT"
         current = await db.transcriptions.find_one({"patient_id": patient["_id"]})
         assert current["bp"] == "130/90"
         assert current["draft_version"] == 3
@@ -65,7 +65,7 @@ def test_legacy_draft_without_a_version_accepts_one_save_then_requires_the_stamp
         assert saved["transcription"]["draft_version"] == 1
         with pytest.raises(HTTPException) as exc:
             await _save_draft(patient, 0, "999/99")
-        assert exc.value.detail["code"] == "draft_version_conflict"
+        assert exc.value.detail["code"] == "DRAFT_VERSION_CONFLICT"
         current = await db.transcriptions.find_one({"patient_id": patient["_id"]})
         assert current["bp"] == "110/70"
 
@@ -85,7 +85,7 @@ def test_simultaneous_new_draft_creation_resolves_to_one_draft(monkeypatch):
         loser = outcomes[0]
         assert isinstance(loser, HTTPException)
         assert loser.status_code == 409
-        assert loser.detail["code"] == "draft_version_conflict"
+        assert loser.detail["code"] == "DRAFT_VERSION_CONFLICT"
         assert await db.transcriptions.count_documents({}) == 1
         current = await db.transcriptions.find_one({"patient_id": patient["_id"]})
         assert current["bp"] == "120/80"
@@ -108,7 +108,7 @@ def test_late_initial_save_cannot_overwrite_a_completed_prescription(monkeypatch
         with pytest.raises(HTTPException) as exc:
             await late
         assert exc.value.status_code == 409
-        assert exc.value.detail["code"] == "draft_version_conflict"
+        assert exc.value.detail["code"] == "DRAFT_VERSION_CONFLICT"
         assert await db.transcriptions.count_documents({}) == 1
         current = await db.transcriptions.find_one({"patient_id": patient["_id"]})
         assert current["bp"] == "120/80"
@@ -128,7 +128,7 @@ def test_completion_cannot_apply_a_stale_draft_over_a_newer_save(monkeypatch):
                 actor=CLINICAL,
             )
         assert exc.value.status_code == 409
-        assert exc.value.detail["code"] == "draft_version_conflict"
+        assert exc.value.detail["code"] == "DRAFT_VERSION_CONFLICT"
         current = await db.patients.find_one({"_id": patient["_id"]})
         assert not current.get("committed_revision_id")
         draft = await db.transcriptions.find_one({"patient_id": patient["_id"]})
@@ -186,7 +186,7 @@ def test_an_unversioned_save_still_advances_the_version_for_versioned_clients(mo
                 actor=CLINICAL,
             )
         assert exc.value.status_code == 409
-        assert exc.value.detail["code"] == "draft_version_conflict"
+        assert exc.value.detail["code"] == "DRAFT_VERSION_CONFLICT"
 
     run_camp(monkeypatch, run)
 
@@ -228,7 +228,7 @@ def test_two_operators_who_opened_a_patient_with_no_draft_cannot_overwrite_each_
         with pytest.raises(HTTPException) as exc:
             await _save_draft(patient, 0, "999/99")
         assert exc.value.status_code == 409
-        assert exc.value.detail["code"] == "draft_version_conflict"
+        assert exc.value.detail["code"] == "DRAFT_VERSION_CONFLICT"
 
         current = await db.transcriptions.find_one({"patient_id": patient["_id"]})
         assert current["bp"] == "110/70"

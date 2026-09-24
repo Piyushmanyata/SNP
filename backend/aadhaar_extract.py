@@ -1,3 +1,4 @@
+from helpers import api_error
 import asyncio
 import json
 import os
@@ -8,7 +9,7 @@ from pathlib import Path
 from typing import NoReturn
 from urllib.parse import unquote
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 
 MAX_UPLOAD_BYTES = 12 * 1024 * 1024
 EXTRACT_TIMEOUT_SECONDS = 30
@@ -17,7 +18,7 @@ _requests: dict[str, list[float]] = {}
 
 
 def fail(status: int, code: str, message: str) -> NoReturn:
-    raise HTTPException(status_code=status, detail={'code': code, 'message': message})
+    raise api_error(status, str(code).upper(), message)
 
 
 async def run_worker(document: bytes, password: str) -> dict:

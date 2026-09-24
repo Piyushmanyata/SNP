@@ -31,6 +31,21 @@ const IST_PARTS = new Intl.DateTimeFormat("en-GB", {
   hourCycle: "h23",
 });
 
+const IST_CLOCK = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "Asia/Kolkata",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hourCycle: "h23",
+});
+
+export function displayClock(value) {
+  const instant = new Date(value || "");
+  if (Number.isNaN(instant.getTime())) return "";
+  const part = Object.fromEntries(IST_CLOCK.formatToParts(instant).map((p) => [p.type, p.value]));
+  return `${part.hour}:${part.minute}:${part.second}`;
+}
+
 export function displayTimestamp(value) {
   const instant = new Date(value || "");
   if (Number.isNaN(instant.getTime())) return value || "";

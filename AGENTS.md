@@ -116,8 +116,9 @@ not depend on each other. Sequence only true dependencies.
 
 ## 7. Verification — no dev servers
 
-Forbidden: `npm run dev`, watch mode, browsers, screenshots, computer use,
-manual clicking, "start the server and check".
+Forbidden: `npm run dev`, watch mode, interactive browsers, screenshots, computer use,
+manual clicking, "start the server and check". Headless Playwright (`npx playwright test`)
+is allowed only as the CI and local test runner.
 
 Use instead, in this order:
 
@@ -209,7 +210,6 @@ State assumptions in one line. Ask only when the answer changes what you build.
 The authoritative application stack consists of:
 - `frontend/`: React single-page application (React 18 + Tailwind CSS + Lucide)
 - `backend/`: FastAPI async Python application with the PyMongo Async driver on a single-node MongoDB replica set
-- `memory/`: PRD specifications and test credentials
 - `docker-compose.prod.yml`: Hostinger KVM deployment, reminder worker, TLS and backups
 
 The root Next.js + Supabase application is legacy and has been retired.

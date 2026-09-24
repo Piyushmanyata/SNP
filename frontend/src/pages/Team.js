@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import api, { formatApiError } from "../lib/api";
@@ -50,6 +50,8 @@ export default function Team() {
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [oneTimePin, setOneTimePin] = useState(null);
+  const [nameFilter, setNameFilter] = useState("");
+  const assigning = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -129,9 +131,13 @@ export default function Team() {
   const toggleStatus = (s) => (s.disabled_at
     ? run(null, () => api.patch(`/staff/${s.id}/enable`), `Enabled account for ${s.name}.`)
     : run(`Disable ${s.name}'s account? They are signed out and cannot sign in.`, () => api.patch(`/staff/${s.id}/disable`), `Disabled account for ${s.name}.`));
-  const reassign = (s, teamLeadId) => run(
-    null, () => api.patch(`/staff/${s.id}/team-lead`, { team_lead_id: teamLeadId || null }), `Updated team assignment for ${s.name}.`,
-  );
+  const reassign = (s, teamLeadId) => {
+    if (assigning.current) return null;
+    assigning.current = true;
+    return run(
+      null, () => api.patch(`/staff/${s.id}/team-lead`, { team_lead_id: teamLeadId || null }), `Updated team assignment for ${s.name}.`,
+    ).finally(() => { assigning.current = false; });
+  };
   const deleteStaff = (s) => run(
     `Delete ${s.name}'s account? They will lose access; past activity stays in reports.`,
     () => api.delete(`/staff/${s.id}`),
@@ -228,11 +234,14 @@ export default function Team() {
           <h3 className="font-display font-bold text-lg text-slate-900 mb-3">
             {isTeamLead ? "Volunteers in Your Team" : "All Staff"}
           </h3>
+          <Field label="Find by name">
+            <Input value={nameFilter} onChange={(e) => setNameFilter(e.target.value)} data-testid="staff-name-filter" />
+          </Field>
           {staff.length === 0 ? (
             <p className="text-sm text-slate-500">No staff members found.</p>
           ) : (
             <div className="divide-y divide-slate-100" data-testid="staff-list">
-              {staff.map((s) => (
+              {staff.filter((s) => s.name.toLocaleLowerCase().includes(nameFilter.trim().toLocaleLowerCase())).map((s) => (
                 <div
                   key={s.id}
                   className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"

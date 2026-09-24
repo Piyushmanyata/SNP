@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import api, { formatApiError } from "../lib/api";
 import Layout from "../components/Layout";
 import { Alert, Card, Stat } from "../components/ui";
-import { SPECS_HOURS, displayDate, displayDateRange, displayTimestamp } from "../lib/dates";
+import { SPECS_HOURS, displayClock, displayDate, displayDateRange, displayTimestamp } from "../lib/dates";
 import { SMS_LABELS } from "../lib/sms";
 
 const POLL_MS = 15000;
@@ -91,6 +91,11 @@ export default function Board() {
               {data.day?.day_date ? ` · ${displayDate(data.day.day_date)}` : ""}
               {data.as_of ? ` · as of ${displayTimestamp(data.as_of)}` : ""}
             </p>
+            {data.server_time && (
+              <p className="text-sm text-slate-600" data-testid="board-updated">
+                Updated {displayClock(data.server_time)}
+              </p>
+            )}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3" data-testid="board-kpis">
               <Stat label="Arrived" value={stages.arrived ?? 0} testid="board-arrived" />
               <Stat label="Awaiting Print" value={stages.awaiting_print ?? 0} testid="board-awaiting-print" />
@@ -154,6 +159,8 @@ export default function Board() {
                   <thead>
                     <tr className="text-left text-slate-500">
                       <th scope="col" className="py-2 min-h-[44px]">Volunteer</th>
+                      <th scope="col">Last 15 min</th>
+                      <th scope="col">Last hour</th>
                       <th scope="col">Last arrival</th>
                       <th scope="col">Status</th>
                     </tr>
@@ -166,6 +173,8 @@ export default function Board() {
                         className={row.quiet ? "bg-amber-50" : ""}
                       >
                         <td className="py-2 font-medium min-h-[44px]">{row.name}</td>
+                        <td data-testid={`last-15-${row.id}`}>{row.last_15m ?? 0}</td>
+                        <td data-testid={`last-60-${row.id}`}>{row.last_60m ?? 0}</td>
                         <td>{displayTimestamp(row.last_arrival_at) || "—"}</td>
                         <td>
                           <span data-testid={`quiet-text-${row.id}`}>

@@ -6,9 +6,9 @@ from datetime import timedelta
 from typing import Callable, Any
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import Request, HTTPException, Depends
+from fastapi import Request, Depends
 from db import get_db
-from helpers import now_utc
+from helpers import now_utc, api_error
 
 JWT_ALGORITHM = "HS256"
 
@@ -82,38 +82,38 @@ async def get_current_user(request: Request) -> dict:
         if auth.startswith("Bearer "):
             token = auth[7:]
     if not token:
-        raise HTTPException(status_code=401, detail="Not authenticated")
+        raise api_error(401, "NOT_AUTHENTICATED", 'Not authenticated')
     try:
         payload = jwt.decode(token, _secret(), algorithms=[JWT_ALGORITHM])
         if payload.get("type") != "access":
-            raise HTTPException(status_code=401, detail="Invalid token type")
+            raise api_error(401, "INVALID_TOKEN_TYPE", 'Invalid token type')
         user_id = ObjectId(payload["sub"])
     except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
+        raise api_error(401, "TOKEN_EXPIRED", 'Token expired')
     except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise api_error(401, "INVALID_TOKEN", 'Invalid token')
     except (KeyError, InvalidId, TypeError, ValueError):
-        raise HTTPException(status_code=401, detail="Invalid token")
+        raise api_error(401, "INVALID_TOKEN", 'Invalid token')
     db = get_db()
     user = await db.users.find_one({"_id": user_id})
     if not user:
-        raise HTTPException(status_code=401, detail="User not found")
+        raise api_error(401, "USER_NOT_FOUND", 'User not found')
     if payload.get("session_version", 0) != user.get("session_version", 0):
-        raise HTTPException(status_code=401, detail="Session expired; sign in again")
+        raise api_error(401, "SESSION_EXPIRED_SIGN_IN_AGAIN", 'Session expired; sign in again')
     if user.get("disabled_at"):
-        raise HTTPException(status_code=403, detail="Account disabled")
+        raise api_error(403, "ACCOUNT_DISABLED", 'Account disabled')
     if user.get("must_change_pin"):
         path = request.url.path.rstrip("/") or "/"
         allowed = {"/api/auth/me", "/api/auth/change-pin", "/api/auth/logout"}
         if path not in allowed:
-            raise HTTPException(status_code=403, detail="PIN_CHANGE_REQUIRED")
+            raise api_error(403, "PIN_CHANGE_REQUIRED", 'PIN_CHANGE_REQUIRED')
     return user
 
 
 def require_roles(*roles: str) -> Callable[..., Any]:
     async def dep(user: dict = Depends(get_current_user)) -> dict:
         if user["role"] not in roles:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+            raise api_error(403, "INSUFFICIENT_PERMISSIONS", 'Insufficient permissions')
         return user
     return dep
 

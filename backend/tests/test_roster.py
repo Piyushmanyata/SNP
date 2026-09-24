@@ -142,8 +142,8 @@ class TestAuthenticatedAttribution:
             board = await leaderboard(actor=ADMIN)
             by_name = {row["name"]: row for row in board["volunteers"]}
             assert by_name["Anita"]["registrations"] == 1
-            assert by_name["Anita"]["points"] == 0
+            assert by_name["Anita"]["completed"] == 0
             assert by_name["Ramesh"]["registrations"] == 1
-            assert by_name["Ramesh"]["points"] == 0
+            assert by_name["Ramesh"]["completed"] == 0
 
         run_camp(monkeypatch, body)

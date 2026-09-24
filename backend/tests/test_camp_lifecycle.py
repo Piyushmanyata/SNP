@@ -13,10 +13,10 @@ import routes_camps
 import sms
 from models import CampBody, CompletePrescriptionBody, ScanBody, ScanConfirmBody
 from routes_clinical import complete_prescription, record_fulfilment
-from routes_desk import arrive, mark_seen, print_prescription, scan, scan_confirm
+from routes_desk import arrive, print_prescription, scan, scan_confirm
 from routes_registration import name_search
 from seed import (
-    ACTOR, CARD, CLINICAL, FIXED_POWER, MEDICINE, MEDICINE_ALT, NOW, OTHER_CARD, OTHER_DAY, TODAY,
+    ACTOR, CARD, CLINICAL, FIXED_POWER, MEDICINE, MEDICINE_ALT, OTHER_CARD, OTHER_DAY, TODAY,
     day, fulfil, recorder, register, run_camp, seed_camp, seen_patient,
 )
 
@@ -57,9 +57,6 @@ class TestArrival:
             assert arrived["queue_status"] == "arrived"
             assert arrived["arrived_at"]
             await print_prescription(reg["id"], actor=ACTOR)
-            with pytest.raises(HTTPException) as exc:
-                await mark_seen(reg["id"], actor=ACTOR)
-            assert exc.value.detail["code"] == "completion_required"
             done = await complete_prescription(
                 CompletePrescriptionBody(
                     patient_id=reg["id"],
@@ -71,16 +68,6 @@ class TestArrival:
                 actor=CLINICAL,
             )
             assert done["registration"]["queue_status"] == "seen"
-        run_camp(monkeypatch, body)
-
-    def test_seen_is_unreachable_without_arrival(self, monkeypatch):
-        async def body(database):
-            _camp_id, (day_id,) = await seed_camp(database)
-            reg = await register(day_id, manual_entry=True)
-            await database.patients.update_one({"_id": ObjectId(reg["id"])}, {"$set": {"printed_at": NOW}})
-            with pytest.raises(HTTPException) as exc:
-                await mark_seen(reg["id"], actor=ACTOR)
-            assert exc.value.detail["code"] == "completion_required"
         run_camp(monkeypatch, body)
 
     def test_arrival_is_stamped_once(self, monkeypatch):
@@ -429,7 +416,7 @@ class TestFulfilmentLines:
                     seen["trans_id"], seen["rev_id"], item_type="specs_fixed", status="fulfilled",
                     issued_power_r=9.75, issued_power_l=9.75,
                 ), actor=CLINICAL, background_tasks=None)
-            assert exc.value.detail["code"] == "unknown_power"
+            assert exc.value.detail["code"] == "UNKNOWN_POWER"
         run_camp(monkeypatch, body)
 
     def test_medicine_outcomes_derive_the_line_status(self, monkeypatch):
@@ -554,7 +541,8 @@ class TestFulfilmentLines:
                     seen["trans_id"], seen["rev_id"], item_type="ot",
                     status="deferred", ot_schedule_day_id=str(full_day),
                 ), actor=CLINICAL, background_tasks=None)
-            assert exc.value.detail == "OT day is full or not found"
+            assert exc.value.detail["code"] == "DAY_FULL"
+            assert exc.value.detail["message"] == "OT day is full or not found"
         run_camp(monkeypatch, body)
 
 

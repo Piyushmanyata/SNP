@@ -26,6 +26,10 @@ class Rejected(Exception):
     pass
 
 
+class Throttled(Unsent):
+    """MSG91 did not accept the message. A later try cannot double-charge."""
+
+
 def configured() -> bool:
     return bool(os.environ.get("MSG91_AUTH_KEY")) and any(
         os.environ.get(name) for name in TEMPLATE_ENV.values()
@@ -66,6 +70,8 @@ def send_dlt_sms(message_type: str, mobile: str, variables: Dict[str, Any]) -> s
         raw = response.read()
     finally:
         conn.close()
+    if status in (429, 503):
+        raise Throttled(f"MSG91 answered HTTP {status}")
     if status >= 500:
         raise ValueError(f"MSG91 answered HTTP {status}")
     body = json.loads(raw.decode() or "{}")

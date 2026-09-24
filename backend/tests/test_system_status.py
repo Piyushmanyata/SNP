@@ -27,6 +27,11 @@ def _status(monkeypatch, backup):
     async def body(database):
         if backup:
             await database.ops_status.insert_one(backup)
+        await database.ops_status.update_one(
+            {"_id": "reminders"},
+            {"$set": {"heartbeat_at": NOW, "sweeps": {NOW.astimezone(routes_reports.IST).date().isoformat(): {"10": True, "20": True}}}},
+            upsert=True,
+        )
         return await system_status(actor=ADMIN)
 
     return run_camp(monkeypatch, body)

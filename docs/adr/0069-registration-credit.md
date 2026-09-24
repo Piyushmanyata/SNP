@@ -1,0 +1,5 @@
+Renumbered from `backend/docs/camp-operations/adr/0001-registration-credit.md`.
+
+# Award one consultation-based point per patient per camp
+
+Accepted during the design interview on 5 September 2026 and updated by the user's subsequent correction. A camp can span several dates; the original registrar earns at most one prize point for each registered patient whose whole prescription is completed and marked seen by a clinical desk operator after arrival and printing. Drafts, arrivals and printing confer no prize point. We rejected a point for each doctor-seen day because repeated attendance would inflate prizes. Only one clinical visit is allowed per patient per camp; repeated scans reopen it without resetting completed care. Keep credit with the team at registration instead of the volunteer's current team so reassignment cannot move historical prize credit; personal credit remains with the original registrar. Self-registrations earn no staff prize point. A reasoned clinical undo before any issue removes current eligibility; a valid re-completion restores at most one point. After issue, corrections preserve history rather than resetting the visit.

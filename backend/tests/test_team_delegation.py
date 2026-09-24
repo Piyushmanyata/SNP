@@ -96,13 +96,13 @@ def test_dual_leaderboard_scoring(monkeypatch):
         assert "team_leads" in data
 
         vols_by_name = {v["name"]: v for v in data["volunteers"]}
-        assert vols_by_name["Vol 1"]["points"] == 1
+        assert vols_by_name["Vol 1"]["completed"] == 1
         assert vols_by_name["Vol 1"]["registrations"] == 2
-        assert vols_by_name["Vol 2"]["points"] == 1
-        assert vols_by_name["Vol 3"]["points"] == 0
+        assert vols_by_name["Vol 2"]["completed"] == 1
+        assert vols_by_name["Vol 3"]["completed"] == 0
 
         leads_by_name = {l["name"]: l for l in data["team_leads"]}
-        assert leads_by_name["Lead One"]["points"] == 2
-        assert leads_by_name["Lead Two"]["points"] == 0
+        assert leads_by_name["Lead One"]["completed"] == 2
+        assert leads_by_name["Lead Two"]["completed"] == 0
 
     http(monkeypatch, body)

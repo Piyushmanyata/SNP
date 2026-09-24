@@ -108,7 +108,7 @@ class TestPrescriptionLineRules:
                 await _complete(patient, **_lines(lines, outcome=outcome))
             status, detail = _refusal(exc)
             assert status == 400
-            assert detail["code"] == "incomplete_prescription"
+            assert detail["code"] == "INCOMPLETE_PRESCRIPTION"
             for label in named:
                 assert label in detail["fields"]["prescribed_lines"]
             assert await db.prescription_revisions.count_documents({}) == 0
@@ -134,7 +134,7 @@ class TestPrescriptionLineRules:
                 await _complete(patient, **content)
             status, detail = _refusal(exc)
             assert status == 400
-            assert detail["code"] == "incomplete_prescription"
+            assert detail["code"] == "INCOMPLETE_PRESCRIPTION"
             assert field in detail["fields"]
         run_camp(monkeypatch, run)
 
@@ -270,7 +270,7 @@ class TestHospitalStation:
                 await add_correction(CorrectionBody(**body), actor=CLINICAL)
             status_code, detail = _refusal(exc)
             assert status_code == 409
-            assert detail["code"] == "surgery_scheduled"
+            assert detail["code"] == "SURGERY_SCHEDULED"
             assert (await db.ot_schedule_days.find_one({"_id": day_id}))["seats_taken"] == 1
             await _record(done, "decline", "declined")
             corrected = await add_correction(CorrectionBody(**{**body, "operation_id": "corr-after"}), actor=CLINICAL)
@@ -297,7 +297,7 @@ class TestHospitalStation:
             )
             with pytest.raises(HTTPException) as exc:
                 await add_correction(body, actor=CLINICAL)
-            assert _refusal(exc)[1]["code"] == "surgery_scheduled"
+            assert _refusal(exc)[1]["code"] == "SURGERY_SCHEDULED"
             current = await db.patients.find_one({"_id": patient["_id"]})
             assert str(current["committed_revision_id"]) == done["revision"]["id"]
         run_camp(monkeypatch, run)
@@ -313,7 +313,7 @@ class TestHospitalStation:
                 await _record(done, "referral", status, day_id if status == "deferred" else None)
             status_code, detail = _refusal(exc)
             assert status_code == 409
-            assert detail["code"] == "hospital_referral"
+            assert detail["code"] == "HOSPITAL_REFERRAL"
             assert (await db.ot_schedule_days.find_one({"_id": day_id}))["seats_taken"] == 0
             assert await db.fulfilments.count_documents({}) == 0
             assert sent == []

@@ -11,11 +11,11 @@ import gzip
 import zlib
 import os
 import pytest
+from helpers import age_from_dob
 from aadhaar import (
     decode_aadhaar,
     parse_xml_qr,
     _to_iso_dob,
-    _calc_age,
     _clean_date_string,
     _extract_delimited_segments,
     _normalize_gender,
@@ -173,7 +173,7 @@ def test_decode_versioned_secure_qr(version, use_gzip):
         "full_name": "Ramesh Kumar",
         "gender": "M",
         "dob": "1975-08-15",
-        "age": _calc_age("1975-08-15"),
+        "age": age_from_dob("1975-08-15"),
         "aadhaar_last4": "4321",
         "address": "12-A, MG Road, Near Temple, Rampur, Rampur PO, Rampur, Modinagar, Ghaziabad, Uttar Pradesh, 201001",
     }
@@ -243,7 +243,7 @@ def test_versioned_secure_qr_decode_endpoint(anon):
     assert result["outcome"] == "card"
     assert result["data"]["full_name"] == "Ramesh Kumar"
     assert result["data"]["dob"] == "1975-08-15"
-    assert result["data"]["age"] == _calc_age("1975-08-15")
+    assert result["data"]["age"] == age_from_dob("1975-08-15")
     assert result["data"]["gender"] == "M"
     assert result["data"]["aadhaar_last4"] == "5678"
     rejected = anon.post(f"{API}/aadhaar/decode", json={"payload": build_secure_qr(["V99", *SAMPLE])})
@@ -362,10 +362,10 @@ def test_decode_additional_date_formats():
 
 
 def test_decode_age_calculation():
-    assert _calc_age("1990-01-01") is not None
-    assert _calc_age("1990-01-01") > 30
-    assert _calc_age(None) is None
-    assert _calc_age("invalid") is None
+    assert age_from_dob("1990-01-01") is not None
+    assert age_from_dob("1990-01-01") > 30
+    assert age_from_dob(None) is None
+    assert age_from_dob("invalid") is None
 
     res = decode_aadhaar('<PrintLetterBarcodeData name="Ravi Kumar" gender="M" dob="1990-01-01" uid="5544" street="Delhi"/>')
     assert res["outcome"] == "card"

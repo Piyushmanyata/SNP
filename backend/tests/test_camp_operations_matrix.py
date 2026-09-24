@@ -31,7 +31,7 @@ from routes_clinical import (
     record_fulfilment,
     undo_completion,
 )
-from routes_desk import arrive, mark_seen, preview_prescription, print_prescription, record_identity_check
+from routes_desk import arrive, preview_prescription, print_prescription, record_identity_check
 from routes_registration import _create_registration
 from seed import (
     FIXED_POWER, MEDICINE, MEDICINE_ALT, NOW, TODAY, TOMORROW, Request, day, patient_doc, register, run_camp,
@@ -167,17 +167,6 @@ class TestClinicalMatrix:
             assert refreshed.get("queue_status") != "seen"
         run_camp(monkeypatch, run)
 
-    def test_c03_mark_seen_cannot_confer_seen(self, monkeypatch):
-        async def run(db):
-            _camp, _day, patient = await _printed_patient(db)
-            with pytest.raises(HTTPException) as exc:
-                await mark_seen(str(patient["_id"]), actor=CLINICAL)
-            assert exc.value.status_code == 409
-            refreshed = await db.patients.find_one({"_id": patient["_id"]})
-            assert refreshed.get("seen_at") is None
-            assert refreshed.get("committed_revision_id") is None
-        run_camp(monkeypatch, run)
-
     def test_c04_draft_saves_without_seen_or_fulfilment(self, monkeypatch):
         async def run(db):
             _camp, _day, patient = await _printed_patient(db)
@@ -205,7 +194,7 @@ class TestClinicalMatrix:
             with pytest.raises(HTTPException) as exc:
                 await complete_prescription(_complete_body(pid, "op-c05"), actor=CLINICAL)
             assert exc.value.status_code == 409
-            assert _code(exc) in ("not_arrived", "never_printed")
+            assert _code(exc) in ("NOT_ARRIVED", "NEVER_PRINTED")
             patient = await db.patients.find_one({"_id": ObjectId(pid)})
             assert patient.get("committed_revision_id") is None
         run_camp(monkeypatch, run)
@@ -223,7 +212,7 @@ class TestClinicalMatrix:
                     actor=CLINICAL,
                 )
             assert exc.value.status_code == 400
-            assert exc.value.detail["code"] == "incomplete_prescription"
+            assert exc.value.detail["code"] == "INCOMPLETE_PRESCRIPTION"
             refreshed = await db.patients.find_one({"_id": patient["_id"]})
             assert refreshed.get("seen_at") is None
         run_camp(monkeypatch, run)
@@ -510,7 +499,7 @@ class TestFulfilmentMatrix:
                     actor=CLINICAL,
                  background_tasks=None)
             assert exc.value.status_code == 409
-            assert _code(exc) == "stale_review"
+            assert _code(exc) == "STALE_REVIEW"
             ok = await record_fulfilment(
                 _issue_body(
                     done["transcription"]["id"],
@@ -797,7 +786,7 @@ class TestPrintingMatrix:
                     actor=ADMIN,
                 )
             assert exc.value.status_code == 409
-            assert exc.value.detail["code"] == "camp_setup_incomplete"
+            assert exc.value.detail["code"] == "CAMP_SETUP_INCOMPLETE"
             camp_id = exc.value.detail["camp_id"]
             camp = await db.camps.find_one({"_id": ObjectId(camp_id)})
             assert camp["is_active"] is False
@@ -873,8 +862,8 @@ class TestScoringAndMessages:
             await complete_prescription(_complete_body(patient["_id"], "op-s01"), actor=CLINICAL)
             board = await routes_reports.leaderboard(actor=LEAD)
             lead = next(x for x in board["team_leads"] if x["id"] == str(LEAD["_id"]))
-            assert lead["personal_points"] == 1
-            assert lead["points"] == 1
+            assert lead["personal_completed"] == 1
+            assert lead["completed"] == 1
         run_camp(monkeypatch, run)
 
     def test_s02_team_change_keeps_original_credit(self, monkeypatch):
@@ -890,8 +879,8 @@ class TestScoringAndMessages:
             await db.users.update_one({"_id": vol["_id"]}, {"$set": {"team_lead_id": str(lead_b)}})
             board = await routes_reports.leaderboard(actor=ADMIN)
             leads = {x["id"]: x for x in board["team_leads"]}
-            assert leads[str(lead_a)]["points"] == 1
-            assert leads.get(str(lead_b), {}).get("points", 0) == 0
+            assert leads[str(lead_a)]["completed"] == 1
+            assert leads.get(str(lead_b), {}).get("completed", 0) == 0
         run_camp(monkeypatch, run)
 
     def test_s03_self_registration_no_staff_point(self, monkeypatch):
@@ -910,7 +899,7 @@ class TestScoringAndMessages:
             await complete_prescription(_complete_body(pid, "op-s03"), actor=CLINICAL)
             board = await routes_reports.leaderboard(actor=VOLUNTEER)
             for row in board["volunteers"]:
-                assert row["points"] == 0
+                assert row["completed"] == 0
         run_camp(monkeypatch, run)
 
     def test_s04_point_follows_valid_completion(self, monkeypatch):
@@ -919,7 +908,7 @@ class TestScoringAndMessages:
             done = await complete_prescription(_complete_body(patient["_id"], "op-s04"), actor=CLINICAL)
             board = await routes_reports.leaderboard(actor=VOLUNTEER)
             vol = next(v for v in board["volunteers"] if v["id"] == str(VOLUNTEER["_id"]))
-            assert vol["points"] == 1
+            assert vol["completed"] == 1
             await undo_completion(
                 UndoCompletionBody(
                     patient_id=str(patient["_id"]),
@@ -931,14 +920,14 @@ class TestScoringAndMessages:
             )
             board = await routes_reports.leaderboard(actor=VOLUNTEER)
             vol = next(v for v in board["volunteers"] if v["id"] == str(VOLUNTEER["_id"]))
-            assert vol["points"] == 0
+            assert vol["completed"] == 0
             await complete_prescription(
                 _complete_body(patient["_id"], "op-s04-b", expected_generation=2),
                 actor=CLINICAL,
             )
             board = await routes_reports.leaderboard(actor=VOLUNTEER)
             vol = next(v for v in board["volunteers"] if v["id"] == str(VOLUNTEER["_id"]))
-            assert vol["points"] == 1
+            assert vol["completed"] == 1
         run_camp(monkeypatch, run)
 
     def test_s05_shared_mobile_not_collapsed(self, monkeypatch):

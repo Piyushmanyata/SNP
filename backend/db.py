@@ -1,5 +1,5 @@
 import os
-from typing import Any, Awaitable, Callable, TypeVar
+from typing import Any, Awaitable, Callable, TypeVar, cast
 from pymongo import ASCENDING, AsyncMongoClient, ReturnDocument
 from pymongo.asynchronous.client_session import AsyncClientSession
 from pymongo.asynchronous.collection import AsyncCollection
@@ -27,7 +27,7 @@ def get_db() -> AsyncDatabase:
 
 async def in_transaction(callback: Callable[[AsyncClientSession], Awaitable[T]]) -> T:
     async with get_client().start_session() as session:
-        return await session.with_transaction(callback)
+        return await session.with_transaction(cast(Any, callback))
 
 
 async def aggregate_list(collection: AsyncCollection, pipeline: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -72,12 +72,19 @@ async def init_indexes() -> None:
         partialFilterExpression={"person_id": {"$type": "objectId"}},
     )
     await db.patients.create_index([("camp_id", ASCENDING), ("full_name_normalized", ASCENDING)])
-    await db.patients.create_index([("camp_id", ASCENDING), ("arrived_at", ASCENDING)])
+    await db.patients.create_index([
+        ("camp_id", ASCENDING), ("arrived_at", ASCENDING), ("arrived_by", ASCENDING),
+        ("printed_at", ASCENDING), ("seen_at", ASCENDING), ("committed_revision_id", ASCENDING),
+    ])
     await db.patients.create_index([("camp_id", ASCENDING), ("seen_at", ASCENDING)])
     await db.patients.create_index([("camp_id", ASCENDING), ("aadhaar_last4", ASCENDING)])
     await db.patients.create_index([("camp_id", ASCENDING), ("phone_normalized", ASCENDING)])
     await db.patients.create_index([("camp_id", ASCENDING), ("queue_status", ASCENDING)])
-    await db.patients.create_index([("camp_id", ASCENDING), ("created_by", ASCENDING)])
+    await db.patients.create_index([("camp_day_id", ASCENDING), ("_id", ASCENDING)])
+    await db.patients.create_index([
+        ("camp_id", ASCENDING), ("created_by", ASCENDING), ("registrar_team_lead_id", ASCENDING),
+        ("committed_revision_id", ASCENDING), ("is_self_registered", ASCENDING),
+    ])
     await db.patients.create_index([("camp_id", ASCENDING), ("registrar_team_lead_id", ASCENDING)])
     await db.transcriptions.create_index("patient_id", unique=True)
     await db.transcriptions.create_index([("person_id", ASCENDING), ("created_at", -1)])
@@ -92,9 +99,26 @@ async def init_indexes() -> None:
     await db.deferred_slips.create_index([("specs_collection_day_id", ASCENDING), ("active", ASCENDING)])
     await db.fulfilments.create_index([("ot_schedule_day_id", ASCENDING), ("status", ASCENDING)])
     await db.fulfilments.create_index([("transcription_id", ASCENDING), ("item_type", ASCENDING)], unique=True)
+    await db.fulfilments.create_index(
+        "operation_id", unique=True, partialFilterExpression={"operation_id": {"$type": "string"}},
+    )
+    await db.fulfilments.create_index([
+        ("camp_id", ASCENDING), ("item_type", ASCENDING),
+        ("status", ASCENDING), ("patient_seen_at", ASCENDING),
+    ])
     await db.ot_schedule_days.create_index([("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True)
     await db.specs_collection_days.create_index([("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True)
     await db.reminder_ledger.create_index([("status", ASCENDING), ("created_at", ASCENDING)])
+    await db.reminder_ledger.create_index([("camp_id", ASCENDING), ("event_date", ASCENDING), ("status", ASCENDING)])
+    await db.reminder_ledger.create_index(
+        [("camp_id", ASCENDING), ("status", ASCENDING), ("created_at", ASCENDING)],
+    )
+    await db.reminder_ledger.create_index(
+        [("camp_id", ASCENDING), ("delivery", ASCENDING), ("created_at", ASCENDING)],
+    )
+    await db.reminder_ledger.create_index(
+        [("message_type", ASCENDING), ("event_date", ASCENDING), ("created_at", ASCENDING)],
+    )
     await db.reminder_ledger.create_index("provider_id", sparse=True)
     await db.reminder_ledger.create_index("created_at")
     await db.reminder_ledger.create_index([("number", ASCENDING), ("message_type", ASCENDING), ("created_at", ASCENDING)])

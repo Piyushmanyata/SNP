@@ -121,7 +121,6 @@ export default function Desk() {
   const focusUsbBox = useRef(false);
   const [printingOpen, setPrintingOpen] = useState(false);
   const [operatingDayId, setOperatingDayId] = useState("");
-  const campDayMode = printingOpen;
   const noCamp = !camp;
 
   const load = useCallback(async () => {
@@ -248,7 +247,7 @@ export default function Desk() {
     if (!value) { setSearchResults(null); return; }
     if (AADHAAR_PAYLOAD.test(value)) {
       setFindVal("");
-      if (!campDayMode) {
+      if (!printingOpen) {
         setError("That is an Aadhaar QR. Use New Registration to register this patient.");
         return;
       }
@@ -276,7 +275,7 @@ export default function Desk() {
       if (request !== findSequence.current) return;
       setError(formatApiError(err));
     }
-  }, [findVal, lookupValue, clearScan, campDayMode, resolveDoorScan]);
+  }, [findVal, lookupValue, clearScan, printingOpen, resolveDoorScan]);
 
   const print = useCallback(async (reg, known) => {
     if (printing.current) return;
@@ -357,7 +356,7 @@ export default function Desk() {
   const closePreReg = useCallback(() => { setShowReg(false); setPreRegPayload(""); }, []);
 
   useWedgeBurst({
-    enabled: !campDayMode && !showReg && !noCamp,
+    enabled: !printingOpen && !showReg && !noCamp,
     onBurst: (payload) => {
       setPreRegPayload(payload);
       setShowReg(true);
@@ -458,13 +457,13 @@ export default function Desk() {
         </div>
       )}
 
-      <div className={`grid gap-2 sm:gap-3 mb-5 ${campDayMode ? "grid-cols-3" : "grid-cols-1"}`}>
+      <div className={`grid gap-2 sm:gap-3 mb-5 ${printingOpen ? "grid-cols-3" : "grid-cols-1"}`}>
         <Stat label="Registered" value={kpi?.registered ?? "—"} testid="kpi-registered-count" />
-        {campDayMode && <Stat label="Seen" value={kpi?.seen ?? "—"} tone="emerald" testid="kpi-seen-count" />}
-        {campDayMode && <Stat label="Pending" value={kpi?.pending ?? "—"} tone="amber" testid="kpi-pending-count" />}
+        {printingOpen && <Stat label="Seen" value={kpi?.seen ?? "—"} tone="emerald" testid="kpi-seen-count" />}
+        {printingOpen && <Stat label="Pending" value={kpi?.pending ?? "—"} tone="amber" testid="kpi-pending-count" />}
       </div>
 
-      {!campDayMode && (
+      {!printingOpen && (
         <>
           <Card className="mb-5" data-desk-card="prereg" data-testid="desk-card-prereg">
             <h3 className="font-display font-bold text-slate-900 mb-1">Pre-registration</h3>
@@ -480,7 +479,7 @@ export default function Desk() {
         </>
       )}
 
-      {campDayMode && <DoorScanCard
+      {printingOpen && <DoorScanCard
         noCamp={noCamp}
         resolveDoorScan={resolveDoorScan}
         onPatientCode={lookupValue}

@@ -77,7 +77,7 @@ The pre-deployment database archive is `/opt/snp/backup-export/pre-audit-1385476
 
 No data migration was required. Startup ran the existing index initializer. Before/after counts and index-name sets were identical across all 18 collections, preserving two patients, one person, one camp and two users. No database reset or volume removal occurred. The prior images retain `rollback-13854767e93b1f95bda958680ef27aff387bd36e` tags. HTTPS homepage returned 200 and `/api/health` returned `{"status":"ok"}`; the deployed clinical module hash matches the release source. The current-release symlink points to the new release.
 
-See `adr-2026-09-ci-reliability.md`, `clinical-audit.md` and `production-registration-security.md` for fixes and verification boundaries. Clinical writes are transactions (ADR 0065) and need no reconciliation.
+See `production-registration-security.md` for fixes and verification boundaries. Clinical writes are transactions (ADR 0065) and need no reconciliation.
 
 ## Hospital outcomes and Clinical find release
 
@@ -225,7 +225,7 @@ Before this deployment, production had one future spectacles day (5 October–6 
 
 ## SMS cost guard — 23 September 2026
 
-[ADR 0051](adr/0051-one-sms-venue-rule-at-thirty-characters.md) limits every DLT variable to 30 characters and holds every SMS venue to one rule. [ADR 0052](adr/0052-delivery-reports-pause-and-canary.md) reads MSG91 delivery reports, pauses a message type after a DLT failure, and sends one reminder per type before the rest of the batch. Admin → SMS shows each message type, pauses and today's credits, and resumes a paused type.
+[ADR 0078](../../docs/adr/0078-one-sms-venue-rule-at-thirty-characters.md) limits every DLT variable to 30 characters and holds every SMS venue to one rule. [ADR 0079](../../docs/adr/0079-delivery-reports-pause-and-canary.md) reads MSG91 delivery reports, pauses a message type after a DLT failure, and sends one reminder per type before the rest of the batch. Admin → SMS shows each message type, pauses and today's credits, and resumes a paused type.
 
 Delivery reports need one shared secret. `MSG91_WEBHOOK_SECRET` is set in `/opt/snp/.env.production`, which only root can read; read it on the VPS with:
 

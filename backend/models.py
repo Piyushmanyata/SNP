@@ -104,24 +104,17 @@ class RegisterBody(BaseModel):
     aadhaar_last4: Optional[str] = Field(default=None, pattern=r"^\d{4}$")
     dob: Optional[str] = None
     aadhaar_scanned: bool = False
-    latin_display_name: Optional[str] = Field(default=None, max_length=NAME_LIMIT)
     camp_day_id: str = Field(max_length=24)
     registration_request_id: Optional[RequestId] = None
-    is_self_registered: bool = False
     manual_reason: Optional[str] = Field(default=None, max_length=200)
     at_door: bool = False
     qr_payload: Optional[QrPayload] = None
     review_confirmed_id: Optional[str] = Field(default=None, max_length=24)
 
 
-class DuplicateCheckBody(BaseModel):
-    full_name: str
-    age: Optional[int] = None
-
-
 # ---- desk ----
 class QrLookupBody(BaseModel):
-    value: str  # patient qr uuid, snp:{uuid}, /p/{uuid}, or reg_no
+    value: str
 
 
 class ScanBody(BaseModel):

@@ -782,7 +782,7 @@ describe("Clinical draft version and dirty-draft protection", () => {
   const savedDraft = (draft_version) => ({ data: { transcription: { id: "tx-1", draft_version } } });
 
   const conflictError = { response: { status: 409, data: { detail: {
-    code: "draft_version_conflict",
+    code: "DRAFT_VERSION_CONFLICT",
     message: "Another operator saved this prescription; reload before saving.",
   } } } };
 
@@ -1116,7 +1116,7 @@ describe("S7 clinical desk", () => {
     await open(draft(3));
     await toReview();
     api.post.mockRejectedValueOnce({ response: { status: 409, data: { detail: {
-      code: "stale_generation", message: "The prescription changed; reload and retry.",
+      code: "STALE_GENERATION", message: "The prescription changed; reload and retry.",
     } } } });
     await act(async () => q("complete-prescription-button").click());
     expect(q("draft-conflict-reload")).not.toBeNull();
@@ -1169,7 +1169,7 @@ describe("S7 clinical desk", () => {
     expect(q("wizard-progress").textContent).toContain("Step 2 of");
     await act(async () => q("none-prescribed").click());
     api.post.mockRejectedValueOnce({ response: { status: 409, data: { detail: {
-      code: "draft_version_conflict", message: "Another operator saved this prescription; reload before saving.",
+      code: "DRAFT_VERSION_CONFLICT", message: "Another operator saved this prescription; reload before saving.",
     } } } });
     await act(async () => q("wizard-next").click());
     api.post.mockResolvedValueOnce(draft(9));

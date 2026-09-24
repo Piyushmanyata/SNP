@@ -8,7 +8,7 @@ from fastapi import FastAPI
 import db
 from conftest import run_db
 from seed import asgi_client, bearer, run_camp, user_doc
-from server import request_context
+from server import RequestContext
 
 
 class Aborted(Exception):
@@ -41,7 +41,7 @@ class _Lines(logging.Handler):
 
 def _call(path, lines):
     app = FastAPI()
-    app.middleware("http")(request_context)
+    app.add_middleware(RequestContext)
 
     @app.get("/api/items/{item_id}")
     async def item(item_id: str):

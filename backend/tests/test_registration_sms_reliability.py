@@ -37,7 +37,7 @@ def test_legacy_patient_qr_resolves_at_desk_and_clinical_lookup(monkeypatch, ent
         with pytest.raises(HTTPException) as exc:
             await routes_clinical.clinical_lookup({"value": entry}, CLINICAL)
         assert exc.value.status_code == 409
-        assert exc.value.detail["code"] == "not_arrived"
+        assert exc.value.detail["code"] == "NOT_ARRIVED"
 
     run_camp(monkeypatch, run)
 
@@ -47,8 +47,9 @@ def test_competing_arrivals_preserve_the_first_volunteer(monkeypatch):
         camp_id, (day_id,) = await seed_camp(database)
         target = patient_doc(_id=ObjectId(), camp_id=camp_id, camp_day_id=day_id, queue_status="registered")
         await database.patients.insert_one(target.copy())
-        first = await routes_desk._stamp_arrival(database, target, "first-volunteer")
-        retry = await routes_desk._stamp_arrival(database, target, "second-volunteer")
+        camp = await database.camps.find_one({"_id": camp_id})
+        first = await routes_desk._stamp_arrival(database, target, "first-volunteer", camp)
+        retry = await routes_desk._stamp_arrival(database, target, "second-volunteer", camp)
         assert retry["arrived_by"] == "first-volunteer"
         assert retry["arrived_at"] == first["arrived_at"]
 

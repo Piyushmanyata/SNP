@@ -83,7 +83,7 @@ class TestCampDayBoard:
                 patient_doc(
                     _id=p_tx, camp_id=camp_id, full_name="Ramesh Kumar", arrived_by=str(desk_quiet),
                     arrived_at=NOW - timedelta(minutes=40), printed_at=NOW - timedelta(minutes=35),
-                    seen_at=NOW - timedelta(minutes=30),
+                    seen_at=NOW - timedelta(minutes=30), committed_revision_id=ObjectId(),
                 ),
                 patient_doc(
                     camp_id=other, full_name="Other Patient", arrived_by=str(desk_busy),
@@ -92,9 +92,10 @@ class TestCampDayBoard:
             ])
             tx = ObjectId()
             await database.transcriptions.insert_one({"_id": tx, "patient_id": p_tx, "camp_id": camp_id})
+            seen = NOW - timedelta(minutes=30)
             await database.fulfilments.insert_many([
-                {"transcription_id": tx, "item_type": "medicine", "status": "fulfilled", "created_at": NOW - timedelta(minutes=2)},
-                {"transcription_id": tx, "item_type": "ot", "status": "deferred", "created_at": NOW - timedelta(minutes=3)},
+                {"transcription_id": tx, "item_type": "medicine", "status": "fulfilled", "camp_id": camp_id, "patient_seen_at": seen, "created_at": NOW - timedelta(minutes=2)},
+                {"transcription_id": tx, "item_type": "ot", "status": "deferred", "camp_id": camp_id, "patient_seen_at": seen, "created_at": NOW - timedelta(minutes=3)},
             ])
             await database.ot_schedule_days.insert_one({
                 "camp_id": camp_id, "day_date": day(1), "venue": "OT Hall", "seat_limit": 10, "seats_taken": 3,
@@ -113,7 +114,11 @@ class TestCampDayBoard:
                 {"status": "paused", "patient_id": p_tx},
             ]
             await database.reminder_ledger.insert_many([
-                {**row, "event_key": str(i), "created_at": NOW - timedelta(minutes=1)} for i, row in enumerate(ledger)
+                {
+                    **row, "event_key": str(i), "event_date": TODAY, "created_at": NOW - timedelta(minutes=1),
+                    "camp_id": camp_id if row["patient_id"] in (p_seen, p_tx) else ObjectId(),
+                }
+                for i, row in enumerate(ledger)
             ])
             await database.sms_controls.insert_many([
                 {"_id": "registration", "paused": True}, {"_id": "camp", "paused": False},
@@ -129,7 +134,12 @@ class TestCampDayBoard:
             by_name = {d["name"]: d for d in out["activity"]}
             assert set(by_name) == {"Vol 1", "Vol 2"}
             assert by_name["Vol 1"]["quiet"] is False
+            assert by_name["Vol 1"]["last_15m"] == 1
+            assert by_name["Vol 1"]["last_60m"] == 1
             assert by_name["Vol 2"]["quiet"] is True
+            assert by_name["Vol 2"]["last_15m"] == 0
+            assert by_name["Vol 2"]["last_60m"] == 1
+            assert out["server_time"] == out["as_of"]
             assert out["quiet_count"] == 1
             assert out["fulfilment"]["medicine"]["fulfilled"] == 1
             assert out["fulfilment"]["ot"]["deferred"] == 1

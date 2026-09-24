@@ -58,6 +58,15 @@ beforeEach(() => {
     if (url === "/admin/system") {
       return Promise.resolve({ data: SYSTEM });
     }
+    if (url === "/sms/status") {
+      return Promise.resolve({
+        data: {
+          reports_enabled: true,
+          today: { submitted: 0, delivered: 0, dlt_failed: 0, credits: 0 },
+          types: [],
+        },
+      });
+    }
     if (url === "/kpis") {
       return Promise.resolve({
         data: { registered: 120, seen: 90, pending: 30 },
@@ -146,7 +155,7 @@ beforeEach(() => {
     if (url === "/leaderboard") {
       return Promise.resolve({
         data: {
-          volunteers: [{ name: "Vol 1", registrations: 50, arrivals: 30, points: 80 }],
+          volunteers: [{ name: "Vol 1", registrations: 50, completed: 30 }],
         },
       });
     }
@@ -404,7 +413,8 @@ describe("AdminDashboard component", () => {
 
     const volBoard = container.querySelector('[data-testid="leaderboard-volunteers-table"]');
     expect(volBoard).not.toBeNull();
-    expect(volBoard.textContent).toContain("80 pts");
+    expect(volBoard.textContent).toContain("30 completed prescriptions");
+    expect(volBoard.textContent).not.toContain("arrivals");
 
     // Switch to Exports tab
     const expTab = container.querySelector('[data-testid="admin-tab-exports"]');
