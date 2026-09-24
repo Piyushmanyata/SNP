@@ -10,7 +10,7 @@ import zlib
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
-from helpers import IST
+from helpers import age_from_dob
 from models import ADDRESS_LIMIT, NAME_LIMIT
 
 # A Secure QR carrying a photo runs to roughly 7k digits; anything larger is not a
@@ -21,11 +21,10 @@ MAX_DECOMPRESSED_BYTES = 256 * 1024
 MAX_HUMAN_AGE = 130
 XML_QR_ROOT = "printletterbarcodedata"
 
-if hasattr(sys, "set_int_max_str_digits"):
-    try:
-        sys.set_int_max_str_digits(MAX_SECURE_QR_DIGITS)
-    except Exception:
-        pass
+try:
+    sys.set_int_max_str_digits(MAX_SECURE_QR_DIGITS)
+except Exception:
+    pass
 
 FIELDS = [
     "indicator", "referenceid", "name", "dob", "gender", "careof", "district",
@@ -62,17 +61,6 @@ def _to_iso_dob(raw: str) -> str | None:
     if len(cleaned) == 4 and cleaned.isdigit():
         return f"{cleaned}-01-01"
     return None
-
-
-def _calc_age(dob: str | None) -> int | None:
-    if not dob:
-        return None
-    try:
-        d = datetime.strptime(dob, "%Y-%m-%d")
-        today = datetime.now(IST)
-        return today.year - d.year - ((today.month, today.day) < (d.month, d.day))
-    except Exception:
-        return None
 
 
 def _normalize_gender(g: str | None) -> str:
@@ -143,7 +131,7 @@ def parse_secure_qr(qr: str) -> dict:
         raise ValueError("Invalid Secure QR gender")
     gender = _normalize_gender(raw_gender)
     dob_iso = _to_iso_dob(fields.get("dob", ""))
-    age = _calc_age(dob_iso)
+    age = age_from_dob(dob_iso)
     if age is None or not 0 <= age <= MAX_HUMAN_AGE:
         raise ValueError("Invalid Secure QR date of birth")
     addr_keys = ["house", "street", "landmark", "location", "postoffice", "vtc", "subdistrict", "district", "state", "pincode"]
@@ -195,7 +183,7 @@ def parse_xml_qr(qr: str) -> dict:
     if not re.fullmatch(r"[0-9]{4}|[0-9]{12}", uid):
         raise ValueError("Invalid XML QR Aadhaar number")
     dob_iso = _to_iso_dob(attrs.get("dob") or attrs.get("yob") or "")
-    age = _calc_age(dob_iso)
+    age = age_from_dob(dob_iso)
     if age is None or not 0 <= age <= MAX_HUMAN_AGE:
         raise ValueError("Invalid XML QR date of birth")
     return {

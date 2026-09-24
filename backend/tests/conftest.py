@@ -1,7 +1,6 @@
 import asyncio
 import importlib
 import os
-import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -116,17 +115,10 @@ def _require_live_api():
 @pytest.fixture(scope="session")
 def admin_credentials():
     _require_live_api()
-    if os.environ.get("SNP_TEST_ADMIN_NAME") and os.environ.get("SNP_TEST_ADMIN_PIN"):
-        return {"name": os.environ["SNP_TEST_ADMIN_NAME"], "pin": os.environ["SNP_TEST_ADMIN_PIN"]}
-    p = Path("/app/memory/test_credentials.md") if Path("/app/memory/test_credentials.md").exists() else _root / "memory" / "test_credentials.md"
-    if not p.exists():
-        pytest.skip("test_credentials.md missing")
-    content = p.read_text(encoding="utf-8")
-    name = re.search(r'(?im)^\s*(?:[-*]\s*)?(?:\*\*)?name(?:\*\*)?\s*:\s*`?([^`\s]+)', content)
-    pin = re.search(r'(?im)^\s*(?:[-*]\s*)?(?:\*\*)?pin(?:\*\*)?\s*:\s*`?([^`\s]+)', content)
-    if not name or not pin:
-        pytest.skip("Name/PIN credentials missing")
-    return {"name": name.group(1), "pin": pin.group(1)}
+    return {
+        "name": os.environ.get("SNP_TEST_ADMIN_NAME") or "admin",
+        "pin": os.environ.get("SNP_TEST_ADMIN_PIN") or "864200",
+    }
 
 
 @pytest.fixture(scope="session")

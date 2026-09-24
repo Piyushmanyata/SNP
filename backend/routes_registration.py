@@ -4,7 +4,7 @@ from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 from pymongo.asynchronous.database import AsyncDatabase
 from db import get_db, next_seq
-from models import AadhaarDecodeBody, RegisterBody, DuplicateCheckBody
+from models import AadhaarDecodeBody, RegisterBody
 from helpers import (
     api_error,    OVERWRITTEN_FIELDS, now_utc, normalize_name, normalize_phone, is_dummy_phone,
     person_key, new_patient_code, age_from_dob, today_ist_str, material_diff,
@@ -55,20 +55,6 @@ async def aadhaar_decode(body: AadhaarDecodeBody, request: Request) -> Dict[str,
     return await asyncio.to_thread(decode_aadhaar, body.payload)
 
 
-# ---------- soft duplicate check ----------
-@router.post("/register/duplicate-check")
-async def duplicate_check(body: DuplicateCheckBody, actor: dict = Depends(require_staff)) -> Dict[str, Any]:
-    db = get_db()
-    camp = await db.camps.find_one({"is_active": True})
-    if not camp:
-        return {"likely_duplicates": []}
-    q = {"camp_id": camp["_id"], "full_name_normalized": normalize_name(body.full_name)}
-    if body.age is not None:
-        q["age"] = body.age
-    dups = await db.patients.find(q).limit(5).to_list(5)
-    return {"likely_duplicates": [ser_patient(d) for d in dups]}
-
-
 async def _resolve_person(data: dict) -> Tuple[Dict[str, Any], bool]:
     """Find or create a Person from scanned aadhaar data. Returns (person, created)."""
     db = get_db()
@@ -81,12 +67,10 @@ async def _resolve_person(data: dict) -> Tuple[Dict[str, Any], bool]:
         "aadhaar_key": key,
         "person_no": person_no,
         "name_verbatim": data["full_name"],
-        "latin_display_name": data.get("latin_display_name"),
         "dob": data.get("dob"),
         "gender": data.get("gender"),
         "last4": data["aadhaar_last4"],
         "locked": True,
-        "merged_into": None,
         "created_at": now_utc(),
     }
     try:
@@ -205,7 +189,6 @@ async def _overwrite_manual(
         **({"registration_request_id": body.registration_request_id} if body.registration_request_id else {}),
         "full_name": body.full_name,
         "full_name_normalized": norm,
-        "latin_display_name": body.latin_display_name,
         "gender": body.gender,
         "age": age,
         "address": body.address,
@@ -264,7 +247,6 @@ def _build_patient_document(
         "reg_no": reg_no,
         "full_name": body.full_name,
         "full_name_normalized": norm,
-        "latin_display_name": body.latin_display_name,
         "gender": body.gender,
         "age": age,
         "address": body.address,
@@ -410,7 +392,6 @@ async def _create_registration(
             "full_name": body.full_name,
             "dob": body.dob,
             "gender": body.gender,
-            "latin_display_name": body.latin_display_name,
         })
 
     hits = await _duplicate_hits(db, camp["_id"], body, person)
@@ -551,7 +532,6 @@ async def self_register(body: RegisterBody, request: Request, background_tasks: 
     await _apply_scanned_identity(
         body, "We could not read the QR code on this Aadhaar card. Please register at the camp desk.",
     )
-    body.is_self_registered = True
     try:
         patient, created = await _create_registration(body, None, True, request)
     except HTTPException as exc:

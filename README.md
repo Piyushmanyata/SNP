@@ -57,4 +57,4 @@ Backend: install `backend/requirements-dev.txt`, run `python -m compileall -q ba
 
 The complete backend suite includes live HTTP tests. Run it serially against a fresh isolated Docker project with `SNP_LIVE_API=http://localhost:3000`, `SNP_TEST_ADMIN_NAME=admin`, and `SNP_TEST_ADMIN_PIN=864200`. It changes the bootstrap PIN and creates synthetic camp records. Without a live endpoint, those integration tests are explicitly skipped.
 
-See [audit evidence and limits](frontend/docs/production-audit.md), [clinical workflow](frontend/docs/clinical-workflow.md) and [scanner audit](frontend/docs/scanner-audit.md). Automated tests do not replace checking the real A6 printer, older phones and SMS carrier before the camp.
+See [clinical workflow](frontend/docs/clinical-workflow.md). Automated tests do not replace checking the real A6 printer, older phones and SMS carrier before the camp.

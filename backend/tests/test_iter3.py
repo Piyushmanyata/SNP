@@ -217,7 +217,7 @@ class TestPrintTemplate:
         reg = admin.post(f"{API}/register", json={
             "full_name": f"TEST Print {TAG}", "gender": "M", "age": 44,
             "phone": "9876500011", "address": "TEST addr", "camp_day_id": day["id"],
-            "aadhaar_last4": "5678", "aadhaar_verified": True,
+            "aadhaar_last4": "5678",
             "manual_reason": "scanner unavailable",
             "registration_request_id": str(uuid.uuid4())}, timeout=30)
         assert reg.status_code in (200, 201), reg.text

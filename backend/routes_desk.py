@@ -109,15 +109,11 @@ def _require_in_camp(patient: dict, camp: dict) -> None:
 
 async def _stamp_arrival(
     db: AsyncDatabase, patient: dict, actor_id: str,
-    camp: Optional[dict] = None, state: Optional[dict] = None,
+    camp: dict, state: Optional[dict] = None,
 ) -> Dict[str, Any]:
     """Arrival is a presence. It never consults camp-day capacity."""
     if patient.get("arrived_at"):
         return patient
-    if camp is None:
-        camp = await db.camps.find_one({"_id": patient["camp_id"]})
-        if not camp:
-            raise api_error(404, "CAMP_NOT_FOUND", 'Camp not found')
     if state is None:
         state = await _require_door_open(db, camp)
     updates: Dict[str, Any] = {
@@ -293,8 +289,7 @@ def _print_refusal(p: dict, state: dict) -> Optional[HTTPException]:
     return None
 
 
-async def _prescription_payload(db, p: dict, actor: dict, stamp: bool) -> Dict[str, Any]:
-    camp = await db.camps.find_one({"_id": p["camp_id"]})
+async def _prescription_payload(db, p: dict, actor: dict, stamp: bool, camp: dict) -> Dict[str, Any]:
     refusal = _print_refusal(p, await _printing_state(db, camp))
     if refusal:
         raise refusal
@@ -355,7 +350,7 @@ async def preview_prescription(
     if not p:
         raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
     _require_in_camp(p, camp)
-    return await _prescription_payload(db, p, actor, stamp=False)
+    return await _prescription_payload(db, p, actor, False, camp)
 
 
 @router.post("/print/{patient_id}")
@@ -369,19 +364,7 @@ async def print_prescription(
     if not p:
         raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
     _require_in_camp(p, camp)
-    return await _prescription_payload(db, p, actor, stamp=True)
-
-
-@router.post("/mark-seen/{patient_id}")
-async def mark_seen(
-    patient_id: str,
-    actor: dict = Depends(require_staff),
-) -> Dict[str, Any]:
-    db = get_db()
-    p = await db.patients.find_one({"_id": ObjectId(patient_id)})
-    if not p:
-        raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
-    raise api_error(409, "COMPLETION_REQUIRED", 'Seen is recorded only when a clinical operator completes the prescription.')
+    return await _prescription_payload(db, p, actor, True, camp)
 
 
 @router.post("/identity-check")
@@ -403,21 +386,8 @@ async def record_identity_check(
             "admin_id": str(actor["_id"]),
             "checked_at": now_utc(),
         },
-        "aadhaar_verified": False,
     }})
     p = await db.patients.find_one({"_id": p["_id"]})
     if not p:
         raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
     return {"registration": ser_patient(p)}
-
-
-@router.post("/undo-seen/{patient_id}")
-async def undo_seen(
-    patient_id: str,
-    actor: dict = Depends(require_staff),
-) -> Dict[str, Any]:
-    db = get_db()
-    p = await db.patients.find_one({"_id": ObjectId(patient_id)})
-    if not p:
-        raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
-    raise api_error(409, "COMPLETION_REQUIRED", 'Use clinical undo before any issue to reverse a completion.')

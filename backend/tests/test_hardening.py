@@ -178,9 +178,10 @@ class TestConflictsAreNotCrashes:
                 patient_qr="qr-1", queue_status="arrived", arrived_at=NOW, printed_at=None,
             )
             await database.patients.insert_one({**row, "identity_recheck_required": True})
+            camp = await database.camps.find_one({"_id": camp_id})
 
             with pytest.raises(HTTPException) as exc:
-                await routes_desk._prescription_payload(database, row, ACTOR, stamp=True)
+                await routes_desk._prescription_payload(database, row, ACTOR, True, camp)
             assert exc.value.status_code == 409
             assert exc.value.detail["code"] == "PRINT_CONFLICT"
             assert (await database.patients.find_one({"_id": pid}))["printed_at"] is None

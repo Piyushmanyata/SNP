@@ -221,7 +221,7 @@ An admin's recorded decision that a Manual entry's patient was identified at cam
 _Avoid_: verification, override, alternative scan
 
 **Door manual gate**:
-The admin decision that Scan at the door may accept typed identity today, taken because the scanners are down. Stamped on the active camp as the IST date it was opened, so it lapses when that camp day ends and an admin must take the decision again tomorrow. It reveals the typed form and the OCR transcription route at the door and nothing else: a Manual entry it produces is arrived when saved, still carries `identity_recheck_required` and still cannot print until an admin records an identity check.
+The admin decision that Scan at the door may accept typed identity today, taken because the scanners are down. Stamped on the active camp as the IST date it was opened, so it lapses when that camp day ends and an admin must take the decision again tomorrow. It reveals the typed form at the door and nothing else: a Manual entry it produces is arrived when saved, still carries `identity_recheck_required` and still cannot print until an admin records an identity check.
 _Avoid_: manual mode, break-glass, override, failure unlock (the door has no failure counter)
 
 **Patient code**:

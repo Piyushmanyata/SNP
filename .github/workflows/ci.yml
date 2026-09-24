@@ -88,7 +88,7 @@ jobs:
         run: docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.ci.yml -p snp-ci up -d --build --wait --wait-timeout 180
       - run: docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.ci.yml -p snp-ci exec -T frontend nginx -t
       - name: Full backend suite with real HTTP and MongoDB
-        run: python -m pytest backend/tests -q --strict-markers --strict-config --junitxml=backend/test-results.xml --cov=backend --cov-config=backend/.coveragerc --cov-report=xml:backend/coverage.xml --cov-report=term:skip-covered
+        run: python -m pytest backend/tests -q --strict-markers --strict-config --junitxml=backend/test-results.xml --cov=backend --cov-config=backend/.coveragerc --cov-fail-under=88 --cov-report=xml:backend/coverage.xml --cov-report=term:skip-covered
       - name: Container diagnostics
         if: failure()
         run: docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.ci.yml -p snp-ci logs --no-color --tail=100

@@ -47,8 +47,9 @@ def test_competing_arrivals_preserve_the_first_volunteer(monkeypatch):
         camp_id, (day_id,) = await seed_camp(database)
         target = patient_doc(_id=ObjectId(), camp_id=camp_id, camp_day_id=day_id, queue_status="registered")
         await database.patients.insert_one(target.copy())
-        first = await routes_desk._stamp_arrival(database, target, "first-volunteer")
-        retry = await routes_desk._stamp_arrival(database, target, "second-volunteer")
+        camp = await database.camps.find_one({"_id": camp_id})
+        first = await routes_desk._stamp_arrival(database, target, "first-volunteer", camp)
+        retry = await routes_desk._stamp_arrival(database, target, "second-volunteer", camp)
         assert retry["arrived_by"] == "first-volunteer"
         assert retry["arrived_at"] == first["arrived_at"]
 

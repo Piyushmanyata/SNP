@@ -69,8 +69,6 @@ async def _token_targets(
     query = {"item_type": item_type, "active": True, "collection_date": event_date}
     async for page in _pages(db.deferred_slips, query):
         for s in page:
-            if s.get("cancelled"):
-                continue
             patient = await db.patients.find_one({"_id": s["patient_id"]})
             if not patient:
                 continue

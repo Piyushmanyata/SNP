@@ -31,7 +31,7 @@ from routes_clinical import (
     record_fulfilment,
     undo_completion,
 )
-from routes_desk import arrive, mark_seen, preview_prescription, print_prescription, record_identity_check
+from routes_desk import arrive, preview_prescription, print_prescription, record_identity_check
 from routes_registration import _create_registration
 from seed import (
     FIXED_POWER, MEDICINE, MEDICINE_ALT, NOW, TODAY, TOMORROW, Request, day, patient_doc, register, run_camp,
@@ -165,17 +165,6 @@ class TestClinicalMatrix:
             refreshed = await db.patients.find_one({"_id": patient["_id"]})
             assert refreshed.get("committed_revision_id") is None
             assert refreshed.get("queue_status") != "seen"
-        run_camp(monkeypatch, run)
-
-    def test_c03_mark_seen_cannot_confer_seen(self, monkeypatch):
-        async def run(db):
-            _camp, _day, patient = await _printed_patient(db)
-            with pytest.raises(HTTPException) as exc:
-                await mark_seen(str(patient["_id"]), actor=CLINICAL)
-            assert exc.value.status_code == 409
-            refreshed = await db.patients.find_one({"_id": patient["_id"]})
-            assert refreshed.get("seen_at") is None
-            assert refreshed.get("committed_revision_id") is None
         run_camp(monkeypatch, run)
 
     def test_c04_draft_saves_without_seen_or_fulfilment(self, monkeypatch):

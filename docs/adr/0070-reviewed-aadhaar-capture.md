@@ -14,4 +14,4 @@ Both registration paths share one server-side identity check for reviewed and ma
 
 The stricter public-only rules stay on `/self-register`: age must agree with the date of birth, and gender, address and last-four digits are constrained. The desk keeps its existing tolerance — operator-entered age need not agree with the date of birth, and gender words are normalised — because the desk resolves those differences through its mismatch review rather than by refusing the registration.
 
-See [capture design](../../../../frontend/docs/aadhaar-capture-improvements.md) and [OCR research](../../aadhaar-ocr-research.md). The engine choice and performance claims remain subject to implementation validation.
+See [capture design](../../frontend/docs/aadhaar-capture-improvements.md). The engine choice and performance claims remain subject to implementation validation.
