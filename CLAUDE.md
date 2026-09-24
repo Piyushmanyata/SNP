@@ -4,7 +4,7 @@
 
 Authoritative stack:
 - `frontend/`: React + Tailwind CSS (Vite)
-- `backend/`: FastAPI + Motor async MongoDB
+- `backend/`: FastAPI + PyMongo Async on a MongoDB replica set
 - `memory/`: PRD and test credentials
 - `docker-compose.prod.yml`: full-stack deployment, TLS, backups and reminder worker
 

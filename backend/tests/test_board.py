@@ -31,7 +31,7 @@ def _value(document, expression):
     return document.get(expression[1:]) if isinstance(expression, str) and expression.startswith("$") else expression
 
 
-def _aggregate(collection, pipeline):
+async def _aggregate(collection, pipeline):
     collection.db.query_count += 1
     documents = collection.docs
     for stage in pipeline:

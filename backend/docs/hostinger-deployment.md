@@ -265,3 +265,13 @@ Post-deployment checks against the live host:
 SmartPing approved the revised `SNP Specs Token` and `SNP Specs Reminder` texts as Promotional on header `SZWTRT`. The DLT IDs are `1777179015421050461` and `1777179015427680603`. Matching Unicode MSG91 flows were created as `6ab3a55711b0c861c10e65e2` and `6ab3a56d4313c436210f3de3`, with variables `camp_no`, `date`, `end_date`, `venue`, and `reg_no` in that order. The exact copies and IDs are in [msg91-templates.json](msg91-templates.json).
 
 Both new flows now show “Verified by DLT” in MSG91. Set `MSG91_TEMPLATE_SPECS_TOKEN` and `MSG91_TEMPLATE_SPECS` in `/opt/snp/.env.production` and recreate the backend and reminders containers after deploying. The 5 October–6 November spectacles day still needs fixed 10:00–17:00 hours and a real SMS venue before patient sends can occur.
+
+## Replica set and database users — issue #50 S1
+
+[ADR 0060](../../docs/adr/0060-replica-set-transactions-and-pymongo-async.md) runs MongoDB as the replica set `rs0` with a key file, gives the API the `snp_app` user and backups the `snp_backup` user, and moves the backend to PyMongo Async. The users are created by `ops/mongo/init-users.js`, which runs only on an empty data directory, so an existing deployment needs a fresh `mongo_data` volume:
+
+1. Take a final archive by restarting the backup container, and copy it to `/opt/snp/archive/`.
+2. Append `MONGO_APP_PASSWORD` and `MONGO_BACKUP_PASSWORD` to `/opt/snp/.env.production`, each from `openssl rand -hex 32`.
+3. `docker compose --env-file /opt/snp/.env.production -p snp -f docker-compose.prod.yml down` (without `-v`), then `docker volume rm snp_mongo_data`.
+4. `up -d --build --wait`. The `mongo` healthcheck initiates `rs0`; startup recreates `admin` from `ADMIN_BOOTSTRAP_PIN` with a forced PIN change.
+5. Check that `/api/health/ready` returns `ready: true` and that the backend's user lists only `DB_NAME`.

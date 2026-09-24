@@ -8,7 +8,7 @@ from uuid import NAMESPACE_URL, uuid5
 from zoneinfo import ZoneInfo
 
 from bson import ObjectId
-from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import AsyncMongoClient
 
 
 MARKER = "snp-benchmark-10000-v1"
@@ -151,13 +151,13 @@ async def seed(database) -> dict:
 async def main(action: str) -> None:
     if os.environ.get("DB_NAME") != "snp_audit":
         raise RuntimeError("This helper may only modify the isolated snp_audit database")
-    client = AsyncIOMotorClient(os.environ["MONGO_URL"], serverSelectionTimeoutMS=5000)
+    client = AsyncMongoClient(os.environ["MONGO_URL"], serverSelectionTimeoutMS=5000)
     try:
         database = client["snp_audit"]
         result = await (seed(database) if action == "seed" else restore(database))
         print(json.dumps(result, indent=2))
     finally:
-        client.close()
+        await client.close()
 
 
 if __name__ == "__main__":

@@ -1,11 +1,16 @@
+import json
+import logging
 import os
+import time
+import traceback
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Awaitable, Callable
+from uuid import uuid4
 from dotenv import load_dotenv
 load_dotenv()
 
 from bson.errors import InvalidId
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -57,6 +62,48 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(title="SNP Camps API", lifespan=lifespan)
+
+http_log = logging.getLogger("snp.http")
+if not http_log.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(message)s"))
+    http_log.addHandler(_handler)
+    http_log.setLevel(logging.INFO)
+    http_log.propagate = False
+SLOW_REQUEST_MS = 1000
+
+
+async def request_context(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    request_id = uuid4().hex[:12]
+    request.state.request_id = request_id
+    started = time.perf_counter()
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        http_log.error(json.dumps({
+            "request_id": request_id,
+            "error": type(exc).__name__,
+            "trace": "".join(traceback.format_tb(exc.__traceback__)),
+        }))
+        response = JSONResponse(status_code=500, content={"detail": {
+            "code": "INTERNAL",
+            "message": "Something went wrong. Quote this code to the admin.",
+            "request_id": request_id,
+        }})
+    ms = round((time.perf_counter() - started) * 1000)
+    route = request.scope.get("route")
+    http_log.log(logging.WARNING if ms > SLOW_REQUEST_MS else logging.INFO, json.dumps({
+        "request_id": request_id,
+        "method": request.method,
+        "path": getattr(route, "path", "unmatched"),
+        "status": response.status_code,
+        "ms": ms,
+    }))
+    response.headers["X-Request-ID"] = request_id
+    return response
+
+
+app.middleware("http")(request_context)
 
 
 @app.exception_handler(InvalidId)

@@ -7,7 +7,7 @@ from bson import ObjectId
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
 from catalogue import format_power
-from db import get_db
+from db import aggregate_list, get_db
 from helpers import as_utc, display_date, display_timestamp, iso, ist_day_bounds, now_utc, today_ist_str
 from security import require_admin, require_staff, require_any, require_lead
 import sms
@@ -32,10 +32,10 @@ async def kpis(actor: dict = Depends(require_any)) -> Dict[str, Any]:
 
 
 async def _counts_by(collection: Any, match: Dict[str, Any], field: str) -> Dict[str, int]:
-    rows = await collection.aggregate([
+    rows = await aggregate_list(collection, [
         {"$match": match},
         {"$group": {"_id": f"${field}", "count": {"$sum": 1}}},
-    ]).to_list(None)
+    ])
     return {row["_id"]: row["count"] for row in rows if row["_id"]}
 
 
@@ -257,10 +257,10 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
         db.patients.count_documents({**arrival_filter, "printed_at": None}),
         db.patients.count_documents({**arrival_filter, "printed_at": {"$ne": None}, "seen_at": None}),
         db.patients.distinct("_id", {**camp_filter, "seen_at": {"$gte": start, "$lt": end}}),
-        db.patients.aggregate([
+        aggregate_list(db.patients, [
             {"$match": arrival_filter},
             {"$group": {"_id": "$arrived_by", "last": {"$max": "$arrived_at"}}},
-        ]).to_list(None),
+        ]),
     )
     seen_today = len(seen_ids)
     tx_ids = await db.transcriptions.distinct("_id", {"patient_id": {"$in": seen_ids}}) if seen_ids else []
@@ -287,10 +287,10 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
 
     fulfil_counts = _empty_board(as_of, "current")["fulfilment"]
     if tx_ids:
-        fulfilments = await db.fulfilments.aggregate([
+        fulfilments = await aggregate_list(db.fulfilments, [
             {"$match": {"transcription_id": {"$in": tx_ids}}},
             {"$group": {"_id": {"item_type": "$item_type", "status": "$status"}, "count": {"$sum": 1}}},
-        ]).to_list(None)
+        ])
         for f in fulfilments:
             bucket = fulfil_counts.get(f["_id"].get("item_type"))
             status = f["_id"].get("status")

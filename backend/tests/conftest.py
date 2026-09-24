@@ -1,9 +1,36 @@
+import asyncio
 import os
 import re
 import sys
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
+
+TEST_MONGO_URL = os.environ.get(
+    "SNP_TEST_MONGO_URL", "mongodb://127.0.0.1:27017/?replicaSet=rs0&directConnection=true"
+)
+
+
+def run_db(body):
+    """Run body(database) against a fresh, indexed MongoDB database that is dropped afterwards."""
+    import db
+    from pymongo import AsyncMongoClient
+
+    async def main():
+        client = AsyncMongoClient(TEST_MONGO_URL, serverSelectionTimeoutMS=5000)
+        name = f"snp_t_{uuid4().hex[:8]}"
+        database = client[name]
+        db._client, db._db = client, database
+        try:
+            await db.init_indexes()
+            return await body(database)
+        finally:
+            await client.drop_database(name)
+            await client.close()
+            db._client = db._db = None
+
+    return asyncio.run(main())
 
 def pytest_configure(config):
     backend_dir = str(Path(__file__).resolve().parents[1])

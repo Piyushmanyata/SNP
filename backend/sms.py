@@ -6,7 +6,7 @@ from datetime import timedelta
 from typing import Any, Dict, Optional
 
 from bson import ObjectId
-from motor.motor_asyncio import AsyncIOMotorDatabase
+from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.errors import DuplicateKeyError
 
 import helpers
@@ -65,13 +65,13 @@ def valid_phone(raw: Optional[str]) -> Optional[str]:
     return n
 
 
-async def paused(db: AsyncIOMotorDatabase, message_type: str) -> bool:
+async def paused(db: AsyncDatabase, message_type: str) -> bool:
     control = await db.sms_controls.find_one({"_id": message_type})
     return bool(control and control.get("paused"))
 
 
 async def _claim(
-    db: AsyncIOMotorDatabase,
+    db: AsyncDatabase,
     patient_id: Any,
     message_type: str,
     event_date: str,
@@ -129,7 +129,7 @@ async def _claim(
 
 
 async def _record_paused(
-    db: AsyncIOMotorDatabase, patient_id: Any, message_type: str, event_date: str, event_key: Optional[str],
+    db: AsyncDatabase, patient_id: Any, message_type: str, event_date: str, event_key: Optional[str],
     number: str, venue: str, copy: str,
 ) -> None:
     try:
@@ -152,7 +152,7 @@ def _template_variables(template: str, values: Dict[str, Any]) -> Dict[str, Any]
 
 
 async def deliver_patient_sms(
-    db: AsyncIOMotorDatabase,
+    db: AsyncDatabase,
     patient: dict,
     message_type: str,
     event_date: str,
@@ -245,7 +245,7 @@ async def deliver_patient_sms(
 
 
 async def send_patient_sms(
-    db: AsyncIOMotorDatabase,
+    db: AsyncDatabase,
     patient: dict,
     message_type: str,
     event_date: str,
@@ -273,7 +273,7 @@ def _credit(raw: Any) -> float:
         return 0.0
 
 
-async def record_delivery_report(db: AsyncIOMotorDatabase, report: Dict[str, Any]) -> bool:
+async def record_delivery_report(db: AsyncDatabase, report: Dict[str, Any]) -> bool:
     request_id = str(report.get("requestId") or "").strip()
     code = str(report.get("status") or "").strip()
     delivery = REPORT_STATUS.get(code)
@@ -296,7 +296,7 @@ async def record_delivery_report(db: AsyncIOMotorDatabase, report: Dict[str, Any
     return True
 
 
-async def _pause(db: AsyncIOMotorDatabase, row: Dict[str, Any], reason: str) -> None:
+async def _pause(db: AsyncDatabase, row: Dict[str, Any], reason: str) -> None:
     control = await db.sms_controls.find_one({"_id": row["message_type"]}) or {}
     resumed_at = control.get("resumed_at")
     if control.get("paused") or (resumed_at and helpers.as_utc(row["created_at"]) < helpers.as_utc(resumed_at)):
@@ -310,7 +310,7 @@ async def _pause(db: AsyncIOMotorDatabase, row: Dict[str, Any], reason: str) -> 
     logger.warning("SMS %s paused after a DLT failure: %s", row["message_type"], reason)
 
 
-async def resume(db: AsyncIOMotorDatabase, message_type: str, actor_id: str) -> None:
+async def resume(db: AsyncDatabase, message_type: str, actor_id: str) -> None:
     await db.sms_controls.update_one(
         {"_id": message_type},
         {"$set": {"paused": False, "resumed_at": helpers.now_utc(), "resumed_by": actor_id}},

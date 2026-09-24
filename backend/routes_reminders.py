@@ -4,7 +4,8 @@ from datetime import timedelta
 from typing import Any, AsyncGenerator, Dict, List, Tuple
 
 from fastapi import APIRouter, HTTPException, Request
-from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
+from pymongo.asynchronous.collection import AsyncCollection
+from pymongo.asynchronous.database import AsyncDatabase
 
 from db import get_db
 import helpers
@@ -28,7 +29,7 @@ def _require_cron_secret(request: Request) -> None:
 
 
 async def _pages(
-    collection: AsyncIOMotorCollection, query: Dict[str, Any]
+    collection: AsyncCollection, query: Dict[str, Any]
 ) -> AsyncGenerator[List[dict], None]:
     after: Any = None
     while True:
@@ -44,7 +45,7 @@ async def _pages(
         after = page[-1]["_id"]
 
 
-async def _camp_targets(db: AsyncIOMotorDatabase, event_date: str) -> AsyncGenerator[Target, None]:
+async def _camp_targets(db: AsyncDatabase, event_date: str) -> AsyncGenerator[Target, None]:
     days = await db.camp_days.find({"day_date": event_date}).to_list(None)
     for day in days:
         camp = await db.camps.find_one({"_id": day["camp_id"]})
@@ -55,7 +56,7 @@ async def _camp_targets(db: AsyncIOMotorDatabase, event_date: str) -> AsyncGener
 
 
 async def _token_targets(
-    db: AsyncIOMotorDatabase, item_type: str, event_date: str
+    db: AsyncDatabase, item_type: str, event_date: str
 ) -> AsyncGenerator[Target, None]:
     query = {"item_type": item_type, "active": True, "collection_date": event_date}
     async for page in _pages(db.deferred_slips, query):
@@ -74,14 +75,14 @@ async def _token_targets(
                    s.get("collection_end_date"))
 
 
-async def _gate(db: AsyncIOMotorDatabase, message_type: str, event_date: str) -> str:
+async def _gate(db: AsyncDatabase, message_type: str, event_date: str) -> str:
     control = await db.sms_controls.find_one({"_id": message_type}) or {}
     if control.get("paused"):
         return "paused"
     return await _canary(db, message_type, event_date, control.get("resumed_at"))
 
 
-async def _canary(db: AsyncIOMotorDatabase, message_type: str, event_date: str, resumed_at: Any) -> str:
+async def _canary(db: AsyncDatabase, message_type: str, event_date: str, resumed_at: Any) -> str:
     query: Dict[str, Any] = {
         "message_type": message_type, "event_date": event_date,
         "status": {"$in": ["sent", "uncertain", "rejected"]},
@@ -99,7 +100,7 @@ async def _canary(db: AsyncIOMotorDatabase, message_type: str, event_date: str, 
 
 
 async def _send_each(
-    db: AsyncIOMotorDatabase,
+    db: AsyncDatabase,
     message_type: str,
     targets: AsyncGenerator[Target, None],
     event_date: str,
