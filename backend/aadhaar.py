@@ -21,10 +21,7 @@ MAX_DECOMPRESSED_BYTES = 256 * 1024
 MAX_HUMAN_AGE = 130
 XML_QR_ROOT = "printletterbarcodedata"
 
-try:
-    sys.set_int_max_str_digits(MAX_SECURE_QR_DIGITS)
-except Exception:
-    pass
+sys.set_int_max_str_digits(MAX_SECURE_QR_DIGITS)
 
 FIELDS = [
     "indicator", "referenceid", "name", "dob", "gender", "careof", "district",
