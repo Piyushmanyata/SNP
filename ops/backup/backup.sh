@@ -55,11 +55,13 @@ run_once() {
     restic init --quiet || { fail "local repository init failed"; return 1; }
   fi
   patients=$(count_patients) || { fail "MongoDB unreachable or login refused"; return 1; }
-  summary=$(restic backup --json --quiet --retry-lock 10m --host snp --tag snp --tag "patients=$patients" \
+  if ! summary=$(restic backup --json --quiet --retry-lock 10m --host snp --tag snp --tag "patients=$patients" \
       --stdin-filename snp.archive.gz --stdin-from-command -- \
       mongodump --uri "$uri" --oplog --gzip --archive --quiet \
-    | jq -c 'select(.message_type == "summary")') && [ -n "$summary" ] \
-    || { fail "dump failed"; return 1; }
+    | jq -c 'select(.message_type == "summary")') || [ -z "$summary" ]; then
+    fail "dump failed"
+    return 1
+  fi
   if [ -n "$remote" ]; then
     if copy_to_remote; then remote_ok=true; else error="remote copy failed"; fi
   fi
