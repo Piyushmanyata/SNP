@@ -69,8 +69,7 @@ beforeEach(() => {
       return Promise.resolve({
         data: {
           specs_days: [
-            { id: "sp-1", day_date: "2026-09-12", venue: "Base Optical", start_time: "10:00", end_time: "17:00" },
-            { id: "sp-full", day_date: "2026-09-13", venue: "Full Desk", window_required: true },
+            { id: "sp-1", day_date: "2026-09-12", venue: "Base Optical" },
           ],
         },
       });
@@ -655,7 +654,7 @@ describe("Clinical page component", () => {
     warnSpy.mockRestore();
   });
 
-  test("Spectacles to be made assigns a Specs collection day with date venue and window", async () => {
+  test("Spectacles to be made assigns a Specs collection day with date, venue and the fixed hours", async () => {
     auth.user.line = "specs_made";
     sessionStorage.setItem(LINE_STORAGE_KEY, "specs_made");
     const mockLookupData = {
@@ -704,8 +703,6 @@ describe("Clinical page component", () => {
     expect(daySelect).not.toBeNull();
     expect(container.querySelector('[data-testid="specs-collection-date"]')).toBeNull();
     expect(container.querySelector('[data-testid="specs-collection-venue"]')).toBeNull();
-    const fullOpt = Array.from(daySelect.options).find((o) => o.value === "sp-full");
-    expect(fullOpt).toBeUndefined();
     const openOpt = Array.from(daySelect.options).find((o) => o.value === "sp-1");
     expect(openOpt.disabled).toBe(false);
     expect(openOpt.textContent).toContain("Base Optical");

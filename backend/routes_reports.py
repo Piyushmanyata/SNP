@@ -166,8 +166,7 @@ def _export_row(p: dict, t: dict, fulfilments: dict, day_dates: dict, revision: 
         display_date(scheduled.get("collection_date")), scheduled.get("collection_venue", "") or "",
         display_date(specs.get("collection_date")),
         specs.get("collection_venue", "") or "",
-        specs.get("collection_start_time", "") or "",
-        specs.get("collection_end_time", "") or "",
+        *((sms.SPECS_PICKUP_START_TIME, sms.SPECS_PICKUP_END_TIME) if specs.get("collection_date") else ("", "")),
     ]
     return [csv_cell(c) for c in cells]
 
@@ -316,8 +315,7 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
         sort=[("day_date", 1)],
     )
     specs_day = await db.specs_collection_days.find_one(
-        {"camp_id": camp["_id"], "$or": [{"day_date": {"$gte": today}}, {"end_date": {"$gte": today}}],
-         "start_time": sms.SPECS_PICKUP_START_TIME, "end_time": sms.SPECS_PICKUP_END_TIME},
+        {"camp_id": camp["_id"], "$or": [{"day_date": {"$gte": today}}, {"end_date": {"$gte": today}}]},
         sort=[("day_date", 1)],
     )
     next_ot = None
@@ -333,8 +331,8 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
             "day_date": specs_day["day_date"],
             "end_date": specs_day.get("end_date") or specs_day["day_date"],
             "venue": specs_day.get("venue"),
-            "start_time": specs_day["start_time"],
-            "end_time": specs_day["end_time"],
+            "start_time": sms.SPECS_PICKUP_START_TIME,
+            "end_time": sms.SPECS_PICKUP_END_TIME,
         }
 
     return {

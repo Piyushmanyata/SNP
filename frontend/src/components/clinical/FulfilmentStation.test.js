@@ -237,14 +237,13 @@ describe("Fulfilment lines", () => {
     }));
   });
 
-  test("the specs picker shows date venue and window and omits incomplete days", async () => {
+  test("the specs picker shows each day's dates, venue and the fixed hours", async () => {
     await renderStation({
       line: "specs_made",
       data: { transcription: { id: "tx-1", specs_measurements: RX }, registration: { id: "r" }, fulfilments: [] },
       specsDays: [
-        { id: "sp-legacy", day_date: "2026-09-05", venue: "Old Optical", window_required: true },
-        { id: "sp-2", day_date: "2026-09-06", end_date: "2026-09-06", venue: "Optical", start_time: "10:00", end_time: "17:00" },
-        { id: "sp-3", day_date: "2026-09-07", end_date: "2026-09-14", venue: "Hall B", start_time: "10:00", end_time: "17:00" },
+        { id: "sp-2", day_date: "2026-09-06", end_date: "2026-09-06", venue: "Optical" },
+        { id: "sp-3", day_date: "2026-09-07", end_date: "2026-09-14", venue: "Hall B" },
       ],
     });
 
@@ -253,7 +252,6 @@ describe("Fulfilment lines", () => {
     expect(picker.textContent).toContain("06-09-2026 · Optical · 10:00 AM–5:00 PM");
     expect(picker.textContent).toContain("07-09-2026 – 14-09-2026 · Hall B · 10:00 AM–5:00 PM");
     expect(picker.textContent).not.toContain("2026-09-06");
-    expect(picker.textContent).not.toContain("Old Optical");
     expect(picker.textContent).not.toContain("full");
   });
 
@@ -416,6 +414,23 @@ describe("Fulfilment lines", () => {
 
     expect(container.querySelector('[data-testid="station-specs_made-print-token"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="station-specs_made-save"]')).toBeNull();
+    expect(container.querySelector('[data-testid="station-specs_made-token-replaced"]')).toBeNull();
+  });
+
+  test("a Token replaced by a schedule change tells the desk to print the new one", async () => {
+    await renderStation({
+      line: "ot",
+      data: {
+        transcription: { id: "tx-1" },
+        registration: { id: "reg-1" },
+        fulfilments: [{ item_type: "ot", status: "deferred", ot_schedule_day_id: "ot-1" }],
+        slips: [{ id: "slip-2", item_type: "ot", active: true, replaces: "slip-1" }],
+      },
+      otDays: [{ id: "ot-1", day_date: "2026-10-02", venue: "OT Theatre", seats_free: 3 }],
+    });
+
+    expect(container.querySelector('[data-testid="station-ot-token-replaced"]').textContent)
+      .toContain("Print this new Token and take back the old one");
   });
 
   test("a failed issue retry reuses the same operation id", async () => {

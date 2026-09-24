@@ -554,7 +554,7 @@ class TestClinical:
         assert d["seat_limit"] == 1 and d["seats_taken"] == 0 and d["seats_free"] == 1
         STATE["ot_day_id"] = d["id"]
 
-    def test_create_list_upsert_specs_collection_days(self, admin):
+    def test_create_list_and_edit_specs_collection_days(self, admin):
         r = admin.post(f"{API}/clinical/specs-days", json={
             "camp_id": STATE["camp_id"], "day_date": DAY_B,
             "venue": "TEST Optical",
@@ -562,14 +562,19 @@ class TestClinical:
         assert r.status_code == 200, r.text
         d = r.json()["specs_day"]
         assert "seat_limit" not in d and "seats_taken" not in d and "seats_free" not in d
-        assert d["start_time"] == "10:00" and d["end_time"] == "17:00"
+        assert "start_time" not in d and "end_time" not in d
         assert d["day_date"] == DAY_B
         STATE["specs_day_id"] = d["id"]
 
         listed = admin.get(f"{API}/clinical/specs-days", timeout=30).json()["specs_days"]
-        assert any(x["id"] == d["id"] and x["start_time"] == "10:00" for x in listed)
+        assert any(x["id"] == d["id"] for x in listed)
 
-        r = admin.post(f"{API}/clinical/specs-days", json={
+        again = admin.post(f"{API}/clinical/specs-days", json={
+            "camp_id": STATE["camp_id"], "day_date": DAY_B,
+            "venue": "TEST Optical Hall",
+        }, timeout=30)
+        assert again.status_code == 409 and again.json()["detail"]["code"] == "DAY_EXISTS"
+        r = admin.patch(f"{API}/clinical/specs-days/{d['id']}", json={
             "camp_id": STATE["camp_id"], "day_date": DAY_B,
             "venue": "TEST Optical Hall",
         }, timeout=30)
@@ -657,21 +662,15 @@ class TestClinical:
         days = admin.get(f"{API}/clinical/specs-days", timeout=30).json()["specs_days"]
         day = next(d for d in days if d["id"] == STATE["specs_day_id"])
         assert "seats_taken" not in day
-        assert slip["collection_start_time"] == "10:00"
 
-    def test_specs_window_can_be_updated_after_assignment(self, admin):
-        invalid = admin.post(f"{API}/clinical/specs-days", json={
+    def test_a_specs_day_edit_after_assignment_keeps_the_token_unless_the_date_or_venue_changes(self, admin):
+        r = admin.patch(f"{API}/clinical/specs-days/{STATE['specs_day_id']}", json={
             "camp_id": STATE["camp_id"], "day_date": DAY_B,
-            "venue": "TEST Optical Hall", "start_time": "10:00", "end_time": "16:00",
-        }, timeout=30)
-        assert invalid.status_code == 400, invalid.text
-        r = admin.post(f"{API}/clinical/specs-days", json={
-            "camp_id": STATE["camp_id"], "day_date": DAY_B,
-            "venue": "TEST Optical Hall",
+            "venue": STATE["specs_day_venue"], "venue_sms": "Optical Hall",
         }, timeout=30)
         assert r.status_code == 200, r.text
-        assert r.json()["specs_day"]["start_time"] == "10:00"
-        assert r.json()["specs_day"]["end_time"] == "17:00"
+        slip = _clinical(admin).get(f"{API}/clinical/slip/{STATE['specs_slip_id']}", timeout=30).json()["slip"]
+        assert slip["active"] is True and slip["superseded"] is False
 
     def test_a_hospital_referral_is_refused_at_the_hospital_station(self, admin):
         r = _defer(_clinical(admin), STATE["trans_id"], STATE["rev_id"], STATE["gen"], f"op-referral-{TAG}",

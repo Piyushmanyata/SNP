@@ -1,6 +1,7 @@
 from datetime import datetime
-from typing import Any, Awaitable, Callable, Dict, NoReturn, Optional, Tuple
+from typing import Any, Awaitable, Callable, Dict, List, NoReturn, Optional, Tuple
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
+from pymongo import UpdateOne
 from pymongo.errors import DuplicateKeyError
 from pydantic import ValidationError
 from bson import ObjectId
@@ -31,7 +32,7 @@ import sms
 router = APIRouter(prefix="/api/clinical", tags=["clinical"])
 
 
-Write = Callable[[Any], Awaitable[Tuple[Dict[str, Any], Optional[ObjectId]]]]
+Write = Callable[[Any], Awaitable[Tuple[Dict[str, Any], List[ObjectId]]]]
 
 
 async def _claim_patient(db: AsyncDatabase, patient_id: ObjectId, session) -> dict:
@@ -44,14 +45,14 @@ async def _claim_patient(db: AsyncDatabase, patient_id: ObjectId, session) -> di
     return patient
 
 
-async def _run_operation(db: AsyncDatabase, operation_id: str, kind: str, digest: str, write: Write) -> Tuple[Dict[str, Any], Optional[ObjectId]]:
+async def _run_operation(db: AsyncDatabase, operation_id: str, kind: str, digest: str, write: Write) -> Tuple[Dict[str, Any], List[ObjectId]]:
     try:
         return await in_transaction(write)
     except DuplicateKeyError:
         done = await recover_operation(db, operation_id, kind, digest)
         if not done:
             raise
-        return done["result"], None
+        return done["result"], []
 
 
 def ser_trans(t: dict) -> Dict[str, Any]:
@@ -88,8 +89,6 @@ def ser_fulfil(f: dict) -> Dict[str, Any]:
         "collection_venue": f.get("collection_venue"),
         "ot_schedule_day_id": str(f["ot_schedule_day_id"]) if f.get("ot_schedule_day_id") else None,
         "specs_collection_day_id": str(f["specs_collection_day_id"]) if f.get("specs_collection_day_id") else None,
-        "collection_start_time": f.get("collection_start_time"),
-        "collection_end_time": f.get("collection_end_time"),
         "medicine_outcomes": f.get("medicine_outcomes") or [],
         "issued_power_r": f.get("issued_power_r"),
         "issued_power_l": f.get("issued_power_l"),
@@ -108,9 +107,9 @@ def ser_slip(s: dict) -> Dict[str, Any]:
         "collection_date": s.get("collection_date"),
         "collection_venue": s.get("collection_venue"),
         "collection_end_date": s.get("collection_end_date"),
-        "collection_start_time": s.get("collection_start_time"),
-        "collection_end_time": s.get("collection_end_time"),
         "instructions": s.get("instructions"),
+        "superseded": bool(s.get("superseded_by")),
+        "replaces": str(s["replaces"]) if s.get("replaces") else None,
         "created_at": iso(s.get("created_at")),
     }
 
@@ -129,9 +128,6 @@ def ser_ot_day(d: dict) -> Dict[str, Any]:
 
 
 def ser_specs_day(d: dict) -> Dict[str, Any]:
-    start = d.get("start_time")
-    end = d.get("end_time")
-    complete = sms.specs_pickup_hours_match(start, end)
     return {
         "id": str(d["_id"]),
         "camp_id": str(d["camp_id"]),
@@ -139,9 +135,6 @@ def ser_specs_day(d: dict) -> Dict[str, Any]:
         "end_date": d.get("end_date") or d["day_date"],
         "venue": d["venue"],
         "venue_sms": d.get("venue_sms"),
-        "start_time": start,
-        "end_time": end,
-        "window_required": not complete,
     }
 
 
@@ -350,7 +343,7 @@ async def complete_prescription(
         patient = await _claim_patient(db, p["_id"], session)
         replay = await recover_operation(db, body.operation_id, "complete", digest, session)
         if replay:
-            return replay["result"], None
+            return replay["result"], []
         _require_printed(patient)
         if patient.get("committed_revision_id"):
             raise conflict("already_completed", "This patient already has a completed prescription.")
@@ -369,7 +362,7 @@ async def complete_prescription(
         transcription = await _upsert_transcription(db, committed, actor, content, locked=True, session=session)
         result = _clinical_result(committed, revision, transcription)
         await record_operation(db, body.operation_id, "complete", digest, patient["_id"], result, session)
-        return result, None
+        return result, []
 
     result, _ = await _run_operation(db, body.operation_id, "complete", digest, write)
     return result
@@ -399,7 +392,7 @@ async def undo_completion(
         patient = await _claim_patient(db, p["_id"], session)
         replay = await recover_operation(db, body.operation_id, "undo", digest, session)
         if replay:
-            return replay["result"], None
+            return replay["result"], []
         if await has_issue_history(db, patient, session):
             raise conflict("undo_after_issue", "Completion cannot be undone after an issue or pending issue.")
         if not patient.get("committed_revision_id"):
@@ -415,7 +408,7 @@ async def undo_completion(
             "transcription": ser_trans(trans) if trans else None,
         }
         await record_operation(db, body.operation_id, "undo", digest, patient["_id"], result, session)
-        return result, None
+        return result, []
 
     result, _ = await _run_operation(db, body.operation_id, "undo", digest, write)
     return result
@@ -543,15 +536,8 @@ def _oid_or_400(raw: str) -> ObjectId:
         raise HTTPException(status_code=400, detail="Invalid schedule day")
 
 
-def _specs_window_selectable(day: dict) -> bool:
-    start = day.get("start_time")
-    end = day.get("end_time")
-    if not sms.specs_pickup_hours_match(start, end):
-        return False
-    try:
-        return ist_local_instant(day.get("end_date") or day["day_date"], sms.SPECS_PICKUP_END_TIME) > now_ist()
-    except (ValueError, TypeError):
-        return False
+def _specs_window_open(day: dict) -> bool:
+    return ist_local_instant(day.get("end_date") or day["day_date"], sms.SPECS_PICKUP_END_TIME) > now_ist()
 
 
 async def _load_deferral_day(
@@ -568,7 +554,7 @@ async def _load_deferral_day(
             raise HTTPException(status_code=400, detail=cfg["full_err"])
         if target.get("camp_id") != patient.get("camp_id"):
             raise HTTPException(status_code=400, detail="Specs collection day belongs to another camp")
-        if not _specs_window_selectable(target):
+        if not _specs_window_open(target):
             raise HTTPException(status_code=400, detail="Specs collection window is not selectable")
         return target
     if not target:
@@ -597,8 +583,6 @@ async def _process_deferral(
         db, t, body.item_type, day["day_date"], day["venue"], cfg["instructions"], session,
         venue_sms=day.get("venue_sms"),
         end_date=(day.get("end_date") or day["day_date"]) if specs else None,
-        start_time=day.get("start_time") if specs else None,
-        end_time=day.get("end_time") if specs else None,
         **{cfg["slip_kwarg"]: day["_id"]},
     )
 
@@ -640,8 +624,6 @@ def _build_fulfilment_doc(
         "collection_venue": (slip or {}).get("collection_venue"),
         "ot_schedule_day_id": _deferred_day_id(body, "ot"),
         "specs_collection_day_id": _deferred_day_id(body, "specs_made"),
-        "collection_start_time": (slip or {}).get("collection_start_time"),
-        "collection_end_time": (slip or {}).get("collection_end_time"),
         "created_by": actor_id,
         "created_at": now_utc(),
     }
@@ -696,7 +678,7 @@ async def record_fulfilment(
         current = await _claim_patient(db, patient["_id"], session)
         replay = await recover_operation(db, op_id, "issue", digest, session)
         if replay:
-            return replay["result"], None
+            return replay["result"], []
         if not current.get("committed_revision_id") or current.get("queue_status") != "seen":
             raise conflict("not_completed", "Issue requires a completed prescription.")
         if str(current["committed_revision_id"]) != body.reviewed_revision_id or generation_of(current) != body.reviewed_generation:
@@ -734,22 +716,17 @@ async def record_fulfilment(
             await db.ot_schedule_days.update_one(
                 {"_id": old_ot, "seats_taken": {"$gt": 0}}, {"$inc": {"seats_taken": -1}}, session=session,
             )
-        sms_row = await sms.queue_patient_sms(
-            db, current, DEFERRAL_CONFIG[doc["item_type"]]["message_type"],
+        queued = await sms.queue_sms(
+            db, [current], DEFERRAL_CONFIG[doc["item_type"]]["message_type"],
             slip["collection_date"], slip.get("collection_venue_sms") or slip["collection_venue"],
-            slip.get("collection_start_time"), slip.get("collection_end_time"), slip.get("collection_end_date"),
-            event_key=str(slip["_id"]), session=session,
-        ) if slip else None
+            slip.get("collection_end_date"), event_key=str(slip["_id"]), session=session,
+        ) if slip else []
         result = {"fulfilment": ser_fulfil(doc), "slip": ser_slip(slip) if slip else None}
         await record_operation(db, op_id, "issue", digest, patient["_id"], result, session)
-        return result, sms_row
+        return result, queued
 
-    result, sms_row = await _run_operation(db, op_id, "issue", digest, write)
-    if sms_row:
-        if background_tasks is not None:
-            background_tasks.add_task(sms.send_queued, db, sms_row)
-        else:
-            await sms.send_queued(db, sms_row)
+    result, queued = await _run_operation(db, op_id, "issue", digest, write)
+    await sms.dispatch(background_tasks, db, queued)
     return result
 
 
@@ -764,8 +741,6 @@ async def _make_slip(
     venue_sms: Optional[str] = None,
     ot_schedule_day_id: Optional[ObjectId | str] = None,
     specs_collection_day_id: Optional[ObjectId | str] = None,
-    start_time: Optional[str] = None,
-    end_time: Optional[str] = None,
     end_date: Optional[str] = None,
 ) -> dict:
     count = await db.deferred_slips.count_documents({"transcription_id": t["_id"], "item_type": item_type}, session=session)
@@ -780,8 +755,6 @@ async def _make_slip(
         "collection_venue": venue,
         "collection_venue_sms": venue_sms,
         "collection_end_date": end_date,
-        "collection_start_time": start_time,
-        "collection_end_time": end_time,
         "ot_schedule_day_id": ot_schedule_day_id,
         "specs_collection_day_id": specs_collection_day_id,
         "instructions": instructions,
@@ -887,7 +860,7 @@ async def add_correction(
         patient = await _claim_patient(db, p["_id"], session)
         replay = await recover_operation(db, op_id, "correct", digest, session)
         if replay:
-            return replay["result"], None
+            return replay["result"], []
         if generation_of(patient) != body.expected_generation or patient.get("committed_revision_id") != base_id:
             raise conflict("stale_generation", "The prescription changed; reload and retry.")
         trans = await db.transcriptions.find_one({"patient_id": patient["_id"]}, session=session)
@@ -904,7 +877,7 @@ async def add_correction(
         trans = await _upsert_transcription(db, committed, actor, content, locked=True, session=session)
         result = _clinical_result(committed, revision, trans)
         await record_operation(db, op_id, "correct", digest, patient["_id"], result, session)
-        return result, None
+        return result, []
 
     result, _ = await _run_operation(db, op_id, "correct", digest, write)
     return result
@@ -931,7 +904,80 @@ async def clinical_history(person_id: str, actor: dict = Depends(require_clinica
     return {"history": out}
 
 
-# ---- OT schedule ----
+# ---- OT and Specs schedules ----
+NOTICE_FIELDS = {"phone": 1, "phone_normalized": 1, "reg_no": 1, "created_by": 1, "camp_id": 1, "full_name": 1}
+
+
+def _day_exists() -> HTTPException:
+    return conflict("DAY_EXISTS", "A day already uses that date. Use Edit on that day.")
+
+
+async def _supersede_tokens(
+    db: AsyncDatabase, day_field: str, day: dict, message_type: str, end_date: Optional[str], session,
+) -> List[ObjectId]:
+    """A date or venue change replaces every active Token on the day and queues one notice per patient."""
+    slips = await db.deferred_slips.find({day_field: day["_id"], "active": True}, session=session).to_list(None)
+    if not slips:
+        return []
+    revision = day["edit_revision"]
+    fields = {"collection_date": day["day_date"], "collection_venue": day["venue"],
+              "collection_venue_sms": day.get("venue_sms"), "collection_end_date": end_date}
+    replacements = [{
+        **{key: value for key, value in old.items() if key not in ("_id", "contacted_at", "contacted_by")},
+        **fields, "_id": ObjectId(), "version": old.get("version", 1) + 1, "replaces": old["_id"],
+        "edit_revision": revision, "created_at": now_utc(),
+    } for old in slips]
+    await db.deferred_slips.insert_many(replacements, session=session)
+    await db.deferred_slips.bulk_write([UpdateOne(
+        {"_id": new["replaces"]},
+        {"$set": {"active": False, "superseded_by": new["_id"], "superseded_at": now_utc()}},
+    ) for new in replacements], session=session)
+    await db.fulfilments.bulk_write([UpdateOne(
+        {"transcription_id": new["transcription_id"], "item_type": new["item_type"], "status": "deferred"},
+        {"$set": {"slip_id": new["_id"], "collection_date": day["day_date"], "collection_venue": day["venue"]}},
+    ) for new in replacements], session=session)
+    patients = await db.patients.find(
+        {"_id": {"$in": [slip["patient_id"] for slip in slips]}}, NOTICE_FIELDS, session=session,
+    ).to_list(None)
+    return await sms.queue_sms(
+        db, patients, message_type, day["day_date"], day.get("venue_sms") or day["venue"], end_date,
+        event_key=f"edit:{revision}", session=session,
+    )
+
+
+async def _edit_day(
+    collection: AsyncCollection, day: dict, updates: dict, extra_filter: dict, day_field: str,
+    message_type: str, background_tasks: BackgroundTasks, conflict_message: str,
+) -> dict:
+    db = get_db()
+    material = any(updates[key] != day.get(key) for key in ("day_date", "venue", "end_date") if key in updates)
+    if material:
+        updates = {**updates, "edit_revision": str(ObjectId())}
+
+    async def write(session):
+        changed = await collection.find_one_and_update(
+            {"_id": day["_id"], "day_date": day["day_date"], "venue": day["venue"], **extra_filter},
+            {"$set": updates}, return_document=True, session=session,
+        )
+        if not changed:
+            raise HTTPException(status_code=409, detail=conflict_message)
+        if material:
+            end_date = (changed.get("end_date") or changed["day_date"]) if day_field == "specs_collection_day_id" else None
+            return changed, await _supersede_tokens(db, day_field, changed, message_type, end_date, session)
+        await db.deferred_slips.update_many(
+            {day_field: day["_id"], "active": True}, {"$set": {"collection_venue_sms": changed.get("venue_sms")}},
+            session=session,
+        )
+        return changed, []
+
+    try:
+        changed, queued = await in_transaction(write)
+    except DuplicateKeyError:
+        raise _day_exists()
+    await sms.dispatch(background_tasks, db, queued)
+    return changed
+
+
 @router.post("/ot-days")
 async def create_ot_day(body: OtScheduleBody, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
@@ -947,31 +993,17 @@ async def create_ot_day(body: OtScheduleBody, actor: dict = Depends(require_admi
     venue = (body.venue or "").strip()
     if not venue:
         raise HTTPException(status_code=400, detail="Venue is required")
-    venue_sms = body.venue_sms
     if not await db.camps.find_one({"_id": camp_id, "is_active": True}):
         raise HTTPException(status_code=400, detail="Camp is not active")
-    existing = await db.ot_schedule_days.find_one({"camp_id": camp_id, "day_date": body.day_date})
-    if existing:
-        assigned = existing.get("seats_taken", 0)
-        if body.seat_limit < assigned:
-            raise HTTPException(status_code=409, detail={
-                "code": "SEAT_LIMIT_BELOW_ASSIGNED",
-                "message": f"Cannot set below {assigned} already-assigned seats",
-            })
-        d = await db.ot_schedule_days.find_one_and_update(
-            {"_id": existing["_id"], "seats_taken": {"$lte": body.seat_limit}},
-            {"$set": {"seat_limit": body.seat_limit, "venue": venue, "venue_sms": venue_sms}},
-            return_document=True,
-        )
-        if not d:
-            raise HTTPException(status_code=409, detail="Seats changed; reload before reducing capacity")
-    else:
-        d = {
-            "camp_id": camp_id, "day_date": body.day_date,
-            "venue": venue, "venue_sms": venue_sms, "seat_limit": body.seat_limit, "seats_taken": 0,
-            "created_at": now_utc(),
-        }
+    d = {
+        "camp_id": camp_id, "day_date": body.day_date,
+        "venue": venue, "venue_sms": body.venue_sms, "seat_limit": body.seat_limit, "seats_taken": 0,
+        "created_at": now_utc(),
+    }
+    try:
         d["_id"] = (await db.ot_schedule_days.insert_one(d)).inserted_id
+    except DuplicateKeyError:
+        raise _day_exists()
     return {"ot_day": ser_ot_day(d)}
 
 
@@ -1012,52 +1044,20 @@ async def update_ot_day(day_id: str, body: OtScheduleBody, background_tasks: Bac
             "code": "SEAT_LIMIT_BELOW_ASSIGNED",
             "message": f"Cannot set below {day.get('seats_taken', 0)} already-assigned seats",
         })
-    date_changed = body.day_date != day["day_date"]
-    if date_changed:
-        if await db.ot_schedule_days.find_one({"camp_id": camp_id, "day_date": body.day_date}):
-            raise HTTPException(status_code=409, detail="Another OT day already uses that date")
-    revision = str(ObjectId()) if date_changed else day.get("edit_revision")
-    updates = {"day_date": body.day_date, "seat_limit": body.seat_limit,
-               "venue": venue, "venue_sms": body.venue_sms}
-    if date_changed:
-        updates["edit_revision"] = revision
-    try:
-        changed = await db.ot_schedule_days.find_one_and_update(
-            {"_id": oid, "day_date": day["day_date"], "seats_taken": {"$lte": body.seat_limit}},
-            {"$set": updates},
-            return_document=True,
-        )
-    except DuplicateKeyError:
-        raise HTTPException(status_code=409, detail="Another OT day already uses that date")
-    if not changed:
-        raise HTTPException(status_code=409, detail="Seats or date changed; reload and try again")
-    if changed.get("edit_revision") or venue != day["venue"] or body.venue_sms != day.get("venue_sms"):
-        slips = await db.deferred_slips.find({"ot_schedule_day_id": oid, "active": True}).to_list(None)
-        fields = {"collection_date": body.day_date, "collection_venue": venue,
-                  "collection_venue_sms": body.venue_sms}
-        await db.deferred_slips.update_many({"ot_schedule_day_id": oid, "active": True}, {"$set": fields})
-        await db.fulfilments.update_many({"ot_schedule_day_id": oid, "status": "deferred"}, {"$set": fields})
-        if changed.get("edit_revision"):
-            event_key = f"ot_day:{day_id}:{changed['edit_revision']}"
-            for patient_id in {slip["patient_id"] for slip in slips}:
-                patient = await db.patients.find_one({"_id": patient_id})
-                if patient:
-                    args = (db, patient, "ot_token", body.day_date, body.venue_sms or venue)
-                    if background_tasks is not None:
-                        background_tasks.add_task(sms.send_patient_sms, *args, event_key=event_key)
-                    else:
-                        await sms.send_patient_sms(*args, event_key=event_key)
+    changed = await _edit_day(
+        db.ot_schedule_days, day,
+        {"day_date": body.day_date, "seat_limit": body.seat_limit, "venue": venue, "venue_sms": body.venue_sms},
+        {"seats_taken": {"$lte": body.seat_limit}}, "ot_schedule_day_id", "ot_change", background_tasks,
+        "Seats or date changed; reload and try again",
+    )
     return {"ot_day": ser_ot_day(changed)}
 
 
-def _validated_specs_window(body: SpecsScheduleBody) -> tuple[ObjectId, str, str, str, str, str]:
+def _validated_specs_window(body: SpecsScheduleBody) -> tuple[ObjectId, str, str, str]:
     venue = (body.venue or "").strip()
     if not venue:
         raise HTTPException(status_code=400, detail="Venue is required")
-    try:
-        camp_oid = ObjectId(body.camp_id)
-    except (InvalidId, TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Invalid camp id")
+    camp_oid = _oid_or_400(body.camp_id)
     end_date = body.end_date or body.day_date
     try:
         first_day = datetime.strptime(body.day_date, "%Y-%m-%d")
@@ -1069,35 +1069,43 @@ def _validated_specs_window(body: SpecsScheduleBody) -> tuple[ObjectId, str, str
         raise HTTPException(status_code=400, detail="Invalid end_date")
     if last_day < first_day:
         raise HTTPException(status_code=400, detail="end_date must not be before day_date")
-    start = sms.SPECS_PICKUP_START_TIME
-    end = sms.SPECS_PICKUP_END_TIME
-    if body.start_time not in (None, start) or body.end_time not in (None, end):
-        raise HTTPException(status_code=400, detail="Specs collection hours are fixed at 10:00–17:00")
-    if ist_local_instant(end_date, end) <= now_ist():
+    if ist_local_instant(end_date, sms.SPECS_PICKUP_END_TIME) <= now_ist():
         raise HTTPException(status_code=400, detail="Window end must be after now")
-    return camp_oid, body.day_date, end_date, venue, start, end
+    return camp_oid, body.day_date, end_date, venue
 
 
 @router.post("/specs-days")
 async def create_specs_day(body: SpecsScheduleBody, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
-    camp_oid, day_date, end_date, venue, start, end = _validated_specs_window(body)
-    camp = await db.camps.find_one({"_id": camp_oid, "is_active": True})
-    if not camp:
+    camp_oid, day_date, end_date, venue = _validated_specs_window(body)
+    if not await db.camps.find_one({"_id": camp_oid, "is_active": True}):
         raise HTTPException(status_code=400, detail="Camp is not active")
-    existing = await db.specs_collection_days.find_one({"camp_id": camp_oid, "day_date": day_date})
-    fields = {"end_date": end_date, "venue": venue, "venue_sms": body.venue_sms, "start_time": start, "end_time": end}
-    if existing:
-        await db.specs_collection_days.update_one({"_id": existing["_id"]}, {"$set": fields})
-        d = await db.specs_collection_days.find_one({"_id": existing["_id"]})
-    else:
-        res = await db.specs_collection_days.insert_one({
-            "camp_id": camp_oid, "day_date": day_date, **fields, "created_at": now_utc(),
-        })
-        d = await db.specs_collection_days.find_one({"_id": res.inserted_id})
-    if not d:
-        raise HTTPException(status_code=404, detail="Specs collection day not found")
+    d = {"camp_id": camp_oid, "day_date": day_date, "end_date": end_date, "venue": venue,
+         "venue_sms": body.venue_sms, "created_at": now_utc()}
+    try:
+        d["_id"] = (await db.specs_collection_days.insert_one(d)).inserted_id
+    except DuplicateKeyError:
+        raise _day_exists()
     return {"specs_day": ser_specs_day(d)}
+
+
+@router.patch("/specs-days/{day_id}")
+async def update_specs_day(day_id: str, body: SpecsScheduleBody, background_tasks: BackgroundTasks,
+                           actor: dict = Depends(require_admin)) -> Dict[str, Any]:
+    db = get_db()
+    camp_oid, day_date, end_date, venue = _validated_specs_window(body)
+    day = await db.specs_collection_days.find_one({"_id": _oid_or_400(day_id), "camp_id": camp_oid})
+    if not day:
+        raise HTTPException(status_code=404, detail="Specs collection day not found")
+    if not _specs_window_open(day):
+        raise HTTPException(status_code=409, detail="Past specs collection days cannot be edited")
+    changed = await _edit_day(
+        db.specs_collection_days, {**day, "end_date": day.get("end_date") or day["day_date"]},
+        {"day_date": day_date, "end_date": end_date, "venue": venue, "venue_sms": body.venue_sms},
+        {}, "specs_collection_day_id", "specs_change", background_tasks,
+        "The day changed; reload and try again",
+    )
+    return {"specs_day": ser_specs_day(changed)}
 
 
 @router.get("/specs-days")
@@ -1108,3 +1116,56 @@ async def list_specs_days(actor: dict = Depends(require_any)) -> Dict[str, Any]:
         return {"specs_days": []}
     days = await db.specs_collection_days.find({"camp_id": camp["_id"]}).sort("day_date", 1).to_list(100)
     return {"specs_days": [ser_specs_day(d) for d in days]}
+
+
+SENT_OR_SENDING = {"queued", "pending", "sent", "uncertain"}
+
+
+@router.get("/schedule-notices")
+async def list_schedule_notices(actor: dict = Depends(require_admin)) -> Dict[str, Any]:
+    """Patients whose replaced Token has no SMS on its way: the desk phones them."""
+    db = get_db()
+    camp = await db.camps.find_one({"is_active": True})
+    if not camp:
+        return {"notices": []}
+    slips = await db.deferred_slips.find(
+        {"active": True, "edit_revision": {"$exists": True}, "contacted_at": None},
+    ).to_list(None)
+    patients = {p["_id"]: p for p in await db.patients.find(
+        {"_id": {"$in": [slip["patient_id"] for slip in slips]}, "camp_id": camp["_id"]}, NOTICE_FIELDS,
+    ).to_list(None)}
+    rows = await db.reminder_ledger.find({
+        "patient_id": {"$in": list(patients)}, "message_type": {"$in": ["ot_change", "specs_change"]},
+        "event_key": {"$in": [f"edit:{slip['edit_revision']}" for slip in slips]},
+    }, {"patient_id": 1, "event_key": 1, "status": 1, "delivery": 1}).to_list(None)
+    sms_status = {
+        (row["patient_id"], row["event_key"]): "failed" if row.get("delivery") == "failed" else row["status"]
+        for row in rows
+    }
+    notices = []
+    for slip in slips:
+        patient = patients.get(slip["patient_id"])
+        status = sms_status.get((slip["patient_id"], f"edit:{slip['edit_revision']}"), "not_sent")
+        if not patient or status in SENT_OR_SENDING:
+            continue
+        notices.append({
+            "slip_id": str(slip["_id"]), "item_type": slip["item_type"],
+            "reg_no": patient.get("reg_no"), "full_name": patient.get("full_name"),
+            "phone": patient.get("phone_normalized") or patient.get("phone"),
+            "collection_date": slip["collection_date"], "collection_end_date": slip.get("collection_end_date"),
+            "collection_venue": slip["collection_venue"], "sms_status": status,
+        })
+    notices.sort(key=lambda n: (n["collection_date"], n["reg_no"] or 0))
+    return {"notices": notices}
+
+
+@router.post("/schedule-notices/{slip_id}/contacted")
+async def mark_notice_contacted(slip_id: str, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
+    db = get_db()
+    res = await db.deferred_slips.update_one(
+        {"_id": _oid_or_400(slip_id), "active": True, "edit_revision": {"$exists": True}},
+        {"$set": {"contacted_at": now_utc(), "contacted_by": str(actor["_id"])}},
+    )
+    if not res.matched_count:
+        raise HTTPException(status_code=404, detail="Notice not found")
+    return {"ok": True}

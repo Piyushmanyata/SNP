@@ -113,6 +113,41 @@
       "body": "Sikar Zilla Welfare Trust के {camp_no} वे शिविर के चश्मे बनकर तैयार हैं। चश्मे {date} से {end_date} तक प्रतिदिन 10:00 AM से 5:00 PM तक {venue} आकर ले जाएँ। टोकन क्रमांक {reg_no} अवश्य साथ लाएँ।",
       "dlt_body": "Sikar Zilla Welfare Trust के ##camp_no## वे शिविर के चश्मे बनकर तैयार हैं। चश्मे ##date## से ##end_date## तक प्रतिदिन 10:00 AM से 5:00 PM तक ##venue## आकर ले जाएँ। टोकन क्रमांक ##reg_no## अवश्य साथ लाएँ।",
       "dlt_portal_body": "Sikar Zilla Welfare Trust के {#var#} वे शिविर के चश्मे बनकर तैयार हैं। चश्मे {#var#} से {#var#} तक प्रतिदिन 10:00 AM से 5:00 PM तक {#var#} आकर ले जाएँ। टोकन क्रमांक {#var#} अवश्य साथ लाएँ।"
+    },
+    {
+      "key": "ot_change",
+      "dlt_template_id": null,
+      "msg91_flow_id": null,
+      "dlt_status": "Not yet registered; until approved, these patients appear under Patients to phone",
+      "env_var": "MSG91_TEMPLATE_OT_CHANGE",
+      "purpose": "Surgery date or venue changed; the old Token is void",
+      "variables": [
+        "camp_no",
+        "date",
+        "venue",
+        "reg_no"
+      ],
+      "body": "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपके ऑपरेशन की तारीख या स्थान बदल गया है। नई तारीख: {date}। स्थल: {venue}। पुराने टोकन पर लिखी तारीख और स्थान अब मान्य नहीं हैं। क्रमांक: {reg_no}।",
+      "dlt_body": "Sikar Zilla Welfare Trust के ##camp_no## वें नेत्र शिविर में आपके ऑपरेशन की तारीख या स्थान बदल गया है। नई तारीख: ##date##। स्थल: ##venue##। पुराने टोकन पर लिखी तारीख और स्थान अब मान्य नहीं हैं। क्रमांक: ##reg_no##।",
+      "dlt_portal_body": "Sikar Zilla Welfare Trust के {#var#} वें नेत्र शिविर में आपके ऑपरेशन की तारीख या स्थान बदल गया है। नई तारीख: {#var#}। स्थल: {#var#}। पुराने टोकन पर लिखी तारीख और स्थान अब मान्य नहीं हैं। क्रमांक: {#var#}।"
+    },
+    {
+      "key": "specs_change",
+      "dlt_template_id": null,
+      "msg91_flow_id": null,
+      "dlt_status": "Not yet registered; until approved, these patients appear under Patients to phone",
+      "env_var": "MSG91_TEMPLATE_SPECS_CHANGE",
+      "purpose": "Spectacle collection date or venue changed; the old Token is void",
+      "variables": [
+        "camp_no",
+        "date",
+        "end_date",
+        "venue",
+        "reg_no"
+      ],
+      "body": "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपके चश्मे लेने की तारीख या स्थान बदल गया है। चश्मा {date} से {end_date} तक प्रतिदिन 10:00 AM से 5:00 PM तक {venue} में मिलेगा। पुराने टोकन पर लिखी तारीख और स्थान अब मान्य नहीं हैं। क्रमांक: {reg_no}।",
+      "dlt_body": "Sikar Zilla Welfare Trust के ##camp_no## वें नेत्र शिविर में आपके चश्मे लेने की तारीख या स्थान बदल गया है। चश्मा ##date## से ##end_date## तक प्रतिदिन 10:00 AM से 5:00 PM तक ##venue## में मिलेगा। पुराने टोकन पर लिखी तारीख और स्थान अब मान्य नहीं हैं। क्रमांक: ##reg_no##।",
+      "dlt_portal_body": "Sikar Zilla Welfare Trust के {#var#} वें नेत्र शिविर में आपके चश्मे लेने की तारीख या स्थान बदल गया है। चश्मा {#var#} से {#var#} तक प्रतिदिन 10:00 AM से 5:00 PM तक {#var#} में मिलेगा। पुराने टोकन पर लिखी तारीख और स्थान अब मान्य नहीं हैं। क्रमांक: {#var#}।"
     }
   ],
   "request_example": {

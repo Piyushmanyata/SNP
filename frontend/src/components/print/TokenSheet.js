@@ -1,5 +1,5 @@
 import React from "react";
-import { displayDateRange, displayTimeRange } from "../../lib/dates";
+import { SPECS_HOURS, displayDateRange } from "../../lib/dates";
 
 const TITLES = {
   ot: { hi: "मोतियाबिंद (IOL) ऑपरेशन", en: "IOL Surgery" },
@@ -19,6 +19,11 @@ export function TokenSheet({ slip, registration, campName }) {
       style={{ width: "105mm", height: "148mm", overflow: "hidden", padding: "6mm", overflowWrap: "anywhere" }}
       data-testid="a6-token"
     >
+      {slip.superseded && (
+        <p className="border-2 border-rose-700 text-rose-800 font-bold text-center p-1 mb-2" data-testid="token-superseded">
+          पुराना टोकन — मान्य नहीं / Replaced — not valid
+        </p>
+      )}
       <div className="text-center border-b-2 border-slate-900 pb-2 mb-3">
         <p className="font-display font-bold text-lg text-slate-900">{campName || "SNP"}</p>
         <p className="mt-1 text-base font-semibold">{title.hi} / {title.en}</p>
@@ -27,9 +32,9 @@ export function TokenSheet({ slip, registration, campName }) {
       <p className="text-sm mb-1"><span className="text-slate-500">नाम / Name</span> — {registration?.full_name}</p>
       <p className="text-lg font-bold mb-2">क्रमांक / Token — #{registration?.reg_no}</p>
       <p className="text-sm mb-1"><span className="text-slate-500">तिथि / Date</span> — {displayDateRange(slip.collection_date, slip.collection_end_date)}</p>
-      {slip.collection_start_time && slip.collection_end_time && (
+      {slip.item_type !== "ot" && (
         <p className="text-sm mb-1" data-testid="token-window">
-          <span className="text-slate-500">समय / Time</span> — {displayTimeRange(slip.collection_start_time, slip.collection_end_time)}
+          <span className="text-slate-500">समय / Time</span> — {SPECS_HOURS}
         </p>
       )}
       <p className="text-sm mb-3"><span className="text-slate-500">स्थान / Venue</span> — {slip.collection_venue}</p>

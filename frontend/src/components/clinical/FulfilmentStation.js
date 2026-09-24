@@ -4,7 +4,7 @@ import { v4 } from "../../lib/uuid";
 import { Alert, Button, Badge } from "../ui";
 import { Pill, Glasses, Scissors, Printer } from "lucide-react";
 import { FixedPowerPicker, formatPower } from "./FixedPowerPicker";
-import { displayDateRange, displayTimeRange } from "../../lib/dates";
+import { SPECS_HOURS, displayDateRange } from "../../lib/dates";
 import { printDocument } from "../../lib/printJob";
 import { TokenSheet } from "../print/TokenSheet";
 
@@ -72,21 +72,15 @@ function earliestFreeDay(days, currentId) {
   return free.length ? free[0].id : "";
 }
 
-function selectableSpecsDays(days) {
-  return (days || []).filter((d) => d.start_time && d.end_time && !d.window_required);
-}
-
 function earliestSpecsDay(days, currentId) {
   if (currentId) return currentId;
-  const open = selectableSpecsDays(days);
-  return open.length ? open[0].id : "";
+  return days?.length ? days[0].id : "";
 }
 
 function DayPicker({ line, days, value, onChange }) {
   const specs = line.itemType === "specs_made";
-  const visible = specs ? selectableSpecsDays(days) : days;
   const noneFree = specs
-    ? visible.length === 0
+    ? days.length === 0
     : days.every((d) => d.seats_free <= 0);
   return (
     <>
@@ -98,7 +92,7 @@ function DayPicker({ line, days, value, onChange }) {
         data-testid={`${line.dayField}-select`}
       >
         <option value="">Select {line.dayLabel}…</option>
-        {visible.map((d) => (
+        {days.map((d) => (
           <option
             key={d.id}
             value={d.id}
@@ -106,7 +100,7 @@ function DayPicker({ line, days, value, onChange }) {
           >
             {displayDateRange(d.day_date, d.end_date)} · {d.venue}
             {specs
-              ? ` · ${displayTimeRange(d.start_time, d.end_time)}`
+              ? ` · ${SPECS_HOURS}`
               : d.seats_free <= 0 ? " (full)" : ` (${d.seats_free} free)`}
           </option>
         ))}
@@ -332,6 +326,11 @@ export function FulfilmentStation({
         <Badge tone={STATUS_TONES[existing.status] || "emerald"} data-testid={`station-${lineKey}-recorded`}>
           {statusLabel(line, existing.status)}
         </Badge>
+        {slip?.replaces && (
+          <p className="text-sm text-amber-800 mt-2" data-testid={`station-${lineKey}-token-replaced`}>
+            The date or venue changed. Print this new Token and take back the old one.
+          </p>
+        )}
         {slip && (
           <Button
             size="sm"

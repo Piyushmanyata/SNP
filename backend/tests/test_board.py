@@ -34,7 +34,6 @@ class TestCampDayBoard:
                     {"camp_id": camp_id, "day_date": day(-1)},
                     {"camp_id": ObjectId(), "day_date": TODAY, "start_time": "10:00", "end_time": "17:00"},
                 ])
-            await database.specs_collection_days.insert_one({"camp_id": camp_id, "day_date": TODAY, "start_time": "09:00"})
             result = await camp_day_board(actor=ADMIN)
             assert result["next_ot"]["day_date"] == day(1)
             assert result["next_specs"]["day_date"] == day(1)

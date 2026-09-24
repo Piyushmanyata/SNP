@@ -19,6 +19,8 @@ export function displayTimeRange(start, end) {
   return `${displayTime(start)}–${displayTime(end)}`;
 }
 
+export const SPECS_HOURS = displayTimeRange("10:00", "17:00");
+
 const IST_PARTS = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Asia/Kolkata",
   year: "numeric",

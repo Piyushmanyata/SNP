@@ -13,6 +13,8 @@ TEMPLATE_ENV = {
     "ot": "MSG91_TEMPLATE_OT",
     "specs_token": "MSG91_TEMPLATE_SPECS_TOKEN",
     "specs": "MSG91_TEMPLATE_SPECS",
+    "ot_change": "MSG91_TEMPLATE_OT_CHANGE",
+    "specs_change": "MSG91_TEMPLATE_SPECS_CHANGE",
 }
 
 

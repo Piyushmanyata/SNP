@@ -251,8 +251,6 @@ class SpecsScheduleBody(BaseModel):
     end_date: Optional[str] = None
     venue: str
     venue_sms: Optional[str] = None
-    start_time: Optional[str] = None
-    end_time: Optional[str] = None
 
     @model_validator(mode="after")
     def check_sms_venue(self) -> "SpecsScheduleBody":

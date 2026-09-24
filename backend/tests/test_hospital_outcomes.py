@@ -392,7 +392,8 @@ class TestClinicalFind:
 
 
 class TestDisplayedDates:
-    @pytest.mark.parametrize("message_type", ["registration", "camp", "ot_token", "ot", "specs_token", "specs"])
+    @pytest.mark.parametrize("message_type", ["registration", "camp", "ot_token", "ot", "specs_token", "specs",
+                                              "ot_change", "specs_change"])
     def test_every_sms_states_its_date_as_dd_mm_yyyy(self, monkeypatch, message_type):
         async def run(db):
             sent = recorder(monkeypatch)
@@ -400,7 +401,7 @@ class TestDisplayedDates:
             await db.camps.insert_one({"_id": camp_id, "name": "C", "venue": "Hall", "camp_number": 162})
             patient = {"_id": ObjectId(), "camp_id": camp_id, "phone": "9876500001", "reg_no": 7}
             start, end = day(12), day(19)
-            assert await sms.send_patient_sms(db, patient, message_type, start, "Hall", "10:00", "17:00", end)
+            assert await sms.send_patient_sms(db, patient, message_type, start, "Hall", end)
             assert sent[0]["date"] == _dmy(start)
             if message_type.startswith("specs"):
                 assert sent[0]["end_date"] == _dmy(end)

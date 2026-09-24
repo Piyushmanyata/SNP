@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { formatPower } from "../components/clinical";
 import TemplateEditor from "../components/TemplateEditor";
-import { displayDate, displayDateRange, displayTimeRange, displayTimestamp } from "../lib/dates";
+import { SPECS_HOURS, displayDate, displayDateRange, displayTimestamp } from "../lib/dates";
 import { SMS_LABELS, SMS_VENUE_MAX, smsVenueFor } from "../lib/sms";
 
 const CAMP_VENUE = "Hansa Garden, Rohini Road in Baghmara, Jasidih, Deoghar - 814142";
@@ -50,7 +50,7 @@ export default function AdminDashboard() {
       {tab === "overview" && <Overview />}
       {tab === "camps" && <Camps />}
       {tab === "template" && <TemplateEditor />}
-      {tab === "ot" && <div className="space-y-5"><OtSchedule /><SpecsCollectionDays /></div>}
+      {tab === "ot" && <div className="space-y-5"><ScheduleNotices /><OtSchedule /><SpecsCollectionDays /></div>}
       {tab === "sms" && <SmsHealth />}
       {tab === "supplies" && <div className="space-y-5"><Medicines /><FixedPowers /></div>}
       {tab === "board" && <Leaderboards />}
@@ -422,7 +422,7 @@ function OtSchedule() {
           ))}
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start pt-4 mt-3 border-t border-slate-100">
-          <Field label="Date"><Input type="date" value={form.day_date} onChange={(e) => { const existing = editing ? null : days.find((d) => d.day_date === e.target.value); setForm({ ...form, day_date: e.target.value, venue: existing ? existing.venue : form.venue, venue_sms: existing ? existing.venue_sms || "" : form.venue_sms, seat_limit: existing ? existing.seat_limit : form.seat_limit }); }} data-testid="ot-date-input" /></Field>
+          <Field label="Date"><Input type="date" value={form.day_date} onChange={(e) => setForm({ ...form, day_date: e.target.value })} data-testid="ot-date-input" /></Field>
           <Field label="Seats"><Input type="number" inputMode="numeric" min="1" value={form.seat_limit} onChange={(e) => setForm({ ...form, seat_limit: e.target.value })} data-testid="ot-seat-input" /></Field>
           <Field label="Hospital"><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="ot-venue-input" /></Field>
           <SmsVenueField label="Short name for SMS" venue={form.venue} value={form.venue_sms} onChange={(venue_sms) => setForm({ ...form, venue_sms })} placeholder={HOSPITAL_SMS_VENUE} testid="ot-venue-sms-input" />
@@ -439,6 +439,8 @@ function SpecsCollectionDays() {
   const [camp, setCamp] = useState(null);
   const [err, setErr] = useState("");
   const [form, setForm] = useState(NEW_SPECS_DAY);
+  const [editing, setEditing] = useState(null);
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
     Promise.all([api.get("/clinical/specs-days"), api.get("/camps/active")])
@@ -447,16 +449,28 @@ function SpecsCollectionDays() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const add = useCallback(async () => {
+  const reset = () => { setForm(NEW_SPECS_DAY); setEditing(null); };
+
+  const save = useCallback(async () => {
     setErr("");
     if (!camp) { setErr("Activate a camp first."); return; }
+    setBusy(true);
     try {
-      await api.post("/clinical/specs-days", { camp_id: camp.id, ...form });
-      setForm(NEW_SPECS_DAY);
+      const body = { camp_id: camp.id, ...form };
+      if (editing) await api.patch(`/clinical/specs-days/${editing}`, body);
+      else await api.post("/clinical/specs-days", body);
+      reset();
       load();
     }
     catch (e) { setErr(formatApiError(e)); }
-  }, [camp, form, load]);
+    finally { setBusy(false); }
+  }, [camp, form, editing, load]);
+
+  const edit = (day) => {
+    setEditing(day.id);
+    setForm({ day_date: day.day_date, end_date: day.end_date, venue: day.venue, venue_sms: day.venue_sms || "" });
+    setErr("");
+  };
 
   return (
     <div className="space-y-4">
@@ -469,9 +483,8 @@ function SpecsCollectionDays() {
             <div key={d.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 p-3 rounded-xl bg-slate-50" data-testid={`specs-day-${d.id}`}>
               <Glasses className="w-4 h-4 text-emerald-600" />
               <span className="font-medium text-slate-800 text-sm">{displayDateRange(d.day_date, d.end_date)}</span>
-              <Badge tone={d.window_required ? "amber" : "emerald"} className="ml-auto">
-                {d.start_time && d.end_time ? displayTimeRange(d.start_time, d.end_time) : "window required"}
-              </Badge>
+              <Badge tone="emerald" className="ml-auto">{SPECS_HOURS}</Badge>
+              <Button size="sm" variant="outline" onClick={() => edit(d)} data-testid={`edit-specs-day-${d.id}`}><Pencil className="w-4 h-4" /> Edit</Button>
               <span className="basis-full text-xs text-slate-600 break-words">{d.venue}</span>
               <SmsVenueBadge venue={d.venue} venueSms={d.venue_sms} testid={`specs-sms-venue-problem-${d.id}`} />
             </div>
@@ -482,11 +495,58 @@ function SpecsCollectionDays() {
           <Field label="To"><Input type="date" value={form.end_date} min={form.day_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} data-testid="specs-end-date-input" /></Field>
           <Field label="Venue"><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="specs-venue-input" /></Field>
           <SmsVenueField label="Short venue for SMS" venue={form.venue} value={form.venue_sms} onChange={(venue_sms) => setForm({ ...form, venue_sms })} testid="specs-venue-sms-input" />
-          <Button className="sm:col-span-2" onClick={add} disabled={!form.day_date || !form.venue || Boolean(smsVenueFor(form.venue, form.venue_sms).problem)} data-testid="add-specs-day-button"><Plus className="w-4 h-4" /> Add collection days</Button>
+          <Button className="sm:col-span-2" onClick={save} disabled={busy || !form.day_date || !form.venue || Boolean(smsVenueFor(form.venue, form.venue_sms).problem)} data-testid={editing ? "save-specs-day-button" : "add-specs-day-button"}>{editing ? <Pencil className="w-4 h-4" /> : <Plus className="w-4 h-4" />} {editing ? "Save collection days" : "Add collection days"}</Button>
+          {editing && <Button variant="ghost" onClick={reset}>Cancel</Button>}
         </div>
-        <p className="text-xs text-slate-500 mt-2">Leave “To” empty for a single day. Collection hours: 10:00 AM–5:00 PM.</p>
+        <p className="text-xs text-slate-500 mt-2">Leave “To” empty for a single day. Collection hours: {SPECS_HOURS}. Changing the dates or venue replaces every patient&apos;s Token and sends each one SMS.</p>
       </Card>
     </div>
+  );
+}
+
+const NOTICE_LINES = { ot: "IOL surgery", specs_made: "Spectacles" };
+const NOTICE_STATUS = { not_sent: "SMS not sent", failed: "SMS failed", rejected: "SMS rejected", paused: "SMS paused", skipped: "SMS skipped", abandoned: "SMS gave up" };
+
+function ScheduleNotices() {
+  const [notices, setNotices] = useState([]);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(null);
+
+  const load = useCallback(() => {
+    api.get("/clinical/schedule-notices")
+      .then((r) => setNotices(r.data.notices))
+      .catch((e) => setErr(formatApiError(e)));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const contacted = async (slipId) => {
+    setErr("");
+    setBusy(slipId);
+    try {
+      await api.post(`/clinical/schedule-notices/${slipId}/contacted`);
+      setNotices((current) => current.filter((n) => n.slip_id !== slipId));
+    } catch (e) { setErr(formatApiError(e)); }
+    finally { setBusy(null); }
+  };
+
+  if (!notices.length && !err) return null;
+  return (
+    <Card data-testid="schedule-notices">
+      <h3 className="font-display font-bold text-slate-900">Patients to phone</h3>
+      <p className="text-sm text-slate-600 mb-3">Their date or venue changed and no SMS reached them. Tell them the new day and venue, and that the old Token is no longer valid.</p>
+      {err && <Alert>{err}</Alert>}
+      <div className="space-y-2">
+        {notices.map((n) => (
+          <div key={n.slip_id} className="flex flex-wrap items-center gap-x-3 gap-y-1 p-3 rounded-xl bg-amber-50" data-testid={`schedule-notice-${n.slip_id}`}>
+            <span className="font-semibold text-slate-900">#{n.reg_no} {n.full_name}</span>
+            <a className="font-mono text-emerald-800 underline min-h-[44px] inline-flex items-center" href={`tel:${n.phone}`}>{n.phone || "No phone"}</a>
+            <Badge tone="amber" className="ml-auto">{NOTICE_STATUS[n.sms_status] || n.sms_status}</Badge>
+            <span className="basis-full text-sm text-slate-700">{NOTICE_LINES[n.item_type]} · {displayDateRange(n.collection_date, n.collection_end_date)} · {n.collection_venue}</span>
+            <Button size="sm" variant="outline" onClick={() => contacted(n.slip_id)} disabled={busy === n.slip_id} data-testid={`schedule-notice-done-${n.slip_id}`}>Phoned — done</Button>
+          </div>
+        ))}
+      </div>
+    </Card>
   );
 }
 

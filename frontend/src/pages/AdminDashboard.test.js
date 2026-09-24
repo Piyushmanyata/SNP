@@ -135,10 +135,13 @@ beforeEach(() => {
       return Promise.resolve({
         data: {
           specs_days: [
-            { id: "sp-1", day_date: "2026-09-12", end_date: "2026-09-19", venue: "Base Optical", start_time: "10:00", end_time: "17:00" },
+            { id: "sp-1", day_date: "2026-09-12", end_date: "2026-09-19", venue: "Base Optical", venue_sms: "Base Optical" },
           ],
         },
       });
+    }
+    if (url === "/clinical/schedule-notices") {
+      return Promise.resolve({ data: { notices: [] } });
     }
     if (url === "/leaderboard") {
       return Promise.resolve({
@@ -582,6 +585,51 @@ describe("AdminDashboard component", () => {
         venue_sms: "",
       }
     );
+  });
+
+  test("a Specs collection day is edited in place, never re-added", async () => {
+    api.patch.mockResolvedValue({ data: {} });
+    await act(async () => {
+      root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>);
+    });
+    await act(async () => container.querySelector('[data-testid="admin-tab-ot"]').click());
+    act(() => container.querySelector('[data-testid="edit-specs-day-sp-1"]').click());
+    const venue = container.querySelector('[data-testid="specs-venue-input"]');
+    expect(venue.value).toBe("Base Optical");
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    act(() => {
+      setter.call(venue, "New Optical");
+      venue.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => container.querySelector('[data-testid="save-specs-day-button"]').click());
+    expect(api.patch).toHaveBeenCalledWith("/clinical/specs-days/sp-1", {
+      camp_id: "c-1", day_date: "2026-09-12", end_date: "2026-09-19", venue: "New Optical", venue_sms: "Base Optical",
+    });
+    expect(api.post).not.toHaveBeenCalledWith("/clinical/specs-days", expect.anything());
+  });
+
+  test("patients whose changed Token got no SMS are listed to phone until marked done", async () => {
+    const notice = {
+      slip_id: "slip-9", item_type: "ot", reg_no: 501, full_name: "Sita Devi", phone: "9876500001",
+      collection_date: "2026-10-09", collection_end_date: null, collection_venue: "New Hospital", sms_status: "not_sent",
+    };
+    const get = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url === "/clinical/schedule-notices"
+      ? Promise.resolve({ data: { notices: [notice] } }) : get(url)));
+    api.post.mockResolvedValue({ data: { ok: true } });
+    await act(async () => {
+      root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>);
+    });
+    await act(async () => container.querySelector('[data-testid="admin-tab-ot"]').click());
+    const row = container.querySelector('[data-testid="schedule-notice-slip-9"]');
+    expect(row.textContent).toContain("#501 Sita Devi");
+    expect(row.textContent).toContain("9876500001");
+    expect(row.textContent).toContain("IOL surgery · 09-10-2026 · New Hospital");
+    expect(row.textContent).toContain("SMS not sent");
+    expect(row.querySelector('a[href="tel:9876500001"]')).not.toBeNull();
+    await act(async () => container.querySelector('[data-testid="schedule-notice-done-slip-9"]').click());
+    expect(api.post).toHaveBeenCalledWith("/clinical/schedule-notices/slip-9/contacted");
+    expect(container.querySelector('[data-testid="schedule-notices"]')).toBeNull();
   });
 
   test("an SMS venue that would fail DLT blocks saving and says why", async () => {

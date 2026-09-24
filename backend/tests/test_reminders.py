@@ -366,28 +366,6 @@ class TestReminderCronHttp:
 
         _run(monkeypatch, body)
 
-    def test_specs_token_without_fixed_pickup_hours_is_not_sent(self, monkeypatch):
-        captured = recorder(monkeypatch)
-
-        async def body(database, client):
-            camp_id = await _numbered_camp(database)
-            for reg_no, hours in ((42, {}), (43, {"collection_start_time": "10:00", "collection_end_time": "15:00"})):
-                pid = ObjectId()
-                await database.patients.insert_one(patient_doc(
-                    _id=pid, camp_id=camp_id, camp_day_id=ObjectId(), reg_no=reg_no,
-                    phone=HOUSEHOLD, phone_normalized=HOUSEHOLD,
-                ))
-                await database.deferred_slips.insert_one({
-                    "patient_id": pid, "item_type": "specs_made", "active": True, "cancelled": False,
-                    "collection_date": TOMORROW, "collection_venue": "Token Hall", "version": 1, **hours,
-                })
-            r = await _post(client)
-            assert r.json()["sent"] == 0
-            assert captured == []
-            assert await _ledger(database) == []
-
-        _run(monkeypatch, body)
-
     def test_camp_without_a_number_sends_nothing_until_the_admin_sets_it(self, monkeypatch):
         captured = recorder(monkeypatch)
 

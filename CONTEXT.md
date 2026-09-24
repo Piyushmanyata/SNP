@@ -141,12 +141,20 @@ The clinical fulfilment outcome for spectacles that cannot be issued at camp and
 _Avoid_: to-be specs, TBD specs, specs order, glasses order
 
 **Specs collection day**:
-An admin-created day, unique per camp and date, on which patients deferred for Spectacles to be made are assigned. Same shape as an OT Schedule Day: venue and finite seat limit.
+An admin-created date range, unique per camp and start date, with a venue, on which patients deferred for Spectacles to be made collect them. It has no seat limit. Collection hours are always 10:00 AM–5:00 PM and are not stored.
 _Avoid_: specs slot, collection appointment, specs schedule
 
 **Token**:
-The short A6 paper printed when IOL surgery or Spectacles to be made is scheduled — never for a Hospital referral or Surgery declined. It contains the patient's name, registration number, date or collection window and venue. Each Token sends its own SMS, so moving a patient A→B→A sends three. An IOL surgery Token is titled as IOL surgery, names the eye, carries BP and blood sugar when recorded, the hospital phone, and the Bring list. Rescheduling cancels the previous Token.
+The short A6 paper printed when IOL surgery or Spectacles to be made is scheduled — never for a Hospital referral or Surgery declined. It contains the patient's name, registration number, date or collection window and venue. Each Token sends its own SMS, so moving a patient A→B→A sends three. An IOL surgery Token is titled as IOL surgery, names the eye, carries BP and blood sugar when recorded, the hospital phone, and the Bring list. Rescheduling cancels the previous Token. A Schedule edit replaces it: the old Token is marked replaced, a new one is printed, and the patient gets one notice by SMS or by phone.
 _Avoid_: slip, deferred slip, thermal slip, queue ticket, final token
+
+**Schedule edit**:
+A change to an OT Schedule Day or Specs collection day through its Edit. A date or venue change is material: it replaces every active Token on the day and queues one notice per patient. A seat-limit or SMS short-name change is not. Adding a day on a date that already has one is refused.
+_Avoid_: re-adding a day, upsert
+
+**Patients to phone**:
+The admin list of patients whose Token was replaced by a Schedule edit but whose SMS notice was not sent, failed, or is paused. Someone phones each one and marks the call done.
+_Avoid_: manual SMS, call list
 
 **Bring list**:
 The one list of what a patient carries on the day of IOL surgery: the prescription, the Token, Aadhaar card, ration card and mobile phone. Printed identically on the prescription and the IOL surgery Token. On the prescription it shares a Hindi and English band with the notice that only cataract (IOL) operations are arranged.

@@ -81,13 +81,18 @@ test("a Spectacles to be made Token keeps its collection line with a DD-MM-YYYY 
     collection_date: "2026-12-05",
     collection_end_date: "2026-12-12",
     collection_venue: "Base Optical",
-    collection_start_time: "10:00",
-    collection_end_time: "12:00",
   });
   expect(surface.textContent).toContain("चश्मा / Spectacles");
   expect(surface.textContent).toContain("05-12-2026 – 12-12-2026");
-  expect(surface.textContent).toContain("10:00 AM–12:00 PM");
+  expect(surface.textContent).toContain("10:00 AM–5:00 PM");
+  expect(surface.querySelector('[data-testid="token-superseded"]')).toBeNull();
   expect(surface.textContent).toContain("Bring this token for collection.");
   expect(surface.textContent).not.toContain("IOL");
   expect(surface.textContent).not.toContain("आधार कार्ड");
+});
+
+test("a replaced Token says it is no longer valid, and an IOL surgery Token has no collection hours", () => {
+  const surface = renderToken({ ...OT_SLIP, superseded: true });
+  expect(surface.querySelector('[data-testid="token-superseded"]').textContent).toContain("Replaced — not valid");
+  expect(surface.querySelector('[data-testid="token-window"]')).toBeNull();
 });

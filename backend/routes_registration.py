@@ -499,7 +499,10 @@ async def _confirm_registration(patient: Dict[str, Any], skip_walk_in: bool = Fa
         days = await db.camp_days.find({"camp_id": camp["_id"]}).to_list(100)
         if effective_printing(camp, days)["operating_day_id"] == str(day["_id"]):
             return
-    await sms.send_patient_sms(db, row, "registration", day["day_date"], camp.get("venue_sms") or camp["venue"])
+    await sms.send_patient_sms(
+        db, row, "registration", day["day_date"], camp.get("venue_sms") or camp["venue"],
+        event_key=f"edit:{day['edit_revision']}" if day.get("edit_revision") else None,
+    )
 
 
 async def _apply_scanned_identity(body: RegisterBody, message: str) -> None:

@@ -3,7 +3,7 @@ import logging
 import re
 import string
 from datetime import timedelta
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from bson import ObjectId
 from pymongo.asynchronous.database import AsyncDatabase
@@ -22,6 +22,8 @@ SPECS_PICKUP_START_TIME = "10:00"
 SPECS_PICKUP_END_TIME = "17:00"
 SPECS_TOKEN = "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपको चश्मा {date} से {end_date} तक प्रतिदिन 10:00 AM से 5:00 PM तक {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर अवश्य आएँ।"
 SPECS_REMINDER = "Sikar Zilla Welfare Trust के {camp_no} वे शिविर के चश्मे बनकर तैयार हैं। चश्मे {date} से {end_date} तक प्रतिदिन 10:00 AM से 5:00 PM तक {venue} आकर ले जाएँ। टोकन क्रमांक {reg_no} अवश्य साथ लाएँ।"
+OT_CHANGE = "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपके ऑपरेशन की तारीख या स्थान बदल गया है। नई तारीख: {date}। स्थल: {venue}। पुराने टोकन पर लिखी तारीख और स्थान अब मान्य नहीं हैं। क्रमांक: {reg_no}।"
+SPECS_CHANGE = "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपके चश्मे लेने की तारीख या स्थान बदल गया है। चश्मा {date} से {end_date} तक प्रतिदिन 10:00 AM से 5:00 PM तक {venue} में मिलेगा। पुराने टोकन पर लिखी तारीख और स्थान अब मान्य नहीं हैं। क्रमांक: {reg_no}।"
 
 MESSAGE_COPY = {
     "registration": REGISTRATION_CONFIRMATION,
@@ -30,6 +32,8 @@ MESSAGE_COPY = {
     "ot": OT_REMINDER,
     "specs_token": SPECS_TOKEN,
     "specs": SPECS_REMINDER,
+    "ot_change": OT_CHANGE,
+    "specs_change": SPECS_CHANGE,
 }
 RETRY_AFTER = timedelta(minutes=10)
 VARIABLE_LIMIT = 30
@@ -155,24 +159,31 @@ async def _record_unsent(
         pass
 
 
-def specs_pickup_hours_match(start_time: Optional[str], end_time: Optional[str]) -> bool:
-    return (start_time, end_time) == (SPECS_PICKUP_START_TIME, SPECS_PICKUP_END_TIME)
-
-
 def _template_variables(template: str, values: Dict[str, Any]) -> Dict[str, Any]:
     return {name: values[name] for _, name, _, _ in string.Formatter().parse(template) if name}
 
 
-async def _compose(
-    db: AsyncDatabase,
+async def _recipients(db: AsyncDatabase, patients: List[dict], session=None) -> Tuple[Dict[Any, dict], Dict[str, Optional[str]]]:
+    """The camps and registrar phones a batch of patient SMS needs, fetched once."""
+    camp_ids = list({p["camp_id"] for p in patients if p.get("camp_id")})
+    registrar_ids = list({ObjectId(str(p["created_by"])) for p in patients
+                          if p.get("created_by") and ObjectId.is_valid(str(p["created_by"]))})
+    camps = await db.camps.find({"_id": {"$in": camp_ids}}, session=session).to_list(None) if camp_ids else []
+    staff = await db.users.find(
+        {"_id": {"$in": registrar_ids}}, {"phone": 1}, session=session,
+    ).to_list(None) if registrar_ids else []
+    return ({c["_id"]: c for c in camps},
+            {str(u["_id"]): helpers.normalize_phone(u.get("phone")) for u in staff})
+
+
+def _compose(
     patient: dict,
     message_type: str,
     event_date: str,
     venue: str,
-    start_time: Optional[str],
-    end_time: Optional[str],
     end_date: Optional[str],
-    session=None,
+    camps: Dict[Any, dict],
+    staff_phones: Dict[str, Optional[str]],
 ) -> Optional[Tuple[str, Dict[str, Any], str]]:
     """The number, DLT variables and copy of a patient SMS, or None when it must not be sent."""
     if not msg91.configured() or not msg91.template_id(message_type):
@@ -181,18 +192,13 @@ async def _compose(
     reg_no = patient.get("reg_no")
     if not number or reg_no is None:
         return None
-    registrar_id = patient.get("created_by")
-    if registrar_id and ObjectId.is_valid(str(registrar_id)):
-        registrar = await db.users.find_one({"_id": ObjectId(str(registrar_id))}, session=session)
-        if registrar and helpers.normalize_phone(registrar.get("phone")) == number:
-            return None
-    if message_type in ("specs_token", "specs") and not specs_pickup_hours_match(start_time, end_time):
+    if staff_phones.get(str(patient.get("created_by"))) == number:
         return None
-    camp = await db.camps.find_one({"_id": patient["camp_id"]}, session=session) if patient.get("camp_id") else None
+    camp = camps.get(patient.get("camp_id")) or {}
     template = MESSAGE_COPY[message_type]
     variables = _template_variables(template, {
         "reg_no": reg_no,
-        "camp_no": str((camp or {}).get("camp_number") or ""),
+        "camp_no": str(camp.get("camp_number") or ""),
         "date": helpers.display_date(event_date),
         "end_date": helpers.display_date(end_date or event_date),
         "venue": venue,
@@ -239,8 +245,6 @@ async def deliver_patient_sms(
     message_type: str,
     event_date: str,
     venue: str,
-    start_time: Optional[str] = None,
-    end_time: Optional[str] = None,
     end_date: Optional[str] = None,
     retry_after: Optional[timedelta] = None,
     event_key: Optional[str] = None,
@@ -249,7 +253,8 @@ async def deliver_patient_sms(
     row = None
     venue = clean_sms_venue(venue)
     try:
-        composed = await _compose(db, patient, message_type, event_date, venue, start_time, end_time, end_date)
+        camps, staff_phones = await _recipients(db, [patient])
+        composed = _compose(patient, message_type, event_date, venue, end_date, camps, staff_phones)
         if not composed:
             return "skipped"
         number, variables, copy = composed
@@ -281,32 +286,36 @@ async def deliver_patient_sms(
         return "failed"
 
 
-async def queue_patient_sms(
+async def queue_sms(
     db: AsyncDatabase,
-    patient: dict,
+    patients: List[dict],
     message_type: str,
     event_date: str,
     venue: str,
-    start_time: Optional[str] = None,
-    end_time: Optional[str] = None,
     end_date: Optional[str] = None,
     *,
     event_key: str,
     session,
-) -> Optional[ObjectId]:
-    """Writes the SMS intent inside the caller's transaction; send_queued delivers it after commit."""
+) -> List[ObjectId]:
+    """Writes one SMS intent per patient inside the caller's transaction and returns the queued ids to send after commit."""
     venue = clean_sms_venue(venue)
-    composed = await _compose(db, patient, message_type, event_date, venue, start_time, end_time, end_date, session)
-    if not composed:
-        return None
-    number, variables, copy = composed
+    camps, staff_phones = await _recipients(db, patients, session)
     status = "paused" if await paused(db, message_type, session) else "queued"
-    res = await db.reminder_ledger.insert_one({
-        "patient_id": patient["_id"], "message_type": message_type, "event_date": event_date,
-        "event_key": event_key, "number": number, "venue": venue, "copy": copy, "variables": variables,
-        "status": status, "attempts": 0, "provider_id": None, "created_at": helpers.now_utc(),
-    }, session=session)
-    return res.inserted_id if status == "queued" else None
+    rows = []
+    for patient in patients:
+        composed = _compose(patient, message_type, event_date, venue, end_date, camps, staff_phones)
+        if not composed:
+            continue
+        number, variables, copy = composed
+        rows.append({
+            "patient_id": patient["_id"], "message_type": message_type, "event_date": event_date,
+            "event_key": event_key, "number": number, "venue": venue, "copy": copy, "variables": variables,
+            "status": status, "attempts": 0, "provider_id": None, "created_at": helpers.now_utc(),
+        })
+    if not rows:
+        return []
+    res = await db.reminder_ledger.insert_many(rows, session=session)
+    return res.inserted_ids if status == "queued" else []
 
 
 async def send_queued(db: AsyncDatabase, row_id: ObjectId) -> str:
@@ -320,14 +329,27 @@ async def send_queued(db: AsyncDatabase, row_id: ObjectId) -> str:
     return await _submit(db, row, row["variables"])
 
 
+async def send_queued_rows(db: AsyncDatabase, row_ids: List[ObjectId]) -> None:
+    for row_id in row_ids:
+        await send_queued(db, row_id)
+
+
+async def dispatch(background_tasks: Any, db: AsyncDatabase, row_ids: List[ObjectId]) -> None:
+    """Sends committed intents after the response; without a request context, sends them now."""
+    if not row_ids:
+        return
+    if background_tasks is None:
+        await send_queued_rows(db, row_ids)
+    else:
+        background_tasks.add_task(send_queued_rows, db, row_ids)
+
+
 async def send_patient_sms(
     db: AsyncDatabase,
     patient: dict,
     message_type: str,
     event_date: str,
     venue: str,
-    start_time: Optional[str] = None,
-    end_time: Optional[str] = None,
     end_date: Optional[str] = None,
     event_key: Optional[str] = None,
 ) -> bool:
@@ -337,8 +359,7 @@ async def send_patient_sms(
     True means the request reached the provider, including when its reply was lost.
     """
     return (await deliver_patient_sms(
-        db, patient, message_type, event_date, venue, start_time, end_time, end_date,
-        event_key=event_key,
+        db, patient, message_type, event_date, venue, end_date, event_key=event_key,
     )) in ("sent", "uncertain")
 
 

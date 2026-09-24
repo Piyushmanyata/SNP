@@ -21,7 +21,6 @@ def _failing(name):
 async def _specs_day(db, camp_id):
     result = await db.specs_collection_days.insert_one({
         "camp_id": camp_id, "day_date": day(5), "end_date": day(12), "venue": "Optical",
-        "start_time": "10:00", "end_time": "17:00",
     })
     return result.inserted_id
 
@@ -63,7 +62,7 @@ def test_a_token_and_its_sms_intent_commit_together(monkeypatch):
         sent = recorder(monkeypatch)
         done = await _complete(patient, **_lines(["ot"]))
         day_id = await _ot_day(db, camp_id)
-        restore = intercept(monkeypatch, "reminder_ledger", "insert_one", _failing("ledger"))
+        restore = intercept(monkeypatch, "reminder_ledger", "insert_many", _failing("ledger"))
         with pytest.raises(RuntimeError):
             await _record(done, "schedule", "deferred", day_id)
         restore()
