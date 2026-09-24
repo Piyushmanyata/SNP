@@ -682,6 +682,8 @@ async def record_fulfilment(
             "reviewed_revision_id": current["committed_revision_id"],
             "reviewed_generation": generation_of(current),
             "slip_id": slip["_id"] if slip else None,
+            "camp_id": current.get("camp_id"),
+            "patient_seen_at": current.get("seen_at"),
         })
         doc = await persist_fulfilment(db, prior, doc, session)
         if doc["status"] != "deferred":

@@ -93,10 +93,18 @@ async def init_indexes() -> None:
     await db.deferred_slips.create_index([("specs_collection_day_id", ASCENDING), ("active", ASCENDING)])
     await db.fulfilments.create_index([("ot_schedule_day_id", ASCENDING), ("status", ASCENDING)])
     await db.fulfilments.create_index([("transcription_id", ASCENDING), ("item_type", ASCENDING)], unique=True)
+    await db.fulfilments.create_index(
+        "operation_id", unique=True, partialFilterExpression={"operation_id": {"$type": "string"}},
+    )
+    await db.fulfilments.create_index([
+        ("camp_id", ASCENDING), ("patient_seen_at", ASCENDING),
+        ("item_type", ASCENDING), ("status", ASCENDING),
+    ])
     await db.ot_schedule_days.create_index([("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True)
     await db.specs_collection_days.create_index([("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True)
     await db.reminder_ledger.create_index([("status", ASCENDING), ("created_at", ASCENDING)])
     await db.reminder_ledger.create_index([("camp_id", ASCENDING), ("event_date", ASCENDING), ("status", ASCENDING)])
+    await db.reminder_ledger.create_index([("camp_id", ASCENDING), ("created_at", ASCENDING)])
     await db.reminder_ledger.create_index(
         [("message_type", ASCENDING), ("event_date", ASCENDING), ("created_at", ASCENDING)],
     )

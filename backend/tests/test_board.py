@@ -92,9 +92,10 @@ class TestCampDayBoard:
             ])
             tx = ObjectId()
             await database.transcriptions.insert_one({"_id": tx, "patient_id": p_tx, "camp_id": camp_id})
+            seen = NOW - timedelta(minutes=30)
             await database.fulfilments.insert_many([
-                {"transcription_id": tx, "item_type": "medicine", "status": "fulfilled", "created_at": NOW - timedelta(minutes=2)},
-                {"transcription_id": tx, "item_type": "ot", "status": "deferred", "created_at": NOW - timedelta(minutes=3)},
+                {"transcription_id": tx, "item_type": "medicine", "status": "fulfilled", "camp_id": camp_id, "patient_seen_at": seen, "created_at": NOW - timedelta(minutes=2)},
+                {"transcription_id": tx, "item_type": "ot", "status": "deferred", "camp_id": camp_id, "patient_seen_at": seen, "created_at": NOW - timedelta(minutes=3)},
             ])
             await database.ot_schedule_days.insert_one({
                 "camp_id": camp_id, "day_date": day(1), "venue": "OT Hall", "seat_limit": 10, "seats_taken": 3,

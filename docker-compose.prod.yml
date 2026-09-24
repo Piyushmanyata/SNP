@@ -10,7 +10,8 @@ services:
     restart: unless-stopped
     logging: *logging
     entrypoint: ["sh", "/usr/local/bin/snp-mongo-entrypoint.sh"]
-    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--keyFile", "/data/configdb/keyfile"]
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all", "--keyFile", "/data/configdb/keyfile", "--wiredTigerCacheSizeGB", "2"]
+    mem_limit: 3g
     environment:
       MONGO_INITDB_ROOT_USERNAME: snp
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?set MONGO_PASSWORD to a random hex value}
@@ -31,6 +32,7 @@ services:
   backend:
     build: ./backend
     restart: unless-stopped
+    mem_limit: 1g
     logging: *logging
     security_opt:
       - no-new-privileges:true
@@ -73,6 +75,7 @@ services:
       args:
         REACT_APP_BACKEND_URL: ""
     restart: unless-stopped
+    mem_limit: 128m
     logging: *logging
     depends_on:
       backend:
@@ -86,6 +89,7 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    mem_limit: 256m
     logging: *logging
     ports:
       - "80:80"
@@ -105,6 +109,7 @@ services:
   reminders:
     build: ./backend
     restart: unless-stopped
+    mem_limit: 256m
     logging: *logging
     environment:
       CRON_SECRET: ${CRON_SECRET}
@@ -117,6 +122,7 @@ services:
   backup:
     build: ./ops/backup
     restart: unless-stopped
+    mem_limit: 768m
     logging: *logging
     environment:
       DB_NAME: ${DB_NAME}

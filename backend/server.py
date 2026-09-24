@@ -4,13 +4,13 @@ import os
 import time
 import traceback
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Awaitable, Callable
+from typing import AsyncGenerator
 from uuid import uuid4
 from dotenv import load_dotenv
 load_dotenv()
 
 from bson.errors import InvalidId
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -73,37 +73,62 @@ if not http_log.handlers:
 SLOW_REQUEST_MS = 1000
 
 
-async def request_context(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
-    request_id = uuid4().hex[:12]
-    request.state.request_id = request_id
-    started = time.perf_counter()
-    try:
-        response = await call_next(request)
-    except Exception as exc:
-        http_log.error(json.dumps({
+class RequestContext:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        request_id = uuid4().hex[:12]
+        scope.setdefault("state", {})["request_id"] = request_id
+        started = time.perf_counter()
+        status = 500
+        started_response = False
+
+        async def send_wrapper(message):
+            nonlocal status, started_response
+            if message["type"] == "http.response.start":
+                started_response = True
+                status = message["status"]
+                headers = list(message.get("headers") or [])
+                headers.append((b"x-request-id", request_id.encode()))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_wrapper)
+        except Exception as exc:
+            http_log.error(json.dumps({
+                "request_id": request_id,
+                "error": type(exc).__name__,
+                "trace": "".join(traceback.format_tb(exc.__traceback__)),
+            }))
+            if started_response:
+                raise
+            body = json.dumps({"detail": {
+                "code": "INTERNAL",
+                "message": "Something went wrong. Quote this code to the admin.",
+                "request_id": request_id,
+            }}).encode()
+            await send({"type": "http.response.start", "status": 500, "headers": [
+                (b"content-type", b"application/json"),
+                (b"x-request-id", request_id.encode()),
+            ]})
+            await send({"type": "http.response.body", "body": body})
+        ms = round((time.perf_counter() - started) * 1000)
+        route = scope.get("route")
+        http_log.log(logging.WARNING if ms > SLOW_REQUEST_MS else logging.INFO, json.dumps({
             "request_id": request_id,
-            "error": type(exc).__name__,
-            "trace": "".join(traceback.format_tb(exc.__traceback__)),
+            "method": scope.get("method"),
+            "path": getattr(route, "path", "unmatched"),
+            "status": status,
+            "ms": ms,
         }))
-        response = JSONResponse(status_code=500, content={"detail": {
-            "code": "INTERNAL",
-            "message": "Something went wrong. Quote this code to the admin.",
-            "request_id": request_id,
-        }})
-    ms = round((time.perf_counter() - started) * 1000)
-    route = request.scope.get("route")
-    http_log.log(logging.WARNING if ms > SLOW_REQUEST_MS else logging.INFO, json.dumps({
-        "request_id": request_id,
-        "method": request.method,
-        "path": getattr(route, "path", "unmatched"),
-        "status": response.status_code,
-        "ms": ms,
-    }))
-    response.headers["X-Request-ID"] = request_id
-    return response
 
 
-app.middleware("http")(request_context)
+app.add_middleware(RequestContext)
 
 
 def _error_body(exc) -> JSONResponse:

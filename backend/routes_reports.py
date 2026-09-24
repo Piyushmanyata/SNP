@@ -22,22 +22,22 @@ async def kpis(actor: dict = Depends(require_any)) -> Dict[str, Any]:
     camp = await db.camps.find_one({"is_active": True})
     if not camp:
         return {"active_camp": None, "registered": 0, "seen": 0, "pending": 0}
-    registered = await db.patients.count_documents({"camp_id": camp["_id"]})
-    seen = await db.patients.count_documents({"camp_id": camp["_id"], "queue_status": "seen"})
+    counted = await aggregate_list(db.patients, [
+        {"$match": {"camp_id": camp["_id"]}},
+        {"$group": {
+            "_id": None,
+            "registered": {"$sum": 1},
+            "seen": {"$sum": {"$cond": [{"$eq": ["$queue_status", "seen"]}, 1, 0]}},
+        }},
+    ])
+    registered = counted[0]["registered"] if counted else 0
+    seen = counted[0]["seen"] if counted else 0
     return {
         "active_camp": {"id": str(camp["_id"]), "name": camp["name"]},
         "registered": registered,
         "seen": seen,
         "pending": registered - seen,
     }
-
-
-async def _counts_by(collection: Any, match: Dict[str, Any], field: str) -> Dict[str, int]:
-    rows = await aggregate_list(collection, [
-        {"$match": match},
-        {"$group": {"_id": f"${field}", "count": {"$sum": 1}}},
-    ])
-    return {row["_id"]: row["count"] for row in rows if row["_id"]}
 
 
 @router.get("/leaderboard")
@@ -48,18 +48,32 @@ async def leaderboard(actor: dict = Depends(require_staff)) -> Dict[str, Any]:
         return {"volunteers": [], "team_leads": []}
 
     registered = {"camp_id": camp["_id"]}
-    completed = {
-        **registered,
-        "committed_revision_id": {"$ne": None},
-        "is_self_registered": {"$ne": True},
-    }
-    staff, registrations, points, team_registrations, team_points = await asyncio.gather(
+    staff_rows, counted = await asyncio.gather(
         db.users.find({"role": {"$in": ["volunteer", "team_lead"]}}).to_list(None),
-        _counts_by(db.patients, registered, "created_by"),
-        _counts_by(db.patients, completed, "created_by"),
-        _counts_by(db.patients, registered, "registrar_team_lead_id"),
-        _counts_by(db.patients, completed, "registrar_team_lead_id"),
+        aggregate_list(db.patients, [
+            {"$match": registered},
+            {"$facet": {
+                "registrations": [{"$group": {"_id": "$created_by", "count": {"$sum": 1}}}],
+                "completed": [
+                    {"$match": {"committed_revision_id": {"$ne": None}, "is_self_registered": {"$ne": True}}},
+                    {"$group": {"_id": "$created_by", "count": {"$sum": 1}}},
+                ],
+                "team_registrations": [{"$group": {"_id": "$registrar_team_lead_id", "count": {"$sum": 1}}}],
+                "team_completed": [
+                    {"$match": {"committed_revision_id": {"$ne": None}, "is_self_registered": {"$ne": True}}},
+                    {"$group": {"_id": "$registrar_team_lead_id", "count": {"$sum": 1}}},
+                ],
+            }},
+        ]),
     )
+    staff = staff_rows
+    facet = counted[0] if counted else {}
+
+    def _tallies(name: str) -> Dict[str, int]:
+        return {row["_id"]: row["count"] for row in facet.get(name) or [] if row["_id"]}
+
+    registrations, points = _tallies("registrations"), _tallies("completed")
+    team_registrations, team_points = _tallies("team_registrations"), _tallies("team_completed")
 
     volunteers = [{
         "id": str(u["_id"]),
@@ -279,11 +293,11 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
     arrival_filter = {**camp_filter, "arrived_at": {"$gte": start, "$lt": end}}
     quiet_cutoff = now - timedelta(minutes=15)
     hour_cutoff = now - timedelta(minutes=60)
-    arrived, awaiting_print, awaiting_seen, seen_ids, volunteer_rows = await asyncio.gather(
+    arrived, awaiting_print, awaiting_seen, seen_today, volunteer_rows, fulfilments = await asyncio.gather(
         db.patients.count_documents(arrival_filter),
         db.patients.count_documents({**arrival_filter, "printed_at": None}),
         db.patients.count_documents({**arrival_filter, "printed_at": {"$ne": None}, "seen_at": None}),
-        db.patients.distinct("_id", {**camp_filter, "seen_at": {"$gte": start, "$lt": end}}),
+        db.patients.count_documents({**camp_filter, "seen_at": {"$gte": start, "$lt": end}}),
         aggregate_list(db.patients, [
             {"$match": arrival_filter},
             {"$group": {
@@ -293,9 +307,11 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
                 "last_60m": {"$sum": {"$cond": [{"$gte": ["$arrived_at", hour_cutoff]}, 1, 0]}},
             }},
         ]),
+        aggregate_list(db.fulfilments, [
+            {"$match": {"camp_id": camp["_id"], "patient_seen_at": {"$gte": start, "$lt": end}}},
+            {"$group": {"_id": {"item_type": "$item_type", "status": "$status"}, "count": {"$sum": 1}}},
+        ]),
     )
-    seen_today = len(seen_ids)
-    tx_ids = await db.transcriptions.distinct("_id", {"patient_id": {"$in": seen_ids}}) if seen_ids else []
     backlog = await db.patients.count_documents({
         **arrival_filter,
         "printed_at": {"$ne": None},
@@ -323,16 +339,11 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
     quiet_count = sum(1 for r in activity if r["quiet"])
 
     fulfil_counts = _empty_board(as_of, "current")["fulfilment"]
-    if tx_ids:
-        fulfilments = await aggregate_list(db.fulfilments, [
-            {"$match": {"transcription_id": {"$in": tx_ids}}},
-            {"$group": {"_id": {"item_type": "$item_type", "status": "$status"}, "count": {"$sum": 1}}},
-        ])
-        for f in fulfilments:
-            bucket = fulfil_counts.get(f["_id"].get("item_type"))
-            status = f["_id"].get("status")
-            if bucket is not None and status in bucket:
-                bucket[status] += f["count"]
+    for f in fulfilments:
+        bucket = fulfil_counts.get(f["_id"].get("item_type"))
+        status = f["_id"].get("status")
+        if bucket is not None and status in bucket:
+            bucket[status] += f["count"]
 
     sms_groups = await sms.ledger_groups(
         db, {"camp_id": camp["_id"], "created_at": {"$gte": start, "$lt": end}}, by_camp=True,
