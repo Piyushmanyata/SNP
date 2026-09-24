@@ -74,6 +74,11 @@ export default function Board() {
         )}
         {data && (
           <>
+            {data.backups_failing && (
+              <div data-testid="board-backups-failing">
+                <Alert>Backups failing — tell the admin</Alert>
+              </div>
+            )}
             {(data.sms_paused || []).length > 0 && (
               <div data-testid="board-sms-paused">
                 <Alert>

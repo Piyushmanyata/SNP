@@ -1,7 +1,8 @@
 import asyncio
 import io
 import csv
-from datetime import timedelta
+import shutil
+from datetime import datetime, timedelta
 from typing import Any, Dict, List
 from bson import ObjectId
 from fastapi import APIRouter, Depends
@@ -238,9 +239,10 @@ def _empty_board(as_of: str, state: str) -> Dict[str, Any]:
 async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
     db = get_db()
     as_of = iso(now_utc())
+    backups_failing = (await _system(db))["status"] == "red"
     camp = await db.camps.find_one({"is_active": True})
     if not camp:
-        return _empty_board(as_of, "no_camp")
+        return {**_empty_board(as_of, "no_camp"), "backups_failing": backups_failing}
     today = today_ist_str()
     start, end = ist_day_bounds(today)
     now = now_utc()
@@ -248,6 +250,7 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
     if not day:
         empty = _empty_board(as_of, "no_day")
         empty["camp"] = {"id": str(camp["_id"]), "name": camp["name"]}
+        empty["backups_failing"] = backups_failing
         return empty
 
     camp_filter = {"camp_id": camp["_id"]}
@@ -337,6 +340,7 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
     return {
         "as_of": as_of,
         "state": "current",
+        "backups_failing": backups_failing,
         "camp": {"id": str(camp["_id"]), "name": camp["name"]},
         "day": {"id": str(day["_id"]), "day_date": day["day_date"]},
         "stages": {
@@ -373,3 +377,60 @@ async def readiness() -> Dict[str, Any] | JSONResponse:
         return {"ready": True, "db": "reachable", "active_camps": n_active}
     except Exception:
         return JSONResponse(status_code=503, content={"ready": False, "reason": "db unreachable"})
+
+
+LEVELS = ("green", "amber", "red")
+BACKUP_FIELDS = (
+    "last_success_at", "last_error_at", "last_error", "remote_configured", "remote_last_success_at",
+    "interval_seconds", "bytes", "patients_count",
+)
+
+
+def _backup_level(backup: Dict[str, Any] | None, now: datetime) -> str:
+    last = as_utc(backup.get("last_success_at")) if backup else None
+    if backup is None or last is None:
+        return "red"
+    interval = timedelta(seconds=backup.get("interval_seconds") or 3600)
+    if now - last > max(timedelta(hours=6), 3 * interval):
+        return "red"
+    remote = as_utc(backup.get("remote_last_success_at"))
+    error = as_utc(backup.get("last_error_at"))
+    if (now - last > 2 * interval or not backup.get("remote_configured") or remote is None
+            or now - remote > 2 * interval or (error is not None and error >= last)):
+        return "amber"
+    return "green"
+
+
+def _disk() -> Dict[str, int] | str:
+    try:
+        usage = shutil.disk_usage("/backups")
+    except OSError:
+        return "unknown"
+    return {"free_bytes": usage.free, "total_bytes": usage.total}
+
+
+def _disk_level(disk: Dict[str, int] | str) -> str:
+    if isinstance(disk, str):
+        return "green"
+    free = disk["free_bytes"] / disk["total_bytes"]
+    return "red" if free < 0.1 else "amber" if free < 0.2 else "green"
+
+
+async def _system(db: Any) -> Dict[str, Any]:
+    backup = await db.ops_status.find_one({"_id": "backup"})
+    disk = _disk()
+    levels = {"backup": _backup_level(backup, now_utc()), "disk": _disk_level(disk)}
+    return {
+        "status": max(levels.values(), key=LEVELS.index),
+        "levels": levels,
+        "backup": {
+            field: iso(backup.get(field)) if field.endswith("_at") else backup.get(field)
+            for field in BACKUP_FIELDS
+        } if backup else None,
+        "disk": disk,
+    }
+
+
+@router.get("/admin/system")
+async def system_status(actor: dict = Depends(require_admin)) -> Dict[str, Any]:
+    return await _system(get_db())

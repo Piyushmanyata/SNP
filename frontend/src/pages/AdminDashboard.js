@@ -86,6 +86,7 @@ function Overview() {
           <p className="text-slate-600 mt-1">No active camp. Create & activate one under “Camps & Days”.</p>
         )}
       </Card>
+      <SystemCard />
       <div className="grid grid-cols-3 gap-3">
         <Stat label="Registered" value={kpi?.registered ?? 0} testid="kpi-registered-count" />
         <Stat label="Seen" value={kpi?.seen ?? 0} tone="emerald" testid="kpi-seen-count" />
@@ -98,6 +99,58 @@ function Overview() {
         <Button size="lg" variant="outline" onClick={() => navigate("/analytics")} data-testid="goto-analytics-button"><BarChart3 className="w-5 h-5" /> Analytics</Button>
       </div>
     </div>
+  );
+}
+
+const SYSTEM_LEVELS = {
+  green: { tone: "emerald", label: "All good", card: "border-emerald-300", text: "text-slate-700" },
+  amber: { tone: "amber", label: "Needs attention", card: "border-amber-300 bg-amber-50/40", text: "text-amber-800" },
+  red: { tone: "rose", label: "Failing", card: "border-rose-300 bg-rose-50/40", text: "text-rose-700" },
+};
+
+function gigabytes(bytes) {
+  return `${Math.round(bytes / 1e9)} GB`;
+}
+
+function SystemCard() {
+  const [data, setData] = useState(null);
+  const [err, setErr] = useState("");
+  const load = useCallback(() => {
+    setErr("");
+    api.get("/admin/system").then((r) => setData(r.data)).catch((e) => setErr(formatApiError(e)));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  if (err) return <ErrorCard message={err} onRetry={load} />;
+  if (!data) return null;
+
+  const level = SYSTEM_LEVELS[data.status];
+  const backup = data.backup || {};
+  const errorIsLatest = backup.last_error && (!backup.last_success_at || backup.last_error_at >= backup.last_success_at);
+  const backupText = SYSTEM_LEVELS[data.levels.backup].text;
+  return (
+    <Card className={level.card} data-testid="system-card" data-status={data.status}>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-mono uppercase tracking-widest text-slate-500">System</p>
+        <Badge tone={level.tone} data-testid="system-status">{level.label}</Badge>
+      </div>
+      <ul className="mt-3 space-y-1 text-sm">
+        <li className={backupText} data-testid="system-backup">
+          Backup: {backup.last_success_at ? `last ${displayTimestamp(backup.last_success_at)}` : "No backup yet"}
+        </li>
+        <li className={backupText} data-testid="system-remote">
+          Off-site copy: {!backup.remote_configured ? "Not set up"
+            : backup.remote_last_success_at ? `last ${displayTimestamp(backup.remote_last_success_at)}` : "Not copied yet"}
+        </li>
+        <li className={SYSTEM_LEVELS[data.levels.disk].text} data-testid="system-disk">
+          Backup disk: {data.disk === "unknown" ? "Unknown" : `${gigabytes(data.disk.free_bytes)} free of ${gigabytes(data.disk.total_bytes)}`}
+        </li>
+        {errorIsLatest && (
+          <li className="text-rose-700" data-testid="system-error">
+            Last error {displayTimestamp(backup.last_error_at)}: {backup.last_error}
+          </li>
+        )}
+      </ul>
+    </Card>
   );
 }
 

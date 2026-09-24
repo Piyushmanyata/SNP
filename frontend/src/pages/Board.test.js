@@ -109,6 +109,28 @@ describe("Camp-day board", () => {
     expect(container.querySelector('[data-testid="board-sms-paused"]')).toBeNull();
   });
 
+  test("failing backups show one red banner with no patient data", async () => {
+    api.get.mockResolvedValue({ data: { ...PAYLOAD, backups_failing: true } });
+    await act(async () => { root.render(<MemoryRouter><Board /></MemoryRouter>); });
+    const banners = container.querySelectorAll('[data-testid="board-backups-failing"]');
+    expect(banners).toHaveLength(1);
+    expect(banners[0].textContent).toBe("Backups failing — tell the admin");
+    expect(banners[0].querySelector('[role="alert"]')).not.toBeNull();
+  });
+
+  test("the backups banner also shows when there is no active camp", async () => {
+    api.get.mockResolvedValue({ data: { as_of: PAYLOAD.as_of, state: "no_camp", backups_failing: true } });
+    await act(async () => { root.render(<MemoryRouter><Board /></MemoryRouter>); });
+    expect(container.querySelector('[data-testid="board-no-camp"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="board-backups-failing"]')).not.toBeNull();
+  });
+
+  test("healthy backups show no banner", async () => {
+    api.get.mockResolvedValue({ data: { ...PAYLOAD, backups_failing: false } });
+    await act(async () => { root.render(<MemoryRouter><Board /></MemoryRouter>); });
+    expect(container.querySelector('[data-testid="board-backups-failing"]')).toBeNull();
+  });
+
   test("flags a paused SMS type and counts messages held back", async () => {
     api.get.mockResolvedValue({ data: { ...PAYLOAD, sms_not_sent: 4, sms_paused: ["registration", "camp"] } });
     await act(async () => { root.render(<MemoryRouter><Board /></MemoryRouter>); });

@@ -245,7 +245,7 @@ Every camp day has a seat limit greater than zero. The limit blocks self-registr
 _Avoid_: seats_taken (that counter is OT and Spectacles to be made only), unlimited day, turning away a walk-in
 
 **Camp-day board**:
-The read-only page a team lead watches during a camp day. Per Registration desk, Arrivals in the last fifteen minutes and the last hour, with a desk that has gone quiet highlighted; the transcription backlog; each Fulfilment line's count today; seats left on the next OT Schedule Day and Specs collection day; SMS failures. Counts only, refreshes on its own, no actions and no patient names.
+The read-only page a team lead watches during a camp day. Per Registration desk, Arrivals in the last fifteen minutes and the last hour, with a desk that has gone quiet highlighted; the transcription backlog; each Fulfilment line's count today; seats left on the next OT Schedule Day and Specs collection day; SMS failures; one banner when the System card is red. Counts only, refreshes on its own, no actions and no patient names.
 _Avoid_: dashboard (that is the admin area), live feed, monitor, alerts (the board pushes nothing)
 
 **Transcription backlog**:
@@ -263,6 +263,14 @@ _Avoid_: opening the prescription, automatic approval
 **Camp records export**:
 The single admin-only CSV for a camp, one row per patient including no-shows. Carries identity (name, age, gender, household phone, address, Aadhaar last-4, reg_no), the Manual entry mark, the registration / arrival / seen timestamps, diagnosis, BP and blood sugar, each eye's power, the medicines prescribed and any not given, the prescribed and issued fixed powers, the status of each of the four Fulfilment lines with blank meaning the patient was never recorded at that desk, and the assigned clinical day and venue for each deferral. It is a wide file of patient data and is not downloadable by a volunteer.
 _Avoid_: camp records, clinical audit, the reports (there is exactly one export)
+
+**Ops status**:
+The record a background service keeps about its own health, one document per service. For backups: when the last backup and the last off-site copy succeeded, the last error message, and the patient count when the dump started. It never holds patient data.
+_Avoid_: logs, audit trail, metrics
+
+**System card**:
+The admin overview's one-glance health check: green, amber or red. Backups are red when none has succeeded for six hours (or three backup intervals, if longer), and amber when the last one is more than two intervals old, there is no recent off-site copy, or the last pass reported an error. The backup disk is amber under 20% free and red under 10%. A red System card puts one "Backups failing — tell the admin" banner on the Camp-day board.
+_Avoid_: status page, health check (that is the readiness route), monitoring
 
 Every SMS below is Devanagari, per patient, and carries that patient's reg_no. A household number covering three patients receives three messages. Each is its own DLT template.
 

@@ -34,6 +34,17 @@ jest.mock("../components/TemplateEditor", () => {
   };
 });
 
+const SYSTEM = {
+  status: "green",
+  levels: { backup: "green", disk: "green" },
+  backup: {
+    last_success_at: "2026-09-24T04:30:00+00:00", last_error_at: null, last_error: null,
+    remote_configured: true, remote_last_success_at: "2026-09-24T04:31:00+00:00",
+    interval_seconds: 3600, bytes: 2661, patients_count: 50,
+  },
+  disk: { free_bytes: 40e9, total_bytes: 100e9 },
+};
+
 let container = null;
 let root = null;
 
@@ -44,6 +55,9 @@ beforeEach(() => {
   jest.clearAllMocks();
 
   api.get.mockImplementation((url) => {
+    if (url === "/admin/system") {
+      return Promise.resolve({ data: SYSTEM });
+    }
     if (url === "/kpis") {
       return Promise.resolve({
         data: { registered: 120, seen: 90, pending: 30 },
@@ -247,11 +261,92 @@ describe("AdminDashboard component", () => {
   });
 
   test("overview recovers after a failed request is retried", async () => {
-    api.get.mockRejectedValueOnce(new Error("Network unavailable"));
+    const base = api.get.getMockImplementation();
+    let failKpis = true;
+    api.get.mockImplementation((url) => {
+      if (url === "/kpis" && failKpis) {
+        failKpis = false;
+        return Promise.reject(new Error("Network unavailable"));
+      }
+      return base(url);
+    });
     await act(async () => root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>));
     expect(container.querySelector('[data-testid="error-retry-button"]')).not.toBeNull();
     await act(async () => container.querySelector('[data-testid="error-retry-button"]').click());
     expect(container.querySelector('[data-testid="kpi-registered-count"]').textContent).toContain("120");
+  });
+
+  describe("System card", () => {
+    const renderWith = async (system) => {
+      const base = api.get.getMockImplementation();
+      api.get.mockImplementation((url) => (url === "/admin/system" ? Promise.resolve({ data: system }) : base(url)));
+      await act(async () => root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>));
+      return container.querySelector('[data-testid="system-card"]');
+    };
+
+    test("green shows the last backup, the off-site copy and free disk", async () => {
+      const card = await renderWith(SYSTEM);
+      expect(card.getAttribute("data-status")).toBe("green");
+      expect(card.querySelector('[data-testid="system-status"]').textContent).toBe("All good");
+      expect(card.querySelector('[data-testid="system-backup"]').textContent).toContain("24-09-2026 10:00");
+      expect(card.querySelector('[data-testid="system-remote"]').textContent).toContain("24-09-2026 10:01");
+      expect(card.querySelector('[data-testid="system-disk"]').textContent).toContain("40 GB free of 100 GB");
+      expect(card.querySelector('[data-testid="system-error"]')).toBeNull();
+    });
+
+    test("amber says the off-site copy is not set up", async () => {
+      const card = await renderWith({
+        ...SYSTEM, status: "amber", levels: { backup: "amber", disk: "green" },
+        backup: { ...SYSTEM.backup, remote_configured: false, remote_last_success_at: null },
+      });
+      expect(card.getAttribute("data-status")).toBe("amber");
+      expect(card.querySelector('[data-testid="system-status"]').textContent).toBe("Needs attention");
+      expect(card.querySelector('[data-testid="system-remote"]').textContent).toContain("Not set up");
+      expect(card.querySelector('[data-testid="system-remote"]').className).toContain("amber");
+      expect(card.querySelector('[data-testid="system-disk"]').className).not.toContain("amber");
+    });
+
+    test("red with no backup yet shows the latest error and an unknown disk", async () => {
+      const card = await renderWith({
+        status: "red", levels: { backup: "red", disk: "green" },
+        backup: { ...SYSTEM.backup, last_success_at: null, remote_last_success_at: null, last_error_at: "2026-09-24T05:00:00+00:00", last_error: "dump failed" },
+        disk: "unknown",
+      });
+      expect(card.getAttribute("data-status")).toBe("red");
+      expect(card.querySelector('[data-testid="system-status"]').textContent).toBe("Failing");
+      expect(card.querySelector('[data-testid="system-backup"]').textContent).toContain("No backup yet");
+      expect(card.querySelector('[data-testid="system-error"]').textContent).toContain("dump failed");
+      expect(card.querySelector('[data-testid="system-disk"]').textContent).toContain("Unknown");
+    });
+
+    test("an error from the same pass as the last success is shown", async () => {
+      const card = await renderWith({
+        ...SYSTEM, status: "amber", levels: { backup: "amber", disk: "green" },
+        backup: { ...SYSTEM.backup, last_error_at: SYSTEM.backup.last_success_at, last_error: "prune failed" },
+      });
+      expect(card.querySelector('[data-testid="system-error"]').textContent).toContain("prune failed");
+    });
+
+    test("an error older than the last success is not shown", async () => {
+      const card = await renderWith({ ...SYSTEM, backup: { ...SYSTEM.backup, last_error_at: "2026-09-24T01:00:00+00:00", last_error: "dump failed" } });
+      expect(card.querySelector('[data-testid="system-error"]')).toBeNull();
+    });
+
+    test("a failed status request leaves the KPIs and offers a retry", async () => {
+      const base = api.get.getMockImplementation();
+      let fail = true;
+      api.get.mockImplementation((url) => {
+        if (url === "/admin/system" && fail) {
+          fail = false;
+          return Promise.reject(new Error("Network unavailable"));
+        }
+        return base(url);
+      });
+      await act(async () => root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>));
+      expect(container.querySelector('[data-testid="kpi-registered-count"]').textContent).toContain("120");
+      await act(async () => container.querySelector('[data-testid="error-retry-button"]').click());
+      expect(container.querySelector('[data-testid="system-card"]').getAttribute("data-status")).toBe("green");
+    });
   });
 
   test("switches tabs smoothly (Camps, Template, OT & Specs, Leaderboard, Exports)", async () => {
@@ -427,7 +522,7 @@ describe("AdminDashboard component", () => {
     const body = JSON.stringify({ detail: "No active camp to export" });
     api.get.mockImplementation((url) => (url === "/exports/camp-records"
       ? Promise.reject({ message: "Request failed with status code 409", response: { status: 409, data: { text: () => Promise.resolve(body) } } })
-      : Promise.resolve({ data: {} })));
+      : Promise.resolve({ data: url === "/admin/system" ? SYSTEM : {} })));
     await act(async () => { root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>); });
     await act(async () => { container.querySelector('[data-testid="admin-tab-exports"]').click(); });
     await act(async () => { container.querySelector('[data-testid="export-camp-records-button"]').click(); });

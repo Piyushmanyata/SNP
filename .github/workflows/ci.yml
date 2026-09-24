@@ -77,8 +77,12 @@ jobs:
           AADHAAR_HASH_PEPPER: ci-aadhaar-pepper
           ADMIN_BOOTSTRAP_PIN: "8642"
           CRON_SECRET: ci-reminder-secret
+          RESTIC_PASSWORD: ci-restic-password
         run: |
           docker compose -f docker-compose.prod.yml config --quiet
+          shellcheck -e SC2016 ops/backup/*.sh ops/mongo/entrypoint.sh
+          docker build -q -t snp-backup ops/backup
+          docker run --rm snp-backup restic version
           docker run --rm -e APP_DOMAIN -e TLS_EMAIL -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
       - name: Start isolated production images
         run: docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.ci.yml -p snp-ci up -d --build --wait --wait-timeout 180

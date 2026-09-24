@@ -32,7 +32,7 @@ Hospital default: Vimla Ramkrishna Bajaj Eye Hospital, Near Canara Bank, Bilasi 
 
 Use a Linux KVM with Docker Engine and the Compose plugin. Hostinger provides an [Ubuntu Docker template](https://www.hostinger.com/support/1583571-what-are-the-available-operating-systems-for-vps-at-hostinger/). Point your domain's DNS to the KVM, and allow TCP 80/443 through the firewall.
 
-Copy `.env.production.example` to `.env.production`. Set the domain, TLS email, a private 4-digit bootstrap PIN other than 1234, and six independent random secrets: `JWT_SECRET`, `AADHAAR_HASH_PEPPER`, `CRON_SECRET`, `MONGO_PASSWORD` (root, operator only), `MONGO_APP_PASSWORD` (the API) and `MONGO_BACKUP_PASSWORD` (backups). Generate each using `openssl rand -hex 32`; hex keeps the database URLs free of escaping. Keep this file private.
+Copy `.env.production.example` to `.env.production`. Set the domain, TLS email, a private 4-digit bootstrap PIN other than 1234, and seven independent random secrets: `JWT_SECRET`, `AADHAAR_HASH_PEPPER`, `CRON_SECRET`, `MONGO_PASSWORD` (root, operator only), `MONGO_APP_PASSWORD` (the API), `MONGO_BACKUP_PASSWORD` (backups) and `RESTIC_PASSWORD` (backup encryption; keep a copy off the VPS). Generate each using `openssl rand -hex 32`; hex keeps the database URLs free of escaping. Keep this file private.
 
 ```sh
 docker compose --env-file .env.production -f docker-compose.prod.yml config --quiet
@@ -47,15 +47,7 @@ The reminder container dispatches day-before reminders at 10:00 Asia/Kolkata and
 
 ## Backups and recovery
 
-Production creates a compressed MongoDB dump every hour in the `backups` volume and keeps 14 days by default. A failed dump does not remove previous successful backups. Copy archives off the KVM using your backup provider or rclone; a backup on the same disk is not disaster recovery.
-
-To export the archive directory:
-
-```sh
-docker compose --env-file .env.production -f docker-compose.prod.yml cp backup:/backups ./backup-export
-```
-
-Restore an archive into an isolated MongoDB instance first using `mongorestore --gzip --archive=<file>`; confirm registrations, prescriptions and schedules before restoring a live database. Do not run `down -v` on the production project.
+Every hour production takes a point-in-time MongoDB dump, encrypts it with `RESTIC_PASSWORD` and copies it off the VPS when `RESTIC_REMOTE_REPOSITORY` is set. The admin overview's System card turns amber or red when backups fall behind. Before each camp, run the restore drill and record `DRILL OK`. Setup, the drill and restoring to production: [backups runbook](docs/ops/backups.md). Do not run `down -v` on the production project.
 
 ## Verification
 
