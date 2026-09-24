@@ -13,7 +13,6 @@ TEST_MONGO_URL = os.environ.get(
 
 
 def run_db(body):
-    """Run body(database) against a fresh, indexed MongoDB database that is dropped afterwards."""
     import db
     from pymongo import AsyncMongoClient
 
@@ -31,6 +30,7 @@ def run_db(body):
             db._client = db._db = None
 
     return asyncio.run(main())
+
 
 def pytest_configure(config):
     backend_dir = str(Path(__file__).resolve().parents[1])

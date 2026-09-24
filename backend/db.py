@@ -1,6 +1,6 @@
 import os
 from typing import Any
-from pymongo import ASCENDING, AsyncMongoClient
+from pymongo import ASCENDING, AsyncMongoClient, ReturnDocument
 from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.asynchronous.database import AsyncDatabase
 
@@ -29,12 +29,13 @@ async def aggregate_list(collection: AsyncCollection, pipeline: list[dict[str, A
 
 async def next_seq(name: str) -> int:
     db = get_db()
-    doc: dict[str, Any] = await db.counters.find_one_and_update(
+    doc = await db.counters.find_one_and_update(
         {"_id": name},
         {"$inc": {"seq": 1}},
         upsert=True,
-        return_document=True,
-    ) or {}
+        return_document=ReturnDocument.AFTER,
+    )
+    assert doc is not None
     return int(doc["seq"])
 
 
