@@ -8,10 +8,15 @@
     "moduleResolution": "bundler",
     "target": "es2022",
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
   "include": [
     "src/lib/uuid.js",
+    "src/lib/phone.js",
+    "src/lib/logoCache.js",
+    "src/lib/printJob.js",
     "src/lib/operatorLines.js",
     "src/constants/roles.js",
     "src/components/aadhaar/liveScan/guideRoi.js",

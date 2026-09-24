@@ -1,254 +1,218 @@
 import asyncio
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import threading
 
 import pytest
 from bson import ObjectId
 from fastapi import HTTPException, Request
-from pymongo.errors import DuplicateKeyError
+from pymongo.asynchronous.collection import AsyncCollection
 
+import helpers
 import routes_registration
 import routes_staff
 import security
+from conftest import run_db
 from models import CampBody, CampDayBody, CampSetupDay, CreateStaffBody, RegisterBody
 from pydantic import ValidationError
-from test_adversarial_challenger import setup_mock_db
+from seed import ADMIN, patient_doc, run_camp, seed_camp, user_doc
 
 
 def test_registrations_without_request_ids_do_not_collide(monkeypatch):
-    async def run():
-        db = setup_mock_db(monkeypatch)
-        camp_id, day_id = ObjectId(), ObjectId()
-        await db.camps.insert_one({"_id": camp_id, "is_active": True})
-        await db.camp_days.insert_one({"_id": day_id, "camp_id": camp_id, "seat_limit": 10, "booked": 0})
-        insert = db.patients.insert_one
-
-        async def sparse_unique_insert(doc):
-            if "registration_request_id" in doc and any(
-                "registration_request_id" in row and row["registration_request_id"] == doc["registration_request_id"]
-                for row in db.patients.docs
-            ):
-                raise DuplicateKeyError("registration_request_id_1")
-            return await insert(doc)
-
-        monkeypatch.setattr(db.patients, "insert_one", sparse_unique_insert)
+    async def run(database):
+        camp_id, (day_id,) = await seed_camp(database)
         for name in ("First Patient", "Second Patient"):
-            body = RegisterBody(full_name=name, age=40, phone="9876543210", camp_day_id=str(day_id))
+            body = RegisterBody(full_name=name, age=40, phone="9876543210", camp_day_id=str(day_id), manual_reason="card at home")
             _, created = await routes_registration._create_registration(body, ObjectId(), False, None)
             assert created
-        assert len(db.patients.docs) == 2
-        assert db.camp_days.docs[0]["booked"] == 2
+        assert await database.patients.count_documents({"camp_id": camp_id}) == 2
+        assert (await database.camp_days.find_one({"_id": day_id}))["booked"] == 2
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_concurrent_person_creation_returns_the_winning_identity(monkeypatch):
-    async def run():
-        db = setup_mock_db(monkeypatch)
-        winner_id = ObjectId()
+    winner_id = ObjectId()
+    real_next_seq = routes_registration.next_seq
 
-        async def losing_insert(doc):
-            db.persons.docs.append({**doc, "_id": winner_id})
-            raise DuplicateKeyError("aadhaar_key_1")
+    async def run(database):
+        async def rival_inserts_first(name):
+            await database.persons.insert_one({
+                "_id": winner_id, "aadhaar_key": helpers.person_key("4321", "Patient", "1980-01-01", "M"),
+                "person_no": await real_next_seq(name),
+            })
+            return await real_next_seq(name)
 
-        monkeypatch.setattr(db.persons, "insert_one", losing_insert)
+        monkeypatch.setattr(routes_registration, "next_seq", rival_inserts_first)
         person, created = await routes_registration._resolve_person({
             "aadhaar_last4": "4321", "full_name": "Patient", "dob": "1980-01-01", "gender": "M",
         })
         assert person["_id"] == winner_id
         assert created is False
+        assert await database.persons.count_documents({}) == 1
 
-    asyncio.run(run())
+    run_db(run)
 
 
 def test_disabling_and_reenabling_staff_keeps_prior_sessions_revoked(monkeypatch):
-    async def run():
-        db = setup_mock_db(monkeypatch)
-        monkeypatch.setattr(routes_staff, "get_db", lambda: db)
-        monkeypatch.setattr(security, "get_db", lambda: db)
-        monkeypatch.setenv("JWT_SECRET", "production-audit-test-secret-at-least-32")
+    monkeypatch.setenv("JWT_SECRET", "production-audit-test-secret-at-least-32")
+
+    async def run(database):
         uid = ObjectId()
-        await db.users.insert_one({"_id": uid, "name": "Staff", "role": "volunteer", "disabled_at": None})
+        await database.users.insert_one(user_doc("Staff", _id=uid))
         token = security.create_access_token(str(uid))
-        actor = {"_id": ObjectId(), "role": "admin"}
         request = Request({"type": "http", "path": "/api/auth/me", "headers": [(b"authorization", f"Bearer {token}".encode())]})
         assert (await security.get_current_user(request))["_id"] == uid
-        await routes_staff.disable_staff(str(uid), actor)
-        await routes_staff.enable_staff(str(uid), actor)
+        await routes_staff.disable_staff(str(uid), ADMIN)
+        await routes_staff.enable_staff(str(uid), ADMIN)
         with pytest.raises(HTTPException) as exc:
             await security.get_current_user(request)
         assert exc.value.status_code == 401
 
-    asyncio.run(run())
+    run_db(run)
 
 
 def test_deleting_staff_hides_roster_and_allows_name_reuse_without_losing_history(monkeypatch):
-    async def run():
-        db = setup_mock_db(monkeypatch)
-        monkeypatch.setattr(routes_staff, "get_db", lambda: db)
-        monkeypatch.setattr(routes_staff, "hash_pin", lambda _: "hash")
-        admin = {"_id": ObjectId(), "role": "admin"}
-        staff_id = ObjectId()
-        await db.users.insert_one({
-            "_id": staff_id, "name": "Vol One", "name_normalized": "vol one",
-            "role": "volunteer", "phone": "9876500001", "disabled_at": None,
-        })
-        patient_id = ObjectId()
-        await db.patients.insert_one({"_id": patient_id, "created_by": str(staff_id)})
+    monkeypatch.setattr(routes_staff, "hash_pin", lambda _: "hash")
 
-        await routes_staff.delete_staff(str(staff_id), admin)
+    async def run(database):
+        staff_id, patient_id = ObjectId(), ObjectId()
+        await database.users.insert_one(user_doc("Vol One", _id=staff_id, phone="9876500001"))
+        await database.patients.insert_one(patient_doc(_id=patient_id, created_by=str(staff_id)))
 
-        original = await db.users.find_one({"_id": staff_id})
+        await routes_staff.delete_staff(str(staff_id), ADMIN)
+
+        original = await database.users.find_one({"_id": staff_id})
         assert original["name"] == "Vol One"
         assert original["deleted_at"] is not None
         assert original["disabled_at"] is not None
-        assert (await db.patients.find_one({"_id": patient_id}))["created_by"] == str(staff_id)
-        assert all(row["id"] != str(staff_id) for row in (await routes_staff.list_staff(admin))["staff"])
-        replacement = await routes_staff.create_staff(CreateStaffBody(name="Vol One", role="volunteer"), admin)
+        assert (await database.patients.find_one({"_id": patient_id}))["created_by"] == str(staff_id)
+        assert all(row["id"] != str(staff_id) for row in (await routes_staff.list_staff(ADMIN))["staff"])
+        replacement = await routes_staff.create_staff(CreateStaffBody(name="Vol One", role="volunteer"), ADMIN)
         assert replacement["staff"]["id"] != str(staff_id)
 
-    asyncio.run(run())
+    run_db(run)
 
 
-def test_team_lead_deletion_requires_reassigning_volunteers(monkeypatch):
-    async def run():
-        db = setup_mock_db(monkeypatch)
-        monkeypatch.setattr(routes_staff, "get_db", lambda: db)
-        admin = {"_id": ObjectId(), "role": "admin"}
-        old_lead_id, new_lead_id, volunteer_id = ObjectId(), ObjectId(), ObjectId()
-        await db.users.insert_one({"_id": old_lead_id, "name": "Old Lead", "role": "team_lead", "disabled_at": None})
-        await db.users.insert_one({"_id": new_lead_id, "name": "New Lead", "role": "team_lead", "disabled_at": None})
-        await db.users.insert_one({
-            "_id": volunteer_id, "name": "Volunteer", "role": "volunteer",
-            "team_lead_id": str(old_lead_id), "disabled_at": None,
-        })
-        patient_id = ObjectId()
-        await db.patients.insert_one({"_id": patient_id, "registrar_team_lead_id": str(old_lead_id)})
+def test_team_lead_deletion_requires_reassigning_volunteers():
+    async def run(database):
+        old_lead_id, new_lead_id, volunteer_id, patient_id = ObjectId(), ObjectId(), ObjectId(), ObjectId()
+        await database.users.insert_many([
+            user_doc("Old Lead", "team_lead", _id=old_lead_id),
+            user_doc("New Lead", "team_lead", _id=new_lead_id),
+            user_doc("Volunteer", _id=volunteer_id, team_lead_id=str(old_lead_id)),
+        ])
+        await database.patients.insert_one(patient_doc(_id=patient_id, registrar_team_lead_id=str(old_lead_id)))
 
         with pytest.raises(HTTPException) as blocked:
-            await routes_staff.delete_staff(str(old_lead_id), admin)
+            await routes_staff.delete_staff(str(old_lead_id), ADMIN)
         assert blocked.value.status_code == 409
 
         await routes_staff.reassign_volunteer(
-            str(volunteer_id), routes_staff.PatchStaffTeamLeadBody(team_lead_id=str(new_lead_id)), admin,
+            str(volunteer_id), routes_staff.PatchStaffTeamLeadBody(team_lead_id=str(new_lead_id)), ADMIN,
         )
-        await routes_staff.delete_staff(str(old_lead_id), admin)
+        await routes_staff.delete_staff(str(old_lead_id), ADMIN)
 
-        assert (await db.users.find_one({"_id": volunteer_id}))["team_lead_id"] == str(new_lead_id)
-        assert (await db.patients.find_one({"_id": patient_id}))["registrar_team_lead_id"] == str(old_lead_id)
+        assert (await database.users.find_one({"_id": volunteer_id}))["team_lead_id"] == str(new_lead_id)
+        assert (await database.patients.find_one({"_id": patient_id}))["registrar_team_lead_id"] == str(old_lead_id)
 
-    asyncio.run(run())
+    run_db(run)
 
 
-def test_delete_staff_rejects_invalid_id(monkeypatch):
-    async def run():
-        db = setup_mock_db(monkeypatch)
-        monkeypatch.setattr(routes_staff, "get_db", lambda: db)
+def test_delete_staff_rejects_invalid_id():
+    async def run(database):
         with pytest.raises(HTTPException) as rejected:
-            await routes_staff.delete_staff("not-an-id", {"_id": ObjectId(), "role": "admin"})
+            await routes_staff.delete_staff("not-an-id", ADMIN)
         assert rejected.value.status_code == 400
 
-    asyncio.run(run())
+    run_db(run)
+
+
+def _pair_users_calls(monkeypatch, method, pairs):
+    real = getattr(AsyncCollection, method)
+    barrier = asyncio.Barrier(2)
+
+    async def paired(self, *args, **kwargs):
+        result = await real(self, *args, **kwargs)
+        if self.name == "users" and pairs(*args):
+            await barrier.wait()
+        return result
+
+    monkeypatch.setattr(AsyncCollection, method, paired)
 
 
 def test_concurrent_admin_deletes_leave_an_enabled_admin(monkeypatch):
-    async def run():
-        db = setup_mock_db(monkeypatch)
-        monkeypatch.setattr(routes_staff, "get_db", lambda: db)
-        first_id, second_id = ObjectId(), ObjectId()
-        for uid, name in ((first_id, "First Admin"), (second_id, "Second Admin")):
-            await db.users.insert_one({
-                "_id": uid, "name": name, "name_normalized": name.lower(),
-                "role": "admin", "disabled_at": None, "deleted_at": None,
-            })
-        original_update = db.users.update_one
-        original_count = db.users.count_documents
-        both_deleted = asyncio.Event()
-        delete_count = 0
-        count_calls = 0
+    first_id, second_id = ObjectId(), ObjectId()
 
-        async def concurrent_count(query):
-            nonlocal count_calls
-            count_calls += 1
-            if count_calls <= 2:
-                return 2
-            return await original_count(query)
-
-        async def interleaved_update(query, update):
-            nonlocal delete_count
-            result = await original_update(query, update)
-            if update.get("$set", {}).get("deleted_at") is not None:
-                delete_count += 1
-                if delete_count == 2:
-                    both_deleted.set()
-                await both_deleted.wait()
-            return result
-
-        monkeypatch.setattr(db.users, "update_one", interleaved_update)
-        monkeypatch.setattr(db.users, "count_documents", concurrent_count)
-        await asyncio.gather(
-            routes_staff.delete_staff(str(second_id), {"_id": first_id, "role": "admin"}),
-            routes_staff.delete_staff(str(first_id), {"_id": second_id, "role": "admin"}),
-            return_exceptions=True,
+    async def run(database):
+        await database.users.insert_many([
+            user_doc("First Admin", "admin", _id=first_id, deleted_at=None),
+            user_doc("Second Admin", "admin", _id=second_id, deleted_at=None),
+        ])
+        _pair_users_calls(monkeypatch, "count_documents", lambda query: True)
+        _pair_users_calls(
+            monkeypatch, "update_one", lambda query, update: update.get("$set", {}).get("deleted_at") is not None,
         )
+        async with asyncio.timeout(10):
+            await asyncio.gather(
+                routes_staff.delete_staff(str(second_id), {"_id": first_id, "role": "admin"}),
+                routes_staff.delete_staff(str(first_id), {"_id": second_id, "role": "admin"}),
+                return_exceptions=True,
+            )
 
-        assert await db.users.count_documents({"role": "admin", "disabled_at": None, "deleted_at": None}) >= 1
+        enabled = await database.users.find({"role": "admin", "disabled_at": None, "deleted_at": None}).to_list(None)
+        assert len(enabled) >= 1
 
-    asyncio.run(run())
+    run_db(run)
 
 
 def test_concurrent_staff_creation_returns_a_name_conflict(monkeypatch):
-    async def run():
-        db = setup_mock_db(monkeypatch)
-        monkeypatch.setattr(routes_staff, "get_db", lambda: db)
-        monkeypatch.setattr(routes_staff, "hash_pin", lambda _: "hash")
+    both_checked = threading.Barrier(2, timeout=10)
 
-        async def losing_insert(doc):
-            raise DuplicateKeyError("name_normalized_1")
+    def hash_after_both_name_checks(_pin):
+        both_checked.wait()
+        return "hash"
 
-        monkeypatch.setattr(db.users, "insert_one", losing_insert)
-        with pytest.raises(HTTPException) as exc:
-            await routes_staff.create_staff(CreateStaffBody(name="Staff", role="volunteer"), {"_id": ObjectId(), "role": "admin"})
-        assert exc.value.status_code == 409
-        assert exc.value.detail == "Name already exists"
+    monkeypatch.setattr(routes_staff, "hash_pin", hash_after_both_name_checks)
 
-    asyncio.run(run())
+    async def run(database):
+        results = await asyncio.gather(*[
+            routes_staff.create_staff(CreateStaffBody(name="Staff", role="volunteer"), ADMIN) for _ in range(2)
+        ], return_exceptions=True)
+        conflicts = [r for r in results if isinstance(r, HTTPException)]
+        assert len(conflicts) == 1
+        assert conflicts[0].status_code == 409
+        assert conflicts[0].detail == "Name already exists"
+        assert await database.users.count_documents({"name_normalized": "staff"}) == 1
+
+    run_db(run)
 
 
 @pytest.mark.parametrize("insert_conflict", [False, True])
 def test_request_id_reuse_cannot_return_another_patients_record(monkeypatch, insert_conflict):
-    async def run():
-        db = setup_mock_db(monkeypatch)
-        camp_id, day_id = ObjectId(), ObjectId()
-        await db.camps.insert_one({"_id": camp_id, "is_active": True})
-        await db.camp_days.insert_one({"_id": day_id, "camp_id": camp_id})
-        existing = {
-            "_id": ObjectId(), "camp_id": camp_id, "camp_day_id": day_id, "full_name": "Another Patient",
-            "registration_request_id": "reused-request", "aadhaar_last4": "1234", "dob": "1970-01-01",
-            "phone": "9876543210", "address": "Private address", "patient_qr": "private-token",
-        }
-        await db.patients.insert_one(existing)
+    async def run(database):
+        camp_id, (day_id,) = await seed_camp(database)
+        await database.patients.insert_one(patient_doc(
+            camp_id=camp_id, camp_day_id=day_id, full_name="Another Patient",
+            registration_request_id="3a4b5c6d-7e8f-4a0b-9c1d-2e3f4a5b6c7d", aadhaar_last4="1234", dob="1970-01-01",
+            phone="9876543210", address="Private address", patient_qr="private-token",
+        ))
         body = RegisterBody(
             full_name="New Patient", camp_day_id=str(day_id), phone="9876543210",
-            registration_request_id="reused-request", aadhaar_scanned=True, aadhaar_last4="5678", dob="1980-01-01",
+            registration_request_id="3a4b5c6d-7e8f-4a0b-9c1d-2e3f4a5b6c7d", aadhaar_scanned=True, aadhaar_last4="5678", dob="1980-01-01",
         )
-
-        async def collision(doc):
-            raise DuplicateKeyError("registration_request_id_1")
 
         with pytest.raises(HTTPException) as exc:
             if insert_conflict:
-                monkeypatch.setattr(db.patients, "insert_one", collision)
-                await routes_registration._insert_patient_document(db, {}, body, None, camp_id)
+                await routes_registration._insert_patient_document(
+                    database, patient_doc(registration_request_id="3a4b5c6d-7e8f-4a0b-9c1d-2e3f4a5b6c7d"), body, None, camp_id,
+                )
             else:
                 await routes_registration._create_registration(body, None, True, None)
         assert exc.value.status_code == 409
         assert "private" not in str(exc.value.detail).lower()
         assert "registration" not in exc.value.detail
+        assert await database.patients.count_documents({}) == 1
 
-    asyncio.run(run())
+    run_camp(monkeypatch, run)
 
 
 def test_public_duplicate_errors_exclude_patient_records(monkeypatch):

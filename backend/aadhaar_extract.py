@@ -12,7 +12,7 @@ from fastapi import HTTPException, Request
 
 MAX_UPLOAD_BYTES = 12 * 1024 * 1024
 EXTRACT_TIMEOUT_SECONDS = 30
-_active = False
+_slots = asyncio.Semaphore(2)
 _requests: dict[str, list[float]] = {}
 
 
@@ -53,7 +53,6 @@ async def wait_for_disconnect(request: Request):
 
 
 async def extract_document(request: Request) -> dict:
-    global _active
     now = time.monotonic()
     for ip in [key for key, attempts in _requests.items() if attempts[-1] < now - 600]:
         del _requests[ip]
@@ -63,10 +62,7 @@ async def extract_document(request: Request) -> dict:
     attempts = [stamp for stamp in _requests.get(ip, []) if stamp > now - 600]
     if len(attempts) >= 12:
         fail(429, 'RATE_LIMITED', 'Too many document attempts. Enter details manually or try again later.')
-    if _active:
-        fail(429, 'QR_BUSY', 'Another document is being read. Please retry shortly or enter details manually.')
     _requests[ip] = attempts + [now]
-    _active = True
     try:
         async with asyncio.timeout(EXTRACT_TIMEOUT_SECONDS):
             document = bytearray()
@@ -85,6 +81,11 @@ async def extract_document(request: Request) -> dict:
                 fail(422, 'INVALID_PASSWORD', 'The PDF password is too long.')
             try:
                 password = unquote(encoded_password, errors='strict')
+            except UnicodeError:
+                fail(422, 'INVALID_PASSWORD', 'Enter the PDF password again.')
+            if _slots.locked():
+                fail(429, 'QR_BUSY', 'Other documents are being read. Please retry shortly or enter details manually.')
+            async with _slots:
                 reading = asyncio.create_task(run_worker(bytes(document), password))
                 disconnected = asyncio.create_task(wait_for_disconnect(request))
                 try:
@@ -92,15 +93,11 @@ async def extract_document(request: Request) -> dict:
                     if reading in done:
                         return await reading
                     fail(499, 'REQUEST_CANCELLED', 'Document reading was cancelled.')
+                except (OSError, ValueError):
+                    fail(503, 'QR_UNAVAILABLE', 'QR reader is unavailable. Enter details manually or ask the desk.')
                 finally:
                     reading.cancel()
                     disconnected.cancel()
                     await asyncio.gather(reading, disconnected, return_exceptions=True)
-            except UnicodeError:
-                fail(422, 'INVALID_PASSWORD', 'Enter the PDF password again.')
-            except (OSError, ValueError):
-                fail(503, 'QR_UNAVAILABLE', 'QR reader is unavailable. Enter details manually or ask the desk.')
     except TimeoutError:
         fail(504, 'QR_TIMEOUT', 'Reading the QR took too long. Try a cropped photo or enter details manually.')
-    finally:
-        _active = False

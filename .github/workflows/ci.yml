@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    - cron: "30 0 * * *"
   workflow_dispatch:
 
 permissions:
@@ -49,7 +51,7 @@ jobs:
     env:
       SNP_LIVE_API: http://127.0.0.1:3000
       SNP_TEST_ADMIN_NAME: admin
-      SNP_TEST_ADMIN_PIN: "8642"
+      SNP_TEST_ADMIN_PIN: "864200"
       SNP_REQUIRE_LIVE_TESTS: "1"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -73,10 +75,14 @@ jobs:
           DB_NAME: snp_ci
           JWT_SECRET: ci-jwt-secret-at-least-thirty-two-characters
           AADHAAR_HASH_PEPPER: ci-aadhaar-pepper
-          ADMIN_BOOTSTRAP_PIN: "8642"
+          ADMIN_BOOTSTRAP_PIN: "864200"
           CRON_SECRET: ci-reminder-secret
+          RESTIC_PASSWORD: ci-restic-password
         run: |
           docker compose -f docker-compose.prod.yml config --quiet
+          shellcheck -e SC2016 ops/backup/*.sh ops/mongo/entrypoint.sh
+          docker build -q -t snp-backup ops/backup
+          docker run --rm snp-backup restic version
           docker run --rm -e APP_DOMAIN -e TLS_EMAIL -v "$PWD/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
       - name: Start isolated production images
         run: docker compose --env-file .env.example -f docker-compose.yml -f docker-compose.ci.yml -p snp-ci up -d --build --wait --wait-timeout 180

@@ -25,11 +25,3 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .animate-fade-up { animation: none; }
 }
-
-@media print {
-  body { background: #fff; }
-  .no-print { display: none !important; }
-  .print-a4 { margin: 0 auto; box-shadow: none !important; }
-  .print-a6 { width: 100%; max-width: 95mm; margin: 0 auto; box-shadow: none !important; }
-  @page { margin: 0; }
-}

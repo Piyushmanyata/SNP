@@ -50,6 +50,10 @@ const ADMIN_STAFF = [
     must_change_pin: false,
   },
   { id: "v1", name: "Vol One", role: "volunteer", team_lead_id: "tl-1", disabled_at: null },
+  {
+    id: "v2", name: "Vol Locked", role: "volunteer", team_lead_id: "tl-1", disabled_at: null,
+    locked_until: "2026-09-24T05:15:00+00:00", lockouts_24h: 3, lockout_sources_24h: 2,
+  },
 ];
 
 const TEAM_LEADS = [{ id: "tl-1", name: "Lead One" }];
@@ -200,6 +204,7 @@ describe("Team page", () => {
     });
     expect(container.textContent).toContain("Name already exists");
 
+    const confirm = jest.spyOn(window, "confirm").mockReturnValue(true);
     await act(async () => {
       container.querySelector('[data-testid="reset-pin-v1"]').click();
     });
@@ -209,6 +214,73 @@ describe("Team page", () => {
       container.querySelector('[data-testid="toggle-status-v1"]').click();
     });
     expect(api.patch).toHaveBeenCalledWith("/staff/v1/disable");
+    confirm.mockRestore();
+  });
+
+  test("a new account's one-time PIN is shown once with a Copy button", async () => {
+    const writeText = jest.fn().mockResolvedValue();
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    api.post.mockResolvedValue({ data: { staff: { id: "n1", name: "New Person" }, temporary_pin: "4071" } });
+    await renderTeam();
+    expect(container.textContent).not.toContain("1234");
+    act(() => {
+      setInputValue(container.querySelector('[data-testid="staff-name-input"]'), "New Person");
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="add-staff-form"]').dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    const dialog = document.querySelector('[data-testid="one-time-pin"]');
+    act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+    expect(document.querySelector('[data-testid="modal-close-button"]')).toBeNull();
+    expect(document.querySelector('[data-testid="one-time-pin"]')).not.toBeNull();
+    expect(dialog.textContent).toContain("New Person");
+    expect(dialog.textContent).toContain("4071");
+    expect(dialog.textContent).toContain("shown once");
+    await act(async () => document.querySelector('[data-testid="one-time-pin-copy"]').click());
+    expect(writeText).toHaveBeenCalledWith("4071");
+    expect(document.querySelector('[data-testid="one-time-pin-copy"]').textContent).toBe("Copied");
+    await act(async () => document.querySelector('[data-testid="one-time-pin-done"]').click());
+    expect(document.querySelector('[data-testid="one-time-pin"]')).toBeNull();
+    expect(document.body.textContent).not.toContain("4071");
+  });
+
+  test("reset and disable name the person first; cancel sends nothing", async () => {
+    const confirm = jest.spyOn(window, "confirm").mockReturnValue(false);
+    await renderTeam();
+    await act(async () => container.querySelector('[data-testid="reset-pin-v1"]').click());
+    await act(async () => container.querySelector('[data-testid="toggle-status-v1"]').click());
+    expect(confirm.mock.calls.map(([text]) => text)).toEqual([
+      expect.stringContaining("Vol One"),
+      expect.stringContaining("Vol One"),
+    ]);
+    expect(api.post).not.toHaveBeenCalled();
+    expect(api.patch).not.toHaveBeenCalled();
+    expect(container.querySelector('[data-testid="reset-pin-v1"]').textContent).not.toContain("1234");
+
+    confirm.mockReturnValue(true);
+    api.post.mockResolvedValue({ data: { ok: true, temporary_pin: "8350" } });
+    const loads = api.get.mock.calls.length;
+    await act(async () => container.querySelector('[data-testid="reset-pin-v1"]').click());
+    expect(api.post).toHaveBeenCalledWith("/staff/v1/reset-pin");
+    expect(document.querySelector('[data-testid="one-time-pin"]').textContent).toContain("8350");
+    expect(api.get.mock.calls.length).toBeGreaterThan(loads);
+    confirm.mockRestore();
+  });
+
+  test("a locked account shows its lockouts and can be unlocked after confirming", async () => {
+    const confirm = jest.spyOn(window, "confirm").mockReturnValue(true);
+    api.post.mockResolvedValue({ data: { ok: true } });
+    await renderTeam();
+    const row = container.querySelector('[data-testid="staff-row-v2"]');
+    expect(row.querySelector('[data-testid="locked-v2"]').textContent).toContain("Locked until 24-09-2026 10:45");
+    expect(row.querySelector('[data-testid="lockouts-v2"]').textContent).toContain("Locked out 3 times in 24 h, from 2 networks");
+    expect(container.querySelector('[data-testid="unlock-v1"]')).toBeNull();
+    const loads = api.get.mock.calls.length;
+    await act(async () => row.querySelector('[data-testid="unlock-v2"]').click());
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining("Vol Locked"));
+    expect(api.post).toHaveBeenCalledWith("/staff/v2/unlock");
+    expect(api.get.mock.calls.length).toBeGreaterThan(loads);
+    confirm.mockRestore();
   });
 
   test("team lead sees only volunteer create and no role or operator-line controls", async () => {

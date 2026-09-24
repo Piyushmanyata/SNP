@@ -1,5 +1,7 @@
 # 0049 Fixed spectacles collection hours
 
+Amended by ADR 0066 (S8): the hours are constants and are no longer stored on days or Tokens. "Days with older hours" no longer exist.
+
 ## Context
 
 SmartPing rejected both spectacles SMS templates because variable content could be static. The start and end times came from the admin schedule, were copied onto patient slips, and appeared in the SMS. Fixing only the message text would give patients conflicting pickup hours.

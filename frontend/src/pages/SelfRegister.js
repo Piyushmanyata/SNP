@@ -1,10 +1,12 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import api, { formatApiError } from "../lib/api";
-import { Button, Card, Input, Select, Field, Alert } from "../components/ui";
+import { Button, Card, Select, Field, Alert } from "../components/ui";
 import AadhaarScanner from "../components/AadhaarScanner";
 import { Stethoscope, CheckCircle2, Lock } from "lucide-react";
 import { v4 } from "../lib/uuid";
+import { normalizePhone } from "../lib/phone";
+import { PhoneInput } from "../components/PhoneInput";
 import { displayDate } from "../lib/dates";
 
 export default function SelfRegister() {
@@ -20,19 +22,27 @@ export default function SelfRegister() {
   const [loadingCamp, setLoadingCamp] = useState(true);
   const [reqId, setReqId] = useState("");
   const [readFailed, setReadFailed] = useState(false);
+  const [retry, setRetry] = useState(false);
+  const canonicalPhone = normalizePhone(phone);
 
   const onScanned = useCallback((card, raw) => {
     setScanned({ ...card, qr_payload: raw || card.qr_payload });
     setReqId(v4());
+    setRetry(false);
   }, []);
 
   const onCaptureStart = useCallback(() => {
     setScanned(null);
     setReqId("");
     setReadFailed(false);
+    setRetry(false);
   }, []);
 
-  const onFailure = useCallback(() => setReadFailed(true), []);
+  const onFailure = useCallback((outcome) => {
+    const unreadable = outcome === "garbage" || outcome === "not-aadhaar";
+    setReadFailed(unreadable);
+    setRetry(!unreadable);
+  }, []);
 
   const loadCamp = useCallback(() => {
     setLoadingCamp(true);
@@ -52,12 +62,12 @@ export default function SelfRegister() {
   useEffect(() => { loadCamp(); }, [loadCamp]);
 
   const submit = useCallback(async () => {
-    if (!scanned || !dayId || !reqId || !phone) return;
+    if (!scanned || !dayId || !reqId || !canonicalPhone) return;
     setBusy(true); setError("");
     try {
       const { data } = await api.post("/self-register", {
         qr_payload: scanned.qr_payload,
-        phone,
+        phone: canonicalPhone,
         camp_day_id: dayId,
         is_self_registered: true,
         registration_request_id: reqId,
@@ -69,11 +79,11 @@ export default function SelfRegister() {
     } finally {
       setBusy(false);
     }
-  }, [scanned, phone, dayId, reqId]);
+  }, [scanned, canonicalPhone, dayId, reqId]);
 
   const missing = [
     !scanned && "Aadhaar card scan",
-    !/^\d{10}$/.test(phone) && "10-digit mobile",
+    !canonicalPhone && "10-digit mobile",
     !dayId && "camp day",
   ].filter(Boolean);
 
@@ -124,9 +134,15 @@ export default function SelfRegister() {
                 </p>
               )}
 
+              {retry && !scanned && (
+                <p role="status" className="text-sm font-semibold text-slate-900" data-testid="self-scan-retry">
+                  That did not work. Check the connection or camera and try again. / फिर कोशिश करें।
+                </p>
+              )}
+
               {scanned && (
                 <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 space-y-1.5" data-testid="self-scanned-preview">
-                  <div className="flex items-center gap-1.5 text-emerald-600 text-xs font-semibold mb-1">
+                  <div className="flex items-center gap-1.5 text-emerald-700 text-xs font-semibold mb-1">
                     <Lock className="w-3.5 h-3.5" /> Details from card QR
                   </div>
                   <Row k="Name" v={scanned.full_name} />
@@ -138,7 +154,7 @@ export default function SelfRegister() {
               )}
 
               <Field label="Mobile" required hint="Required 10-digit household contact">
-                <Input type="tel" value={phone} onChange={(e) => setPhone(normalisePhone(e.target.value))} placeholder="10-digit mobile" inputMode="numeric" autoComplete="tel-national" data-testid="self-phone-input" />
+                <PhoneInput value={phone} onChange={setPhone} placeholder="10-digit mobile" data-testid="self-phone-input" />
               </Field>
 
               <Field label="Camp day">
@@ -168,13 +184,13 @@ export default function SelfRegister() {
                 <QRCodeSVG value={`SNP:${receipt.patient_qr}`} size={160} level="Q" marginSize={4} />
               </div>
             </div>
-            <p className="text-5xl font-display font-extrabold text-emerald-600" data-testid="self-receipt-regno">#{receipt.reg_no}</p>
+            <p className="text-5xl font-display font-extrabold text-emerald-700" data-testid="self-receipt-regno">#{receipt.reg_no}</p>
             <div className="mt-4 text-sm text-slate-600 space-y-1">
               <p><span className="text-slate-600">Camp:</span> {receipt.camp_name}</p>
               <p><span className="text-slate-600">Venue:</span> {receipt.venue}</p>
               <p><span className="text-slate-600">Day:</span> {displayDate(receipt.day_date)}</p>
             </div>
-            <Button variant="outline" className="mt-6 w-full" onClick={() => { setReceipt(null); setScanned(null); setReqId(""); setReadFailed(false); }} data-testid="self-register-another">
+            <Button variant="outline" className="mt-6 w-full" onClick={() => { setReceipt(null); setScanned(null); setReqId(""); setReadFailed(false); setRetry(false); }} data-testid="self-register-another">
               Register another patient
             </Button>
           </Card>
@@ -191,9 +207,4 @@ function Row({ k, v }) {
       <span className="min-w-0 break-words text-right font-medium text-slate-800">{v || "-"}</span>
     </div>
   );
-}
-
-function normalisePhone(value) {
-  const digits = value.replace(/\D/g, "");
-  return (digits.match(/^(?:91|0)(\d{10})$/)?.[1] || digits).slice(0, 10);
 }

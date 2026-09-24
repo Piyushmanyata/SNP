@@ -15,8 +15,8 @@ def benchmark() -> None:
     with requests.Session() as auth:
         login = auth.post(f"{origin}/api/auth/login", json=credentials, timeout=30)
         login.raise_for_status()
-        token = login.json()["access_token"]
-        summary = auth.get(f"{origin}/api/kpis", headers={"Authorization": f"Bearer {token}"}, timeout=30)
+        token = login.cookies["access_token"]
+        summary = auth.get(f"{origin}/api/kpis", timeout=30)
         summary.raise_for_status()
         registered = summary.json().get("registered", 0)
     results = []

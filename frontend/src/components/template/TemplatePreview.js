@@ -1,6 +1,6 @@
 import React from "react";
 import { Card } from "../ui";
-import { PrescriptionSheet } from "../../pages/PrintPrescription";
+import { PrescriptionSheet } from "../print/PrescriptionSheet";
 import { Eye } from "lucide-react";
 
 export function TemplatePreview({ sampleRx, logos }) {

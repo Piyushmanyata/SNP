@@ -4,7 +4,11 @@ import { v4 } from "../../lib/uuid";
 import { Alert, Button, Badge } from "../ui";
 import { Pill, Glasses, Scissors, Printer } from "lucide-react";
 import { FixedPowerPicker, formatPower } from "./FixedPowerPicker";
-import { displayDateRange, displayTimeRange } from "../../lib/dates";
+import { SPECS_HOURS, displayDateRange } from "../../lib/dates";
+import { printDocument } from "../../lib/printJob";
+import { TokenSheet } from "../print/TokenSheet";
+
+const DECLINE = { status: "declined", label: "Patient declined" };
 
 export const FULFILMENT_LINES = {
   medicine: {
@@ -29,6 +33,8 @@ export const FULFILMENT_LINES = {
     dayField: "specs_collection_day_id",
     dayLabel: "Specs collection day",
     actions: [{ status: "deferred", label: "Defer and print Token" }],
+    withdraw: { status: "cancelled", label: "Cancel spectacles order" },
+    statusLabels: { deferred: "Spectacles ordered", cancelled: "Order cancelled" },
   },
   ot: {
     label: "Hospital",
@@ -36,15 +42,13 @@ export const FULFILMENT_LINES = {
     itemType: "ot",
     dayField: "ot_schedule_day_id",
     dayLabel: "OT Schedule Day",
-    actions: [
-      { status: "deferred", label: "Schedule and print token" },
-      { status: "declined", label: "Patient declined" },
-    ],
+    actions: [{ status: "deferred", label: "Schedule and print token" }, DECLINE],
+    withdraw: DECLINE,
     statusLabels: { deferred: "IOL surgery scheduled", declined: "Surgery declined" },
   },
 };
 
-const STATUS_TONES = { deferred: "amber", declined: "slate" };
+const STATUS_TONES = { deferred: "amber", declined: "slate", cancelled: "slate" };
 
 function statusLabel(line, status) {
   return line.statusLabels?.[status] || status.replace(/_/g, " ");
@@ -62,27 +66,21 @@ export function hasFixedPower(transcription) {
   );
 }
 
-export function earliestFreeDay(days, currentId) {
+function earliestFreeDay(days, currentId) {
   if (currentId) return currentId;
   const free = days.filter((d) => d.seats_free > 0);
   return free.length ? free[0].id : "";
 }
 
-export function selectableSpecsDays(days) {
-  return (days || []).filter((d) => d.start_time && d.end_time && !d.window_required);
-}
-
-export function earliestSpecsDay(days, currentId) {
+function earliestSpecsDay(days, currentId) {
   if (currentId) return currentId;
-  const open = selectableSpecsDays(days);
-  return open.length ? open[0].id : "";
+  return days?.length ? days[0].id : "";
 }
 
 function DayPicker({ line, days, value, onChange }) {
   const specs = line.itemType === "specs_made";
-  const visible = specs ? selectableSpecsDays(days) : days;
   const noneFree = specs
-    ? visible.length === 0
+    ? days.length === 0
     : days.every((d) => d.seats_free <= 0);
   return (
     <>
@@ -94,7 +92,7 @@ function DayPicker({ line, days, value, onChange }) {
         data-testid={`${line.dayField}-select`}
       >
         <option value="">Select {line.dayLabel}…</option>
-        {visible.map((d) => (
+        {days.map((d) => (
           <option
             key={d.id}
             value={d.id}
@@ -102,7 +100,7 @@ function DayPicker({ line, days, value, onChange }) {
           >
             {displayDateRange(d.day_date, d.end_date)} · {d.venue}
             {specs
-              ? ` · ${displayTimeRange(d.start_time, d.end_time)}`
+              ? ` · ${SPECS_HOURS}`
               : d.seats_free <= 0 ? " (full)" : ` (${d.seats_free} free)`}
           </option>
         ))}
@@ -185,6 +183,14 @@ function PowerSubstitution({ transcription, powers, issued, onChange, disabled }
   );
 }
 
+async function printToken(slipId) {
+  const { data } = await api.get(`/clinical/slip/${slipId}`);
+  await printDocument(
+    <TokenSheet slip={data.slip} registration={data.registration} campName={data.camp_name} />,
+    { pageSize: "A6" },
+  );
+}
+
 export function FulfilmentStation({
   line: lineKey,
   data,
@@ -192,7 +198,6 @@ export function FulfilmentStation({
   specsDays = [],
   powers = [],
   onDone,
-  navigate,
   setBanner,
   onBusyChange,
 }) {
@@ -271,17 +276,18 @@ export function FulfilmentStation({
       issueOpRef.current = null;
       setBanner(`${line.label}: ${statusLabel(line, res.fulfilment?.status || nextStatus)}`);
       if (res.slip) {
-        navigate(`/print/slip/${res.slip.id}`);
-      } else {
-        onDone();
+        await printToken(res.slip.id).catch((err) => {
+          setError(`Saved. The Token did not print: ${formatApiError(err)} Use Reprint Token.`);
+        });
       }
+      onDone();
     } catch (err) {
       setError(formatApiError(err));
     } finally {
       setBusy(false);
       onBusyChange?.(false);
     }
-  }, [data?.transcription?.id, data?.committed_revision?.id, data?.clinical_generation, data?.registration?.clinical_generation, line, dayId, paperReviewed, outcomes, issued, navigate, onDone, setBanner, onBusyChange]);
+  }, [data?.transcription?.id, data?.committed_revision?.id, data?.clinical_generation, data?.registration?.clinical_generation, line, dayId, paperReviewed, outcomes, issued, onDone, setBanner, onBusyChange]);
 
   const header = (
     <div className="flex items-center gap-2 mb-3">
@@ -300,7 +306,7 @@ export function FulfilmentStation({
       <span>I compared the paper with this saved prescription</span>
     </label>
   );
-  const decline = line.actions.find((a) => a.status === "declined");
+  const withdraw = line.withdraw;
 
   if (line.itemType === "ot" && data?.committed_revision?.ot_outcome === "referral") {
     return (
@@ -320,29 +326,34 @@ export function FulfilmentStation({
         <Badge tone={STATUS_TONES[existing.status] || "emerald"} data-testid={`station-${lineKey}-recorded`}>
           {statusLabel(line, existing.status)}
         </Badge>
+        {slip?.replaces && (
+          <p className="text-sm text-amber-800 mt-2" data-testid={`station-${lineKey}-token-replaced`}>
+            The date or venue changed. Print this new Token and take back the old one.
+          </p>
+        )}
         {slip && (
           <Button
             size="sm"
             variant="outline"
             className="w-full mt-2"
-            onClick={() => navigate(`/print/slip/${slip.id}`)}
+            onClick={() => printToken(slip.id).catch((err) => setError(formatApiError(err)))}
             data-testid={`station-${lineKey}-print-token`}
           >
             <Printer className="w-4 h-4" /> Reprint Token
           </Button>
         )}
-        {decline && existing.status === "deferred" && (
+        {withdraw && existing.status === "deferred" && (
           <div className="mt-3">
             {paperReview}
             <Button
               size="sm"
               variant="outline"
               className="w-full"
-              onClick={() => save(decline.status)}
+              onClick={() => save(withdraw.status)}
               disabled={!paperReviewed || busy}
-              data-testid={`station-${lineKey}-${decline.status}`}
+              data-testid={`station-${lineKey}-${withdraw.status}`}
             >
-              {decline.label}
+              {withdraw.label}
             </Button>
             <Alert className="mt-2">{error}</Alert>
           </div>

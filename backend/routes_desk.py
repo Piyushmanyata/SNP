@@ -1,21 +1,21 @@
-from typing import Any, Dict, List, Optional
+import asyncio
+from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 from pymongo.asynchronous.database import AsyncDatabase
 from db import get_db
 from models import IdentityCheckBody, QrLookupBody, ScanBody, ScanConfirmBody, RegisterBody
-from helpers import now_utc, age_from_dob, normalize_name, parse_patient_identifier, person_key
+from helpers import OVERWRITTEN_FIELDS, now_utc, age_from_dob, material_diff, normalize_name, parse_patient_identifier, person_key
 from serializers import ser_patient
 from security import require_admin, require_staff
 from routes_camps import effective_printing
 from aadhaar import decode_aadhaar
 from routes_registration import (
-    _dup_409, _duplicate_hits, _is_manual, _is_scanned_row, _resolve_person,
+    _dup_409, _duplicate_hits, _is_manual, _is_scanned_row, _overwrite_refused, _resolve_person,
 )
 router = APIRouter(prefix="/api/desk", tags=["desk"])
 
-OVERWRITTEN_FIELDS = ("full_name", "age", "gender", "dob", "aadhaar_last4", "address")
 MAX_REG_NO_DIGITS = 12
 
 
@@ -55,8 +55,8 @@ def _card_values(data: dict) -> Dict[str, Any]:
     }
 
 
-def _decode_card(payload: str) -> Dict[str, Any]:
-    result = decode_aadhaar(payload or "")
+async def _decode_card(payload: str) -> Dict[str, Any]:
+    result = await asyncio.to_thread(decode_aadhaar, payload)
     if result["outcome"] != "card":
         raise HTTPException(status_code=400, detail={
             "code": "NOT_A_CARD",
@@ -152,34 +152,6 @@ async def _stamp_arrival(
     return arrived
 
 
-def _material_diff(card: dict, stored: dict) -> List[Dict[str, Any]]:
-    diff: List[Dict[str, Any]] = []
-    for field in OVERWRITTEN_FIELDS:
-        cv, sv = card.get(field), stored.get(field)
-        if sv is None or sv == "":
-            continue
-        if field == "address":
-            continue
-        trivial = False
-        if field == "full_name":
-            cn, sn = normalize_name(cv or ""), normalize_name(sv or "")
-            trivial = cn == sn or sorted(cn.split()) == sorted(sn.split())
-        elif field == "age":
-            try:
-                trivial = cv is not None and abs(int(cv) - int(sv)) <= 1
-            except (TypeError, ValueError):
-                trivial = False
-        elif field == "gender":
-            c0 = str(cv)[:1].upper() if cv else ""
-            s0 = str(sv)[:1].upper() if sv else ""
-            trivial = bool(c0) and c0 == s0
-        elif field in ("dob", "aadhaar_last4"):
-            trivial = str(cv or "").strip() == str(sv or "").strip()
-        if not trivial:
-            diff.append({"field": field, "card": cv, "stored": sv})
-    return diff
-
-
 async def _apply_overwrite(db: AsyncDatabase, patient: dict, card: dict) -> dict:
     person = None
     if card["aadhaar_last4"] and card["dob"]:
@@ -191,7 +163,8 @@ async def _apply_overwrite(db: AsyncDatabase, patient: dict, card: dict) -> dict
         })
     try:
         updated = await db.patients.find_one_and_update(
-            {"_id": patient["_id"], "aadhaar_scanned": {"$ne": True}, "person_id": None}, {"$set": {
+            {"_id": patient["_id"], "aadhaar_scanned": {"$ne": True}, "person_id": None,
+             "printed_at": None, "queue_status": {"$ne": "seen"}}, {"$set": {
             **{field: card[field] for field in OVERWRITTEN_FIELDS},
             "full_name_normalized": normalize_name(card["full_name"] or ""),
             "aadhaar_scanned": True,
@@ -209,10 +182,7 @@ async def _apply_overwrite(db: AsyncDatabase, patient: dict, card: dict) -> dict
                 raise _dup_409(existing)
         raise
     if not updated:
-        raise HTTPException(status_code=409, detail={
-            "code": "NOT_A_MANUAL_ENTRY",
-            "message": "This registration already has Aadhaar on file. Scan again.",
-        })
+        raise await _overwrite_refused(db, patient["_id"])
     return updated
 
 
@@ -225,26 +195,39 @@ async def scan(
     db = get_db()
     camp = await _active_camp(db)
     state = await _require_door_open(db, camp)
-    card = _decode_card(body.payload)
+    card = await _decode_card(body.payload)
     person = await _known_person(db, card)
     hits = await _duplicate_hits(db, camp["_id"], _card_as_register_body(card), person)
 
     scanned_hits = [h for h in hits if _is_scanned_row(h)]
+    own = next((h for h in scanned_hits if person and h.get("person_id") == person["_id"]), None)
+    if own:
+        arrived = await _stamp_arrival(db, own, str(actor["_id"]), camp, state)
+        return {
+            "outcome": "arrived",
+            "registration": ser_patient(arrived),
+            "prescription": await _printable_prescription(db, arrived, camp, state),
+        }
     if scanned_hits:
-        arrived = await _stamp_arrival(db, scanned_hits[0], str(actor["_id"]), camp, state)
-        return {"outcome": "arrived", "registration": ser_patient(arrived)}
+        return {
+            "outcome": "mismatch_review",
+            "registration": ser_patient(scanned_hits[0]),
+            "card": card,
+            "diff": material_diff(card, scanned_hits[0]),
+        }
 
     manual_hits = [h for h in hits if _is_manual(h)]
     if len(manual_hits) > 1:
         return {"outcome": "ambiguous", "registrations": [ser_patient(h) for h in manual_hits]}
     if len(manual_hits) == 1:
-        diff = _material_diff(card, manual_hits[0])
+        diff = material_diff(card, manual_hits[0])
         if not diff:
             patient = await _apply_overwrite(db, manual_hits[0], card)
             arrived = await _stamp_arrival(db, patient, str(actor["_id"]), camp, state)
             return {
                 "outcome": "arrived",
                 "registration": ser_patient(arrived),
+                "prescription": await _printable_prescription(db, arrived, camp, state),
                 "overwritten": True,
             }
         return {
@@ -261,11 +244,11 @@ async def scan_confirm(
     body: ScanConfirmBody,
     actor: dict = Depends(require_staff),
 ) -> Dict[str, Any]:
-    """Apply the Aadhaar overwrite to a Manual entry and stamp Arrival in one operation."""
+    """Stamp Arrival on the registration the volunteer confirmed, applying the Aadhaar overwrite to a Manual entry."""
     db = get_db()
     camp = await _active_camp(db)
     state = await _require_door_open(db, camp)
-    card = _decode_card(body.payload)
+    card = await _decode_card(body.payload)
     patient = await db.patients.find_one({"_id": ObjectId(body.patient_id)})
     if not patient:
         raise HTTPException(status_code=404, detail="Registration not found")
@@ -280,14 +263,14 @@ async def scan_confirm(
             "code": "STALE_CANDIDATE",
             "message": "That registration does not match this card.",
         })
-    if not _is_manual(patient):
-        raise HTTPException(status_code=409, detail={
-            "code": "NOT_A_MANUAL_ENTRY",
-            "message": "This registration already has Aadhaar on file.",
-        })
-    patient = await _apply_overwrite(db, patient, card)
+    if _is_manual(patient):
+        patient = await _apply_overwrite(db, patient, card)
     arrived = await _stamp_arrival(db, patient, str(actor["_id"]), camp, state)
-    return {"outcome": "arrived", "registration": ser_patient(arrived)}
+    return {
+        "outcome": "arrived",
+        "registration": ser_patient(arrived),
+        "prescription": await _printable_prescription(db, arrived, camp, state),
+    }
 
 
 @router.post("/arrive/{patient_id}")
@@ -301,37 +284,50 @@ async def arrive(
     if not p:
         raise HTTPException(status_code=404, detail="Registration not found")
     _require_in_camp(p, camp)
-    arrived = await _stamp_arrival(db, p, str(actor["_id"]), camp)
-    return {"registration": ser_patient(arrived)}
-
-
-async def _prescription_payload(db, p: dict, actor: dict, stamp: bool) -> Dict[str, Any]:
-    if p.get("queue_status") == "seen":
+    if not (p.get("aadhaar_scanned") or p.get("identity_alt_check") or p.get("arrived_at")):
         raise HTTPException(status_code=409, detail={
+            "code": "IDENTITY_CHECK_REQUIRED",
+            "message": "Scan this patient's Aadhaar card, or ask an admin to record an identity check, before Arrival.",
+        })
+    state = await (_printing_state(db, camp) if p.get("arrived_at") else _require_door_open(db, camp))
+    arrived = await _stamp_arrival(db, p, str(actor["_id"]), camp, state)
+    return {"registration": ser_patient(arrived), "prescription": await _printable_prescription(db, arrived, camp, state)}
+
+
+def _print_refusal(p: dict, state: dict) -> Optional[HTTPException]:
+    if p.get("queue_status") == "seen":
+        return HTTPException(status_code=409, detail={
             "code": "ALREADY_SEEN",
             "message": "The doctor has already seen this patient. The prescription cannot be printed again.",
         })
     if not p.get("arrived_at"):
-        raise HTTPException(status_code=409, detail={
+        return HTTPException(status_code=409, detail={
             "code": "NOT_ARRIVED",
             "message": "Scan the patient in at the door before printing.",
         })
-    day = await db.camp_days.find_one({"_id": p["camp_day_id"]})
-    if not day:
-        raise HTTPException(status_code=404, detail="Camp day not found")
-    camp = await db.camps.find_one({"_id": p["camp_id"]})
-    days = await db.camp_days.find({"camp_id": p["camp_id"]}).to_list(100)
-    state = effective_printing(camp, days)
-    if not p.get("printed_at") and not state.get("printing_open"):
-        raise HTTPException(status_code=409, detail={
+    if p.get("printed_at"):
+        return None
+    if not state.get("printing_open"):
+        return HTTPException(status_code=409, detail={
             "code": "PRINT_WINDOW_CLOSED",
             "message": "The print window is closed.",
         })
-    if p.get("identity_recheck_required") and stamp and not p.get("printed_at"):
-        raise HTTPException(status_code=409, detail={
-            "code": "identity_recheck_required",
+    if p.get("identity_recheck_required"):
+        return HTTPException(status_code=409, detail={
+            "code": "IDENTITY_CHECK_REQUIRED",
             "message": "Confirm identity before printing.",
         })
+    return None
+
+
+async def _prescription_payload(db, p: dict, actor: dict, stamp: bool) -> Dict[str, Any]:
+    camp = await db.camps.find_one({"_id": p["camp_id"]})
+    refusal = _print_refusal(p, await _printing_state(db, camp))
+    if refusal:
+        raise refusal
+    day = await db.camp_days.find_one({"_id": p["camp_day_id"]})
+    if not day:
+        raise HTTPException(status_code=404, detail="Camp day not found")
     if stamp and not p.get("printed_at"):
         stamped = await db.patients.find_one_and_update(
             {
@@ -352,23 +348,30 @@ async def _prescription_payload(db, p: dict, actor: dict, stamp: bool) -> Dict[s
                 "code": "PRINT_CONFLICT",
                 "message": "This registration changed while printing. Try again.",
             })
-    camp = await db.camps.find_one({"_id": p["camp_id"]})
+    return {"registration": ser_patient(p), "prescription": _prescription(p, camp, day["day_date"])}
+
+
+def _prescription(p: dict, camp: Optional[dict], day_date: str) -> Dict[str, Any]:
     return {
-        "registration": ser_patient(p),
-        "prescription": {
-            "camp_id": str(p["camp_id"]),
-            "camp_name": camp["name"] if camp else None,
-            "venue": camp["venue"] if camp else None,
-            "reg_no": p["reg_no"],
-            "full_name": p["full_name"],
-            "address": p.get("address"),
-            "age": p.get("age"),
-            "gender": p.get("gender"),
-            "phone": p.get("phone"),
-            "date": day["day_date"],
-            "patient_qr": p["patient_qr"],
-        },
+        "camp_id": str(p["camp_id"]),
+        "camp_name": camp["name"] if camp else None,
+        "venue": camp["venue"] if camp else None,
+        "reg_no": p["reg_no"],
+        "full_name": p["full_name"],
+        "address": p.get("address"),
+        "age": p.get("age"),
+        "gender": p.get("gender"),
+        "phone": p.get("phone"),
+        "date": day_date,
+        "patient_qr": p["patient_qr"],
     }
+
+
+async def _printable_prescription(db: AsyncDatabase, p: dict, camp: dict, state: dict) -> Optional[Dict[str, Any]]:
+    if _print_refusal(p, state):
+        return None
+    day = await db.camp_days.find_one({"_id": p["camp_day_id"]})
+    return _prescription(p, camp, day["day_date"]) if day else None
 
 
 @router.get("/print/{patient_id}")
@@ -377,9 +380,11 @@ async def preview_prescription(
     actor: dict = Depends(require_staff),
 ) -> Dict[str, Any]:
     db = get_db()
+    camp = await _active_camp(db)
     p = await db.patients.find_one({"_id": ObjectId(patient_id)})
     if not p:
         raise HTTPException(status_code=404, detail="Registration not found")
+    _require_in_camp(p, camp)
     return await _prescription_payload(db, p, actor, stamp=False)
 
 

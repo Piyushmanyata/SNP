@@ -9,14 +9,12 @@ const SelfRegister = lazy(() => import("./pages/SelfRegister"));
 const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
 const Desk = lazy(() => import("./pages/Desk"));
 const Clinical = lazy(() => import("./pages/Clinical"));
-const PrintPrescription = lazy(() => import("./pages/PrintPrescription"));
-const PrintSlip = lazy(() => import("./pages/PrintSlip"));
 const Board = lazy(() => import("./pages/Board"));
 const Team = lazy(() => import("./pages/Team"));
 
 function FullLoader() {
   return (
-    <div className="no-print min-h-screen flex items-center justify-center">
+    <div className="min-h-screen flex items-center justify-center">
       <Spinner className="w-8 h-8 text-emerald-500" />
     </div>
   );
@@ -50,8 +48,6 @@ export default function App() {
           <Route path="/admin" element={<Protected roles={ADMIN_ROLES}><AdminDashboard /></Protected>} />
           <Route path="/desk" element={<Protected roles={DESK_ROLES}><Desk /></Protected>} />
           <Route path="/clinical" element={<Protected roles={CLINICAL_ROLES}><Clinical /></Protected>} />
-          <Route path="/print/prescription/:id" element={<Protected roles={DESK_ROLES}><PrintPrescription /></Protected>} />
-          <Route path="/print/slip/:id" element={<Protected roles={CLINICAL_ROLES}><PrintSlip /></Protected>} />
           <Route path="/analytics" element={<Protected roles={LEAD_ROLES}><Board /></Protected>} />
           <Route path="/board" element={<Navigate to="/analytics" replace />} />
           <Route path="/team" element={<Protected roles={LEAD_ROLES}><Team /></Protected>} />

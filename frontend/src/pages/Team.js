@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useState } from "react";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import api, { formatApiError } from "../lib/api";
-import { Alert, Badge, Button, Card, Field, Input, Select } from "../components/ui";
+import { Alert, Badge, Button, Card, Field, Input, Modal, Select } from "../components/ui";
+import { displayTimestamp } from "../lib/dates";
 
 const ALL_ROLES = [
   { value: "volunteer", label: "Volunteer" },
@@ -10,6 +11,29 @@ const ALL_ROLES = [
   { value: "team_lead", label: "Team Lead" },
   { value: "admin", label: "Admin" },
 ];
+
+function OneTimePin({ name, pin, onDone }) {
+  const [copy, setCopy] = useState("Copy");
+  const onCopy = () => navigator.clipboard.writeText(pin).then(() => setCopy("Copied"), () => setCopy("Copy failed"));
+  return (
+    <Modal open title={`One-time PIN for ${name}`} size="sm">
+      <div data-testid="one-time-pin" className="space-y-4">
+        <p className="font-mono text-4xl font-bold tracking-[0.3em] text-slate-900 text-center">{pin}</p>
+        <p className="text-sm text-slate-600">
+          This PIN is shown once. Give it to {name} in person; they choose their own PIN at first sign-in.
+        </p>
+        <div className="flex gap-2">
+          {navigator.clipboard && (
+            <Button type="button" variant="outline" className="flex-1" onClick={onCopy} data-testid="one-time-pin-copy">
+              {copy}
+            </Button>
+          )}
+          <Button type="button" className="flex-1" onClick={onDone} data-testid="one-time-pin-done">Done</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
 
 export default function Team() {
   const { user } = useAuth();
@@ -25,6 +49,7 @@ export default function Team() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
+  const [oneTimePin, setOneTimePin] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -60,8 +85,9 @@ export default function Team() {
           phone: phone.trim() || null,
           team_lead_id: isAdmin && role === "volunteer" ? (selectedLead || null) : null,
         };
-        await api.post("/staff", payload);
-        setMsg(`Added ${name.trim()} successfully with default PIN 1234.`);
+        const created = await api.post("/staff", payload);
+        setOneTimePin({ name: payload.name, pin: created.data.temporary_pin });
+        setMsg(`Added ${payload.name}.`);
         setName("");
         setPhone("");
         setRole("volunteer");
@@ -76,77 +102,55 @@ export default function Team() {
     [name, role, phone, selectedLead, isAdmin, load]
   );
 
-  const resetPin = useCallback(
-    async (id, staffName) => {
-      setErr("");
-      setMsg("");
-      try {
-        await api.post(`/staff/${id}/reset-pin`);
-        setMsg(`PIN for ${staffName} has been reset to 1234.`);
-      } catch (error) {
-        setErr(formatApiError(error));
-      }
-    },
-    []
-  );
-
-  const toggleStatus = useCallback(
-    async (s) => {
-      setErr("");
-      setMsg("");
-      try {
-        if (s.disabled_at) {
-          await api.patch(`/staff/${s.id}/enable`);
-          setMsg(`Enabled account for ${s.name}.`);
-        } else {
-          await api.patch(`/staff/${s.id}/disable`);
-          setMsg(`Disabled account for ${s.name}.`);
-        }
-        load();
-      } catch (error) {
-        setErr(formatApiError(error));
-      }
-    },
-    [load]
-  );
-
-  const reassign = useCallback(async (s, teamLeadId) => {
+  const run = useCallback(async (confirmText, request, doneMsg) => {
+    if (confirmText && !window.confirm(confirmText)) return null;
     setErr("");
     setMsg("");
     try {
-      await api.patch(`/staff/${s.id}/team-lead`, { team_lead_id: teamLeadId || null });
-      setMsg(`Updated team assignment for ${s.name}.`);
+      const response = await request();
+      setMsg(doneMsg);
       load();
+      return response;
     } catch (error) {
       setErr(formatApiError(error));
+      return null;
     }
   }, [load]);
 
-  const deleteStaff = useCallback(async (s) => {
-    if (!window.confirm(`Delete ${s.name}'s account? They will lose access; past activity stays in reports.`)) return;
-    setErr("");
-    setMsg("");
-    try {
-      await api.delete(`/staff/${s.id}`);
-      setMsg(`Deleted account for ${s.name}.`);
-      load();
-    } catch (error) {
-      setErr(formatApiError(error));
-    }
-  }, [load]);
+  const resetPin = async (s) => {
+    const reset = await run(
+      `Reset ${s.name}'s PIN? Their current PIN and open sessions stop working.`,
+      () => api.post(`/staff/${s.id}/reset-pin`),
+      `Reset ${s.name}'s PIN.`,
+    );
+    if (reset) setOneTimePin({ name: s.name, pin: reset.data.temporary_pin });
+  };
+  const unlock = (s) => run(`Unlock ${s.name}? Their PIN stays the same.`, () => api.post(`/staff/${s.id}/unlock`), `Unlocked ${s.name}.`);
+  const toggleStatus = (s) => (s.disabled_at
+    ? run(null, () => api.patch(`/staff/${s.id}/enable`), `Enabled account for ${s.name}.`)
+    : run(`Disable ${s.name}'s account? They are signed out and cannot sign in.`, () => api.patch(`/staff/${s.id}/disable`), `Disabled account for ${s.name}.`));
+  const reassign = (s, teamLeadId) => run(
+    null, () => api.patch(`/staff/${s.id}/team-lead`, { team_lead_id: teamLeadId || null }), `Updated team assignment for ${s.name}.`,
+  );
+  const deleteStaff = (s) => run(
+    `Delete ${s.name}'s account? They will lose access; past activity stays in reports.`,
+    () => api.delete(`/staff/${s.id}`),
+    `Deleted account for ${s.name}.`,
+  );
 
   return (
     <Layout title={isTeamLead ? "My Team" : "Staff & Team Management"}>
       <div className="space-y-6">
         {err && <Alert tone="rose">{err}</Alert>}
         {msg && <Alert tone="emerald">{msg}</Alert>}
+        {oneTimePin && <OneTimePin {...oneTimePin} onDone={() => setOneTimePin(null)} />}
 
         <Card>
           <h3 className="font-display font-bold text-lg text-slate-900 mb-1">
             {isTeamLead ? "Add Volunteer to Your Team" : "Add Staff Member"}
           </h3>
           <p className="text-xs text-slate-500 mb-4">
-            New accounts are provisioned with default PIN <strong>1234</strong>. The user will be required to change it upon first login.
+            Each new account gets a one-time PIN, shown once. The user chooses their own PIN at first sign-in.
           </p>
 
           <form onSubmit={onAdd} className="space-y-4" data-testid="add-staff-form">
@@ -241,8 +245,14 @@ export default function Team() {
                         {ALL_ROLES.find((r) => r.value === s.role)?.label || s.role}
                       </Badge>
                       {s.disabled_at && <Badge tone="rose">Disabled</Badge>}
-                      {s.must_change_pin && <Badge tone="amber">Default PIN</Badge>}
+                      {s.must_change_pin && <Badge tone="amber">One-time PIN</Badge>}
+                      {s.locked_until && <Badge tone="rose" data-testid={`locked-${s.id}`}>Locked until {displayTimestamp(s.locked_until)}</Badge>}
                     </div>
+                    {s.lockouts_24h > 1 && (
+                      <p className="text-xs text-rose-700 mt-0.5" data-testid={`lockouts-${s.id}`}>
+                        Locked out {s.lockouts_24h} times in 24 h, from {s.lockout_sources_24h} {s.lockout_sources_24h === 1 ? "network" : "networks"}
+                      </p>
+                    )}
                     {s.phone && (
                       <p className="text-xs text-slate-500 mt-0.5">{s.phone}</p>
                     )}
@@ -267,10 +277,15 @@ export default function Team() {
                       size="sm"
                       variant="outline"
                       data-testid={`reset-pin-${s.id}`}
-                      onClick={() => resetPin(s.id, s.name)}
+                      onClick={() => resetPin(s)}
                     >
-                      Reset PIN (1234)
+                      Reset PIN
                     </Button>
+                    {s.locked_until && (
+                      <Button size="sm" variant="outline" data-testid={`unlock-${s.id}`} onClick={() => unlock(s)}>
+                        Unlock
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       variant={s.disabled_at ? "primary" : "ghost"}

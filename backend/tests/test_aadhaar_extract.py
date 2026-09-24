@@ -174,6 +174,6 @@ def test_extract_disconnect_cancels_qr_reading_and_releases_capacity(monkeypatch
             await aadhaar_extract.extract_document(request)
         assert error.value.status_code == 499
         assert cancelled == [True]
-        assert aadhaar_extract._active is False
+        assert not aadhaar_extract._slots.locked() and aadhaar_extract._slots._value == 2
 
     asyncio.run(run())

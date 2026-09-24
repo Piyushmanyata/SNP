@@ -1,8 +1,11 @@
 import os
-from typing import Any
+from typing import Any, Awaitable, Callable, TypeVar
 from pymongo import ASCENDING, AsyncMongoClient, ReturnDocument
+from pymongo.asynchronous.client_session import AsyncClientSession
 from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.asynchronous.database import AsyncDatabase
+
+T = TypeVar("T")
 
 _client: AsyncMongoClient | None = None
 _db: AsyncDatabase | None = None
@@ -20,6 +23,11 @@ def get_db() -> AsyncDatabase:
     if _db is None:
         _db = get_client()[os.environ["DB_NAME"]]
     return _db
+
+
+async def in_transaction(callback: Callable[[AsyncClientSession], Awaitable[T]]) -> T:
+    async with get_client().start_session() as session:
+        return await session.with_transaction(callback)
 
 
 async def aggregate_list(collection: AsyncCollection, pipeline: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -44,6 +52,9 @@ async def init_indexes() -> None:
     await db.users.create_index("name_normalized", unique=True)
     await db.login_attempts.create_index("identifier", unique=True)
     await db.login_attempts.create_index("locked_until", expireAfterSeconds=900)
+    await db.login_lockouts.create_index("at", expireAfterSeconds=7 * 86400)
+    await db.login_sources.create_index("trusted_until", expireAfterSeconds=0)
+    await db.login_lockouts.create_index([("name_normalized", ASCENDING), ("at", ASCENDING)])
     await db.camps.create_index("is_active", unique=True, partialFilterExpression={"is_active": True})
     await db.camps.create_index(
         "setup_request_id", unique=True, partialFilterExpression={"setup_request_id": {"$type": "string"}}
@@ -77,13 +88,16 @@ async def init_indexes() -> None:
     await db.clinical_operations.create_index("operation_id", unique=True)
     await db.deferred_slips.create_index([("transcription_id", ASCENDING), ("active", ASCENDING)])
     await db.deferred_slips.create_index([("item_type", ASCENDING), ("active", ASCENDING), ("collection_date", ASCENDING)])
-    await db.corrections.create_index([("transcription_id", ASCENDING), ("created_at", ASCENDING)])
+    await db.deferred_slips.create_index([("ot_schedule_day_id", ASCENDING), ("active", ASCENDING)])
+    await db.deferred_slips.create_index([("specs_collection_day_id", ASCENDING), ("active", ASCENDING)])
+    await db.fulfilments.create_index([("ot_schedule_day_id", ASCENDING), ("status", ASCENDING)])
     await db.fulfilments.create_index([("transcription_id", ASCENDING), ("item_type", ASCENDING)], unique=True)
     await db.ot_schedule_days.create_index([("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True)
     await db.specs_collection_days.create_index([("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True)
     await db.reminder_ledger.create_index([("status", ASCENDING), ("created_at", ASCENDING)])
     await db.reminder_ledger.create_index("provider_id", sparse=True)
     await db.reminder_ledger.create_index("created_at")
+    await db.reminder_ledger.create_index([("number", ASCENDING), ("message_type", ASCENDING), ("created_at", ASCENDING)])
     await db.reminder_ledger.create_index(
         [
             ("patient_id", ASCENDING),

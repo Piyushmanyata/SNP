@@ -1,74 +1,49 @@
-import asyncio
-import os
-import sys
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+import pytest
 
-backend_dir = Path(__file__).resolve().parents[1]
-if str(backend_dir) not in sys.path:
-    sys.path.insert(0, str(backend_dir))
-
-os.environ["ADMIN_BOOTSTRAP_PIN"] = "8642"
-os.environ.setdefault("JWT_SECRET", "test-jwt-secret")
-os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
-os.environ.setdefault("DB_NAME", "snp_camps")
-
+from conftest import run_db
+from security import verify_pin
 from server import seed_admin
 
 
-from security import verify_pin
+def test_seed_admin_creates_when_missing(monkeypatch):
+    monkeypatch.setenv("ADMIN_BOOTSTRAP_PIN", "864200")
 
+    async def run(database):
+        await seed_admin()
+        users = await database.users.find({}).to_list(None)
+        assert len(users) == 1
+        doc = users[0]
+        assert doc["name"] == "admin"
+        assert doc["name_normalized"] == "admin"
+        assert doc["role"] == "admin"
+        assert doc["must_change_pin"] is True
+        assert verify_pin("864200", doc["pin_hash"])
+        assert not verify_pin("1234", doc["pin_hash"])
 
-def test_seed_admin_creates_when_missing():
-    db = MagicMock()
-    db.users.find_one = AsyncMock(return_value=None)
-    db.users.insert_one = AsyncMock()
-    db.users.update_one = AsyncMock()
-    with patch("server.get_db", return_value=db):
-        asyncio.run(seed_admin())
-    db.users.insert_one.assert_awaited_once()
-    db.users.update_one.assert_not_called()
-    doc = db.users.insert_one.await_args.args[0]
-    assert doc["name"] == "admin"
-    assert doc["name_normalized"] == "admin"
-    assert doc["role"] == "admin"
-    assert doc["must_change_pin"] is True
-    assert verify_pin("8642", doc["pin_hash"])
-    assert not verify_pin("1234", doc["pin_hash"])
+    run_db(run)
 
 
 def test_seed_admin_refuses_missing_or_known_pin(monkeypatch):
-    db = MagicMock()
-    db.users.find_one = AsyncMock(return_value=None)
-    db.users.insert_one = AsyncMock()
-    with patch("server.get_db", return_value=db):
+    async def run(database):
         monkeypatch.delenv("ADMIN_BOOTSTRAP_PIN", raising=False)
-        try:
-            asyncio.run(seed_admin())
-            raise AssertionError("expected missing pin to fail")
-        except RuntimeError:
-            pass
-        monkeypatch.setenv("ADMIN_BOOTSTRAP_PIN", "1234")
-        try:
-            asyncio.run(seed_admin())
-            raise AssertionError("expected known pin to fail")
-        except RuntimeError:
-            pass
-    db.users.insert_one.assert_not_called()
+        with pytest.raises(RuntimeError):
+            await seed_admin()
+        for pin in ("1234", "8642", "123456", "000000"):
+            monkeypatch.setenv("ADMIN_BOOTSTRAP_PIN", pin)
+            with pytest.raises(RuntimeError):
+                await seed_admin()
+        assert await database.users.count_documents({}) == 0
+
+    run_db(run)
 
 
-def test_seed_admin_leaves_existing_unchanged():
-    existing = {
-        "name": "admin",
-        "name_normalized": "admin",
-        "pin_hash": "not-a-real-hash",
-        "role": "admin",
-    }
-    db = MagicMock()
-    db.users.find_one = AsyncMock(return_value=existing)
-    db.users.insert_one = AsyncMock()
-    db.users.update_one = AsyncMock()
-    with patch("server.get_db", return_value=db):
-        asyncio.run(seed_admin())
-    db.users.insert_one.assert_not_called()
-    db.users.update_one.assert_not_called()
+def test_seed_admin_leaves_existing_unchanged(monkeypatch):
+    monkeypatch.setenv("ADMIN_BOOTSTRAP_PIN", "864200")
+    existing = {"name": "admin", "name_normalized": "admin", "pin_hash": "not-a-real-hash", "role": "admin"}
+
+    async def run(database):
+        await database.users.insert_one(existing)
+        await seed_admin()
+        assert await database.users.find({}).to_list(None) == [existing]
+
+    run_db(run)

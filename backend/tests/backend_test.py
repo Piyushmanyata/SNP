@@ -6,7 +6,7 @@ never_printed, PRINT_WINDOW_CLOSED), clinical (seen-only, transcription lock,
 corrections, OT seats), staff management, reports/exports.
 """
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from xml.etree.ElementTree import Element, tostring
 
@@ -15,7 +15,15 @@ import requests
 
 from conftest import API
 
-TODAY_IST = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d")
+NOW_IST = datetime.now(ZoneInfo("Asia/Kolkata"))
+TODAY_IST = NOW_IST.strftime("%Y-%m-%d")
+
+
+def future(days):
+    return (NOW_IST.date() + timedelta(days=days)).isoformat()
+
+
+DAY_A, DAY_B, DAY_C, DAY_D, DAY_E = future(60), future(64), future(77), future(78), future(81)
 TAG = uuid.uuid4().hex[:6]
 STATE = {}
 
@@ -43,7 +51,7 @@ class TestAuth:
         data = r.json()
         assert data["user"]["role"] == "admin"
         assert data["user"]["name"].lower() == admin_credentials["name"].lower()
-        assert isinstance(data["access_token"], str) and len(data["access_token"]) > 20
+        assert "access_token" not in data
         assert "access_token" in r.cookies, f"cookies={r.cookies.get_dict()}"
         # httpOnly flag present on Set-Cookie header
         raw = r.headers.get("set-cookie", "")
@@ -184,7 +192,7 @@ class TestRegistration:
             "full_name": f"TESTPATIENT Alpha {TAG}", "age": 55, "gender": "M",
             "phone": "9876543210", "camp_day_id": STATE["day_id"],
             "registration_request_id": rid,
-            "failed_scan_attempts": 3, "manual_reason": "scanner unavailable",
+            "manual_reason": "scanner unavailable",
         }, timeout=30)
         assert r.status_code == 200, r.text
         body = r.json()
@@ -214,7 +222,7 @@ class TestRegistration:
             "full_name": f"TESTPATIENT Alpha {TAG}", "age": 55, "gender": "M",
             "phone": "9876543210", "camp_day_id": STATE["day_id"],
             "registration_request_id": STATE["req_id"],
-            "failed_scan_attempts": 3, "manual_reason": "scanner unavailable",
+            "manual_reason": "scanner unavailable",
         }, timeout=30)
         assert r.status_code == 200, r.text
         body = r.json()
@@ -238,7 +246,7 @@ class TestRegistration:
             "full_name": f"TESTPATIENT Beta {TAG}", "age": 62, "gender": "F",
             "phone": "9812345670", "camp_day_id": STATE["day_id"],
             "registration_request_id": str(uuid.uuid4()),
-            "failed_scan_attempts": 3, "manual_reason": "scanner unavailable",
+            "manual_reason": "scanner unavailable",
         }, timeout=30)
         assert r.status_code == 200, r.text
         STATE["p2"] = r.json()["registration"]
@@ -386,6 +394,14 @@ def _catalogue(admin):
     return STATE["medicine_id"]
 
 
+def _signed_in(name, pin):
+    s = requests.Session()
+    s.headers.update({"Content-Type": "application/json"})
+    r = s.post(f"{API}/auth/login", json={"name": name, "pin": pin}, timeout=30)
+    assert r.status_code == 200, r.text
+    return s
+
+
 def _clinical(admin):
     _catalogue(admin)
     if "clinical_http" in STATE:
@@ -393,15 +409,15 @@ def _clinical(admin):
     name = f"TEST flow clinical {TAG}"
     created = admin.post(f"{API}/staff", json={"name": name, "role": "clinical_desk_operator"}, timeout=30)
     assert created.status_code == 200, created.text
+    temporary = created.json()["temporary_pin"]
     s = requests.Session()
     s.headers.update({"Content-Type": "application/json"})
-    logged = s.post(f"{API}/auth/login", json={"name": name, "pin": "1234"}, timeout=30)
+    logged = s.post(f"{API}/auth/login", json={"name": name, "pin": temporary}, timeout=30)
     assert logged.status_code == 200, logged.text
-    changed = s.post(f"{API}/auth/change-pin", json={"current_pin": "1234", "new_pin": "5678"}, timeout=30)
+    changed = s.post(f"{API}/auth/change-pin", json={"current_pin": temporary, "new_pin": "2580"}, timeout=30)
     assert changed.status_code == 200, changed.text
-    logged = s.post(f"{API}/auth/login", json={"name": name, "pin": "5678"}, timeout=30)
+    logged = s.post(f"{API}/auth/login", json={"name": name, "pin": "2580"}, timeout=30)
     assert logged.status_code == 200, logged.text
-    s.headers.update({"Authorization": f"Bearer {logged.json()['access_token']}"})
     STATE["clinical_http"] = s
     return s
 
@@ -428,12 +444,12 @@ def _arrived_printed(admin, label, phone):
         "full_name": f"TESTPATIENT {label} {TAG}", "age": 48, "gender": "F",
         "phone": phone, "camp_day_id": STATE["day_id"],
         "registration_request_id": str(uuid.uuid4()),
-        "failed_scan_attempts": 3, "manual_reason": "scanner unavailable",
+        "manual_reason": "scanner unavailable",
     }, timeout=30)
     assert r.status_code == 200, r.text
     patient = r.json()["registration"]
-    assert admin.post(f"{API}/desk/arrive/{patient['id']}", timeout=30).status_code == 200
     _identity_checked(admin, patient["id"])
+    assert admin.post(f"{API}/desk/arrive/{patient['id']}", timeout=30).status_code == 200
     assert admin.post(f"{API}/desk/print/{patient['id']}", timeout=30).status_code == 200
     return patient
 
@@ -530,7 +546,7 @@ class TestClinical:
 
     def test_create_ot_day(self, admin):
         r = admin.post(f"{API}/clinical/ot-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-01",
+            "camp_id": STATE["camp_id"], "day_date": DAY_A,
             "venue": "TEST OT Hospital", "seat_limit": 1,
         }, timeout=30)
         assert r.status_code == 200, r.text
@@ -538,23 +554,28 @@ class TestClinical:
         assert d["seat_limit"] == 1 and d["seats_taken"] == 0 and d["seats_free"] == 1
         STATE["ot_day_id"] = d["id"]
 
-    def test_create_list_upsert_specs_collection_days(self, admin):
+    def test_create_list_and_edit_specs_collection_days(self, admin):
         r = admin.post(f"{API}/clinical/specs-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-05",
+            "camp_id": STATE["camp_id"], "day_date": DAY_B,
             "venue": "TEST Optical",
         }, timeout=30)
         assert r.status_code == 200, r.text
         d = r.json()["specs_day"]
         assert "seat_limit" not in d and "seats_taken" not in d and "seats_free" not in d
-        assert d["start_time"] == "10:00" and d["end_time"] == "17:00"
-        assert d["day_date"] == "2026-12-05"
+        assert "start_time" not in d and "end_time" not in d
+        assert d["day_date"] == DAY_B
         STATE["specs_day_id"] = d["id"]
 
         listed = admin.get(f"{API}/clinical/specs-days", timeout=30).json()["specs_days"]
-        assert any(x["id"] == d["id"] and x["start_time"] == "10:00" for x in listed)
+        assert any(x["id"] == d["id"] for x in listed)
 
-        r = admin.post(f"{API}/clinical/specs-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-05",
+        again = admin.post(f"{API}/clinical/specs-days", json={
+            "camp_id": STATE["camp_id"], "day_date": DAY_B,
+            "venue": "TEST Optical Hall",
+        }, timeout=30)
+        assert again.status_code == 409 and again.json()["detail"]["code"] == "DAY_EXISTS"
+        r = admin.patch(f"{API}/clinical/specs-days/{d['id']}", json={
+            "camp_id": STATE["camp_id"], "day_date": DAY_B,
             "venue": "TEST Optical Hall",
         }, timeout=30)
         assert r.status_code == 200, r.text
@@ -616,7 +637,7 @@ class TestClinical:
 
         r = clin.post(f"{API}/clinical/fulfilment", json={
             "transcription_id": STATE["trans_id"], "item_type": "specs_made", "status": "deferred",
-            "collection_date": "2026-12-05", "collection_venue": "TEST Optical",
+            "collection_date": DAY_B, "collection_venue": "TEST Optical",
             "paper_reviewed": True, "reviewed_revision_id": STATE["rev_id"],
             "reviewed_generation": STATE["gen"], "operation_id": f"op-specs-miss2-{TAG}",
         }, timeout=30)
@@ -633,7 +654,7 @@ class TestClinical:
         assert r.status_code == 200, r.text
         slip = r.json()["slip"]
         assert slip["item_type"] == "specs_made"
-        assert slip["collection_date"] == "2026-12-05"
+        assert slip["collection_date"] == DAY_B
         assert slip["collection_venue"] == STATE["specs_day_venue"]
         assert slip["active"] == True
         STATE["specs_slip_id"] = slip["id"]
@@ -641,21 +662,15 @@ class TestClinical:
         days = admin.get(f"{API}/clinical/specs-days", timeout=30).json()["specs_days"]
         day = next(d for d in days if d["id"] == STATE["specs_day_id"])
         assert "seats_taken" not in day
-        assert slip["collection_start_time"] == "10:00"
 
-    def test_specs_window_can_be_updated_after_assignment(self, admin):
-        invalid = admin.post(f"{API}/clinical/specs-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-05",
-            "venue": "TEST Optical Hall", "start_time": "10:00", "end_time": "16:00",
-        }, timeout=30)
-        assert invalid.status_code == 400, invalid.text
-        r = admin.post(f"{API}/clinical/specs-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-05",
-            "venue": "TEST Optical Hall",
+    def test_a_specs_day_edit_after_assignment_keeps_the_token_unless_the_date_or_venue_changes(self, admin):
+        r = admin.patch(f"{API}/clinical/specs-days/{STATE['specs_day_id']}", json={
+            "camp_id": STATE["camp_id"], "day_date": DAY_B,
+            "venue": STATE["specs_day_venue"], "venue_sms": "Optical Hall",
         }, timeout=30)
         assert r.status_code == 200, r.text
-        assert r.json()["specs_day"]["start_time"] == "10:00"
-        assert r.json()["specs_day"]["end_time"] == "17:00"
+        slip = _clinical(admin).get(f"{API}/clinical/slip/{STATE['specs_slip_id']}", timeout=30).json()["slip"]
+        assert slip["active"] is True and slip["superseded"] is False
 
     def test_a_hospital_referral_is_refused_at_the_hospital_station(self, admin):
         r = _defer(_clinical(admin), STATE["trans_id"], STATE["rev_id"], STATE["gen"], f"op-referral-{TAG}",
@@ -678,7 +693,7 @@ class TestClinical:
         assert r.status_code == 200, r.text
         slip = r.json()["slip"]
         assert slip["item_type"] == "ot"
-        assert slip["collection_date"] == "2026-12-01"
+        assert slip["collection_date"] == DAY_A
         STATE["ot_slip_id"] = slip["id"]
 
         days = admin.get(f"{API}/clinical/ot-days", timeout=30).json()["ot_days"]
@@ -692,7 +707,7 @@ class TestClinical:
 
     def test_seat_limit_below_assigned(self, admin):
         r = admin.post(f"{API}/clinical/ot-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-01",
+            "camp_id": STATE["camp_id"], "day_date": DAY_A,
             "venue": "TEST OT Hospital", "seat_limit": 0,
         }, timeout=30)
         assert r.status_code == 400, r.text
@@ -748,13 +763,9 @@ class TestClinical:
         assert r.status_code == 200, r.text
         STATE["rev_id"] = r.json()["revision"]["id"]
         STATE["gen"] = r.json()["registration"]["clinical_generation"]
-        r = clin.get(f"{API}/clinical/corrections/{STATE['trans_id']}", timeout=30)
-        assert r.status_code == 200
-        corr = r.json()["corrections"]
-        assert len(corr) == 1
-        assert corr[0]["reason"] == "TEST typo in BP"
         r = clin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
         assert r.json()["transcription"]["bp"] == "140/90"
+        assert r.json()["committed_revision"]["reason"] == "TEST typo in BP"
 
     def test_undo_seen_blocked_after_transcription(self, admin):
         r = admin.post(f"{API}/desk/undo-seen/{STATE['p1']['id']}", timeout=30)
@@ -790,11 +801,14 @@ class TestStaff:
             r = admin.post(f"{API}/staff", json={"name": name, "role": role}, timeout=30)
             assert r.status_code == 200, f"{role}: {r.text}"
             assert r.json()["staff"]["role"] == role
-            STATE[role] = {"name": name, "pin": "5678", "id": r.json()["staff"]["id"]}
+            temporary = r.json()["temporary_pin"]
+            assert len(temporary) == (6 if role == "team_lead" else 4)
+            personal = "586042" if role == "team_lead" else "2580"
+            STATE[role] = {"name": name, "pin": personal, "id": r.json()["staff"]["id"]}
             session = requests.Session()
-            logged_in = session.post(f"{API}/auth/login", json={"name": name, "pin": "1234"}, timeout=30)
+            logged_in = session.post(f"{API}/auth/login", json={"name": name, "pin": temporary}, timeout=30)
             assert logged_in.status_code == 200, logged_in.text
-            changed = session.post(f"{API}/auth/change-pin", json={"current_pin": "1234", "new_pin": "5678"}, timeout=30)
+            changed = session.post(f"{API}/auth/change-pin", json={"current_pin": temporary, "new_pin": personal}, timeout=30)
             assert changed.status_code == 200, changed.text
 
         r = admin.post(f"{API}/staff", json={"name": accounts[0][1], "role": "volunteer"}, timeout=30)
@@ -808,12 +822,7 @@ class TestStaff:
 
     def test_team_lead_can_only_create_volunteers(self, anon):
         lead = STATE["team_lead"]
-        r = anon.post(f"{API}/auth/login", json={"name": lead["name"], "pin": lead["pin"]},
-                      timeout=30)
-        assert r.status_code == 200, r.text
-        tok = r.json()["access_token"]
-        s = requests.Session()
-        s.headers.update({"Authorization": f"Bearer {tok}"})
+        s = _signed_in(lead["name"], lead["pin"])
         r = s.post(f"{API}/staff", json={"email": f"TEST_admin2_{TAG}@x.org",
                                          "password": "GoodPass@12345", "name": "x", "role": "admin"},
                    timeout=30)
@@ -825,10 +834,7 @@ class TestStaff:
 
     def test_clinical_operator_cannot_register_or_print(self, anon):
         c = STATE["clinical_desk_operator"]
-        r = anon.post(f"{API}/auth/login", json={"name": c["name"], "pin": c["pin"]}, timeout=30)
-        assert r.status_code == 200, r.text
-        s = requests.Session()
-        s.headers.update({"Authorization": f"Bearer {r.json()['access_token']}"})
+        s = _signed_in(c["name"], c["pin"])
         assert s.post(f"{API}/desk/print/{STATE['p1']['id']}", timeout=30).status_code == 403
         # but clinical lookup works
         r = s.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
@@ -836,10 +842,7 @@ class TestStaff:
 
     def test_volunteer_cannot_access_clinical(self, anon):
         v = STATE["volunteer"]
-        r = anon.post(f"{API}/auth/login", json={"name": v["name"], "pin": v["pin"]}, timeout=30)
-        assert r.status_code == 200, r.text
-        s = requests.Session()
-        s.headers.update({"Authorization": f"Bearer {r.json()['access_token']}"})
+        s = _signed_in(v["name"], v["pin"])
         r = s.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
         assert r.status_code == 403, r.text
 
@@ -899,10 +902,7 @@ class TestReports:
 
     def test_exports_require_admin(self, anon):
         c = STATE["clinical_desk_operator"]
-        r = anon.post(f"{API}/auth/login", json={"name": c["name"], "pin": c["pin"]}, timeout=30)
-        assert r.status_code == 200, r.text
-        s = requests.Session()
-        s.headers.update({"Authorization": f"Bearer {r.json()['access_token']}"})
+        s = _signed_in(c["name"], c["pin"])
         assert s.get(f"{API}/exports/camp-records", timeout=30).status_code == 403
 
 
@@ -948,12 +948,12 @@ class TestFixRegressions:
             "full_name": f"TESTUNDO Gamma {TAG}", "age": 44, "gender": "M",
             "phone": "9876500011", "camp_day_id": STATE["day_id"],
             "registration_request_id": rid,
-            "failed_scan_attempts": 3, "manual_reason": "scanner unavailable",
+            "manual_reason": "scanner unavailable",
         }, timeout=30)
         assert r.status_code == 200, r.text
         pid = r.json()["registration"]["id"]
-        assert admin.post(f"{API}/desk/arrive/{pid}", timeout=30).status_code == 200
         _identity_checked(admin, pid)
+        assert admin.post(f"{API}/desk/arrive/{pid}", timeout=30).status_code == 200
         pr = admin.post(f"{API}/desk/print/{pid}", timeout=30)
         assert pr.status_code == 200, pr.text
         printed_at = pr.json()["registration"]["printed_at"]
@@ -975,10 +975,10 @@ class TestFixRegressions:
     def test_ot_seat_released_on_rerecord(self, admin):
         # two OT days with free seats
         a = admin.post(f"{API}/clinical/ot-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-18",
+            "camp_id": STATE["camp_id"], "day_date": DAY_C,
             "venue": "TEST OT A", "seat_limit": 3}, timeout=30)
         b = admin.post(f"{API}/clinical/ot-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-19",
+            "camp_id": STATE["camp_id"], "day_date": DAY_D,
             "venue": "TEST OT B", "seat_limit": 3}, timeout=30)
         assert a.status_code == 200 and b.status_code == 200, (a.text, b.text)
         day_a, day_b = a.json()["ot_day"]["id"], b.json()["ot_day"]["id"]
@@ -1011,10 +1011,10 @@ class TestFixRegressions:
 
     def test_specs_rerecord_replaces_active_token_without_capacity(self, admin):
         a = admin.post(f"{API}/clinical/specs-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-18",
+            "camp_id": STATE["camp_id"], "day_date": DAY_C,
             "venue": "TEST Specs A"}, timeout=30)
         b = admin.post(f"{API}/clinical/specs-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-19",
+            "camp_id": STATE["camp_id"], "day_date": DAY_D,
             "venue": "TEST Specs B"}, timeout=30)
         assert a.status_code == 200 and b.status_code == 200, (a.text, b.text)
         day_a, day_b = a.json()["specs_day"]["id"], b.json()["specs_day"]["id"]
@@ -1059,7 +1059,7 @@ class TestFixRegressions:
 
     def test_specs_choice_is_exclusive_and_collection_has_no_capacity_limit(self, admin):
         c = admin.post(f"{API}/clinical/specs-days", json={
-            "camp_id": STATE["camp_id"], "day_date": "2026-12-22",
+            "camp_id": STATE["camp_id"], "day_date": DAY_E,
             "venue": "TEST Specs C"}, timeout=30)
         assert c.status_code == 200, c.text
         day_c = c.json()["specs_day"]["id"]

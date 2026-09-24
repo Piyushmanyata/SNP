@@ -18,7 +18,7 @@ PAGE_SIZE = 500
 SEND_LIMIT = 200
 CANARY_WAIT = timedelta(minutes=10)
 
-Target = Tuple[dict, str, str | None, str | None, str | None]
+Target = Tuple[dict, str, str | None]
 
 
 def _require_cron_secret(request: Request) -> None:
@@ -52,7 +52,7 @@ async def _camp_targets(db: AsyncDatabase, event_date: str) -> AsyncGenerator[Ta
         venue = (camp.get("venue_sms") or camp["venue"]) if camp else ""
         async for page in _pages(db.patients, {"camp_day_id": day["_id"]}):
             for patient in page:
-                yield patient, venue, None, None, None
+                yield patient, venue, None
 
 
 async def _token_targets(
@@ -71,8 +71,7 @@ async def _token_targets(
                 day = await db.ot_schedule_days.find_one({"_id": s["ot_schedule_day_id"]})
                 if day:
                     venue = day.get("venue_sms") or day["venue"]
-            yield (patient, venue, s.get("collection_start_time"), s.get("collection_end_time"),
-                   s.get("collection_end_date"))
+            yield patient, venue, s.get("collection_end_date")
 
 
 async def _gate(db: AsyncDatabase, message_type: str, event_date: str) -> str:
@@ -110,13 +109,12 @@ async def _send_each(
     used = 0
     complete = True
     try:
-        async for patient, venue, start, end, end_date in targets:
+        async for patient, venue, end_date in targets:
             if used >= budget:
                 complete = False
                 break
             outcome = await sms.deliver_patient_sms(
-                db, patient, message_type, event_date, venue,
-                start_time=start, end_time=end, end_date=end_date, retry_after=sms.RETRY_AFTER,
+                db, patient, message_type, event_date, venue, end_date, retry_after=sms.RETRY_AFTER,
             )
             if outcome == "paused":
                 complete = False

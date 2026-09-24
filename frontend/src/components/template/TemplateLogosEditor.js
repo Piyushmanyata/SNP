@@ -1,14 +1,16 @@
 import React from "react";
 import { Button, Card } from "../ui";
 import { ArrowUp, ArrowDown, Trash2, ImagePlus } from "lucide-react";
+import { MAX_LOGOS } from "./templateHelpers";
 
 export function TemplateLogosEditor({ logos, onAddLogo, onMoveLogo, onRemoveLogo }) {
+  const full = logos.length >= MAX_LOGOS;
   return (
     <Card>
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-1">
         <h3 className="font-display font-bold text-slate-900">Sponsor Logos</h3>
         <label
-          className="inline-flex items-center gap-2 min-h-[44px] px-4 rounded-xl bg-slate-900 text-white text-sm font-semibold cursor-pointer hover:bg-slate-800"
+          className={`inline-flex items-center gap-2 min-h-[44px] px-4 rounded-xl bg-slate-900 text-white text-sm font-semibold ${full ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:bg-slate-800"}`}
           data-testid="tpl-add-logo-label"
         >
           <ImagePlus className="w-4 h-4" /> Add logo
@@ -16,6 +18,7 @@ export function TemplateLogosEditor({ logos, onAddLogo, onMoveLogo, onRemoveLogo
             type="file"
             accept="image/png,image/jpeg,image/webp"
             className="hidden"
+            disabled={full}
             onChange={(e) => {
               onAddLogo(e.target.files?.[0]);
               e.target.value = "";
@@ -24,8 +27,11 @@ export function TemplateLogosEditor({ logos, onAddLogo, onMoveLogo, onRemoveLogo
           />
         </label>
       </div>
+      <p className="text-sm text-slate-700 mb-3" data-testid="tpl-logo-limits">
+        {logos.length} of {MAX_LOGOS}. Up to {MAX_LOGOS} logos, PNG, JPEG or WebP, each up to 2 MB. Saved logos are resized to at most 600 px and 150 KB.
+      </p>
       {logos.length === 0 ? (
-        <p className="text-slate-400 text-sm">No logos. PNG/JPEG/WebP ≤ 2 MB.</p>
+        <p className="text-slate-600 text-sm">No logos.</p>
       ) : (
         <div className="space-y-2" data-testid="tpl-logos-list">
           {logos.map((lg, i) => (

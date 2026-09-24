@@ -4,21 +4,18 @@ import { Button, Field } from "../ui";
 export function AadhaarManualInput({ mode, disabled, busy, decode }) {
   const ref = useRef(null);
   const [filled, setFilled] = useState(false);
-  const locked = disabled || busy;
-
   useEffect(() => {
-    if (mode === "manual" && !locked) ref.current?.focus();
-  }, [mode, locked]);
+    if (mode === "manual" && !disabled) ref.current?.focus();
+  }, [mode, disabled]);
 
   if (mode !== "manual") return null;
 
   const submit = async () => {
     const text = ref.current?.value.trim();
-    if (!text || locked) return;
-    await decode(text);
-    if (!ref.current) return;
+    if (!text || disabled) return;
     ref.current.value = "";
     setFilled(false);
+    await decode(text);
   };
 
   return (
@@ -34,7 +31,7 @@ export function AadhaarManualInput({ mode, disabled, busy, decode }) {
           }
         }}
         placeholder="Ready. Scan the QR with the USB scanner, or paste the QR text and press Enter."
-        readOnly={locked}
+        readOnly={disabled}
         aria-busy={busy}
         spellCheck={false}
         data-usb-box=""
@@ -48,7 +45,7 @@ export function AadhaarManualInput({ mode, disabled, busy, decode }) {
           size="sm"
           type="button"
           onClick={submit}
-          disabled={locked || !filled}
+          disabled={disabled || !filled}
           data-testid="aadhaar-scan-button"
         >
           {busy ? "Decoding…" : "Decode"}

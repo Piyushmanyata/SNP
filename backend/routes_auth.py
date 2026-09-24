@@ -19,10 +19,13 @@ from security import (
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 MAX_ATTEMPTS = 5
+SOURCE_MAX_ATTEMPTS = 50
 LOCK_MINUTES = 15
+TRUSTED_SOURCE_HOURS = 12
+UNKNOWN_NAME_HASH = hash_pin("unknown-name")
 
 
-async def _claim_pin_attempt(db, identifier: str) -> None:
+async def _claim_pin_attempt(db, identifier: str, limit: int = MAX_ATTEMPTS) -> dict:
     now = now_utc()
     attempt = await db.login_attempts.find_one({"identifier": identifier})
     if not attempt:
@@ -38,11 +41,12 @@ async def _claim_pin_attempt(db, identifier: str) -> None:
             {"$set": {"count": 0, "locked_until": now + timedelta(minutes=LOCK_MINUTES)}},
         )
     claimed = await db.login_attempts.find_one_and_update(
-        {"identifier": identifier, "count": {"$lt": MAX_ATTEMPTS}}, {"$inc": {"count": 1}},
+        {"identifier": identifier, "count": {"$lt": limit}}, {"$inc": {"count": 1}},
         return_document=True,
     )
     if not claimed:
         raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+    return claimed
 
 
 def _cookie_samesite() -> Literal["lax", "strict", "none"]:
@@ -68,41 +72,50 @@ async def login(body: LoginBody, request: Request, response: Response) -> Dict[s
     db = get_db()
     name_norm = normalize_name(body.name)
     identifier = f"name:{name_norm}"
+    source = request.client.host if request.client else "unknown"
 
-    await _claim_pin_attempt(db, identifier)
+    if not await db.login_sources.find_one({"_id": source, "trusted_until": {"$gt": now_utc()}}):
+        await _claim_pin_attempt(db, f"source:{source}", SOURCE_MAX_ATTEMPTS)
+    claimed = await _claim_pin_attempt(db, identifier)
 
     user = await db.users.find_one({"name_normalized": name_norm})
-    user_hash = (user.get("pin_hash") or user.get("password_hash")) if user else None
-    if not user or not user_hash or not await asyncio.to_thread(verify_pin, body.pin, user_hash):
+    user_hash = user.get("pin_hash") if user else None
+    matched = await asyncio.to_thread(verify_pin, body.pin, user_hash or UNKNOWN_NAME_HASH)
+    if not user or not user_hash or not matched:
+        if user and claimed["count"] >= MAX_ATTEMPTS:
+            await db.login_lockouts.insert_one({"name_normalized": name_norm, "source": source, "at": now_utc()})
         raise HTTPException(status_code=401, detail="Invalid name or PIN")
 
     if user.get("disabled_at"):
         raise HTTPException(status_code=403, detail="Account disabled")
 
     await db.login_attempts.delete_one({"identifier": identifier})
+    await db.login_sources.update_one(
+        {"_id": source}, {"$set": {"trusted_until": now_utc() + timedelta(hours=TRUSTED_SOURCE_HOURS)}}, upsert=True,
+    )
     uid = str(user["_id"])
     access = create_access_token(uid, user.get("name") or name_norm, user.get("role", ""), user.get("session_version", 0))
     set_auth_cookie(response, access)
-    return {"user": serialize_user(user), "access_token": access}
+    return {"user": serialize_user(user)}
 
 
 @router.post("/change-pin")
 async def change_pin(body: ChangePinBody, response: Response, user: dict = Depends(get_current_user)) -> Dict[str, Any]:
-    err = validate_pin_policy(body.new_pin)
+    if body.new_pin == body.current_pin:
+        raise HTTPException(status_code=400, detail={"code": "PIN_UNCHANGED", "message": "Choose a new PIN, not the current one."})
+    err = validate_pin_policy(body.new_pin, user["role"])
     if err:
-        raise HTTPException(status_code=400, detail=err)
+        raise HTTPException(status_code=400, detail={"code": "PIN_POLICY", "message": err})
     db = get_db()
     identifier = f"change-pin:{user['_id']}"
     await _claim_pin_attempt(db, identifier)
-    current_hash = user.get("pin_hash") or user.get("password_hash")
+    current_hash = user.get("pin_hash")
     if not current_hash or not await asyncio.to_thread(verify_pin, body.current_pin, current_hash):
         raise HTTPException(status_code=400, detail="Current PIN is incorrect")
     new_hash = await asyncio.to_thread(hash_pin, body.new_pin)
-    hash_field = "pin_hash" if user.get("pin_hash") else "password_hash"
     updated = await db.users.find_one_and_update(
-        {"_id": user["_id"], hash_field: current_hash},
-        {"$set": {"pin_hash": new_hash, "must_change_pin": False}, "$unset": {"password_hash": ""},
-         "$inc": {"session_version": 1}},
+        {"_id": user["_id"], "pin_hash": current_hash},
+        {"$set": {"pin_hash": new_hash, "must_change_pin": False}, "$inc": {"session_version": 1}},
         return_document=True,
     )
     if not updated:
@@ -111,7 +124,7 @@ async def change_pin(body: ChangePinBody, response: Response, user: dict = Depen
     await db.login_attempts.delete_one({"identifier": identifier})
     access = create_access_token(str(user["_id"]), user.get("name", ""), user["role"], user["session_version"])
     set_auth_cookie(response, access)
-    return {"ok": True, "user": serialize_user(user), "access_token": access}
+    return {"ok": True, "user": serialize_user(user)}
 
 
 @router.post("/logout")
@@ -119,7 +132,6 @@ async def logout(response: Response, user: dict = Depends(get_current_user)) -> 
     secure = os.environ.get("COOKIE_SECURE", "true").lower() == "true"
     samesite = _cookie_samesite()
     response.delete_cookie("access_token", path="/", secure=secure, httponly=True, samesite=samesite)
-    response.delete_cookie("refresh_token", path="/", secure=secure, httponly=True, samesite=samesite)
     return {"ok": True}
 
 

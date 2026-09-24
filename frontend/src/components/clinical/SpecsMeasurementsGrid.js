@@ -1,6 +1,15 @@
 import React from "react";
 import { Input } from "../ui";
 
+const SIGNED = new Set(["r_sph", "r_cyl", "l_sph", "l_cyl"]);
+
+function flipSign(value) {
+  const text = String(value || "").trim();
+  if (text.startsWith("-")) return `+${text.slice(1)}`;
+  if (text.startsWith("+")) return `-${text.slice(1)}`;
+  return `-${text}`;
+}
+
 const RIGHT = [
   ["r_sph", "Right SPH"],
   ["r_cyl", "Right CYL"],
@@ -22,17 +31,31 @@ function EyeGroup({ title, fields, specsMeasurements, onChange, disabled, firstF
             <label className="text-xs font-mono text-slate-700" htmlFor={`specs-${k}`}>
               {label}
             </label>
-            <Input
-              id={`specs-${k}`}
-              ref={i === 0 ? firstFieldRef : undefined}
-              className="text-center px-1"
-              value={specsMeasurements?.[k] || ""}
-              disabled={disabled}
-              inputMode="decimal"
-              autoComplete="off"
-              onChange={(e) => onChange?.({ ...specsMeasurements, [k]: e.target.value })}
-              data-testid={`specs-${k}`}
-            />
+            <div className="flex gap-1">
+              <Input
+                id={`specs-${k}`}
+                ref={i === 0 ? firstFieldRef : undefined}
+                className="text-center px-1"
+                value={specsMeasurements?.[k] || ""}
+                disabled={disabled}
+                inputMode={SIGNED.has(k) ? "text" : "numeric"}
+                autoComplete="off"
+                onChange={(e) => onChange?.({ ...specsMeasurements, [k]: e.target.value })}
+                data-testid={`specs-${k}`}
+              />
+              {SIGNED.has(k) && (
+                <button
+                  type="button"
+                  disabled={disabled}
+                  aria-label={`Change the sign of ${label}`}
+                  className="min-h-[44px] min-w-[44px] rounded-xl border border-slate-300 font-mono font-bold text-slate-900 disabled:opacity-50"
+                  onClick={() => onChange?.({ ...specsMeasurements, [k]: flipSign(specsMeasurements?.[k]) })}
+                  data-testid={`specs-${k}-sign`}
+                >
+                  ±
+                </button>
+              )}
+            </div>
           </div>
         ))}
       </div>

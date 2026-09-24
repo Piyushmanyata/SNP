@@ -79,7 +79,7 @@ def _medicine_oid(raw: Any) -> ObjectId:
         })
 
 
-async def resolve_medicines(db, ids: List[Any]) -> List[Dict[str, Any]]:
+async def resolve_medicines(db, ids: List[Any], *, active_only: bool) -> List[Dict[str, Any]]:
     """Snapshot catalogue names onto the prescription so later catalogue edits cannot rewrite it."""
     ordered: List[str] = []
     for raw in ids or []:
@@ -88,9 +88,10 @@ async def resolve_medicines(db, ids: List[Any]) -> List[Dict[str, Any]]:
             ordered.append(key)
     if not ordered:
         return []
-    rows = await db.medicines.find(
-        {"_id": {"$in": [_medicine_oid(k) for k in ordered]}}
-    ).to_list(len(ordered))
+    query: Dict[str, Any] = {"_id": {"$in": [_medicine_oid(k) for k in ordered]}}
+    if active_only:
+        query["active"] = {"$ne": False}
+    rows = await db.medicines.find(query).to_list(len(ordered))
     names = {str(row["_id"]): row["name"] for row in rows}
     if set(names) != set(ordered):
         raise HTTPException(status_code=400, detail={
@@ -100,11 +101,14 @@ async def resolve_medicines(db, ids: List[Any]) -> List[Dict[str, Any]]:
     return [{"medicine_id": key, "name": names[key]} for key in ordered]
 
 
-async def stocked_power(db, raw: Any) -> Any:
+async def stocked_power(db, raw: Any, *, active_only: bool) -> Any:
     if raw is None:
         return None
     value = parse_power(raw)
-    if not await db.fixed_powers.find_one({"value": value}):
+    query: Dict[str, Any] = {"value": value}
+    if active_only:
+        query["active"] = {"$ne": False}
+    if not await db.fixed_powers.find_one(query):
         raise HTTPException(status_code=400, detail={
             "code": "unknown_power",
             "message": f"{format_power(value)} is not one of the camp's fixed powers.",

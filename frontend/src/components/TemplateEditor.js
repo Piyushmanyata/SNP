@@ -2,6 +2,7 @@ import React, { useEffect, useState, useCallback, useMemo, useRef } from "react"
 import api, { formatApiError } from "../lib/api";
 import { Button, Card, Alert } from "./ui";
 import { v4 } from "../lib/uuid";
+import { forgetLogos } from "../lib/logoCache";
 import { Save } from "lucide-react";
 import { swapItems, validateLogoFile, buildSampleRx } from "./template/templateHelpers";
 import { TemplateLogosEditor } from "./template/TemplateLogosEditor";
@@ -80,6 +81,7 @@ export default function TemplateEditor() {
         logos: logos.map((l, i) => ({ ...l, order: i })),
       });
       setLogos(data.logos);
+      forgetLogos(campId);
       setMsg("Sponsor logos saved. The change is live.");
     } catch (e) {
       setErr(formatApiError(e));

@@ -47,7 +47,7 @@ const PAYLOAD = {
   quiet_count: 1,
   sms_failures: 1,
   next_ot: { day_date: "2026-09-02", venue: "OT Hall", seats_left: 7 },
-  next_specs: { day_date: "2026-09-05", end_date: "2026-09-12", venue: "Optical", start_time: "10:00", end_time: "17:00" },
+  next_specs: { day_date: "2026-09-05", end_date: "2026-09-12", venue: "Optical" },
 };
 
 let container = null;
@@ -107,6 +107,28 @@ describe("Camp-day board", () => {
     expect(table.querySelector("caption")).not.toBeNull();
     expect(table.querySelector("th[scope='col']")).not.toBeNull();
     expect(container.querySelector('[data-testid="board-sms-paused"]')).toBeNull();
+  });
+
+  test("failing backups show one red banner with no patient data", async () => {
+    api.get.mockResolvedValue({ data: { ...PAYLOAD, backups_failing: true } });
+    await act(async () => { root.render(<MemoryRouter><Board /></MemoryRouter>); });
+    const banners = container.querySelectorAll('[data-testid="board-backups-failing"]');
+    expect(banners).toHaveLength(1);
+    expect(banners[0].textContent).toBe("Backups failing — tell the admin");
+    expect(banners[0].querySelector('[role="alert"]')).not.toBeNull();
+  });
+
+  test("the backups banner also shows when there is no active camp", async () => {
+    api.get.mockResolvedValue({ data: { as_of: PAYLOAD.as_of, state: "no_camp", backups_failing: true } });
+    await act(async () => { root.render(<MemoryRouter><Board /></MemoryRouter>); });
+    expect(container.querySelector('[data-testid="board-no-camp"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="board-backups-failing"]')).not.toBeNull();
+  });
+
+  test("healthy backups show no banner", async () => {
+    api.get.mockResolvedValue({ data: { ...PAYLOAD, backups_failing: false } });
+    await act(async () => { root.render(<MemoryRouter><Board /></MemoryRouter>); });
+    expect(container.querySelector('[data-testid="board-backups-failing"]')).toBeNull();
   });
 
   test("flags a paused SMS type and counts messages held back", async () => {

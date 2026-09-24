@@ -57,6 +57,20 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
+describe("Login PIN", () => {
+  test("accepts a 6-digit PIN for admins and team leads", async () => {
+    await act(async () => { root.render(<MemoryRouter><Login /></MemoryRouter>); });
+    const input = container.querySelector('[data-testid="login-pin-input"]');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    act(() => {
+      setter.call(input, "8642001");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(input.value).toBe("864200");
+    expect(input.maxLength).toBe(6);
+  });
+});
+
 describe("Login page occupancy", () => {
   test("does not overlap occupancy requests while a slow response is pending", async () => {
     let resolve;
@@ -65,7 +79,7 @@ describe("Login page occupancy", () => {
     await act(async () => { jest.advanceTimersByTime(15000); });
     expect(api.get).toHaveBeenCalledTimes(1);
     await act(async () => { resolve({ data: { camp: null } }); });
-    await act(async () => { jest.advanceTimersByTime(5000); });
+    await act(async () => { jest.advanceTimersByTime(15000); });
     expect(api.get).toHaveBeenCalledTimes(2);
   });
 
@@ -110,7 +124,7 @@ describe("Login page occupancy", () => {
     expect(container.textContent).not.toContain("Aadhaar-based registration, prescription printing");
   });
 
-  test("refreshes occupancy on a short poll", async () => {
+  test("refreshes occupancy every 30 seconds", async () => {
     await act(async () => {
       root.render(
         <MemoryRouter>
@@ -120,9 +134,9 @@ describe("Login page occupancy", () => {
     });
     expect(api.get).toHaveBeenCalledTimes(1);
 
-    await act(async () => {
-      jest.advanceTimersByTime(5000);
-    });
-    expect(api.get.mock.calls.filter((c) => c[0] === "/camps/active/public").length).toBeGreaterThanOrEqual(2);
+    await act(async () => { jest.advanceTimersByTime(29999); });
+    expect(api.get).toHaveBeenCalledTimes(1);
+    await act(async () => { jest.advanceTimersByTime(1); });
+    expect(api.get.mock.calls.filter((c) => c[0] === "/camps/active/public")).toHaveLength(2);
   });
 });

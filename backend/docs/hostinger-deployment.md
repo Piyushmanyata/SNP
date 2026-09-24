@@ -77,7 +77,7 @@ The pre-deployment database archive is `/opt/snp/backup-export/pre-audit-1385476
 
 No data migration was required. Startup ran the existing index initializer. Before/after counts and index-name sets were identical across all 18 collections, preserving two patients, one person, one camp and two users. No database reset or volume removal occurred. The prior images retain `rollback-13854767e93b1f95bda958680ef27aff387bd36e` tags. HTTPS homepage returned 200 and `/api/health` returned `{"status":"ok"}`; the deployed clinical module hash matches the release source. The current-release symlink points to the new release.
 
-See `adr-2026-09-ci-reliability.md`, `clinical-audit.md` and `production-registration-security.md` for fixes, verification boundaries and remaining reconciliation requirements.
+See `adr-2026-09-ci-reliability.md`, `clinical-audit.md` and `production-registration-security.md` for fixes and verification boundaries. Clinical writes are transactions (ADR 0065) and need no reconciliation.
 
 ## Hospital outcomes and Clinical find release
 
@@ -292,3 +292,11 @@ Checks against the live host:
 - Responses carry `X-Request-ID`, and the backend logs one JSON line per request with the route template.
 - The API user connects to replica set `rs0`, lists only `snp_camps`, and is refused the full database list. The key file is `-r-------- mongodb`.
 - The backup container wrote its first archive as `snp_backup`.
+
+## Staff sign-in (#50 S4)
+
+[ADR 0025](../../docs/adr/0025-name-and-pin-auth-with-team-lead-delegation.md), as amended, makes Admin and Team Lead PINs 6 digits and removes the shared default PIN. Before deploying:
+
+1. Replace `ADMIN_BOOTSTRAP_PIN` in `/opt/snp/.env.production` with 6 digits that are not one digit repeated or a straight run such as `123456`, and update `/opt/snp/initial-admin.txt` and its private copy. The existing `admin` account keeps its PIN; the new value applies when the database is next wiped. A 4-digit value stops the backend at startup on an empty database.
+2. `up -d --build --wait`.
+3. Existing Admins and Team Leads keep signing in with 4 digits until they next change their PIN, which then needs 6.

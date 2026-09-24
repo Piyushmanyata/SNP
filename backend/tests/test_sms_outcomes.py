@@ -1,35 +1,26 @@
 import io
 import json
-import os
-import sys
 from contextlib import nullcontext
 from datetime import datetime, timedelta
-from pathlib import Path
 from types import SimpleNamespace
-
-backend_dir = Path(__file__).resolve().parents[1]
-if str(backend_dir) not in sys.path:
-    sys.path.insert(0, str(backend_dir))
-
-os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
-os.environ.setdefault("DB_NAME", "snp_test")
-
-import asyncio
 
 import pytest
 from bson import ObjectId
+from pymongo.asynchronous.collection import AsyncCollection
 
 import msg91
 import reminder_worker
 import routes_reminders
-from test_adversarial_challenger import setup_mock_db
+from seed import TODAY, TOMORROW, patient_doc, recorder, seed_camp
 from test_reminder_worker import IST, Clock
 from test_reminders import (
     HOUSEHOLD,
-    TOMORROW,
-    _calls,
-    _client,
+    TOMORROW_SHOWN,
+    _age_ledger,
+    _ledger,
+    _numbered_camp,
     _post,
+    _run,
     _seed_camp_household,
 )
 
@@ -71,107 +62,123 @@ def _provider(monkeypatch, body, requests=None, *, status=200, fail_connect=None
     monkeypatch.setattr(msg91.http.client, "HTTPSConnection", _Connection)
 
 
+async def _later(database):
+    await _age_ledger(database, routes_reminders.sms.RETRY_AFTER + timedelta(minutes=1))
+
+
 class TestProviderAcceptance:
     def test_a_provider_refusal_is_recorded_and_never_repeated(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
-        client = _client(monkeypatch, mock_db)
         requests = []
         _provider(monkeypatch, {"type": "error", "message": "template not approved"}, requests, status=400)
 
-        body = _post(client).json()
-        mock_db.reminder_ledger.docs[0]["created_at"] -= routes_reminders.sms.RETRY_AFTER * 2
-        again = _post(client).json()
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=1)
 
-        assert (body["sent"], body["failed"], body["ok"]) == (0, 0, True)
-        assert again["sent"] == 0
-        assert len(requests) == 1
-        row = mock_db.reminder_ledger.docs[0]
-        assert row["status"] == "rejected"
-        assert row["error"] == "template not approved"
-        assert row["provider_id"] is None
+            first = (await _post(client)).json()
+            await _age_ledger(database, routes_reminders.sms.RETRY_AFTER * 2)
+            again = (await _post(client)).json()
+
+            assert (first["sent"], first["failed"], first["ok"]) == (0, 0, True)
+            assert again["sent"] == 0
+            assert len(requests) == 1
+            [row] = await _ledger(database)
+            assert row["status"] == "rejected"
+            assert row["error"] == "template not approved"
+            assert row["provider_id"] is None
+
+        _run(monkeypatch, body)
 
     def test_the_request_carries_the_flow_and_every_variable(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
-        client = _client(monkeypatch, mock_db)
         requests = []
         _provider(monkeypatch, {"type": "success", "message": "rq-1"}, requests)
 
-        _post(client)
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=1)
 
-        [sent] = requests
-        assert (sent["host"], sent["path"]) == ("control.msg91.com", "/api/v5/flow")
-        assert sent["headers"]["authkey"] == "auth"
-        assert sent["body"] == {
-            "template_id": "tmpl-camp", "short_url": "0",
-            "recipients": [{"mobiles": f"91{HOUSEHOLD}", "date": "02-09-2026", "camp_no": "162",
-                            "venue": "Hall A", "reg_no": "1000"}],
-        }
+            await _post(client)
+
+            [sent] = requests
+            assert (sent["host"], sent["path"]) == ("control.msg91.com", "/api/v5/flow")
+            assert sent["headers"]["authkey"] == "auth"
+            assert sent["body"] == {
+                "template_id": "tmpl-camp", "short_url": "0",
+                "recipients": [{"mobiles": f"91{HOUSEHOLD}", "date": TOMORROW_SHOWN, "camp_no": "162",
+                                "venue": "Hall A", "reg_no": "1000"}],
+            }
+
+        _run(monkeypatch, body)
 
     def test_a_connection_that_never_opened_is_retried_later(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
-        client = _client(monkeypatch, mock_db)
         _provider(monkeypatch, {"type": "success", "message": "rq-2"}, fail_connect=ConnectionRefusedError("refused"))
 
-        first = _post(client).json()
-        assert (first["sent"], first["failed"], first["ok"]) == (0, 1, False)
-        assert mock_db.reminder_ledger.docs[0]["status"] == "failed"
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=1)
 
-        _provider(monkeypatch, {"type": "success", "message": "rq-2"})
-        _later(mock_db)
-        second = _post(client).json()
+            first = (await _post(client)).json()
+            assert (first["sent"], first["failed"], first["ok"]) == (0, 1, False)
+            assert (await _ledger(database))[0]["status"] == "failed"
 
-        assert (second["sent"], second["failed"], second["ok"]) == (1, 0, True)
-        assert mock_db.reminder_ledger.docs[0]["provider_id"] == "rq-2"
+            _provider(monkeypatch, {"type": "success", "message": "rq-2"})
+            await _later(database)
+            second = (await _post(client)).json()
+
+            assert (second["sent"], second["failed"], second["ok"]) == (1, 0, True)
+            assert (await _ledger(database))[0]["provider_id"] == "rq-2"
+
+        _run(monkeypatch, body)
 
     @pytest.mark.parametrize("failure", [TimeoutError("read timed out"), ConnectionResetError("reset")])
     def test_a_reply_lost_after_sending_is_uncertain_and_never_resent(self, monkeypatch, failure):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
-        client = _client(monkeypatch, mock_db)
         requests = []
         _provider(monkeypatch, {"type": "success", "message": "rq-3"}, requests, fail_reply=failure)
 
-        first = _post(client).json()
-        _later(mock_db)
-        second = _post(client).json()
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=1)
 
-        assert (first["sent"], first["failed"], first["ok"]) == (1, 0, True)
-        assert second["sent"] == 0
-        assert len(requests) == 1
-        assert mock_db.reminder_ledger.docs[0]["status"] == "uncertain"
+            first = (await _post(client)).json()
+            await _later(database)
+            second = (await _post(client)).json()
+
+            assert (first["sent"], first["failed"], first["ok"]) == (1, 0, True)
+            assert second["sent"] == 0
+            assert len(requests) == 1
+            assert (await _ledger(database))[0]["status"] == "uncertain"
+
+        _run(monkeypatch, body)
 
     def test_a_server_error_after_sending_is_uncertain(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
-        client = _client(monkeypatch, mock_db)
         _provider(monkeypatch, b"<html>bad gateway</html>", status=502)
 
-        _post(client)
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=1)
 
-        row = mock_db.reminder_ledger.docs[0]
-        assert row["status"] == "uncertain"
-        assert "502" in row["error"]
+            await _post(client)
+
+            [row] = await _ledger(database)
+            assert row["status"] == "uncertain"
+            assert "502" in row["error"]
+
+        _run(monkeypatch, body)
 
     def test_success_body_records_the_request_id(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
-        client = _client(monkeypatch, mock_db)
         requests = []
         _provider(monkeypatch, {"type": "success", "message": "3a4b5c6d7e"}, requests)
 
-        body = _post(client).json()
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=1)
 
-        assert body == {"ok": True, "sent": 1, "failed": 0, "complete": True, "waiting": False,
-                        "event_date": TOMORROW, "send_date": "2026-09-01"}
-        row = mock_db.reminder_ledger.docs[0]
-        assert row["status"] == "sent"
-        assert row["provider_id"] == "3a4b5c6d7e"
-        assert len(requests) == 1
+            result = (await _post(client)).json()
 
-    @pytest.mark.parametrize("body", [
+            assert result == {"ok": True, "sent": 1, "failed": 0, "complete": True, "waiting": False,
+                              "event_date": TOMORROW, "send_date": TODAY}
+            [row] = await _ledger(database)
+            assert row["status"] == "sent"
+            assert row["provider_id"] == "3a4b5c6d7e"
+            assert len(requests) == 1
+
+        _run(monkeypatch, body)
+
+    @pytest.mark.parametrize("reply", [
         {},
         {"type": "success"},
         {"type": "success", "message": ""},
@@ -180,179 +187,174 @@ class TestProviderAcceptance:
         ["success"],
         b"not json at all",
     ])
-    def test_an_unreadable_reply_is_uncertain_and_never_resent(self, monkeypatch, body):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
-        client = _client(monkeypatch, mock_db)
+    def test_an_unreadable_reply_is_uncertain_and_never_resent(self, monkeypatch, reply):
         requests = []
-        _provider(monkeypatch, body, requests)
+        _provider(monkeypatch, reply, requests)
 
-        result = _post(client).json()
-        _later(mock_db)
-        _post(client)
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=1)
 
-        assert (result["failed"], result["ok"]) == (0, True)
-        assert len(requests) == 1
-        row = mock_db.reminder_ledger.docs[0]
-        assert row["status"] == "uncertain"
-        assert row["provider_id"] is None
+            result = (await _post(client)).json()
+            await _later(database)
+            await _post(client)
+
+            assert (result["failed"], result["ok"]) == (0, True)
+            assert len(requests) == 1
+            [row] = await _ledger(database)
+            assert row["status"] == "uncertain"
+            assert row["provider_id"] is None
+
+        _run(monkeypatch, body)
 
     def test_request_id_field_is_accepted_when_the_type_is_success(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
-        client = _client(monkeypatch, mock_db)
         _provider(monkeypatch, {"type": "success", "request_id": "rq-77"})
 
-        assert _post(client).json()["sent"] == 1
-        assert mock_db.reminder_ledger.docs[0]["provider_id"] == "rq-77"
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=1)
+
+            assert (await _post(client)).json()["sent"] == 1
+            assert (await _ledger(database))[0]["provider_id"] == "rq-77"
+
+        _run(monkeypatch, body)
 
     def test_an_uncertain_acceptance_is_never_resent(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
-        client = _client(monkeypatch, mock_db)
         requests = []
         _provider(monkeypatch, {"type": "success", "message": "req-1"}, requests)
-        ledger = mock_db.reminder_ledger
-        original = ledger.update_one
+        update_one = AsyncCollection.update_one
 
-        async def unreachable(query, update, upsert=False):
-            raise RuntimeError("ledger unreachable")
+        async def unreachable(self, *args, **kwargs):
+            if self.name == "reminder_ledger":
+                raise RuntimeError("ledger unreachable")
+            return await update_one(self, *args, **kwargs)
 
-        monkeypatch.setattr(ledger, "update_one", unreachable)
-        first = _post(client).json()
-        monkeypatch.setattr(ledger, "update_one", original)
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=1)
+            with monkeypatch.context() as broken:
+                broken.setattr(AsyncCollection, "update_one", unreachable)
+                first = (await _post(client)).json()
 
-        assert first["sent"] == 1
-        assert len(requests) == 1
-        assert ledger.docs[0]["status"] == "pending"
+            assert first["sent"] == 1
+            assert len(requests) == 1
+            assert (await _ledger(database))[0]["status"] == "pending"
 
-        second = _post(client).json()
+            second = (await _post(client)).json()
 
-        assert second["sent"] == 0
-        assert len(requests) == 1
-        assert ledger.docs[0]["status"] == "pending"
-        assert len(ledger.docs) == 1
+            assert second["sent"] == 0
+            assert len(requests) == 1
+            [row] = await _ledger(database)
+            assert row["status"] == "pending"
+
+        _run(monkeypatch, body)
 
 
 class TestBoundedDispatch:
     def test_repeated_cron_runs_are_idempotent_across_page_boundaries(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=9))
         monkeypatch.setattr(routes_reminders, "PAGE_SIZE", 2)
-        captured = _calls(monkeypatch)
-        client = _client(monkeypatch, mock_db)
+        captured = recorder(monkeypatch)
 
-        assert _post(client).json()["sent"] == 9
-        assert _post(client).json()["sent"] == 0
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=9)
 
-        assert sorted(c["reg_no"] for c in captured) == list(range(1000, 1009))
-        assert len(mock_db.reminder_ledger.docs) == 9
+            assert (await _post(client)).json()["sent"] == 9
+            assert (await _post(client)).json()["sent"] == 0
+
+            assert sorted(c["reg_no"] for c in captured) == list(range(1000, 1009))
+            assert await database.reminder_ledger.count_documents({}) == 9
+
+        _run(monkeypatch, body)
 
     def test_a_run_is_bounded_and_reports_its_own_incompleteness(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=5))
         monkeypatch.setattr(routes_reminders, "PAGE_SIZE", 2)
         monkeypatch.setattr(routes_reminders, "SEND_LIMIT", 2)
-        captured = _calls(monkeypatch)
-        client = _client(monkeypatch, mock_db)
+        captured = recorder(monkeypatch)
 
-        runs = [_post(client).json()]
-        while not runs[-1]["complete"]:
-            runs.append(_post(client).json())
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=5)
 
-        assert [r["sent"] for r in runs] == [2, 2, 1]
-        assert [r["complete"] for r in runs] == [False, False, True]
-        assert len(captured) == 5
-        assert len(mock_db.reminder_ledger.docs) == 5
+            runs = [(await _post(client)).json()]
+            while not runs[-1]["complete"]:
+                runs.append((await _post(client)).json())
+
+            assert [r["sent"] for r in runs] == [2, 2, 1]
+            assert [r["complete"] for r in runs] == [False, False, True]
+            assert len(captured) == 5
+            assert await database.reminder_ledger.count_documents({}) == 5
+
+        _run(monkeypatch, body)
 
     def test_a_recipient_beyond_position_ten_thousand_is_processed(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        camp_id = ObjectId()
-        day_id = ObjectId()
-        mock_db.camps.docs.append({
-            "_id": camp_id, "name": "Big Camp", "venue": "Hall A", "is_active": True, "camp_number": 162,
-        })
-        mock_db.camp_days.docs.append({"_id": day_id, "camp_id": camp_id, "day_date": TOMORROW})
-        for i in range(10_050):
-            mock_db.patients.docs.append({
-                "_id": ObjectId(), "camp_id": camp_id, "camp_day_id": day_id,
-                "reg_no": i, "phone": None, "phone_normalized": None,
-            })
-        last = mock_db.patients.docs[-1]
-        last["phone"] = last["phone_normalized"] = HOUSEHOLD
-        captured = _calls(monkeypatch)
-        client = _client(monkeypatch, mock_db)
+        captured = recorder(monkeypatch)
 
-        body = _post(client).json()
+        async def body(database, client):
+            camp_id, (day_id,) = await seed_camp(database, days=(TOMORROW,), name="Big Camp", venue="Hall A")
+            patients = [
+                patient_doc(camp_id=camp_id, camp_day_id=day_id, reg_no=i, patient_qr=f"big-{i}",
+                            phone=None, phone_normalized=None)
+                for i in range(10_050)
+            ]
+            patients[-1]["phone"] = patients[-1]["phone_normalized"] = HOUSEHOLD
+            await database.patients.insert_many(patients)
 
-        assert body["sent"] == 1
-        assert body["complete"] is True
-        assert [c["reg_no"] for c in captured] == [10_049]
+            result = (await _post(client)).json()
+
+            assert result["sent"] == 1
+            assert result["complete"] is True
+            assert [c["reg_no"] for c in captured] == [10_049]
+
+        _run(monkeypatch, body)
 
     def test_the_send_budget_carries_across_message_types(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-
-        async def seed():
-            camp_id, _day_id, ids = await _seed_camp_household(mock_db, n_patients=2)
-            for pid in ids:
-                await mock_db.deferred_slips.insert_one({
-                    "patient_id": pid, "item_type": "ot", "active": True, "cancelled": False,
-                    "collection_date": TOMORROW, "collection_venue": "OT Theatre", "version": 1,
-                })
-
-        asyncio.run(seed())
         monkeypatch.setattr(routes_reminders, "SEND_LIMIT", 3)
-        captured = _calls(monkeypatch)
-        client = _client(monkeypatch, mock_db)
+        captured = recorder(monkeypatch)
 
-        first = _post(client).json()
-        assert first == {"ok": True, "sent": 3, "failed": 0, "complete": False, "waiting": False,
-                         "event_date": TOMORROW, "send_date": "2026-09-01"}
-        assert [c["type"] for c in captured] == ["camp", "camp", "ot"]
+        async def body(database, client):
+            _camp_id, _day_id, ids = await _seed_camp_household(database, n_patients=2)
+            await database.deferred_slips.insert_many([{
+                "patient_id": pid, "item_type": "ot", "active": True, "cancelled": False,
+                "collection_date": TOMORROW, "collection_venue": "OT Theatre", "version": 1,
+            } for pid in ids])
 
-        second = _post(client).json()
-        assert second["sent"] == 1
-        assert second["complete"] is True
-        assert [c["type"] for c in captured] == ["camp", "camp", "ot", "ot"]
-        assert len(mock_db.reminder_ledger.docs) == 4
+            first = (await _post(client)).json()
+            assert first == {"ok": True, "sent": 3, "failed": 0, "complete": False, "waiting": False,
+                             "event_date": TOMORROW, "send_date": TODAY}
+            assert [c["type"] for c in captured] == ["camp", "camp", "ot"]
+
+            second = (await _post(client)).json()
+            assert second["sent"] == 1
+            assert second["complete"] is True
+            assert [c["type"] for c in captured] == ["camp", "camp", "ot", "ot"]
+            assert await database.reminder_ledger.count_documents({}) == 4
+
+        _run(monkeypatch, body)
 
     def test_failed_sends_consume_the_budget_and_the_next_run_reaches_later_recipients(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=4))
         monkeypatch.setattr(routes_reminders, "SEND_LIMIT", 2)
-        calls = []
+        calls = _flaky_provider(monkeypatch, failures=2)
 
-        def fake_send(message_type, mobile, variables):
-            calls.append(variables["reg_no"])
-            if len(calls) <= 2:
-                raise msg91.Unsent("carrier down")
-            return f"id-{len(calls)}"
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=4)
 
-        monkeypatch.setattr(msg91, "send_dlt_sms", fake_send)
-        monkeypatch.setattr(routes_reminders.sms.msg91, "send_dlt_sms", fake_send)
-        monkeypatch.setattr(msg91, "configured", lambda: True)
-        monkeypatch.setattr(routes_reminders.msg91, "configured", lambda: True)
-        monkeypatch.setattr(routes_reminders.sms.msg91, "configured", lambda: True)
-        client = _client(monkeypatch, mock_db)
+            first = (await _post(client)).json()
+            second = (await _post(client)).json()
 
-        first = _post(client).json()
-        second = _post(client).json()
+            assert first["sent"] == 0
+            assert first["complete"] is False
+            assert second["sent"] == 2
+            assert second["complete"] is True
+            assert [c["reg_no"] for c in calls] == [1000, 1001, 1002, 1003]
 
-        assert first["sent"] == 0
-        assert first["complete"] is False
-        assert second["sent"] == 2
-        assert second["complete"] is True
-        assert calls == [1000, 1001, 1002, 1003]
+        _run(monkeypatch, body)
 
     def test_provider_unconfigured_stays_visibly_skipped(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=2))
-        client = _client(monkeypatch, mock_db, msg91_on=False)
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=2)
 
-        assert _post(client).json() == {
-            "ok": True, "sent": 0, "complete": True, "reason": "msg91_unconfigured",
-        }
-        assert mock_db.reminder_ledger.docs == []
+            assert (await _post(client)).json() == {
+                "ok": True, "sent": 0, "complete": True, "reason": "msg91_unconfigured",
+            }
+            assert await _ledger(database) == []
+
+        _run(monkeypatch, body, msg91_on=False)
 
 
 def _flaky_provider(monkeypatch, failures):
@@ -369,101 +371,87 @@ def _flaky_provider(monkeypatch, failures):
     return calls
 
 
-async def _numbered_camp(mock_db):
-    camp_id = ObjectId()
-    await mock_db.camps.insert_one({"_id": camp_id, "name": "C", "venue": "Hall A", "camp_number": 162})
-    return camp_id
-
-
-def _later(mock_db):
-    for row in mock_db.reminder_ledger.docs:
-        row["created_at"] -= routes_reminders.sms.RETRY_AFTER + timedelta(minutes=1)
-
-
 class TestFailedRemindersRetryOnALaterRun:
     def test_a_failure_is_retried_only_after_the_retry_interval(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
         calls = _flaky_provider(monkeypatch, failures=1)
-        client = _client(monkeypatch, mock_db)
 
-        first = _post(client).json()
-        assert (first["sent"], first["failed"], first["ok"]) == (0, 1, False)
-        assert _post(client).json()["sent"] == 0
-        assert len(calls) == 1
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=1)
 
-        _later(mock_db)
-        third = _post(client).json()
-        assert (third["sent"], third["failed"], third["ok"]) == (1, 0, True)
-        assert len(calls) == 2
+            first = (await _post(client)).json()
+            assert (first["sent"], first["failed"], first["ok"]) == (0, 1, False)
+            assert (await _post(client)).json()["sent"] == 0
+            assert len(calls) == 1
+
+            await _later(database)
+            third = (await _post(client)).json()
+            assert (third["sent"], third["failed"], third["ok"]) == (1, 0, True)
+            assert len(calls) == 2
+
+        _run(monkeypatch, body)
 
     def test_three_spaced_failures_are_abandoned_and_the_day_can_finish(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
-        asyncio.run(_seed_camp_household(mock_db, n_patients=1))
         calls = _flaky_provider(monkeypatch, failures=99)
-        client = _client(monkeypatch, mock_db)
 
-        results = []
-        for _ in range(4):
-            results.append(_post(client).json())
-            _later(mock_db)
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=1)
 
-        assert len(calls) == 3
-        assert mock_db.reminder_ledger.docs[0]["status"] == "abandoned"
-        assert [(r["failed"], r["ok"]) for r in results] == [(1, False)] * 3 + [(0, True)]
+            results = []
+            for _ in range(4):
+                results.append((await _post(client)).json())
+                await _later(database)
+
+            assert len(calls) == 3
+            assert (await _ledger(database))[0]["status"] == "abandoned"
+            assert [(r["failed"], r["ok"]) for r in results] == [(1, False)] * 3 + [(0, True)]
+
+        _run(monkeypatch, body)
 
     def test_a_retry_skips_a_surgery_cancelled_after_the_failure(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
+        calls = _flaky_provider(monkeypatch, failures=1)
 
-        async def seed():
+        async def body(database, client):
             pid = ObjectId()
-            await mock_db.patients.insert_one({
-                "_id": pid, "camp_id": await _numbered_camp(mock_db), "camp_day_id": ObjectId(), "reg_no": 7,
-                "phone": HOUSEHOLD, "phone_normalized": HOUSEHOLD,
-            })
-            await mock_db.deferred_slips.insert_one({
+            await database.patients.insert_one(patient_doc(
+                _id=pid, camp_id=await _numbered_camp(database), camp_day_id=ObjectId(), reg_no=7,
+                phone=HOUSEHOLD, phone_normalized=HOUSEHOLD,
+            ))
+            await database.deferred_slips.insert_one({
                 "patient_id": pid, "item_type": "ot", "active": True, "cancelled": False,
                 "collection_date": TOMORROW, "collection_venue": "OT Theatre", "version": 1,
             })
+            await _post(client)
+            await database.deferred_slips.update_one({"patient_id": pid}, {"$set": {"active": False, "cancelled": True}})
+            await _later(database)
 
-        asyncio.run(seed())
-        calls = _flaky_provider(monkeypatch, failures=1)
-        client = _client(monkeypatch, mock_db)
-        _post(client)
-        slip = mock_db.deferred_slips.docs[0]
-        slip["active"], slip["cancelled"] = False, True
-        _later(mock_db)
+            await _post(client)
 
-        _post(client)
+            assert len(calls) == 1
 
-        assert len(calls) == 1
+        _run(monkeypatch, body)
 
     def test_a_specs_retry_keeps_its_collection_window(self, monkeypatch):
-        mock_db = setup_mock_db(monkeypatch)
+        calls = _flaky_provider(monkeypatch, failures=1)
 
-        async def seed():
+        async def body(database, client):
             pid = ObjectId()
-            await mock_db.patients.insert_one({
-                "_id": pid, "camp_id": await _numbered_camp(mock_db), "camp_day_id": ObjectId(), "reg_no": 42,
-                "phone": HOUSEHOLD, "phone_normalized": HOUSEHOLD,
-            })
-            await mock_db.deferred_slips.insert_one({
+            await database.patients.insert_one(patient_doc(
+                _id=pid, camp_id=await _numbered_camp(database), camp_day_id=ObjectId(), reg_no=42,
+                phone=HOUSEHOLD, phone_normalized=HOUSEHOLD,
+            ))
+            await database.deferred_slips.insert_one({
                 "patient_id": pid, "item_type": "specs_made", "active": True, "cancelled": False,
                 "collection_date": TOMORROW, "collection_venue": "Token Hall",
                 "collection_start_time": "10:00", "collection_end_time": "17:00", "version": 1,
             })
+            await _post(client)
+            await _later(database)
 
-        asyncio.run(seed())
-        calls = _flaky_provider(monkeypatch, failures=1)
-        client = _client(monkeypatch, mock_db)
-        _post(client)
-        _later(mock_db)
+            await _post(client)
 
-        _post(client)
+            assert [(c["date"], c["end_date"]) for c in calls] == [(TOMORROW_SHOWN, TOMORROW_SHOWN)] * 2
 
-        assert [(c["date"], c["end_date"]) for c in calls] == [
-            ("02-09-2026", "02-09-2026"),
-        ] * 2
+        _run(monkeypatch, body)
 
 
 class TestWorkerFollowsThrough:
@@ -478,10 +466,10 @@ class TestWorkerFollowsThrough:
                             SimpleNamespace(now=lambda tz: clock.current.astimezone(tz)))
 
         def post(request, timeout):
-            body = replies[len(attempts)]
+            reply = replies[len(attempts)]
             attempts.append(clock.current)
             clock.stopped = len(attempts) == len(replies)
-            return nullcontext(io.BytesIO(json.dumps(body).encode()))
+            return nullcontext(io.BytesIO(json.dumps(reply).encode()))
 
         monkeypatch.setattr(reminder_worker, "urlopen", post)
         reminder_worker.run_worker(WORKER_URL, "test-secret", clock)

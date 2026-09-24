@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, X, AlertTriangle, RefreshCw } from "lucide-react";
 
@@ -49,8 +49,19 @@ export function Field({ label, children, required, hint }) {
   );
 }
 
+Field.Group = function FieldGroup({ label, children, hint }) {
+  const id = useId();
+  return (
+    <div role="group" aria-labelledby={id}>
+      <span id={id} className="block text-xs font-mono uppercase tracking-widest text-slate-500 mb-1.5">{label}</span>
+      {children}
+      {hint && <span className="block text-xs text-slate-600 mt-1">{hint}</span>}
+    </div>
+  );
+};
+
 const inputCls =
-  "w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500";
+  "w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300 bg-white text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500";
 
 export const Input = React.forwardRef(function Input({ className = "", ...props }, ref) {
   return <input ref={ref} className={`${inputCls} ${className}`} {...props} />;
@@ -122,16 +133,23 @@ export function ErrorCard({ message, onRetry }) {
   );
 }
 
-export function Modal({ open, onClose, title, children, size = "md" }) {
+const FORM_CONTROL = 'input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled])';
+const FOCUSABLE = `button:not([disabled]), ${FORM_CONTROL}, a[href], [tabindex="0"]`;
+
+export function Modal({ open, onClose, title, children, size = "md", dirty = false }) {
   const dialogRef = useRef(null);
-  const focusable = 'button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex="0"]';
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
+  const close = useCallback(() => {
+    if (!dirtyRef.current || window.confirm("Discard changes?")) onClose?.();
+  }, [onClose]);
   useEffect(() => {
     if (!open) return undefined;
     const previousFocus = document.activeElement;
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     if (!dialogRef.current.contains(document.activeElement)) {
-      (dialogRef.current.querySelector(focusable) || dialogRef.current).focus();
+      (dialogRef.current.querySelector(FORM_CONTROL) || dialogRef.current.querySelector(FOCUSABLE) || dialogRef.current).focus();
     }
     return () => {
       document.body.style.overflow = prev;
@@ -141,9 +159,9 @@ export function Modal({ open, onClose, title, children, size = "md" }) {
   useEffect(() => {
     if (!open) return undefined;
     const onKeyDown = (e) => {
-      if (e.key === "Escape") onClose?.();
+      if (e.key === "Escape") close();
       if (e.key !== "Tab") return;
-      const elements = [...dialogRef.current.querySelectorAll(focusable)];
+      const elements = [...dialogRef.current.querySelectorAll(FOCUSABLE)];
       const first = elements[0] || dialogRef.current;
       const last = elements[elements.length - 1] || first;
       if (!elements.length || !dialogRef.current.contains(document.activeElement) || (e.shiftKey ? document.activeElement === first : document.activeElement === last)) {
@@ -153,12 +171,12 @@ export function Modal({ open, onClose, title, children, size = "md" }) {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [open, onClose]);
+  }, [open, close]);
   if (!open) return null;
   const widths = { sm: "max-w-md", md: "max-w-lg", lg: "max-w-2xl", xl: "max-w-4xl" };
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 overflow-y-auto">
-      <div role="presentation" className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={onClose} />
+      <div role="presentation" className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={dirty ? undefined : onClose} />
       <div
         ref={dialogRef}
         tabIndex={-1}
@@ -169,7 +187,7 @@ export function Modal({ open, onClose, title, children, size = "md" }) {
       >
         <div className="sticky top-0 bg-white flex items-center justify-between px-5 py-4 border-b border-slate-100 z-10">
           <h3 className="font-display font-bold text-lg text-slate-900">{title}</h3>
-          {onClose && <button type="button" onClick={onClose} aria-label="Close dialog" className="min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-500 hover:text-slate-700" data-testid="modal-close-button">
+          {onClose && <button type="button" onClick={close} aria-label="Close dialog" className="min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-500 hover:text-slate-700" data-testid="modal-close-button">
             <X className="w-5 h-5" />
           </button>}
         </div>
@@ -183,8 +201,8 @@ export function Modal({ open, onClose, title, children, size = "md" }) {
 export function Stat({ label, value, tone = "slate", testid }) {
   const tones = {
     slate: "text-slate-900",
-    emerald: "text-emerald-600",
-    amber: "text-amber-600",
+    emerald: "text-emerald-700",
+    amber: "text-amber-700",
   };
   return (
     <Card className="min-w-0 !p-3 sm:!p-5">

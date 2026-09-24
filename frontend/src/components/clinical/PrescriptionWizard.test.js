@@ -1,6 +1,7 @@
 import React, { act, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { PrescriptionWizard, stepComplete, visibleSteps } from "./PrescriptionWizard";
+import { FixedPowerPicker } from "./FixedPowerPicker";
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -322,5 +323,49 @@ describe("wizard rendering", () => {
     await next(4);
     expect(q("summary-medicines").textContent).toBe("Timolol");
     expect(q("summary-fixed-power").textContent).toBe("RE +2.00 · LE -1.50");
+  });
+});
+
+function groupLabel(inner) {
+  const group = inner.closest('[role="group"]');
+  return document.getElementById(group.getAttribute("aria-labelledby"));
+}
+
+describe("wizard keyboard and labels", () => {
+  test("a tap on the Diagnosis label selects no diagnosis", () => {
+    const toggleDiag = jest.fn();
+    renderWizard(baseRx, { toggleDiag });
+    act(() => groupLabel(q("diagnosis-options")).click());
+    expect(toggleDiag).not.toHaveBeenCalled();
+  });
+
+  test("a tap on a power label selects no power", () => {
+    const onChange = jest.fn();
+    act(() => root.render(<FixedPowerPicker powers={POWERS} valueR={null} valueL={null} onChange={onChange} />));
+    act(() => groupLabel(q("fixed-power-both-minus")).click());
+    act(() => q("fixed-power-split").click());
+    act(() => groupLabel(q("fixed-power-r-minus")).click());
+    act(() => groupLabel(q("fixed-power-l-minus")).click());
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  test("Enter advances, the new step is announced and the cursor lands in its first field", async () => {
+    renderLive(baseRx);
+    await act(async () => {
+      q("clinical-prescription-form").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(q("wizard-progress").textContent).toContain("Step 2 of 3");
+    expect(q("wizard-announcement").getAttribute("aria-live")).toBe("polite");
+    expect(q("wizard-announcement").textContent).toBe("Step 2 of 3: What was prescribed");
+    expect(document.activeElement).toBe(q("prescribed-lines").querySelector("input"));
+  });
+
+  test("Enter on an incomplete step does not advance", async () => {
+    renderLive({ ...baseRx });
+    await next();
+    await act(async () => {
+      q("clinical-prescription-form").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    expect(q("wizard-progress").textContent).toContain("Step 2 of 3");
   });
 });

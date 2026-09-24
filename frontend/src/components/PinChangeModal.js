@@ -3,10 +3,13 @@ import { useAuth } from "../context/AuthContext";
 import { Alert, Button, Field, Input, Modal } from "./ui";
 import { formatApiError } from "../lib/api";
 
+const digits = (value, length) => value.replace(/\D/g, "").slice(0, length);
+
 export default function PinChangeModal({ onClose }) {
   const { user, changePin } = useAuth();
   const required = Boolean(user?.must_change_pin);
-  const [currentPin, setCurrentPin] = useState(() => required && user.role !== "admin" ? "1234" : "");
+  const pinLength = user?.pin_length;
+  const [currentPin, setCurrentPin] = useState("");
   const [newPin, setNewPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
   const [err, setErr] = useState("");
@@ -18,16 +21,12 @@ export default function PinChangeModal({ onClose }) {
     async (e) => {
       e.preventDefault();
       setErr("");
-      if (!/^\d{4}$/.test(currentPin)) {
-        setErr("Current PIN must be 4 digits");
+      if (currentPin.length < 4) {
+        setErr("Enter your current PIN");
         return;
       }
-      if (!newPin || newPin.length !== 4 || !/^\d{4}$/.test(newPin)) {
-        setErr("New PIN must be exactly 4 digits");
-        return;
-      }
-      if (newPin === "1234") {
-        setErr("New PIN cannot be the default 1234");
+      if (newPin.length !== pinLength) {
+        setErr(`Your new PIN must be ${pinLength} digits`);
         return;
       }
       if (newPin !== confirmPin) {
@@ -44,43 +43,44 @@ export default function PinChangeModal({ onClose }) {
         setBusy(false);
       }
     },
-    [currentPin, newPin, confirmPin, changePin, onClose]
+    [currentPin, newPin, confirmPin, pinLength, changePin, onClose]
   );
 
   if (!user) return null;
 
   return (
-    <Modal open onClose={required ? undefined : close} title={required ? "Change Your Default PIN" : "Reset Your PIN"} size="sm">
+    <Modal open onClose={required ? undefined : close} title={required ? "Choose Your Own PIN" : "Reset Your PIN"} size="sm">
       <p className="text-sm text-slate-600 mb-4">
-        {required ? "Choose a new 4-digit PIN before continuing." : "Enter your current PIN and choose a new 4-digit PIN. If you have forgotten your PIN, ask your team lead or admin to reset it."}
+        {required
+          ? `Enter the one-time PIN you were given, then choose your own ${pinLength}-digit PIN.`
+          : `Enter your current PIN and choose a new ${pinLength}-digit PIN. If you have forgotten your PIN, ask your team lead or admin to reset it.`}
       </p>
       <form onSubmit={onSubmit} className="space-y-4" data-testid="pin-change-form">
         {err && <Alert tone="rose">{err}</Alert>}
-        <Field label="Current PIN">
+        <Field label={required ? "One-time PIN" : "Current PIN"}>
           <Input
             type="password"
             inputMode="numeric"
             autoComplete="current-password"
-            maxLength={4}
+            maxLength={6}
             value={currentPin}
-            onChange={(e) => setCurrentPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+            onChange={(e) => setCurrentPin(digits(e.target.value, 6))}
             placeholder="••••"
-            autoFocus={!required || user.role === "admin"}
+            autoFocus
             required
             data-testid="current-pin-input"
           />
         </Field>
-        <Field label="New 4-digit PIN">
+        <Field label={`New ${pinLength}-digit PIN`}>
           <Input
             type="password"
             inputMode="numeric"
             autoComplete="new-password"
-            maxLength={4}
+            maxLength={pinLength}
             value={newPin}
-            onChange={(e) => setNewPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+            onChange={(e) => setNewPin(digits(e.target.value, pinLength))}
             placeholder="••••"
             required
-            autoFocus={required && user.role !== "admin"}
             data-testid="new-pin-input"
           />
         </Field>
@@ -89,9 +89,9 @@ export default function PinChangeModal({ onClose }) {
             type="password"
             inputMode="numeric"
             autoComplete="new-password"
-            maxLength={4}
+            maxLength={pinLength}
             value={confirmPin}
-            onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+            onChange={(e) => setConfirmPin(digits(e.target.value, pinLength))}
             placeholder="••••"
             required
             data-testid="confirm-pin-input"

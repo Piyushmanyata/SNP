@@ -12,7 +12,7 @@ export function lineLabel(key) {
   return OPERATOR_LINES.find((l) => l.key === key)?.label || key;
 }
 
-export function readSessionLine() {
+function readSessionLine() {
   try {
     const line = sessionStorage.getItem(LINE_STORAGE_KEY);
     return OPERATOR_LINES.some(({ key }) => key === line) ? line : null;

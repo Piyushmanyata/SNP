@@ -1,11 +1,12 @@
 import os
 import re
+import unicodedata
 import hmac
 import hashlib
 import secrets
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from typing import overload
+from typing import Any, Dict, List, overload
 from uuid import UUID
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -99,19 +100,16 @@ def ist_day_bounds(day_str: str) -> tuple[datetime, datetime]:
 def normalize_name(name: str) -> str:
     if not name:
         return ""
-    s = name.strip().lower()
-    s = re.sub(r"[^a-z0-9\u0900-\u097F\u0980-\u09FF ]", "", s)
-    s = re.sub(r"\s+", " ", s)
-    return s.strip()
+    s = unicodedata.normalize("NFC", name).lower()
+    s = "".join(ch for ch in s if ch.isalnum() or ch.isspace() or unicodedata.category(ch).startswith("M"))
+    return " ".join(s.split())
 
 
 def normalize_phone(phone: str | None) -> str | None:
-    if not phone:
-        return None
-    digits = re.sub(r"\D", "", phone)
-    if len(digits) >= 10:
-        digits = digits[-10:]
-    return digits
+    """The ten local digits of an Indian mobile number, from bare, +91 or 0-prefixed input; else None."""
+    digits = re.sub(r"\D", "", phone or "")
+    match = re.fullmatch(r"(?:91|0)?([6-9]\d{9})", digits)
+    return match.group(1) if match else None
 
 
 def is_dummy_phone(phone: str) -> bool:
@@ -179,3 +177,32 @@ def age_from_dob(dob: str) -> int | None:
         return today.year - d.year - ((today.month, today.day) < (d.month, d.day))
     except Exception:
         return None
+
+
+OVERWRITTEN_FIELDS = ("full_name", "age", "gender", "dob", "aadhaar_last4", "address")
+
+
+def material_diff(card: dict, stored: dict) -> List[Dict[str, Any]]:
+    diff: List[Dict[str, Any]] = []
+    for field in OVERWRITTEN_FIELDS:
+        cv, sv = card.get(field), stored.get(field)
+        if sv is None or sv == "" or field == "address":
+            continue
+        trivial = False
+        if field == "full_name":
+            cn, sn = normalize_name(cv or ""), normalize_name(sv or "")
+            trivial = cn == sn or sorted(cn.split()) == sorted(sn.split())
+        elif field == "age":
+            try:
+                trivial = cv is not None and abs(int(cv) - int(sv)) <= 1
+            except (TypeError, ValueError):
+                trivial = False
+        elif field == "gender":
+            c0 = str(cv)[:1].upper() if cv else ""
+            s0 = str(sv)[:1].upper() if sv else ""
+            trivial = bool(c0) and c0 == s0
+        elif field in ("dob", "aadhaar_last4"):
+            trivial = str(cv or "").strip() == str(sv or "").strip()
+        if not trivial:
+            diff.append({"field": field, "card": cv, "stored": sv})
+    return diff

@@ -51,7 +51,11 @@ services:
       MSG91_TEMPLATE_OT: ${MSG91_TEMPLATE_OT:-}
       MSG91_TEMPLATE_SPECS_TOKEN: ${MSG91_TEMPLATE_SPECS_TOKEN:-}
       MSG91_TEMPLATE_SPECS: ${MSG91_TEMPLATE_SPECS:-}
+      MSG91_TEMPLATE_OT_CHANGE: ${MSG91_TEMPLATE_OT_CHANGE:-}
+      MSG91_TEMPLATE_SPECS_CHANGE: ${MSG91_TEMPLATE_SPECS_CHANGE:-}
       MSG91_WEBHOOK_SECRET: ${MSG91_WEBHOOK_SECRET:-}
+    volumes:
+      - backups:/backups:ro
     depends_on:
       mongo:
         condition: service_healthy
@@ -111,18 +115,20 @@ services:
         condition: service_healthy
 
   backup:
-    image: mongo:7
+    build: ./ops/backup
     restart: unless-stopped
     logging: *logging
     environment:
       DB_NAME: ${DB_NAME}
       MONGO_BACKUP_PASSWORD: ${MONGO_BACKUP_PASSWORD}
       BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-3600}
-      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      RESTIC_REPOSITORY: /backups/restic
+      RESTIC_PASSWORD: ${RESTIC_PASSWORD:?set RESTIC_PASSWORD to a long random value and keep a copy off the VPS}
+      RESTIC_REMOTE_REPOSITORY: ${RESTIC_REMOTE_REPOSITORY:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
     volumes:
       - backups:/backups
-      - ./ops/backup.sh:/backup.sh:ro
-    command: sh /backup.sh
     depends_on:
       mongo:
         condition: service_healthy

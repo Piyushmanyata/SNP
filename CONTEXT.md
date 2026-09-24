@@ -37,8 +37,12 @@ The cohort of Volunteers supervised by a specific Team Lead. The Team Lead's lea
 _Avoid_: sub-camp, brigade, shift group
 
 **PIN**:
-The 4-digit personal identification number used with a unique Name to authenticate. Defaults to 1234 on creation with mandatory change on first login.
-_Avoid_: password, secret, OTP
+The personal number used with a unique Name to sign in: 6 digits for an Admin or Team Lead, 4 for a Volunteer or Clinical operator. It is never one digit repeated or a straight run like 1234. A new or reset account gets a random one-time PIN, shown once to the person who created or reset it, and must choose its own PIN at first sign-in.
+_Avoid_: password, secret, OTP, default PIN
+
+**Lockout**:
+Five wrong PINs for one Name within 15 minutes lock that Name for 15 minutes. A network where no one has signed in during the last 12 hours gets 50 wrong PINs across all Names in 15 minutes; the venue, where desks sign in, is not limited this way. The Team page shows a locked account and how often it was locked in the last day, from how many networks. The account's Team Lead or an Admin can Unlock it, which keeps the PIN and is recorded.
+_Avoid_: ban, block (an Admin disables an account; a lockout lapses by itself)
 
 **Reset PIN**:
 The header action beside Logout that lets the signed-in user choose a new PIN after entering their current PIN. Logout ends the session before another person signs in.
@@ -133,16 +137,24 @@ The clinical fulfilment outcome for ready-made spectacles handed over at camp. T
 _Avoid_: ready specs, stock specs, issued specs
 
 **Spectacles to be made**:
-The clinical fulfilment outcome for spectacles that cannot be issued at camp and must be collected later. Deferral assigns the patient to a Specs collection day. Never on the same prescription as Fixed-power specs or IOL surgery.
+The clinical fulfilment outcome for spectacles that cannot be issued at camp and must be collected later. Deferral assigns the patient to a Specs collection day. Never on the same prescription as Fixed-power specs or IOL surgery. Recording it as cancelled closes its Token. A correction cannot remove or change the order while its Token is active; cancel it first.
 _Avoid_: to-be specs, TBD specs, specs order, glasses order
 
 **Specs collection day**:
-An admin-created day, unique per camp and date, on which patients deferred for Spectacles to be made are assigned. Same shape as an OT Schedule Day: venue and finite seat limit.
+An admin-created date range, unique per camp and start date, with a venue, on which patients deferred for Spectacles to be made collect them. It has no seat limit. Collection hours are always 10:00 AM–5:00 PM and are not stored.
 _Avoid_: specs slot, collection appointment, specs schedule
 
 **Token**:
-The short A6 paper printed when IOL surgery or Spectacles to be made is scheduled — never for a Hospital referral or Surgery declined. It contains the patient's name, registration number, date or collection window and venue. An IOL surgery Token is titled as IOL surgery, names the eye, carries BP and blood sugar when recorded, the hospital phone, and the Bring list. Rescheduling cancels the previous Token.
+The short A6 paper printed when IOL surgery or Spectacles to be made is scheduled — never for a Hospital referral or Surgery declined. It contains the patient's name, registration number, date or collection window and venue. Each Token sends its own SMS, so moving a patient A→B→A sends three. An IOL surgery Token is titled as IOL surgery, names the eye, carries BP and blood sugar when recorded, the hospital phone, and the Bring list. Rescheduling cancels the previous Token. A Schedule edit replaces it: the old Token is marked replaced, a new one is printed, and the patient gets one notice by SMS or by phone.
 _Avoid_: slip, deferred slip, thermal slip, queue ticket, final token
+
+**Schedule edit**:
+A change to an OT Schedule Day or Specs collection day through its Edit. A date or venue change is material: it replaces every active Token on the day and queues one notice per patient. A seat-limit or SMS short-name change is not. Adding a day on a date that already has one is refused.
+_Avoid_: re-adding a day, upsert
+
+**Patients to phone**:
+The admin list of patients whose Token was replaced by a Schedule edit but whose SMS notice was not sent, failed, or is paused. Someone phones each one and marks the call done.
+_Avoid_: manual SMS, call list
 
 **Bring list**:
 The one list of what a patient carries on the day of IOL surgery: the prescription, the Token, Aadhaar card, ration card and mobile phone. Printed identically on the prescription and the IOL surgery Token. On the prescription it shares a Hindi and English band with the notice that only cataract (IOL) operations are arranged.
@@ -177,8 +189,16 @@ The trust's own printed eye-camp form, photographed in the repository root. It i
 _Avoid_: template, Rx template, sample prescription
 
 **Sponsor logo**:
-An image of the camp's sponsor, printed in the prescription footer under "Sponsorer :". The only stored template data and the only part of the printed form an admin can change.
+An image of the camp's sponsor, printed in the prescription footer under "Sponsorer :". The only stored template data and the only part of the printed form an admin can change. At most six per camp. Each upload is up to 2 MB and is stored resized to at most 600 px and 150 KB. A desk downloads a camp's logos once and refreshes them after ten minutes. A prescription never waits more than 3 seconds for them: without them it still prints, and the desk says the logos are unavailable.
 _Avoid_: logo (the trust's own emblems are fixed masthead artwork, not sponsor logos), header image
+
+**Paper check**:
+The dialog that follows every prescription print at the desk. "Printed — next patient" records Print Prescription (`printed_at`), clears the card and returns the cursor to the USB box. "Reprint" asks the server for the sheet again and prints it. "Printer problem" and Escape record nothing and keep the patient on the card. A new scan closes the Paper check without recording anything. The browser's print event alone never records a print, because it fires for a cancelled dialog too.
+_Avoid_: print confirmation, printed flag, auto-stamp
+
+**Print Prescription**:
+The paper in the patient's hand, recorded by the Paper check as `printed_at`. The desk prints in the page, with no navigation. An attempted print that is not confirmed is not Print Prescription. Refused after Doctor seen and while an identity hold stands.
+_Avoid_: print attempt, printed (for a dialog that was cancelled)
 
 **Print window**:
 Server-derived printing availability for the active camp: automatic on the IST calendar camp day, or one admin-selected day, or off. Manual enable/disable expires at the next IST midnight. A stored per-day boolean is not the authority. Chooses Desk mode via the operating day. While it is closed the desk withdraws Print and says so rather than offering a control that fails; a sheet that has already printed keeps its reprint.
@@ -193,7 +213,7 @@ The single camp day currently selected for door check-in and printing. Automatic
 _Avoid_: calendar today, booked day (a patient may have booked a different day)
 
 **Manual entry**:
-A desk registration typed instead of scanned. Marked on the registration; camp-day identity rechecking is required. Registration reveals it after three Failures — permission denial, stall, cancel, frames, network and busy do not count. Scan at the door never reveals it by counting Failures; there it is behind the Door manual gate. Self-register has no typed path: without a readable QR the public endpoint refuses with `AADHAAR_QR_REQUIRED` and sends the patient to the desk. No client-supplied flag can mint a registration without a Lock: the desk and the public endpoint both re-decode the payload themselves and take name, age, gender, DOB, last-4 and address from that decode, so a registration that claims a scan and carries no payload is refused with `AADHAAR_QR_REQUIRED`. The server, not the request, decides that an unscanned registration is a Manual entry. Its identity hold is released only by a card that replaces it, or by an admin's Identity check (ADR 0044).
+A desk registration typed instead of scanned. Marked on the registration; camp-day identity rechecking is required. The server accepts one only with a written reason, and at the door only while the Door manual gate is open; it never trusts a failure count from the browser (ADR 0063). Registration reveals the typed form after three Failures — permission denial, stall, cancel, frames, network and busy do not count — as desk help, not as a server rule. Scan at the door never counts Failures; there the form shows as soon as the gate is open. Self-register has no typed path: without a readable QR the public endpoint refuses with `AADHAAR_QR_REQUIRED` and sends the patient to the desk. No client-supplied flag can mint a registration without a Lock: the desk and the public endpoint both re-decode the payload themselves and take name, age, gender, DOB, last-4 and address from that decode, so a registration that claims a scan and carries no payload is refused with `AADHAAR_QR_REQUIRED`. The server, not the request, decides that an unscanned registration is a Manual entry. Its identity hold is released only by a card that replaces it, or by an admin's Identity check (ADR 0044).
 _Avoid_: permission fallback, two-failure unlock, public reviewed details
 
 **Identity check**:
@@ -201,7 +221,7 @@ An admin's recorded decision that a Manual entry's patient was identified at cam
 _Avoid_: verification, override, alternative scan
 
 **Door manual gate**:
-The admin decision that Scan at the door may accept typed identity today, taken because the scanners are down. Stamped on the active camp as the IST date it was opened, so it lapses when that camp day ends and an admin must take the decision again tomorrow. It reveals the typed form and the OCR transcription route at the door and nothing else: a Manual entry it produces still carries `identity_recheck_required` and still cannot print until an admin records an identity check.
+The admin decision that Scan at the door may accept typed identity today, taken because the scanners are down. Stamped on the active camp as the IST date it was opened, so it lapses when that camp day ends and an admin must take the decision again tomorrow. It reveals the typed form and the OCR transcription route at the door and nothing else: a Manual entry it produces is arrived when saved, still carries `identity_recheck_required` and still cannot print until an admin records an identity check.
 _Avoid_: manual mode, break-glass, override, failure unlock (the door has no failure counter)
 
 **Patient code**:
@@ -213,19 +233,23 @@ Twenty seconds of live scan with no Detect. Does not count as a Failure and does
 _Avoid_: scan timeout, camera failure, give up
 
 **Arrival**:
-The patient is physically at the camp on a camp day. Stamped by a desk Lock that matches their registration in this camp, by the registration that creates a walk-in, or by Print Prescription on a registration whose Lock was already taken at registration. Registration is a booking; Arrival is presence. Stamped once: a second Lock does not re-stamp it or move the patient again. Arrival is never a step the desk performs on its own — it has no button and no screen of its own. Print Prescription is gated on Arrival, not on Registration, and closes at Doctor seen — reprints included, until a clinical undo. Doctor seen is gated on clinical completion after print, not on Arrival alone. A Manual entry has no Lock and still needs one at the door: the desk offers no print control from a name or number lookup.
+The patient is physically at the camp on a camp day. Stamped by a desk Lock that matches their registration in this camp, by the registration that creates a walk-in, or by Print Prescription on a registration whose Lock was already taken at registration. Registration is a booking; Arrival is presence. Stamped once: a second Lock does not re-stamp it or move the patient again. Arrival is never a step the desk performs on its own — it has no button and no screen of its own. Print Prescription is gated on Arrival, not on Registration, and closes at Doctor seen — reprints included, until a clinical undo. Doctor seen is gated on clinical completion after print, not on Arrival alone. A Manual entry has no Lock and still needs one at the door: the desk offers no print control from a name or number lookup, and Arrival refuses it without a Lock or an Identity check, unless it was typed at the door with the gate open. A door Lock stamps Arrival only on the same Person's registration.
 _Avoid_: check-in, checking in, presence, attendance, walk-in (a walk-in registers and arrives in one action), door re-scan (a Lock is taken once)
 
+**Household phone**:
+The one mobile number stored for a registration and used for its SMS. Ten local digits starting 6–9. Input may carry `+91`, `0`, spaces or dashes; the server strips them and refuses anything else. Screens keep what was typed and send the canonical value. One household phone can self-register at most six patients per camp, and receives at most six registration SMS per IST day.
+_Avoid_: contact, mobile of the patient (it is the household's)
+
 **Door walk-in**:
-A registration created at the door from the card a Scan at the door has already decoded, needing only the household phone typed. Registers and stamps Arrival in one action, and is a scanned registration, not a Manual entry.
+A registration created at the door from the card a Scan at the door has already decoded, needing only the household phone typed. The phone field starts empty for every card. Registers and stamps Arrival in one action, and is a scanned registration, not a Manual entry. Walk-in means a staff registration for the Operating day, not for the IST calendar date.
 _Avoid_: rescan, second scan, walk-in registration (also used for the typed path)
 
 **Aadhaar overwrite**:
-A Lock that matches exactly one Manual entry updates that registration in place. Name, age, gender, DOB, last-4, and address come from the card. Household phone, camp day, and reg_no stay. The Manual entry mark clears. Not a second registration. On a camp day the overwrite is not silent: it goes through Mismatch review first.
+A Lock that matches exactly one Manual entry updates that registration in place. Name, age, gender, DOB, last-4, and address come from the card. Household phone, camp day, and reg_no stay. The Manual entry mark clears. Not a second registration. A material diff goes through Mismatch review first, at the door and at the registration desk. Never after print or Doctor seen (`ALREADY_PRINTED`).
 _Avoid_: merge, bind Aadhaar, rescan button
 
 **Mismatch review**:
-The camp-day screen shown when a Lock matches a registration whose stored fields differ materially from the card. Card values and stored values side by side; a volunteer or team lead confirms. Confirming applies the Aadhaar overwrite and stamps Arrival. There is no way to keep the stored values and no way to edit the card values. A Trivial diff never reaches this screen.
+The screen shown, at the door or at the registration desk, when a Lock matches a registration whose stored fields differ materially from the card. Card values and stored values side by side; a volunteer or team lead confirms. For a Manual entry, confirming applies the Aadhaar overwrite and stamps Arrival. For a registration that was already scanned from another card, confirming stamps Arrival and replaces nothing. There is no way to keep the stored values and no way to edit the card values. A Trivial diff never reaches this screen.
 _Avoid_: conflict resolution, merge screen, override prompt
 
 **Trivial diff**:
@@ -233,11 +257,11 @@ A difference between a stored registration and the card that a Lock resolves on 
 _Avoid_: fuzzy match, close enough, auto-merge
 
 **Duplicate in camp**:
-A second registration in the same camp for the same person. Blocked when Person, last-4+name, last-4+DOB, or name+age+household phone already exists in that camp. There is no override.
+A second registration in the same camp for the same person. Blocked when Person, last-4 + name (word order ignored), or name + age + household phone already exists in that camp. There is no override. Last-4 + DOB alone is not a duplicate: year-only card DOBs make it collide for different people.
 _Avoid_: register anyway, likely duplicate
 
 **Public occupancy**:
-The headline on the unauthenticated login page for the active camp: total seats across the camp's days, and registrations so far. Refreshes on its own. No patient details, no per-patient anything.
+The headline on the unauthenticated login page for the active camp: total seats across the camp's days, and registrations so far, read from the camp-day counters. Refreshes every 30 seconds. No patient details, no per-patient anything.
 _Avoid_: live feed, registration ticker, public patient list
 
 **Camp-day capacity**:
@@ -245,7 +269,7 @@ Every camp day has a seat limit greater than zero. The limit blocks self-registr
 _Avoid_: seats_taken (that counter is OT and Spectacles to be made only), unlimited day, turning away a walk-in
 
 **Camp-day board**:
-The read-only page a team lead watches during a camp day. Per Registration desk, Arrivals in the last fifteen minutes and the last hour, with a desk that has gone quiet highlighted; the transcription backlog; each Fulfilment line's count today; seats left on the next OT Schedule Day and Specs collection day; SMS failures. Counts only, refreshes on its own, no actions and no patient names.
+The read-only page a team lead watches during a camp day. Per Registration desk, Arrivals in the last fifteen minutes and the last hour, with a desk that has gone quiet highlighted; the transcription backlog; each Fulfilment line's count today; seats left on the next OT Schedule Day and Specs collection day; SMS failures; one banner when the System card is red. Counts only, refreshes on its own, no actions and no patient names.
 _Avoid_: dashboard (that is the admin area), live feed, monitor, alerts (the board pushes nothing)
 
 **Transcription backlog**:
@@ -253,7 +277,7 @@ Arrived and printed patients who do not yet have a completed prescription. Docto
 _Avoid_: pending Rx after seen, queue at Doctor's Rx (a physical queue is not the backlog)
 
 **Doctor seen**:
-A clinical desk operator's attestation that consultation is complete, committed with whole-prescription completion after arrival and print. Drafts, reprints and volunteer mark-seen cannot confer it.
+A clinical desk operator's attestation that consultation is complete, committed with whole-prescription completion after arrival and print. Drafts, reprints and volunteer mark-seen cannot confer it. Undo completion withdraws it, with a reason, only while no line has been issued; the patient returns to Arrived and can print again.
 _Avoid_: arrival, prescription printed, independent mark-seen
 
 **Paper review**:
@@ -263,6 +287,14 @@ _Avoid_: opening the prescription, automatic approval
 **Camp records export**:
 The single admin-only CSV for a camp, one row per patient including no-shows. Carries identity (name, age, gender, household phone, address, Aadhaar last-4, reg_no), the Manual entry mark, the registration / arrival / seen timestamps, diagnosis, BP and blood sugar, each eye's power, the medicines prescribed and any not given, the prescribed and issued fixed powers, the status of each of the four Fulfilment lines with blank meaning the patient was never recorded at that desk, and the assigned clinical day and venue for each deferral. It is a wide file of patient data and is not downloadable by a volunteer.
 _Avoid_: camp records, clinical audit, the reports (there is exactly one export)
+
+**Ops status**:
+The record a background service keeps about its own health, one document per service. For backups: when the last backup and the last off-site copy succeeded, the last error message, and the patient count when the dump started. It never holds patient data.
+_Avoid_: logs, audit trail, metrics
+
+**System card**:
+The admin overview's one-glance health check: green, amber or red. Backups are red when none has succeeded for six hours (or three backup intervals, if longer), and amber when the last one is more than two intervals old, there is no recent off-site copy, or the last pass reported an error. The backup disk is amber under 20% free and red under 10%. A red System card puts one "Backups failing — tell the admin" banner on the Camp-day board.
+_Avoid_: status page, health check (that is the readiness route), monitoring
 
 Every SMS below is Devanagari, per patient, and carries that patient's reg_no. A household number covering three patients receives three messages. Each is its own DLT template.
 

@@ -44,6 +44,11 @@ def _arrive(admin, patient_id):
     return r.json()["registration"]
 
 
+def _identity(admin, patient_id):
+    r = admin.post(f"{API}/desk/identity-check", json={"patient_id": patient_id, "reason": "Voter ID seen"}, timeout=30)
+    assert r.status_code == 200, r.text
+
+
 def _open_print(admin, day_id, open_=True):
     r = admin.patch(f"{API}/camps/days/{day_id}/print-window",
                     json={"printing_open": open_}, timeout=30)
@@ -61,7 +66,6 @@ def _reg(session, camp_day_id, **fields):
     }
     body.update(fields)
     if not body.get("aadhaar_scanned"):
-        body.setdefault("failed_scan_attempts", 3)
         body.setdefault("manual_reason", "scanner unavailable")
     if body.get("aadhaar_scanned"):
         body["qr_payload"] = tostring(Element(
@@ -96,8 +100,8 @@ class TestPrintWindowNoCalendar:
         r = _reg(admin, day["id"], full_name=f"TEST PrintFuture {TAG}", phone="9876500101")
         assert r.status_code == 200, r.text
         pid = r.json()["registration"]["id"]
+        _identity(admin, pid)
         _arrive(admin, pid)
-        admin.post(f"{API}/desk/identity-check", json={"patient_id": pid, "reason": "Voter ID seen"}, timeout=30)
         p = admin.post(f"{API}/desk/print/{pid}", timeout=30)
         assert p.status_code == 200, p.text
         assert p.json()["registration"]["printed_at"]
@@ -109,6 +113,7 @@ class TestPrintWindowNoCalendar:
         r = _reg(admin, day["id"], full_name=f"TEST PrintClosed {TAG}", phone="9876500102")
         assert r.status_code == 200, r.text
         pid = r.json()["registration"]["id"]
+        _identity(admin, pid)
         arrived = admin.post(f"{API}/desk/arrive/{pid}", timeout=30)
         assert arrived.status_code == 409, arrived.text
         assert arrived.json()["detail"]["code"] == "PRINT_WINDOW_CLOSED"
@@ -120,6 +125,7 @@ class TestPrintWindowNoCalendar:
         r = _reg(admin, day["id"], full_name=f"TEST PrintPast {TAG}", phone="9876500103")
         assert r.status_code == 200, r.text
         pid = r.json()["registration"]["id"]
+        _identity(admin, pid)
         _arrive(admin, pid)
         _open_print(admin, day["id"], False)
         p = admin.post(f"{API}/desk/print/{pid}", timeout=30)
@@ -157,18 +163,16 @@ class TestDuplicateInCamp:
         assert b.json()["detail"]["code"] == "DUPLICATE_IN_CAMP"
         assert b.json()["detail"]["registration"]["reg_no"] == reg_no
 
-    def test_last4_and_dob_409(self, admin):
+    def test_last4_and_dob_alone_are_not_a_duplicate(self, admin):
         camp_id = _camp(admin, "duplast4dob")
         day = _day(admin, camp_id, TODAY_IST)
         a = _reg(admin, day["id"], full_name=f"TEST Dob Alpha {TAG}", age=44,
                  phone="9876500204", aadhaar_last4="3690", dob="1982-04-04", manual_entry=True)
         assert a.status_code == 200, a.text
-        reg_no = a.json()["registration"]["reg_no"]
         b = _reg(admin, day["id"], full_name=f"TEST Dob Beta {TAG}", age=45,
                  phone="9876500205", aadhaar_last4="3690", dob="1982-04-04", manual_entry=True)
-        assert b.status_code == 409, b.text
-        assert b.json()["detail"]["code"] == "DUPLICATE_IN_CAMP"
-        assert b.json()["detail"]["registration"]["reg_no"] == reg_no
+        assert b.status_code == 200, b.text
+        assert b.json()["registration"]["reg_no"] != a.json()["registration"]["reg_no"]
 
     def test_name_age_phone_409(self, admin):
         camp_id = _camp(admin, "dupnap")
@@ -225,15 +229,19 @@ class TestAadhaarOverwrite:
     def test_lock_updates_exactly_one_manual_in_place(self, admin, anon):
         camp_id = _camp(admin, "ow1")
         day = _day(admin, camp_id, TODAY_IST, seat_limit=5)
-        typed = _reg(admin, day["id"], full_name=f"TEST Typo {TAG}", age=60,
+        typed = _reg(admin, day["id"], full_name=f"Name TEST Card {TAG}", age=60,
                      gender="M", phone="9876500301", address="typed addr",
                      aadhaar_last4="8881", dob="1965-07-07", manual_entry=True)
         assert typed.status_code == 200, typed.text
         orig = typed.json()["registration"]
-        lock = _reg(admin, day["id"],
-                    full_name=f"TEST Card Name {TAG}", age=61, gender="F",
+        card = dict(full_name=f"TEST Card Name {TAG}", age=61, gender="F",
                     dob="1965-07-07", aadhaar_last4="8881", aadhaar_scanned=True,
                     address="card addr", phone="9876500399")
+        review = _reg(admin, day["id"], **card)
+        assert review.status_code == 409, review.text
+        assert review.json()["detail"]["code"] == "MISMATCH_REVIEW_REQUIRED"
+        assert [d["field"] for d in review.json()["detail"]["diff"]] == ["gender"]
+        lock = _reg(admin, day["id"], **card, review_confirmed_id=orig["id"])
         assert lock.status_code == 200, lock.text
         body = lock.json()
         reg = body["registration"]
@@ -292,8 +300,8 @@ class TestAadhaarOverwrite:
         a = _reg(admin, day["id"], full_name=f"TEST Twin Card {TAG}", age=99,
                  phone="9876500306", aadhaar_last4="8884", dob="1980-01-01",
                  manual_entry=True)
-        b = _reg(admin, day["id"], full_name=f"TEST Twin Other {TAG}", age=36,
-                 phone="9876500307", aadhaar_last4="8884", dob="1991-01-01",
+        b = _reg(admin, day["id"], full_name=f"TEST Twin Card {TAG}", age=35,
+                 phone="9876500308", aadhaar_last4="1111", dob="1991-01-01",
                  manual_entry=True)
         assert a.status_code == 200, a.text
         assert b.status_code == 200, b.text
@@ -322,7 +330,7 @@ class TestAadhaarOverwrite:
                      manual_entry=True)
         assert typed.status_code == 200, typed.text
         orig = typed.json()["registration"]
-        lock = _self(anon, day["id"], full_name=f"TEST Card Steal {TAG}", age=41,
+        lock = _self(anon, day["id"], full_name=f"TEST Desk Manual {TAG}", age=41,
                      gender="M", dob="1985-03-03", aadhaar_last4="8886",
                      aadhaar_scanned=True, phone="9876500312")
         assert lock.status_code == 409, lock.text
@@ -376,6 +384,7 @@ class TestCampDayCapacity:
         a = _reg(admin, day["id"], full_name=f"TEST CapArrive {TAG}", phone="9876500405",
                  manual_entry=True)
         assert a.status_code == 200, a.text
+        _identity(admin, a.json()["registration"]["id"])
         arrived = _arrive(admin, a.json()["registration"]["id"])
         assert arrived["arrived_at"]
         assert arrived["queue_status"] == "arrived"

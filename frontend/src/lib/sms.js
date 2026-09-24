@@ -27,4 +27,6 @@ export const SMS_LABELS = {
   ot: "OT reminder",
   specs_token: "Specs Token SMS",
   specs: "Specs reminder",
+  ot_change: "OT date or venue change",
+  specs_change: "Specs date or venue change",
 };

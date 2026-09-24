@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import Desk from "./Desk";
 import api from "../lib/api";
+import { forgetLogos } from "../lib/logoCache";
 
 const mockAuth = { user: { id: "u1", name: "Lead", role: "team_lead" } };
 
@@ -64,6 +65,7 @@ jest.mock("../components/AadhaarScanner", () => {
     };
     return (
       <div data-testid="mock-aadhaar-scanner" data-disabled={String(Boolean(disabled))}>
+        <textarea data-usb-box="" aria-label="USB scanner" data-testid="mock-usb-box" />
         <button type="button" data-testid="mock-scan-trigger" onClick={scan}>
           Simulate Scan
         </button>
@@ -99,6 +101,11 @@ jest.mock("../components/AadhaarScanner", () => {
     );
   };
 });
+
+const RX = {
+  camp_id: "camp-1", camp_name: "Howrah Eye Camp", venue: "Community Hall", reg_no: "101",
+  full_name: "Aadhaar Scanned User", patient_qr: "qr-101", date: "2026-08-27", age: 42, gender: "M",
+};
 
 const ARRIVED = {
   id: "p-1",
@@ -143,8 +150,17 @@ function setInput(el, value) {
   el.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+let printedText = [];
+
 beforeEach(() => {
   window.HTMLElement.prototype.scrollIntoView = jest.fn();
+  window.HTMLImageElement.prototype.decode = () => Promise.resolve();
+  printedText = [];
+  window.print = jest.fn(() => {
+    printedText.push(document.getElementById("print-root")?.textContent);
+    window.dispatchEvent(new Event("afterprint"));
+  });
+  forgetLogos("camp-1");
   container = document.createElement("div");
   document.body.appendChild(container);
   root = ReactDOM.createRoot(container);
@@ -382,6 +398,7 @@ describe("Desk page", () => {
     const base = api.get.getMockImplementation();
     api.get.mockImplementation((url) => (url === "/kpis" ? Promise.reject(new Error("Network Error")) : base(url)));
     await scanAtDoor();
+    await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
 
     const refresh = container.querySelector('[data-testid="desk-refresh-error"]');
     expect(refresh.textContent).toContain("Could not refresh the desk: Network Error");
@@ -560,7 +577,7 @@ describe("Desk page", () => {
     act(() => {
       setInput(container.querySelector('[data-testid="door-phone-input"]'), "98765 00001");
     });
-    expect(container.querySelector('[data-testid="door-phone-input"]').value).toBe("9876500001");
+    expect(container.querySelector('[data-testid="door-phone-input"]').value).toBe("98765 00001");
     await act(async () => {
       container.querySelector('[data-testid="door-register-button"]').click();
     });
@@ -575,6 +592,8 @@ describe("Desk page", () => {
     }));
     expect(api.post).toHaveBeenCalledWith("/desk/arrive/p-9");
     expect(container.textContent).toContain("Registered and arrived: #109");
+    expect(container.querySelector('[data-testid="scan-arrived"]').textContent).toContain("#109");
+    expect(container.querySelector('[data-testid="scan-print-button"]')).not.toBeNull();
     expect(container.querySelectorAll('[data-testid="mock-aadhaar-scanner"]').length).toBe(1);
   });
 
@@ -633,7 +652,7 @@ describe("Desk page", () => {
       return Promise.resolve({ data: {} });
     });
     api.post.mockImplementation((url, body) => (url === "/register"
-      ? Promise.resolve({ data: { registration: { id: "p-7", reg_no: "107", full_name: body.full_name } } })
+      ? Promise.resolve({ data: { registration: { id: "p-7", reg_no: "107", full_name: body.full_name }, created: true } })
       : Promise.resolve({ data: {} })));
   }
 
@@ -650,10 +669,10 @@ describe("Desk page", () => {
     await renderDesk();
     act(() => { container.querySelector('[data-testid="new-registration-button"]').click(); });
     act(() => { modalScanner("mock-scan-trigger").click(); });
-    act(() => { setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "+91 98765-00001 99"); });
-    expect(document.body.querySelector('[data-testid="reg-phone-input"]').value).toBe("9198765000");
     act(() => { setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "98765-00001 99"); });
-    expect(document.body.querySelector('[data-testid="reg-phone-input"]').value).toBe("9876500001");
+    expect(document.body.querySelector('[data-testid="patient-register-submit"]').disabled).toBe(true);
+    act(() => { setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "+91 98765-00001"); });
+    expect(document.body.querySelector('[data-testid="reg-phone-input"]').value).toBe("+91 98765-00001");
     await act(async () => { document.body.querySelector('[data-testid="patient-register-submit"]').click(); });
 
     expect(registerBodies()).toHaveLength(1);
@@ -676,6 +695,7 @@ describe("Desk page", () => {
     expect(modalScanner("reg-manual-toggle")).toBeFalsy();
     revealManual();
     act(() => { setInput(document.body.querySelector('[data-testid="reg-fullname-input"]'), "Manual Patient"); });
+    act(() => { setInput(document.body.querySelector('[data-testid="reg-age-input"]'), "44"); });
     act(() => { setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "9876500002"); });
     act(() => { setInput(document.body.querySelector('[data-testid="manual-reason-input"]'), "Camera would not start"); });
     await act(async () => { document.body.querySelector('[data-testid="patient-register-submit"]').click(); });
@@ -683,7 +703,8 @@ describe("Desk page", () => {
     expect(registerBodies()).toHaveLength(1);
     expect(registerBodies()[0].aadhaar_scanned).toBe(false);
     expect(registerBodies()[0].qr_payload).toBeFalsy();
-    expect(registerBodies()[0].failed_scan_attempts).toBe(3);
+    expect(registerBodies()[0]).not.toHaveProperty("failed_scan_attempts");
+    expect(registerBodies()[0].age).toBe(44);
     expect(registerBodies()[0].manual_reason).toBe("Camera would not start");
   });
 
@@ -698,6 +719,7 @@ describe("Desk page", () => {
     expect(document.body.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
     revealManual();
     act(() => { setInput(document.body.querySelector('[data-testid="reg-fullname-input"]'), "Second Patient"); });
+    act(() => { setInput(document.body.querySelector('[data-testid="reg-age-input"]'), "50"); });
     act(() => { setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "9876500003"); });
     act(() => { setInput(document.body.querySelector('[data-testid="manual-reason-input"]'), "Second try"); });
     await act(async () => { document.body.querySelector('[data-testid="patient-register-submit"]').click(); });
@@ -833,6 +855,7 @@ describe("Desk page", () => {
     }
     api.post.mockImplementation((url) => {
       if (url === "/desk/lookup") return Promise.resolve({ data: { registration } });
+      if (url.startsWith("/desk/arrive/")) return Promise.resolve({ data: { registration: { ...registration, arrived_at: "2026-09-01T04:00:00Z" }, prescription: RX } });
       return Promise.resolve({ data: {} });
     });
     await renderDesk();
@@ -1252,17 +1275,11 @@ describe("Desk page", () => {
     });
     api.post.mockImplementation((url, body) => {
       if (url === "/register") {
-        return Promise.resolve({ data: { registration: { id: "p-8", reg_no: "108", full_name: body.full_name } } });
-      }
-      if (url === "/desk/arrive/p-8") {
-        return Promise.resolve({ data: { registration: { ...ARRIVED, id: "p-8", reg_no: "108" } } });
+        return Promise.resolve({ data: { registration: { ...ARRIVED, id: "p-8", reg_no: "108", full_name: body.full_name } } });
       }
       return Promise.resolve({ data: {} });
     });
     await renderDesk();
-    for (let i = 0; i < 3; i += 1) {
-      act(() => { container.querySelector('[data-testid="mock-stall-trigger"]').click(); });
-    }
     act(() => {
       setInput(container.querySelector('[data-testid="reg-fullname-input"]'), "Manual Patient");
       setInput(container.querySelector('[data-testid="reg-age-input"]'), "40");
@@ -1277,10 +1294,10 @@ describe("Desk page", () => {
       phone: "9876500002",
       camp_day_id: "day-2",
       at_door: true,
-      failed_scan_attempts: 3,
       manual_reason: "Scanners are down",
     }));
-    expect(api.post).toHaveBeenCalledWith("/desk/arrive/p-8");
+    expect(registerBodies()[0]).not.toHaveProperty("failed_scan_attempts");
+    expect(api.post).not.toHaveBeenCalledWith("/desk/arrive/p-8");
     expect(container.textContent).toContain("Registered and arrived: #108");
   });
 
@@ -1296,9 +1313,6 @@ describe("Desk page", () => {
     });
     await renderDesk({ door_manual_entry: true });
     await scanAtDoor();
-    for (let i = 0; i < 3; i += 1) {
-      act(() => { container.querySelector('[data-testid="mock-stall-trigger"]').click(); });
-    }
     act(() => {
       setInput(container.querySelector('[data-testid="reg-fullname-input"]'), "Different Person");
       setInput(container.querySelector('[data-testid="reg-age-input"]'), "60");
@@ -1376,16 +1390,21 @@ describe("Desk page", () => {
     expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
   });
 
-  test("the door typed form stays hidden until three camera attempts fail", async () => {
+  test("with the admin gate open the door typed form is there at once, patient after patient", async () => {
+    api.post.mockImplementation((url, body) => (url === "/register"
+      ? Promise.resolve({ data: { registration: { ...ARRIVED, id: `p-${body.full_name}`, reg_no: "108", full_name: body.full_name } } })
+      : Promise.resolve({ data: {} })));
     await renderDesk({ door_manual_entry: true });
-    expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
-    act(() => { container.querySelector('[data-testid="mock-stall-trigger"]').click(); });
-    act(() => { container.querySelector('[data-testid="mock-stall-trigger"]').click(); });
-    expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
-    act(() => { container.querySelector('[data-testid="mock-stall-trigger"]').click(); });
-    expect(container.querySelector('[data-testid="door-manual-form"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="manual-entry-note"]').textContent)
       .toContain("closes at the end of today");
+    await fillDoorManual("First Patient");
+    expect(container.querySelector('[data-testid="door-manual-form"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="reg-fullname-input"]').value).toBe("");
+    await fillDoorManual("Second Patient");
+    expect(registerBodies().map((b) => b.full_name)).toEqual(["First Patient", "Second Patient"]);
+    expect(registerBodies()[0].phone).toBe("9876500002");
+    expect(registerBodies()[0].registration_request_id).not.toBe(registerBodies()[1].registration_request_id);
+    expect(api.post.mock.calls.filter(([url]) => url.startsWith("/desk/arrive"))).toHaveLength(0);
   });
 
   test("a scanned patient QR is looked up instead of decoded as a card", async () => {
@@ -1528,5 +1547,530 @@ describe("Desk page", () => {
     await renderDesk();
     act(() => { deskScanner().parentNode.querySelector('[data-testid="mock-stall-trigger"]').click(); });
     expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
+  });
+
+  async function fillDoorManual(name) {
+    act(() => {
+      setInput(container.querySelector('[data-testid="reg-fullname-input"]'), name);
+      setInput(container.querySelector('[data-testid="reg-age-input"]'), "40");
+      setInput(container.querySelector('[data-testid="reg-phone-input"]'), "+91 98765 00002");
+      setInput(container.querySelector('[data-testid="door-manual-reason"]'), "Scanners are down");
+    });
+    await act(async () => { container.querySelector('[data-testid="door-manual-submit"]').click(); });
+  }
+
+  function noMatch(name) {
+    return { data: { outcome: "no_match", card: { full_name: name, age: 42, gender: "M", address: "Sikar", aadhaar_last4: "8888", dob: "1984-05-12" } } };
+  }
+
+  function doorPhone() {
+    return container.querySelector('[data-testid="door-phone-input"]');
+  }
+
+  test("each walk-in starts with an empty household phone", async () => {
+    api.post.mockResolvedValueOnce(noMatch("Patient A")).mockResolvedValueOnce(noMatch("Patient B")).mockResolvedValueOnce(noMatch("Patient C"));
+    await renderDesk();
+    await scanAtDoor();
+    act(() => setInput(doorPhone(), "9876500001"));
+    await scanAtDoor();
+    expect(container.querySelector('[data-testid="door-card-name"]').textContent).toContain("Patient B");
+    expect(doorPhone().value).toBe("");
+    act(() => setInput(doorPhone(), "9876500002"));
+    act(() => { container.querySelector('[data-testid="mock-capture-start"]').click(); });
+    await scanAtDoor();
+    expect(container.querySelector('[data-testid="door-card-name"]').textContent).toContain("Patient C");
+    expect(doorPhone().value).toBe("");
+  });
+
+  test("a walk-in with no booking puts the cursor in the phone field", async () => {
+    api.post.mockResolvedValueOnce(noMatch("Patient A"));
+    await renderDesk();
+    await scanAtDoor();
+    expect(document.activeElement).toBe(doorPhone());
+  });
+
+  test.each([
+    ["door manual", async () => {
+      await renderDesk({ door_manual_entry: true });
+      await fillDoorManual("Timed Out");
+    }, async () => { await act(async () => { container.querySelector('[data-testid="door-manual-submit"]').click(); }); }],
+    ["walk-in", async () => {
+      await renderDesk();
+      await scanAtDoor();
+      act(() => setInput(doorPhone(), "9876500001"));
+      await act(async () => { container.querySelector('[data-testid="door-register-button"]').click(); });
+    }, async () => { await act(async () => { container.querySelector('[data-testid="door-register-button"]').click(); }); }],
+  ])("a %s request-id conflict points to search and the next try uses a new id", async (_path, first, again) => {
+    api.post.mockImplementation((url) => {
+      if (url === "/desk/scan") return Promise.resolve(noMatch("Patient A"));
+      if (url === "/register") {
+        return Promise.reject(apiError({ code: "REGISTRATION_REQUEST_CONFLICT", message: "Request id reused." }));
+      }
+      return Promise.resolve({ data: {} });
+    });
+    await first();
+    expect(container.textContent).toContain("Saved earlier. Search for the patient.");
+    await again();
+    const ids = registerBodies().map((b) => b.registration_request_id);
+    expect(ids).toHaveLength(2);
+    expect(ids[0]).not.toBe(ids[1]);
+  });
+
+  test("a registration-desk request-id conflict points to search and the next try uses a new id", async () => {
+    preRegistrationMode();
+    api.post.mockImplementation((url) => (url === "/register"
+      ? Promise.reject(apiError({ code: "REGISTRATION_REQUEST_CONFLICT", message: "Request id reused." }))
+      : Promise.resolve({ data: {} })));
+    await renderDesk();
+    act(() => { container.querySelector('[data-testid="new-registration-button"]').click(); });
+    act(() => { modalScanner("mock-scan-trigger").click(); });
+    act(() => { setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "9876500001"); });
+    await act(async () => { document.body.querySelector('[data-testid="patient-register-submit"]').click(); });
+    expect(document.body.textContent).toContain("Saved earlier. Search for the patient.");
+    await act(async () => { document.body.querySelector('[data-testid="patient-register-submit"]').click(); });
+    const ids = registerBodies().map((b) => b.registration_request_id);
+    expect(ids[0]).not.toBe(ids[1]);
+  });
+
+  test("New Registration needs a valid household phone and an age", async () => {
+    preRegistrationMode();
+    await renderDesk();
+    act(() => { container.querySelector('[data-testid="new-registration-button"]').click(); });
+    revealManual();
+    const field = (id) => document.body.querySelector(`[data-testid="${id}"]`);
+    const submit = () => field("patient-register-submit");
+    act(() => {
+      setInput(field("reg-fullname-input"), "Manual Patient");
+      setInput(field("manual-reason-input"), "Card at home");
+      setInput(field("reg-phone-input"), "9876500002");
+    });
+    expect(submit().disabled).toBe(true);
+    act(() => setInput(field("reg-age-input"), "4a0"));
+    expect(field("reg-age-input").value).toBe("40");
+    expect(field("reg-age-input").type).toBe("text");
+    expect(field("reg-age-input").inputMode).toBe("numeric");
+    expect(submit().disabled).toBe(false);
+    act(() => setInput(field("reg-phone-input"), "98765"));
+    expect(submit().disabled).toBe(true);
+    act(() => setInput(field("reg-phone-input"), "+91 98765 00002"));
+    act(() => setInput(field("reg-last4-input"), "12a345"));
+    expect(field("reg-last4-input").value).toBe("1234");
+    await act(async () => { submit().click(); });
+    expect(registerBodies()[0]).toEqual(expect.objectContaining({ phone: "9876500002", age: 40, aadhaar_last4: "1234" }));
+  });
+
+  test("the door typed form takes only digits for age", async () => {
+    await renderDesk({ door_manual_entry: true });
+    const age = container.querySelector('[data-testid="reg-age-input"]');
+    act(() => setInput(age, "6x5"));
+    expect(age.value).toBe("65");
+    expect(age.type).toBe("text");
+    expect(age.inputMode).toBe("numeric");
+  });
+
+  test("a scan in pre-registration opens New Registration with the card and the phone field focused", async () => {
+    preRegistrationMode();
+    api.post.mockImplementation((url) => (url === "/aadhaar/decode"
+      ? Promise.resolve({ data: { outcome: "card", data: { full_name: "Usb Patient", age: 42, gender: "F" } } })
+      : Promise.resolve({ data: {} })));
+    await renderDesk();
+    const find = container.querySelector('[data-testid="desk-find-input"]');
+    find.focus();
+    await fireBurst(CARD_PAYLOAD);
+    expect(api.post).toHaveBeenCalledWith("/aadhaar/decode", { payload: CARD_PAYLOAD });
+    expect(api.post.mock.calls.filter(([url]) => url === "/aadhaar/decode")).toHaveLength(1);
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="reg-fullname-input"]').value).toBe("Usb Patient");
+    expect(document.activeElement).toBe(document.querySelector('[data-testid="reg-phone-input"]'));
+    expect(find.value).toBe("");
+  });
+
+  test("a card read in New Registration moves the cursor to the phone field", async () => {
+    preRegistrationMode();
+    await renderDesk();
+    act(() => { container.querySelector('[data-testid="new-registration-button"]').click(); });
+    act(() => { modalScanner("mock-scan-trigger").click(); });
+    expect(document.activeElement).toBe(document.querySelector('[data-testid="reg-phone-input"]'));
+  });
+
+  test("Register & next saves and leaves a clean form for the next patient", async () => {
+    preRegistrationMode();
+    await renderDesk();
+    act(() => { container.querySelector('[data-testid="new-registration-button"]').click(); });
+    for (const phone of ["9876500001", "9876500002"]) {
+      act(() => { modalScanner("mock-scan-trigger").click(); });
+      act(() => { setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), phone); });
+      await act(async () => { document.body.querySelector('[data-testid="patient-register-next"]').click(); });
+      expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+      expect(document.querySelector('[data-testid="reg-fullname-input"]')).toBeNull();
+    }
+    expect(registerBodies().map((b) => b.phone)).toEqual(["9876500001", "9876500002"]);
+    expect(registerBodies()[0].registration_request_id).not.toBe(registerBodies()[1].registration_request_id);
+    expect(container.textContent).toContain("Registered #107");
+    expect(container.querySelector('[data-testid="kpi-registered-count"]').textContent).toBe("47");
+  });
+
+  test("a card that differs from a Manual entry goes through Mismatch review at the registration desk", async () => {
+    preRegistrationMode();
+    const manual = { id: "p-3", reg_no: "103", full_name: "Aadhaar Scanned User" };
+    api.post.mockImplementationOnce(() => Promise.reject(Object.assign(new Error("409"), { response: { status: 409, data: { detail: {
+      code: "MISMATCH_REVIEW_REQUIRED",
+      message: "Review the card against the Manual entry.",
+      registration: manual,
+      card: { full_name: "Aadhaar Scanned User", age: 42 },
+      diff: [{ field: "age", stored: 30, card: 42 }],
+    } } } })));
+    api.post.mockImplementationOnce(() => Promise.resolve({ data: { registration: { ...manual, aadhaar_scanned: true } } }));
+    await renderDesk();
+    act(() => { container.querySelector('[data-testid="new-registration-button"]').click(); });
+    act(() => { modalScanner("mock-scan-trigger").click(); });
+    act(() => { setInput(document.body.querySelector('[data-testid="reg-phone-input"]'), "9876500001"); });
+    await act(async () => { document.body.querySelector('[data-testid="patient-register-submit"]').click(); });
+    const review = document.querySelector('[data-testid="mismatch-review"]');
+    expect(review.querySelector('[data-testid="diff-age"]').textContent).toContain("30");
+    expect(review.querySelector('[data-testid="diff-age"]').textContent).toContain("42");
+    await act(async () => { review.querySelector('[data-testid="mismatch-confirm-button"]').click(); });
+    expect(registerBodies()[1].review_confirmed_id).toBe("p-3");
+    expect(registerBodies()[1].registration_request_id).toBe(registerBodies()[0].registration_request_id);
+    expect(registerBodies()[0].review_confirmed_id).toBeNull();
+    expect(container.textContent).toContain("Registered #103");
+  });
+
+  test("the door scanner stays live while a check-in is pending, and the late reply is dropped", async () => {
+    let finishConfirm;
+    api.post.mockImplementation((url) => {
+      if (url === "/desk/scan/confirm") return new Promise((done) => { finishConfirm = done; });
+      return Promise.resolve({ data: { outcome: "mismatch_review", registration: ARRIVED, diff: [] } });
+    });
+    await renderDesk();
+    await scanAtDoor();
+    await act(async () => { container.querySelector('[data-testid="mismatch-confirm-button"]').click(); });
+    expect(container.querySelector('[data-testid="mock-aadhaar-scanner"]').getAttribute("data-disabled")).toBe("false");
+    api.post.mockImplementation(() => Promise.resolve(noMatch("Next Patient")));
+    await scanAtDoor();
+    await act(async () => finishConfirm({ data: { outcome: "arrived", registration: ARRIVED } }));
+    expect(container.querySelector('[data-testid="scan-no-match"]')).not.toBeNull();
+    expect(container.textContent).not.toContain("Arrived: #101");
+  });
+
+  test("a walk-in reply that lands after the next scan is dropped", async () => {
+    let finishArrive;
+    api.post.mockImplementation((url, body) => {
+      if (url === "/desk/scan") return Promise.resolve(noMatch("Patient A"));
+      if (url === "/register") return Promise.resolve({ data: { registration: { id: "p-9", reg_no: "109", full_name: body.full_name } } });
+      return new Promise((done) => { finishArrive = done; });
+    });
+    await renderDesk();
+    await scanAtDoor();
+    act(() => setInput(doorPhone(), "9876500001"));
+    await act(async () => { container.querySelector('[data-testid="door-register-button"]').click(); });
+    api.post.mockImplementation(() => Promise.resolve(noMatch("Patient B")));
+    await scanAtDoor();
+    await act(async () => finishArrive({ data: { registration: { ...ARRIVED, id: "p-9", reg_no: "109" } } }));
+    expect(container.querySelector('[data-testid="door-card-name"]').textContent).toContain("Patient B");
+    expect(container.querySelector('[data-testid="scan-arrived"]')).toBeNull();
+  });
+
+  test("an arrival does not refetch the desk, and a walk-in adds one to the counts", async () => {
+    api.post.mockImplementation((url, body) => {
+      if (url === "/desk/scan") return Promise.resolve(noMatch("Patient A"));
+      if (url === "/register") return Promise.resolve({ data: { registration: { id: "p-9", reg_no: "109", full_name: body.full_name }, created: true } });
+      return Promise.resolve({ data: { registration: { ...ARRIVED, id: "p-9", reg_no: "109" } } });
+    });
+    await renderDesk();
+    const fetches = () => api.get.mock.calls.filter(([url]) => url === "/kpis" || url === "/camps/active").length;
+    const before = fetches();
+    await scanAtDoor();
+    act(() => setInput(doorPhone(), "9876500001"));
+    await act(async () => { container.querySelector('[data-testid="door-register-button"]').click(); });
+    expect(fetches()).toBe(before);
+    expect(container.querySelector('[data-testid="kpi-registered-count"]').textContent).toBe("46");
+    expect(container.querySelector('[data-testid="kpi-pending-count"]').textContent).toBe("16");
+  });
+
+  test("the desk refreshes its operating state every 30 seconds while visible, keeping typed work", async () => {
+    jest.useFakeTimers();
+    try {
+      let gate = false;
+      const base = api.get.getMockImplementation();
+      api.get.mockImplementation(async (url) => {
+        const r = await base(url);
+        if (url !== "/camps/active") return r;
+        return { ...r, data: { ...r.data, camp: { ...r.data.camp, door_manual_entry: gate } } };
+      });
+      await renderDesk();
+      const campFetches = () => api.get.mock.calls.filter(([url]) => url === "/camps/active").length;
+      expect(campFetches()).toBe(1);
+      expect(container.querySelector('[data-testid="door-manual-form"]')).toBeNull();
+      gate = true;
+      await act(async () => { jest.advanceTimersByTime(30000); });
+      expect(campFetches()).toBe(2);
+      expect(container.querySelector('[data-testid="door-manual-form"]')).not.toBeNull();
+      act(() => setInput(container.querySelector('[data-testid="reg-fullname-input"]'), "Half Typed"));
+      Object.defineProperty(document, "hidden", { configurable: true, value: true });
+      await act(async () => { jest.advanceTimersByTime(30000); });
+      expect(campFetches()).toBe(2);
+      Object.defineProperty(document, "hidden", { configurable: true, value: false });
+      await act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+      expect(campFetches()).toBe(3);
+      expect(container.querySelector('[data-testid="reg-fullname-input"]').value).toBe("Half Typed");
+    } finally {
+      Object.defineProperty(document, "hidden", { configurable: true, value: false });
+      jest.useRealTimers();
+    }
+  });
+
+  test("a background refresh keeps a half-typed New Registration", async () => {
+    jest.useFakeTimers();
+    try {
+      preRegistrationMode();
+      await renderDesk();
+      act(() => { container.querySelector('[data-testid="new-registration-button"]').click(); });
+      revealManual();
+      act(() => setInput(document.body.querySelector('[data-testid="reg-fullname-input"]'), "Half Typed"));
+      await act(async () => { jest.advanceTimersByTime(30000); });
+      expect(api.get.mock.calls.filter(([url]) => url === "/camps/active")).toHaveLength(2);
+      expect(document.body.querySelector('[data-testid="reg-fullname-input"]').value).toBe("Half Typed");
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test("a half-typed New Registration asks before it is discarded", async () => {
+    preRegistrationMode();
+    await renderDesk();
+    act(() => { container.querySelector('[data-testid="new-registration-button"]').click(); });
+    revealManual();
+    act(() => setInput(document.body.querySelector('[data-testid="reg-fullname-input"]'), "Half Typed"));
+    const confirm = jest.spyOn(window, "confirm").mockReturnValue(false);
+    act(() => document.querySelector('[role="presentation"]').click());
+    act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+    expect(confirm).toHaveBeenCalledWith("Discard changes?");
+    expect(document.querySelector('[role="dialog"]')).not.toBeNull();
+    confirm.mockRestore();
+  });
+
+  test("the scan outcome is announced and registration numbers read at AA contrast", async () => {
+    api.post.mockResolvedValueOnce({ data: { registration: ARRIVED } });
+    await renderDesk();
+    expect(container.querySelector('[data-testid="door-scan-outcome"]').getAttribute("aria-live")).toBe("polite");
+    await act(async () => { container.querySelector('[data-testid="mock-patient-code-trigger"]').click(); });
+    const regNo = container.querySelector('[data-testid="patient-row-101"] .font-mono');
+    expect(regNo.className).toContain("text-emerald-700");
+  });
+
+  test("Mismatch review of a scanned registration says nothing is replaced", async () => {
+    api.post.mockResolvedValueOnce({ data: {
+      outcome: "mismatch_review",
+      registration: { ...ARRIVED, aadhaar_scanned: true, manual_entry: false, arrived_at: null },
+      diff: [{ field: "dob", stored: "1960-01-01", card: "1962-01-01" }],
+    } });
+    await renderDesk();
+    await scanAtDoor();
+    const review = container.querySelector('[data-testid="mismatch-review"]').textContent;
+    expect(review).toContain("registered from another card");
+    expect(review).not.toContain("replaces the stored values");
+  });
+
+  const ARRIVED_SCAN = { data: { outcome: "arrived", registration: ARRIVED, prescription: RX } };
+
+  function stampCalls() {
+    return api.post.mock.calls.filter(([url]) => url.startsWith("/desk/print/"));
+  }
+
+  function paperCheck() {
+    return document.querySelector('[data-testid="paper-check"]');
+  }
+
+  function paperButton(name) {
+    return document.querySelector(`[data-testid="paper-check-${name}"]`);
+  }
+
+  async function printFromDoor() {
+    await scanAtDoor();
+    await act(async () => { container.querySelector('[data-testid="scan-print-button"]').click(); });
+  }
+
+  test("Print stays on the Desk, prints the scanned prescription and asks for a Paper check", async () => {
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN);
+    await renderDesk();
+    await printFromDoor();
+    expect(window.print).toHaveBeenCalledTimes(1);
+    expect(printedText[0]).toContain("Aadhaar Scanned User");
+    expect(printedText[0]).toContain("#101");
+    expect(api.get).not.toHaveBeenCalledWith("/desk/print/p-1");
+    expect(stampCalls()).toHaveLength(0);
+    expect(paperCheck().textContent).toContain("#101");
+    expect(document.activeElement).toBe(paperButton("confirm"));
+    expect(document.getElementById("print-root")).toBeNull();
+  });
+
+  test("Escape on the Paper check records nothing and keeps the patient", async () => {
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN);
+    await renderDesk();
+    await printFromDoor();
+    act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+    expect(paperCheck()).toBeNull();
+    expect(stampCalls()).toHaveLength(0);
+    expect(container.querySelector('[data-testid="scan-arrived"]')).not.toBeNull();
+    expect(container.textContent).toContain("Not recorded as printed");
+  });
+
+  test("Printed — next patient sends one stamp, clears the card and puts the cursor in the USB box", async () => {
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN)
+      .mockResolvedValueOnce({ data: { registration: { ...ARRIVED, printed_at: "2026-09-01T05:00:00Z" }, prescription: RX } });
+    await renderDesk();
+    await printFromDoor();
+    await act(async () => { paperButton("confirm").click(); });
+    expect(stampCalls()).toEqual([["/desk/print/p-1"]]);
+    expect(paperCheck()).toBeNull();
+    expect(container.querySelector('[data-testid="scan-arrived"]')).toBeNull();
+    expect(container.textContent).toContain("Printed #101");
+    expect(document.activeElement).toBe(container.querySelector('[data-testid="mock-usb-box"]'));
+  });
+
+  test("a failed stamp offers Retry and never advances", async () => {
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN)
+      .mockRejectedValueOnce(new Error("Network Error"))
+      .mockResolvedValueOnce({ data: { registration: { ...ARRIVED, printed_at: "2026-09-01T05:00:00Z" }, prescription: RX } });
+    await renderDesk();
+    await printFromDoor();
+    await act(async () => { paperButton("confirm").click(); });
+    expect(paperCheck().textContent).toContain("Network Error");
+    expect(paperButton("confirm").textContent).toBe("Retry");
+    expect(container.querySelector('[data-testid="scan-arrived"]')).not.toBeNull();
+    await act(async () => { paperButton("confirm").click(); });
+    expect(stampCalls()).toHaveLength(2);
+    expect(paperCheck()).toBeNull();
+  });
+
+  test("Reprint prints again and still records nothing", async () => {
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url === "/desk/print/p-1"
+      ? Promise.resolve({ data: { registration: ARRIVED, prescription: RX } }) : base(url)));
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN);
+    await renderDesk();
+    await printFromDoor();
+    await act(async () => { paperButton("reprint").click(); });
+    expect(window.print).toHaveBeenCalledTimes(2);
+    expect(paperCheck()).not.toBeNull();
+    expect(stampCalls()).toHaveLength(0);
+  });
+
+  test("Printer problem keeps the patient on the card and says nothing was recorded", async () => {
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN);
+    await renderDesk();
+    await printFromDoor();
+    await act(async () => { paperButton("problem").click(); });
+    expect(paperCheck()).toBeNull();
+    expect(stampCalls()).toHaveLength(0);
+    expect(container.querySelector('[data-testid="scan-print-button"]')).not.toBeNull();
+    expect(container.textContent).toContain("Nothing was recorded");
+  });
+
+  test("two patients in a row fetch the sponsor logos once", async () => {
+    const stamped = { data: { registration: { ...ARRIVED, printed_at: "2026-09-01T05:00:00Z" }, prescription: RX } };
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN).mockResolvedValueOnce(stamped)
+      .mockResolvedValueOnce(ARRIVED_SCAN).mockResolvedValueOnce(stamped);
+    await renderDesk();
+    for (let i = 0; i < 2; i += 1) {
+      await printFromDoor();
+      await act(async () => { paperButton("confirm").click(); });
+    }
+    expect(window.print).toHaveBeenCalledTimes(2);
+    expect(api.get.mock.calls.filter(([url]) => url.startsWith("/templates/logos"))).toHaveLength(1);
+  });
+
+  test("a patient switch while the print is pending never stamps the old patient", async () => {
+    window.print = jest.fn();
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN).mockResolvedValueOnce({
+      data: { outcome: "no_match", card: { full_name: "Next Patient" } },
+    });
+    await renderDesk();
+    await printFromDoor();
+    expect(window.print).toHaveBeenCalledTimes(1);
+    await scanAtDoor();
+    await act(async () => { window.dispatchEvent(new Event("afterprint")); });
+    expect(paperCheck()).toBeNull();
+    expect(stampCalls()).toHaveLength(0);
+    expect(container.querySelector('[data-testid="door-card-name"]').textContent).toContain("Next Patient");
+  });
+
+  test("a found patient prints from the server's prescription", async () => {
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url === "/desk/print/p-1"
+      ? Promise.resolve({ data: { registration: ARRIVED, prescription: RX } }) : base(url)));
+    await lookup(ARRIVED);
+    await act(async () => { container.querySelector('[data-testid="print-button-101"]').click(); });
+    expect(api.get).toHaveBeenCalledWith("/desk/print/p-1");
+    expect(window.print).toHaveBeenCalledTimes(1);
+    expect(paperCheck()).not.toBeNull();
+  });
+
+  test("sponsor logos that cannot load are named on the Desk, and the prescription still prints", async () => {
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url.startsWith("/templates/logos") ? Promise.reject(new Error("down")) : base(url)));
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN);
+    await renderDesk();
+    expect(container.querySelector('[data-testid="logo-status"]').textContent).toContain("Sponsor logos unavailable");
+    await printFromDoor();
+    expect(window.print).toHaveBeenCalledTimes(1);
+    expect(paperCheck()).not.toBeNull();
+  });
+
+  test("after Printer problem, Print asks the server again instead of reusing the scanned sheet", async () => {
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url === "/desk/print/p-1"
+      ? Promise.reject(apiError({ code: "PRINT_WINDOW_CLOSED", message: "The print window is closed." })) : base(url)));
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN);
+    await renderDesk();
+    await printFromDoor();
+    await act(async () => { paperButton("problem").click(); });
+    await act(async () => { container.querySelector('[data-testid="scan-print-button"]').click(); });
+    expect(api.get).toHaveBeenCalledWith("/desk/print/p-1");
+    expect(window.print).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("The print window is closed.");
+  });
+
+  test("Reprint asks the server again and a second tap cannot start a second print", async () => {
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url === "/desk/print/p-1"
+      ? Promise.resolve({ data: { registration: ARRIVED, prescription: RX } }) : base(url)));
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN);
+    await renderDesk();
+    await printFromDoor();
+    window.print = jest.fn();
+    await act(async () => { paperButton("reprint").click(); });
+    expect(api.get).toHaveBeenCalledWith("/desk/print/p-1");
+    expect(window.print).toHaveBeenCalledTimes(1);
+    await act(async () => { container.querySelector('[data-testid="scan-print-button"]').click(); });
+    expect(window.print).toHaveBeenCalledTimes(1);
+    await act(async () => { window.dispatchEvent(new Event("afterprint")); });
+    expect(paperCheck()).not.toBeNull();
+  });
+
+  test("a scan while the Paper check is open closes it without a stamp", async () => {
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN).mockResolvedValueOnce({
+      data: { outcome: "no_match", card: { full_name: "Next Patient" } },
+    });
+    await renderDesk();
+    await printFromDoor();
+    await scanAtDoor();
+    expect(paperCheck()).toBeNull();
+    expect(stampCalls()).toHaveLength(0);
+  });
+
+  test("a space from a scanner burst never confirms the Paper check", async () => {
+    api.post.mockResolvedValueOnce(ARRIVED_SCAN);
+    await renderDesk();
+    await printFromDoor();
+    for (const type of ["keydown", "keyup"]) {
+      const space = new KeyboardEvent(type, { key: " ", bubbles: true, cancelable: true });
+      paperButton("confirm").dispatchEvent(space);
+      expect(space.defaultPrevented).toBe(true);
+    }
+    const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+    paperButton("confirm").dispatchEvent(enter);
+    expect(enter.defaultPrevented).toBe(false);
   });
 });

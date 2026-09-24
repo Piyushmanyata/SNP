@@ -50,7 +50,6 @@ describe("ErrorBoundary", () => {
     const alert = container.querySelector('[role="alert"]');
     expect(alert).not.toBeNull();
     expect(container.textContent).not.toContain("cannot read property stack");
-    expect(alert.className).toContain("no-print");
 
     const retry = container.querySelector('[data-testid="app-error-reload"]');
     expect(retry.tagName).toBe("BUTTON");

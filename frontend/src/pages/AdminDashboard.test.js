@@ -34,6 +34,17 @@ jest.mock("../components/TemplateEditor", () => {
   };
 });
 
+const SYSTEM = {
+  status: "green",
+  levels: { backup: "green", disk: "green" },
+  backup: {
+    last_success_at: "2026-09-24T04:30:00+00:00", last_error_at: null, last_error: null,
+    remote_configured: true, remote_last_success_at: "2026-09-24T04:31:00+00:00",
+    interval_seconds: 3600, bytes: 2661, patients_count: 50,
+  },
+  disk: { free_bytes: 40e9, total_bytes: 100e9 },
+};
+
 let container = null;
 let root = null;
 
@@ -44,6 +55,9 @@ beforeEach(() => {
   jest.clearAllMocks();
 
   api.get.mockImplementation((url) => {
+    if (url === "/admin/system") {
+      return Promise.resolve({ data: SYSTEM });
+    }
     if (url === "/kpis") {
       return Promise.resolve({
         data: { registered: 120, seen: 90, pending: 30 },
@@ -121,10 +135,13 @@ beforeEach(() => {
       return Promise.resolve({
         data: {
           specs_days: [
-            { id: "sp-1", day_date: "2026-09-12", end_date: "2026-09-19", venue: "Base Optical", start_time: "10:00", end_time: "17:00" },
+            { id: "sp-1", day_date: "2026-09-12", end_date: "2026-09-19", venue: "Base Optical", venue_sms: "Base Optical" },
           ],
         },
       });
+    }
+    if (url === "/clinical/schedule-notices") {
+      return Promise.resolve({ data: { notices: [] } });
     }
     if (url === "/leaderboard") {
       return Promise.resolve({
@@ -247,11 +264,92 @@ describe("AdminDashboard component", () => {
   });
 
   test("overview recovers after a failed request is retried", async () => {
-    api.get.mockRejectedValueOnce(new Error("Network unavailable"));
+    const base = api.get.getMockImplementation();
+    let failKpis = true;
+    api.get.mockImplementation((url) => {
+      if (url === "/kpis" && failKpis) {
+        failKpis = false;
+        return Promise.reject(new Error("Network unavailable"));
+      }
+      return base(url);
+    });
     await act(async () => root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>));
     expect(container.querySelector('[data-testid="error-retry-button"]')).not.toBeNull();
     await act(async () => container.querySelector('[data-testid="error-retry-button"]').click());
     expect(container.querySelector('[data-testid="kpi-registered-count"]').textContent).toContain("120");
+  });
+
+  describe("System card", () => {
+    const renderWith = async (system) => {
+      const base = api.get.getMockImplementation();
+      api.get.mockImplementation((url) => (url === "/admin/system" ? Promise.resolve({ data: system }) : base(url)));
+      await act(async () => root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>));
+      return container.querySelector('[data-testid="system-card"]');
+    };
+
+    test("green shows the last backup, the off-site copy and free disk", async () => {
+      const card = await renderWith(SYSTEM);
+      expect(card.getAttribute("data-status")).toBe("green");
+      expect(card.querySelector('[data-testid="system-status"]').textContent).toBe("All good");
+      expect(card.querySelector('[data-testid="system-backup"]').textContent).toContain("24-09-2026 10:00");
+      expect(card.querySelector('[data-testid="system-remote"]').textContent).toContain("24-09-2026 10:01");
+      expect(card.querySelector('[data-testid="system-disk"]').textContent).toContain("40 GB free of 100 GB");
+      expect(card.querySelector('[data-testid="system-error"]')).toBeNull();
+    });
+
+    test("amber says the off-site copy is not set up", async () => {
+      const card = await renderWith({
+        ...SYSTEM, status: "amber", levels: { backup: "amber", disk: "green" },
+        backup: { ...SYSTEM.backup, remote_configured: false, remote_last_success_at: null },
+      });
+      expect(card.getAttribute("data-status")).toBe("amber");
+      expect(card.querySelector('[data-testid="system-status"]').textContent).toBe("Needs attention");
+      expect(card.querySelector('[data-testid="system-remote"]').textContent).toContain("Not set up");
+      expect(card.querySelector('[data-testid="system-remote"]').className).toContain("amber");
+      expect(card.querySelector('[data-testid="system-disk"]').className).not.toContain("amber");
+    });
+
+    test("red with no backup yet shows the latest error and an unknown disk", async () => {
+      const card = await renderWith({
+        status: "red", levels: { backup: "red", disk: "green" },
+        backup: { ...SYSTEM.backup, last_success_at: null, remote_last_success_at: null, last_error_at: "2026-09-24T05:00:00+00:00", last_error: "dump failed" },
+        disk: "unknown",
+      });
+      expect(card.getAttribute("data-status")).toBe("red");
+      expect(card.querySelector('[data-testid="system-status"]').textContent).toBe("Failing");
+      expect(card.querySelector('[data-testid="system-backup"]').textContent).toContain("No backup yet");
+      expect(card.querySelector('[data-testid="system-error"]').textContent).toContain("dump failed");
+      expect(card.querySelector('[data-testid="system-disk"]').textContent).toContain("Unknown");
+    });
+
+    test("an error from the same pass as the last success is shown", async () => {
+      const card = await renderWith({
+        ...SYSTEM, status: "amber", levels: { backup: "amber", disk: "green" },
+        backup: { ...SYSTEM.backup, last_error_at: SYSTEM.backup.last_success_at, last_error: "prune failed" },
+      });
+      expect(card.querySelector('[data-testid="system-error"]').textContent).toContain("prune failed");
+    });
+
+    test("an error older than the last success is not shown", async () => {
+      const card = await renderWith({ ...SYSTEM, backup: { ...SYSTEM.backup, last_error_at: "2026-09-24T01:00:00+00:00", last_error: "dump failed" } });
+      expect(card.querySelector('[data-testid="system-error"]')).toBeNull();
+    });
+
+    test("a failed status request leaves the KPIs and offers a retry", async () => {
+      const base = api.get.getMockImplementation();
+      let fail = true;
+      api.get.mockImplementation((url) => {
+        if (url === "/admin/system" && fail) {
+          fail = false;
+          return Promise.reject(new Error("Network unavailable"));
+        }
+        return base(url);
+      });
+      await act(async () => root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>));
+      expect(container.querySelector('[data-testid="kpi-registered-count"]').textContent).toContain("120");
+      await act(async () => container.querySelector('[data-testid="error-retry-button"]').click());
+      expect(container.querySelector('[data-testid="system-card"]').getAttribute("data-status")).toBe("green");
+    });
   });
 
   test("switches tabs smoothly (Camps, Template, OT & Specs, Leaderboard, Exports)", async () => {
@@ -427,7 +525,7 @@ describe("AdminDashboard component", () => {
     const body = JSON.stringify({ detail: "No active camp to export" });
     api.get.mockImplementation((url) => (url === "/exports/camp-records"
       ? Promise.reject({ message: "Request failed with status code 409", response: { status: 409, data: { text: () => Promise.resolve(body) } } })
-      : Promise.resolve({ data: {} })));
+      : Promise.resolve({ data: url === "/admin/system" ? SYSTEM : {} })));
     await act(async () => { root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>); });
     await act(async () => { container.querySelector('[data-testid="admin-tab-exports"]').click(); });
     await act(async () => { container.querySelector('[data-testid="export-camp-records-button"]').click(); });
@@ -487,6 +585,71 @@ describe("AdminDashboard component", () => {
         venue_sms: "",
       }
     );
+  });
+
+  test("a Specs collection day is edited in place, never re-added", async () => {
+    api.patch.mockResolvedValue({ data: {} });
+    await act(async () => {
+      root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>);
+    });
+    await act(async () => container.querySelector('[data-testid="admin-tab-ot"]').click());
+    act(() => container.querySelector('[data-testid="edit-specs-day-sp-1"]').click());
+    const venue = container.querySelector('[data-testid="specs-venue-input"]');
+    expect(venue.value).toBe("Base Optical");
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    act(() => {
+      setter.call(venue, "New Optical");
+      venue.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => container.querySelector('[data-testid="save-specs-day-button"]').click());
+    expect(api.patch).toHaveBeenCalledWith("/clinical/specs-days/sp-1", {
+      camp_id: "c-1", day_date: "2026-09-12", end_date: "2026-09-19", venue: "New Optical", venue_sms: "Base Optical",
+    });
+    expect(api.post).not.toHaveBeenCalledWith("/clinical/specs-days", expect.anything());
+  });
+
+  test("patients whose changed Token got no SMS are listed to phone until marked done", async () => {
+    const notice = {
+      slip_id: "slip-9", item_type: "ot", reg_no: 501, full_name: "Sita Devi", phone: "9876500001",
+      collection_date: "2026-10-09", collection_end_date: null, collection_venue: "New Hospital", sms_status: "not_sent",
+    };
+    const get = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url === "/clinical/schedule-notices"
+      ? Promise.resolve({ data: { notices: [notice] } }) : get(url)));
+    api.post.mockResolvedValue({ data: { ok: true } });
+    await act(async () => {
+      root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>);
+    });
+    await act(async () => container.querySelector('[data-testid="admin-tab-ot"]').click());
+    const row = container.querySelector('[data-testid="schedule-notice-slip-9"]');
+    expect(row.textContent).toContain("#501 Sita Devi");
+    expect(row.textContent).toContain("9876500001");
+    expect(row.textContent).toContain("IOL surgery · 09-10-2026 · New Hospital");
+    expect(row.textContent).toContain("SMS not sent");
+    expect(row.querySelector('a[href="tel:9876500001"]')).not.toBeNull();
+    await act(async () => container.querySelector('[data-testid="schedule-notice-done-slip-9"]').click());
+    expect(api.post).toHaveBeenCalledWith("/clinical/schedule-notices/slip-9/contacted");
+    expect(container.querySelector('[data-testid="schedule-notices"]')).toBeNull();
+  });
+
+  test("the phone list reloads after a day is edited", async () => {
+    const notice = {
+      slip_id: "slip-7", item_type: "ot", reg_no: 502, full_name: "Ram Lal", phone: "9876500002",
+      collection_date: "2026-09-06", collection_end_date: null, collection_venue: "Moved Hospital", sms_status: "not_sent",
+    };
+    let edited = false;
+    const get = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url === "/clinical/schedule-notices"
+      ? Promise.resolve({ data: { notices: edited ? [notice] : [] } }) : get(url)));
+    api.patch.mockImplementation(() => { edited = true; return Promise.resolve({ data: {} }); });
+    await act(async () => {
+      root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>);
+    });
+    await act(async () => container.querySelector('[data-testid="admin-tab-ot"]').click());
+    expect(container.querySelector('[data-testid="schedule-notices"]')).toBeNull();
+    act(() => container.querySelector('[data-testid="edit-ot-day-ot-1"]').click());
+    await act(async () => container.querySelector('[data-testid="save-ot-day-button"]').click());
+    expect(container.querySelector('[data-testid="schedule-notice-slip-7"]')).not.toBeNull();
   });
 
   test("an SMS venue that would fail DLT blocks saving and says why", async () => {
