@@ -632,6 +632,26 @@ describe("AdminDashboard component", () => {
     expect(container.querySelector('[data-testid="schedule-notices"]')).toBeNull();
   });
 
+  test("the phone list reloads after a day is edited", async () => {
+    const notice = {
+      slip_id: "slip-7", item_type: "ot", reg_no: 502, full_name: "Ram Lal", phone: "9876500002",
+      collection_date: "2026-09-06", collection_end_date: null, collection_venue: "Moved Hospital", sms_status: "not_sent",
+    };
+    let edited = false;
+    const get = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url === "/clinical/schedule-notices"
+      ? Promise.resolve({ data: { notices: edited ? [notice] : [] } }) : get(url)));
+    api.patch.mockImplementation(() => { edited = true; return Promise.resolve({ data: {} }); });
+    await act(async () => {
+      root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>);
+    });
+    await act(async () => container.querySelector('[data-testid="admin-tab-ot"]').click());
+    expect(container.querySelector('[data-testid="schedule-notices"]')).toBeNull();
+    act(() => container.querySelector('[data-testid="edit-ot-day-ot-1"]').click());
+    await act(async () => container.querySelector('[data-testid="save-ot-day-button"]').click());
+    expect(container.querySelector('[data-testid="schedule-notice-slip-7"]')).not.toBeNull();
+  });
+
   test("an SMS venue that would fail DLT blocks saving and says why", async () => {
     await act(async () => {
       root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>);

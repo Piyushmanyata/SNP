@@ -331,7 +331,10 @@ async def send_queued(db: AsyncDatabase, row_id: ObjectId) -> str:
 
 async def send_queued_rows(db: AsyncDatabase, row_ids: List[ObjectId]) -> None:
     for row_id in row_ids:
-        await send_queued(db, row_id)
+        try:
+            await send_queued(db, row_id)
+        except Exception:
+            logger.exception("Queued patient SMS could not be sent")
 
 
 async def dispatch(background_tasks: Any, db: AsyncDatabase, row_ids: List[ObjectId]) -> None:

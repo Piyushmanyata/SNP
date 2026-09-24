@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 import pytest
 from bson import ObjectId
 from fastapi import BackgroundTasks, HTTPException
@@ -7,7 +9,10 @@ import routes_camps
 import routes_clinical
 from conftest import run_db
 from models import CampDayBody, OtScheduleBody, SpecsScheduleBody
-from seed import ADMIN, NOW, OTHER_DAY, day, patient_doc, recorder, register, run_camp, seed_camp
+from routes_clinical import record_fulfilment
+from seed import (
+    ADMIN, CLINICAL, NOW, OTHER_DAY, day, fulfil, patient_doc, recorder, register, run_camp, seed_camp, seen_patient,
+)
 from test_camp_operations_matrix import intercept
 
 MOVED_DAY = day(4)
@@ -382,6 +387,53 @@ def test_a_sent_notice_needs_no_phone_call(monkeypatch):
         day_id, _patient, _t = await _seed_ot_appointment(database, camp_id, seat_limit=2)
         await _update_ot_day(str(day_id), _ot(camp_id, venue="New Hospital"), actor={})
         assert (await routes_clinical.list_schedule_notices(actor=ADMIN))["notices"] == []
+
+    run_camp(monkeypatch, body)
+
+
+def test_a_notice_still_queued_after_ten_minutes_puts_the_patient_on_the_contact_list(monkeypatch):
+    recorder(monkeypatch)
+
+    async def body(database):
+        camp_id, _ = await seed_camp(database)
+        day_id, _patient, _t = await _seed_ot_appointment(database, camp_id, seat_limit=2)
+        await routes_clinical.update_ot_day(str(day_id), _ot(camp_id, venue="New Hospital"), actor={},
+                                            background_tasks=BackgroundTasks())
+        assert (await routes_clinical.list_schedule_notices(actor=ADMIN))["notices"] == []
+        await database.reminder_ledger.update_many({}, {"$set": {"created_at": NOW - timedelta(minutes=11)}})
+        listed = (await routes_clinical.list_schedule_notices(actor=ADMIN))["notices"]
+        assert [(n["reg_no"], n["sms_status"]) for n in listed] == [(501, "not_sent")]
+
+    run_camp(monkeypatch, body)
+
+
+def test_a_token_issued_while_its_specs_day_moves_gets_the_new_venue(monkeypatch):
+    recorder(monkeypatch)
+
+    async def body(database):
+        camp_id, _ = await seed_camp(database, days=())
+        seen = await seen_patient(database, camp_id)
+        day_id = (await database.specs_collection_days.insert_one({
+            "camp_id": camp_id, "day_date": OTHER_DAY, "end_date": day(9), "venue": "Old Optical",
+        })).inserted_id
+        moved = []
+
+        async def move_once(real, *args, **kwargs):
+            result = await real(*args, **kwargs)
+            if not moved:
+                moved.append(True)
+                await _update_specs_day(str(day_id), SpecsScheduleBody(
+                    camp_id=str(camp_id), day_date=OTHER_DAY, end_date=day(9), venue="New Optical",
+                ), actor={})
+            return result
+
+        restore = intercept(monkeypatch, "patients", "find_one_and_update", move_once)
+        out = await record_fulfilment(fulfil(
+            seen["trans_id"], seen["rev_id"], item_type="specs_made", status="deferred",
+            specs_collection_day_id=str(day_id),
+        ), actor=CLINICAL, background_tasks=None)
+        restore()
+        assert out["slip"]["collection_venue"] == "New Optical"
 
     run_camp(monkeypatch, body)
 

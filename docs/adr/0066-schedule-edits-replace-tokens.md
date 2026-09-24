@@ -20,8 +20,9 @@ Issue #50, slice S8 (stories 20, 21, 67, 68).
   - one `ot_change` or `specs_change` SMS intent is queued per patient, keyed `edit:{revision}`. Its copy says the old paper is no longer valid.
 
   A seat-limit or SMS short-name change replaces nothing and sends nothing.
+- **Deferrals conflict with edits.** A Spectacles deferral increments the day's `booking_seq` in its transaction, like an OT deferral takes a seat. A Token issued while its day is being edited therefore retries and gets the new date and venue.
 - **Camp-day moves use the same ledger.** A date change and its notices commit in one transaction. Each booking gets one queued `registration` intent keyed `edit:{revision}`. Bookings made after the move use the same key, and only a date change queues notices. Queued intents are sent after commit by one background task. S10's worker will retry any that are left.
-- **Patients to phone.** `GET /clinical/schedule-notices` lists replaced Tokens whose notice was not sent, failed, was rejected or paused, or has a failed delivery report. `POST /clinical/schedule-notices/{slip_id}/contacted` records the call. Admin shows the list in the OT & Specs tab. Until MSG91 approves the two new flows (`MSG91_TEMPLATE_OT_CHANGE` and `MSG91_TEMPLATE_SPECS_CHANGE`), every affected patient appears there.
+- **Patients to phone.** `GET /clinical/schedule-notices` lists replaced Tokens whose notice was not sent, failed, was rejected or paused, has a failed delivery report, or is still queued after 10 minutes. `POST /clinical/schedule-notices/{slip_id}/contacted` records the call. Admin shows the list in the OT & Specs tab. Until MSG91 approves the two new flows (`MSG91_TEMPLATE_OT_CHANGE` and `MSG91_TEMPLATE_SPECS_CHANGE`), every affected patient appears there.
 - **Specs hours are constants** (`sms.SPECS_PICKUP_START_TIME` and `SPECS_PICKUP_END_TIME`). They are no longer stored on days or Tokens. Screens use one frontend constant, `SPECS_HOURS`.
 - **Indexes:**
   - `deferred_slips {ot_schedule_day_id, active}`;

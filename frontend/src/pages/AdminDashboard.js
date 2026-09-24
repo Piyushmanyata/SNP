@@ -50,7 +50,7 @@ export default function AdminDashboard() {
       {tab === "overview" && <Overview />}
       {tab === "camps" && <Camps />}
       {tab === "template" && <TemplateEditor />}
-      {tab === "ot" && <div className="space-y-5"><ScheduleNotices /><OtSchedule /><SpecsCollectionDays /></div>}
+      {tab === "ot" && <Schedules />}
       {tab === "sms" && <SmsHealth />}
       {tab === "supplies" && <div className="space-y-5"><Medicines /><FixedPowers /></div>}
       {tab === "board" && <Leaderboards />}
@@ -366,7 +366,19 @@ function CampDays({ campId }) {
 }
 
 
-function OtSchedule() {
+function Schedules() {
+  const [edits, setEdits] = useState(0);
+  const saved = useCallback(() => setEdits((n) => n + 1), []);
+  return (
+    <div className="space-y-5">
+      <ScheduleNotices refresh={edits} />
+      <OtSchedule onSaved={saved} />
+      <SpecsCollectionDays onSaved={saved} />
+    </div>
+  );
+}
+
+function OtSchedule({ onSaved }) {
   const [days, setDays] = useState([]);
   const [camp, setCamp] = useState(null);
   const [err, setErr] = useState("");
@@ -392,9 +404,10 @@ function OtSchedule() {
       setForm({ day_date: "", venue: HOSPITAL_VENUE, venue_sms: HOSPITAL_SMS_VENUE, seat_limit: 10 });
       setEditing(null);
       load();
+      onSaved();
     } catch (e) { setErr(formatApiError(e)); }
     finally { setBusy(false); }
-  }, [camp, form, editing, load]);
+  }, [camp, form, editing, load, onSaved]);
 
   const edit = (day) => {
     setEditing(day.id);
@@ -434,7 +447,7 @@ function OtSchedule() {
   );
 }
 
-function SpecsCollectionDays() {
+function SpecsCollectionDays({ onSaved }) {
   const [days, setDays] = useState([]);
   const [camp, setCamp] = useState(null);
   const [err, setErr] = useState("");
@@ -461,10 +474,11 @@ function SpecsCollectionDays() {
       else await api.post("/clinical/specs-days", body);
       reset();
       load();
+      onSaved();
     }
     catch (e) { setErr(formatApiError(e)); }
     finally { setBusy(false); }
-  }, [camp, form, editing, load]);
+  }, [camp, form, editing, load, onSaved]);
 
   const edit = (day) => {
     setEditing(day.id);
@@ -507,7 +521,7 @@ function SpecsCollectionDays() {
 const NOTICE_LINES = { ot: "IOL surgery", specs_made: "Spectacles" };
 const NOTICE_STATUS = { not_sent: "SMS not sent", failed: "SMS failed", rejected: "SMS rejected", paused: "SMS paused", skipped: "SMS skipped", abandoned: "SMS gave up" };
 
-function ScheduleNotices() {
+function ScheduleNotices({ refresh }) {
   const [notices, setNotices] = useState([]);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(null);
@@ -517,7 +531,7 @@ function ScheduleNotices() {
       .then((r) => setNotices(r.data.notices))
       .catch((e) => setErr(formatApiError(e)));
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load(); }, [load, refresh]);
 
   const contacted = async (slipId) => {
     setErr("");

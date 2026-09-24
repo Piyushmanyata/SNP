@@ -47,7 +47,7 @@ const PAYLOAD = {
   quiet_count: 1,
   sms_failures: 1,
   next_ot: { day_date: "2026-09-02", venue: "OT Hall", seats_left: 7 },
-  next_specs: { day_date: "2026-09-05", end_date: "2026-09-12", venue: "Optical", start_time: "10:00", end_time: "17:00" },
+  next_specs: { day_date: "2026-09-05", end_date: "2026-09-12", venue: "Optical" },
 };
 
 let container = null;

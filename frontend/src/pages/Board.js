@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import api, { formatApiError } from "../lib/api";
 import Layout from "../components/Layout";
 import { Alert, Card, Stat } from "../components/ui";
-import { displayDate, displayDateRange, displayTimeRange, displayTimestamp } from "../lib/dates";
+import { SPECS_HOURS, displayDate, displayDateRange, displayTimestamp } from "../lib/dates";
 import { SMS_LABELS } from "../lib/sms";
 
 const POLL_MS = 15000;
@@ -140,7 +140,7 @@ export default function Board() {
                   <dt className="text-xs font-mono uppercase tracking-widest text-slate-600">Next Specs</dt>
                   <dd className="mt-1 font-semibold text-slate-900 break-words" data-testid="board-next-specs">
                     {data.next_specs
-                      ? `${displayDateRange(data.next_specs.day_date, data.next_specs.end_date)} · ${data.next_specs.venue} · ${displayTimeRange(data.next_specs.start_time, data.next_specs.end_time)}`
+                      ? `${displayDateRange(data.next_specs.day_date, data.next_specs.end_date)} · ${data.next_specs.venue} · ${SPECS_HOURS}`
                       : "No day scheduled"}
                   </dd>
                 </div>

@@ -331,8 +331,6 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
             "day_date": specs_day["day_date"],
             "end_date": specs_day.get("end_date") or specs_day["day_date"],
             "venue": specs_day.get("venue"),
-            "start_time": sms.SPECS_PICKUP_START_TIME,
-            "end_time": sms.SPECS_PICKUP_END_TIME,
         }
 
     return {

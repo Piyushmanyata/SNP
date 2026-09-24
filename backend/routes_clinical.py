@@ -21,7 +21,7 @@ from clinical_state import (
     serialize_revision, validate_completion,
 )
 from helpers import (
-    now_utc, iso, DIAGNOSIS_OPTIONS, now_ist, ist_local_instant,
+    now_utc, iso, DIAGNOSIS_OPTIONS, now_ist, ist_local_instant, as_utc,
     normalize_name, normalize_phone, parse_patient_identifier,
 )
 from bson.errors import InvalidId
@@ -548,8 +548,10 @@ async def _load_deferral_day(
         raise HTTPException(status_code=400, detail=cfg["missing_err"])
     oid = _oid_or_400(target_day_id)
     collection = getattr(db, cfg["collection_attr"])
-    target = await collection.find_one({"_id": oid}, session=session)
     if body.item_type == "specs_made":
+        target = await collection.find_one_and_update(
+            {"_id": oid}, {"$inc": {"booking_seq": 1}}, return_document=True, session=session,
+        )
         if not target:
             raise HTTPException(status_code=400, detail=cfg["full_err"])
         if target.get("camp_id") != patient.get("camp_id"):
@@ -557,6 +559,7 @@ async def _load_deferral_day(
         if not _specs_window_open(target):
             raise HTTPException(status_code=400, detail="Specs collection window is not selectable")
         return target
+    target = await collection.find_one({"_id": oid}, session=session)
     if not target:
         raise HTTPException(status_code=409, detail=cfg["full_err"])
     if target.get("day_date", "") < now_ist().date().isoformat():
@@ -912,14 +915,12 @@ def _day_exists() -> HTTPException:
     return conflict("DAY_EXISTS", "A day already uses that date. Use Edit on that day.")
 
 
-async def _supersede_tokens(
-    db: AsyncDatabase, day_field: str, day: dict, message_type: str, end_date: Optional[str], session,
-) -> List[ObjectId]:
+async def _supersede_tokens(db: AsyncDatabase, day_field: str, day: dict, message_type: str, session) -> List[ObjectId]:
     """A date or venue change replaces every active Token on the day and queues one notice per patient."""
     slips = await db.deferred_slips.find({day_field: day["_id"], "active": True}, session=session).to_list(None)
     if not slips:
         return []
-    revision = day["edit_revision"]
+    revision, end_date = day["edit_revision"], day.get("end_date")
     fields = {"collection_date": day["day_date"], "collection_venue": day["venue"],
               "collection_venue_sms": day.get("venue_sms"), "collection_end_date": end_date}
     replacements = [{
@@ -947,7 +948,7 @@ async def _supersede_tokens(
 
 async def _edit_day(
     collection: AsyncCollection, day: dict, updates: dict, extra_filter: dict, day_field: str,
-    message_type: str, background_tasks: BackgroundTasks, conflict_message: str,
+    message_type: str, background_tasks: BackgroundTasks,
 ) -> dict:
     db = get_db()
     material = any(updates[key] != day.get(key) for key in ("day_date", "venue", "end_date") if key in updates)
@@ -960,10 +961,9 @@ async def _edit_day(
             {"$set": updates}, return_document=True, session=session,
         )
         if not changed:
-            raise HTTPException(status_code=409, detail=conflict_message)
+            raise HTTPException(status_code=409, detail="The day changed; reload and try again")
         if material:
-            end_date = (changed.get("end_date") or changed["day_date"]) if day_field == "specs_collection_day_id" else None
-            return changed, await _supersede_tokens(db, day_field, changed, message_type, end_date, session)
+            return changed, await _supersede_tokens(db, day_field, changed, message_type, session)
         await db.deferred_slips.update_many(
             {day_field: day["_id"], "active": True}, {"$set": {"collection_venue_sms": changed.get("venue_sms")}},
             session=session,
@@ -1048,7 +1048,6 @@ async def update_ot_day(day_id: str, body: OtScheduleBody, background_tasks: Bac
         db.ot_schedule_days, day,
         {"day_date": body.day_date, "seat_limit": body.seat_limit, "venue": venue, "venue_sms": body.venue_sms},
         {"seats_taken": {"$lte": body.seat_limit}}, "ot_schedule_day_id", "ot_change", background_tasks,
-        "Seats or date changed; reload and try again",
     )
     return {"ot_day": ser_ot_day(changed)}
 
@@ -1103,7 +1102,6 @@ async def update_specs_day(day_id: str, body: SpecsScheduleBody, background_task
         db.specs_collection_days, {**day, "end_date": day.get("end_date") or day["day_date"]},
         {"day_date": day_date, "end_date": end_date, "venue": venue, "venue_sms": body.venue_sms},
         {}, "specs_collection_day_id", "specs_change", background_tasks,
-        "The day changed; reload and try again",
     )
     return {"specs_day": ser_specs_day(changed)}
 
@@ -1119,6 +1117,14 @@ async def list_specs_days(actor: dict = Depends(require_any)) -> Dict[str, Any]:
 
 
 SENT_OR_SENDING = {"queued", "pending", "sent", "uncertain"}
+
+
+def _notice_status(row: dict, stuck_before: datetime) -> str:
+    if row.get("delivery") == "failed":
+        return "failed"
+    if row["status"] in ("queued", "pending") and as_utc(row["created_at"]) <= stuck_before:
+        return "not_sent"
+    return row["status"]
 
 
 @router.get("/schedule-notices")
@@ -1137,11 +1143,9 @@ async def list_schedule_notices(actor: dict = Depends(require_admin)) -> Dict[st
     rows = await db.reminder_ledger.find({
         "patient_id": {"$in": list(patients)}, "message_type": {"$in": ["ot_change", "specs_change"]},
         "event_key": {"$in": [f"edit:{slip['edit_revision']}" for slip in slips]},
-    }, {"patient_id": 1, "event_key": 1, "status": 1, "delivery": 1}).to_list(None)
-    sms_status = {
-        (row["patient_id"], row["event_key"]): "failed" if row.get("delivery") == "failed" else row["status"]
-        for row in rows
-    }
+    }, {"patient_id": 1, "event_key": 1, "status": 1, "delivery": 1, "created_at": 1}).to_list(None)
+    stuck_before = now_utc() - sms.RETRY_AFTER
+    sms_status = {(row["patient_id"], row["event_key"]): _notice_status(row, stuck_before) for row in rows}
     notices = []
     for slip in slips:
         patient = patients.get(slip["patient_id"])

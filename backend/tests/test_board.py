@@ -135,7 +135,7 @@ class TestCampDayBoard:
             assert out["fulfilment"]["ot"]["deferred"] == 1
             assert out["next_ot"]["seats_left"] == 7
             assert out["next_ot"]["venue"] == "OT Hall"
-            assert out["next_specs"]["start_time"] == "10:00"
+            assert "start_time" not in out["next_specs"]
             assert "seats_left" not in out["next_specs"]
             assert out["sms_failures"] == 4
             assert out["sms_not_sent"] == 1
