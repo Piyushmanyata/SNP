@@ -5,6 +5,7 @@ from urllib.parse import urljoin
 import pytest
 
 from conftest import API
+from routes_registration import SELF_REGISTER_PER_NETWORK
 
 
 def test_built_spa_deep_links_and_hashed_asset_caching(anon):
@@ -58,7 +59,7 @@ def test_nginx_preserves_distinct_client_rate_limit_buckets(anon):
         "qr_payload": "not-an-aadhaar-qr",
         "dob": "not-a-date",
     }
-    for attempt in range(300):
+    for attempt in range(SELF_REGISTER_PER_NETWORK):
         response = anon.post(f"{API}/self-register", json=payload, headers={"X-Forwarded-For": first_ip}, timeout=30)
         assert response.status_code == 400, (attempt, response.status_code)
         assert response.json()["detail"]["code"] == "AADHAAR_QR_REQUIRED"
