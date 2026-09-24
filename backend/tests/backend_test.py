@@ -479,7 +479,7 @@ class TestClinical:
         r = clin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p2"]["reg_no"])}, timeout=30)
         assert r.status_code == 409, r.text
         detail = r.json()["detail"]
-        assert detail["code"] in ("not_arrived", "never_printed")
+        assert detail["code"] in ("NOT_ARRIVED", "NEVER_PRINTED")
         assert STATE["p2"]["full_name"] not in r.text
 
     def test_lookup_printed_before_seen(self, admin):

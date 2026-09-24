@@ -103,7 +103,7 @@ def test_an_unknown_transcription_is_a_404(monkeypatch):
             await record_fulfilment(fulfil(ObjectId(), ObjectId(), item_type="medicine", status="fulfilled"),
                                     actor=CLINICAL, background_tasks=None)
         assert exc.value.status_code == 404
-        assert "Transcription not found" in exc.value.detail
+        assert exc.value.detail["message"] == "Transcription not found"
 
     run_camp(monkeypatch, body)
 
