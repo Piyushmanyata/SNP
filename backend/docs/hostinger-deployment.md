@@ -5,9 +5,9 @@
 - Application domain: `sikarkolkata.io`.
 - VPS: `82.112.234.39`, Ubuntu 24.04.4 LTS, 2 CPUs, 8 GB RAM.
 - Runtime: Docker Engine 29.8.0 and Docker Compose 5.5.1.
-- Application release: `c363debd62b33e5dca86b33e5984d6968431cb05` (SMS cost guard and phone UI, 23 September 2026).
-- Release directory: `/opt/snp/releases/c363debd62b33e5dca86b33e5984d6968431cb05`.
-- Previous releases kept for rollback: `a2a4415c3247b34753bf93fbd5337352b1019e49`, `a889edb77b887fa12d084b114f910c7b8b7e3c69`, `f2e4592f0dcee138f77c4630964ba92dfb37e664`, `68c978b860edaf9db0dc093740a2228f8ca45ec6`, `730112cb5a122f99b592cce50bb8faf082b3eece`, `13854767e93b1f95bda958680ef27aff387bd36e`, `6f5ab0cb4bd7e58bbf1aacefbaf54db97ff0f3e7`, `ac60bdfe2ecb13555ae449a7d299229ca8758afd`, `7eaed607ba0946c04dd32a405920a49db5e96fe7`, `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`, `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
+- Application release: `b5f2940102c50d1a0ad2e95c15dc10cb4cca3f17` (issue #50 S1: replica set, database users, PyMongo Async, 24 September 2026).
+- Release directory: `/opt/snp/releases/b5f2940102c50d1a0ad2e95c15dc10cb4cca3f17`.
+- Previous releases kept for rollback: `d2e2d43dd00ab2c83418f0fabca21b606fdb7fc2`, `c363debd62b33e5dca86b33e5984d6968431cb05`, `a2a4415c3247b34753bf93fbd5337352b1019e49`, `a889edb77b887fa12d084b114f910c7b8b7e3c69`, `f2e4592f0dcee138f77c4630964ba92dfb37e664`, `68c978b860edaf9db0dc093740a2228f8ca45ec6`, `730112cb5a122f99b592cce50bb8faf082b3eece`, `13854767e93b1f95bda958680ef27aff387bd36e`, `6f5ab0cb4bd7e58bbf1aacefbaf54db97ff0f3e7`, `ac60bdfe2ecb13555ae449a7d299229ca8758afd`, `7eaed607ba0946c04dd32a405920a49db5e96fe7`, `a5acdcdb2398b9af8bce14b2fcacf6f2ff2228d6`, `9ccb9d888f128277cefa790854c71f8cf7d4c72e`, `51a2a0382c20ce07f3cd4829d5e3c0c4803920e1`.
 - Current release link: `/opt/snp/current`.
 - Production Compose project: `snp`.
 - Production environment: `/opt/snp/.env.production`, readable only by root.
@@ -275,6 +275,23 @@ Both new flows now show “Verified by DLT” in MSG91. Set `MSG91_TEMPLATE_SPEC
 3. `docker compose --env-file /opt/snp/.env.production -p snp -f docker-compose.prod.yml down` (without `-v`), then `docker volume rm snp_mongo_data`.
 4. `up -d --build --wait`. The `mongo` healthcheck initiates `rs0`; startup recreates `admin` from `ADMIN_BOOTSTRAP_PIN` with a forced PIN change.
 5. Check that `/api/health/ready` returns `ready: true` and that the backend's user lists only `DB_NAME`.
+
+### Deployment — 24 September 2026
+
+[PR 51](https://github.com/Piyushmanyata/SNP/pull/51) merged as `b5f2940102c50d1a0ad2e95c15dc10cb4cca3f17`. CI run [35976322430](https://github.com/Piyushmanyata/SNP/actions/runs/35976322430) passed backend, frontend, dependencies, workflow and verify. The owner chose to wipe the VPS test data for this move.
+
+- Final archive of the test data: `/opt/snp/archive/snp_camps-pre-s1-20260924T084120Z.archive.gz` (8 patients, 6 persons, 3 camps, 4 users, 11 ledger rows). A `mongorestore --dryRun` read it back.
+- The running `d2e2d43` images were tagged `snp-{backend,frontend,reminders}:rollback-d2e2d43dd00ab2c83418f0fabca21b606fdb7fc2`. Rolling back also needs the old standalone Compose file and the root `MONGO_PASSWORD` URL, which that release still uses.
+- `MONGO_APP_PASSWORD` and `MONGO_BACKUP_PASSWORD` were generated on the VPS with `openssl rand -hex 32` and appended to `/opt/snp/.env.production` (mode 600). They were not printed.
+- The stack was stopped with `down` (no `-v`), `snp_mongo_data` was removed, and the release started with `up -d --build --wait`. `snp_backups` and the Caddy volumes were kept.
+- Startup recreated `admin` from the unchanged `ADMIN_BOOTSTRAP_PIN`. The PIN in `/opt/snp/initial-admin.txt` and the operator copy is valid again, and the first sign-in forces a change. Every earlier camp, patient and staff account is gone.
+
+Checks against the live host:
+
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":0}`. The homepage returned 200 and HTTP redirected with 308. All six services were healthy or running.
+- Responses carry `X-Request-ID`, and the backend logs one JSON line per request with the route template.
+- The API user connects to replica set `rs0`, lists only `snp_camps`, and is refused the full database list. The key file is `-r-------- mongodb`.
+- The backup container wrote its first archive as `snp_backup`.
 
 ## Staff sign-in (#50 S4)
 
