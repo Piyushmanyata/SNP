@@ -54,7 +54,7 @@ export default function AdminDashboard() {
   };
   return (
     <Layout title="Admin">
-      <div role="tablist" aria-label="Admin" onKeyDown={onTabKey} className="flex gap-2 mb-5 -mx-4 px-4 overflow-x-auto [scrollbar-width:none] sm:mx-0 sm:px-0 sm:flex-wrap sm:overflow-visible" data-testid="admin-tabs">
+      <div role="tablist" aria-label="Admin" tabIndex={-1} onKeyDown={onTabKey} className="flex gap-2 mb-5 -mx-4 px-4 overflow-x-auto [scrollbar-width:none] sm:mx-0 sm:px-0 sm:flex-wrap sm:overflow-visible" data-testid="admin-tabs">
         {TABS.map((t) => {
           const Icon = t.icon;
           const selected = tab === t.id;
