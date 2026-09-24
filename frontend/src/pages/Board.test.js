@@ -24,6 +24,7 @@ jest.mock("../components/Layout", () => {
 
 const PAYLOAD = {
   as_of: "2026-09-01T10:00:00+00:00",
+  server_time: "2026-09-01T10:00:00+00:00",
   state: "current",
   camp: { id: "c1", name: "Sikar Camp" },
   day: { id: "d1", day_date: "2026-09-01" },
@@ -41,8 +42,8 @@ const PAYLOAD = {
     ot: { deferred: 3, declined: 2 },
   },
   activity: [
-    { id: "d1", name: "Vol 1", last_arrival_at: "10:00", quiet: false },
-    { id: "d2", name: "Vol 2", last_arrival_at: "09:20", quiet: true },
+    { id: "d1", name: "Vol 1", last_arrival_at: "10:00", last_15m: 4, last_60m: 9, quiet: false },
+    { id: "d2", name: "Vol 2", last_arrival_at: "09:20", last_15m: 0, last_60m: 2, quiet: true },
   ],
   quiet_count: 1,
   sms_failures: 1,
@@ -103,6 +104,9 @@ describe("Camp-day board", () => {
     expect(container.querySelector('[data-testid="board-ot-declined"]').textContent).toBe("2");
     expect(container.querySelector('[data-testid="board-ot-done"]')).toBeNull();
     expect(page).not.toContain("OT done");
+    expect(container.querySelector('[data-testid="board-updated"]').textContent).toBe("Updated 15:30:00");
+    expect(container.querySelector('[data-testid="last-15-d1"]').textContent).toBe("4");
+    expect(container.querySelector('[data-testid="last-60-d1"]').textContent).toBe("9");
     expect(container.querySelector('[data-testid="quiet-text-d2"]').textContent).toBe("Quiet");
     expect(table.querySelector("caption")).not.toBeNull();
     expect(table.querySelector("th[scope='col']")).not.toBeNull();

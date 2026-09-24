@@ -782,7 +782,7 @@ function Board({ title, rows = [], testid }) {
         <Trophy className="w-5 h-5 text-amber-500" /> {title}
       </h3>
       <div className="space-y-2" data-testid={testid}>
-        {safeRows.length === 0 && <p className="text-slate-600 text-sm">No points yet.</p>}
+        {safeRows.length === 0 && <p className="text-slate-600 text-sm">No completed prescriptions yet.</p>}
         {safeRows.map((r, i) => (
           <div key={`${r.name}-${i}`} className="flex items-center gap-3 p-2.5 rounded-xl bg-slate-50">
             <span className={`w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold ${i === 0 ? "bg-amber-400 text-white" : "bg-slate-200 text-slate-600"}`}>
@@ -790,8 +790,7 @@ function Board({ title, rows = [], testid }) {
             </span>
             <span className="flex-1 font-medium text-slate-800">{r.name}</span>
             {r.registrations !== undefined && <Badge tone="slate">{r.registrations} registrations</Badge>}
-            {r.arrivals !== undefined && <Badge tone="slate">{r.arrivals} arrivals</Badge>}
-            <Badge tone="emerald">{r.points} pts</Badge>
+            {r.completed !== undefined && <Badge tone="slate">{r.completed} completed prescriptions</Badge>}
           </div>
         ))}
       </div>

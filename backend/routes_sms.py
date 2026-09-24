@@ -15,24 +15,24 @@ router = APIRouter(prefix="/api", tags=["sms"])
 WEBHOOK_HEADER = "X-SNP-Webhook-Secret"
 
 
-def _tally(rows: List[dict]) -> Dict[str, Any]:
+def _tally(groups: List[dict]) -> Dict[str, Any]:
     t: Dict[str, Any] = dict.fromkeys(
         ("submitted", "delivered", "dlt_failed", "other_failed", "uncertain", "rejected", "unsent", "paused"), 0,
     )
     t["credits"] = 0.0
-    for r in rows:
-        status = r.get("status")
+    for group in groups:
+        status = group["_id"].get("status")
+        count = group["n"]
         if status in ("sent", "uncertain"):
-            t["submitted"] += 1
+            t["submitted"] += count
         if status in ("uncertain", "rejected", "paused"):
-            t[status] += 1
+            t[status] += count
         elif status in ("failed", "abandoned"):
-            t["unsent"] += 1
-        if r.get("delivery") == "delivered":
-            t["delivered"] += 1
-        elif r.get("delivery") == "failed":
-            t["dlt_failed" if r.get("dlt_failure") else "other_failed"] += 1
-        t["credits"] += r.get("credit") or 0.0
+            t["unsent"] += count
+        t["delivered"] += group["delivered"]
+        t["dlt_failed"] += group["dlt_failed"]
+        t["other_failed"] += group["other_failed"]
+        t["credits"] += group["credits"] or 0.0
     t["credits"] = round(t["credits"], 2)
     return t
 
@@ -61,7 +61,7 @@ async def sms_status(actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     controls = {c["_id"]: c for c in await db.sms_controls.find({}).to_list(None)}
     start, end = ist_day_bounds(today_ist_str())
-    rows = await db.reminder_ledger.find({"created_at": {"$gte": start, "$lt": end}}).to_list(None)
+    groups = await sms.ledger_groups(db, {"created_at": {"$gte": start, "$lt": end}}, by_camp=False)
     has_key = bool(os.environ.get("MSG91_AUTH_KEY"))
     types = []
     for message_type in sms.MESSAGE_COPY:
@@ -73,11 +73,11 @@ async def sms_status(actor: dict = Depends(require_admin)) -> Dict[str, Any]:
             "paused_at": iso(control.get("paused_at")) if control.get("paused") else None,
             "paused_reason": control.get("paused_reason") if control.get("paused") else None,
             "paused_request_id": control.get("paused_request_id") if control.get("paused") else None,
-            "today": _tally([r for r in rows if r.get("message_type") == message_type]),
+            "today": _tally([group for group in groups if group["_id"].get("message_type") == message_type]),
         })
     return {
         "types": types,
-        "today": _tally(rows),
+        "today": _tally(groups),
         "reports_enabled": bool(os.environ.get("MSG91_WEBHOOK_SECRET")),
     }
 

@@ -11,6 +11,7 @@ from pymongo.errors import DuplicateKeyError
 
 import helpers
 import msg91
+from db import aggregate_list
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,7 @@ async def _claim(
     venue: str,
     copy: str,
     retry_after: Optional[timedelta] = None,
+    camp_id: Any = None,
 ) -> Optional[Dict[str, Any]]:
     existing = await db.reminder_ledger.find_one({
         "patient_id": patient_id,
@@ -119,7 +121,7 @@ async def _claim(
         return await db.reminder_ledger.find_one_and_update(
             retryable,
             {"$set": {"status": "pending", "attempts": attempts + 1, "created_at": helpers.now_utc(),
-                      "copy": copy, "number": number, "venue": venue}},
+                      "copy": copy, "number": number, "venue": venue, "camp_id": camp_id}},
             return_document=True,
         )
     doc = {
@@ -133,6 +135,7 @@ async def _claim(
         "status": "pending",
         "attempts": 1,
         "provider_id": None,
+        "camp_id": camp_id,
         "created_at": helpers.now_utc(),
     }
     try:
@@ -146,11 +149,12 @@ async def _claim(
 async def _record_unsent(
     db: AsyncDatabase, patient_id: Any, message_type: str, event_date: str, event_key: Optional[str],
     number: str, venue: str, copy: str, status: str, reason: Optional[str] = None,
+    camp_id: Any = None,
 ) -> None:
     try:
         await db.reminder_ledger.insert_one({
             "patient_id": patient_id, "message_type": message_type, "event_date": event_date,
-            "event_key": event_key,
+            "event_key": event_key, "camp_id": camp_id,
             "number": number, "venue": venue, "copy": copy, "status": status, "attempts": 0,
             "provider_id": None, "created_at": helpers.now_utc(),
             **({"reason": reason} if reason else {}),
@@ -259,16 +263,20 @@ async def deliver_patient_sms(
             return "skipped"
         number, variables, copy = composed
         if await paused(db, message_type):
-            await _record_unsent(db, patient["_id"], message_type, event_date, event_key, number, venue, copy, "paused")
+            await _record_unsent(
+                db, patient["_id"], message_type, event_date, event_key, number, venue, copy, "paused",
+                camp_id=patient.get("camp_id"),
+            )
             return "paused"
         if message_type == "registration" and await _over_daily_cap(db, number):
             await _record_unsent(
                 db, patient["_id"], message_type, event_date, event_key, number, venue, copy, "skipped", "daily_cap",
+                camp_id=patient.get("camp_id"),
             )
             return "skipped"
         row = await _claim(
             db, patient["_id"], message_type, event_date, event_key, number, venue, copy,
-            retry_after=retry_after,
+            retry_after=retry_after, camp_id=patient.get("camp_id"),
         )
         if not row:
             return "skipped"
@@ -310,7 +318,8 @@ async def queue_sms(
         rows.append({
             "patient_id": patient["_id"], "message_type": message_type, "event_date": event_date,
             "event_key": event_key, "number": number, "venue": venue, "copy": copy, "variables": variables,
-            "status": status, "attempts": 0, "provider_id": None, "created_at": helpers.now_utc(),
+            "status": status, "attempts": 0, "provider_id": None, "camp_id": patient.get("camp_id"),
+            "created_at": helpers.now_utc(),
         })
     if not rows:
         return []
@@ -408,6 +417,32 @@ async def _pause(db: AsyncDatabase, row: Dict[str, Any], reason: str) -> None:
         upsert=True,
     )
     logger.warning("SMS %s paused after a DLT failure: %s", row["message_type"], reason)
+
+
+async def ledger_groups(db: AsyncDatabase, match: Dict[str, Any], *, by_camp: bool) -> List[dict]:
+    """One $group of ledger rows. Callers never load the rows themselves."""
+    identity: Dict[str, str] = {
+        "event_date": "$event_date",
+        "message_type": "$message_type",
+        "status": "$status",
+    }
+    if by_camp:
+        identity = {"camp_id": "$camp_id", **identity}
+    return await aggregate_list(db.reminder_ledger, [
+        {"$match": match},
+        {"$group": {
+            "_id": identity,
+            "n": {"$sum": 1},
+            "credits": {"$sum": {"$ifNull": ["$credit", 0]}},
+            "delivered": {"$sum": {"$cond": [{"$eq": ["$delivery", "delivered"]}, 1, 0]}},
+            "dlt_failed": {"$sum": {"$cond": [{"$and": [
+                {"$eq": ["$delivery", "failed"]}, {"$eq": ["$dlt_failure", True]},
+            ]}, 1, 0]}},
+            "other_failed": {"$sum": {"$cond": [{"$and": [
+                {"$eq": ["$delivery", "failed"]}, {"$ne": ["$dlt_failure", True]},
+            ]}, 1, 0]}},
+        }},
+    ])
 
 
 async def resume(db: AsyncDatabase, message_type: str, actor_id: str) -> None:

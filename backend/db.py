@@ -26,8 +26,11 @@ def get_db() -> AsyncDatabase:
 
 
 async def in_transaction(callback: Callable[[AsyncClientSession], Awaitable[T]]) -> T:
+    async def run(session: AsyncClientSession) -> T:
+        return await callback(session)
+
     async with get_client().start_session() as session:
-        return await session.with_transaction(callback)
+        return await session.with_transaction(run)
 
 
 async def aggregate_list(collection: AsyncCollection, pipeline: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -95,6 +98,7 @@ async def init_indexes() -> None:
     await db.ot_schedule_days.create_index([("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True)
     await db.specs_collection_days.create_index([("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True)
     await db.reminder_ledger.create_index([("status", ASCENDING), ("created_at", ASCENDING)])
+    await db.reminder_ledger.create_index([("camp_id", ASCENDING), ("event_date", ASCENDING), ("status", ASCENDING)])
     await db.reminder_ledger.create_index("provider_id", sparse=True)
     await db.reminder_ledger.create_index("created_at")
     await db.reminder_ledger.create_index([("number", ASCENDING), ("message_type", ASCENDING), ("created_at", ASCENDING)])
