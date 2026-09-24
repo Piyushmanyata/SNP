@@ -22,16 +22,10 @@ async def kpis(actor: dict = Depends(require_any)) -> Dict[str, Any]:
     camp = await db.camps.find_one({"is_active": True})
     if not camp:
         return {"active_camp": None, "registered": 0, "seen": 0, "pending": 0}
-    counted = await aggregate_list(db.patients, [
-        {"$match": {"camp_id": camp["_id"]}},
-        {"$group": {
-            "_id": None,
-            "registered": {"$sum": 1},
-            "seen": {"$sum": {"$cond": [{"$eq": ["$queue_status", "seen"]}, 1, 0]}},
-        }},
-    ])
-    registered = counted[0]["registered"] if counted else 0
-    seen = counted[0]["seen"] if counted else 0
+    registered, seen = await asyncio.gather(
+        db.patients.count_documents({"camp_id": camp["_id"]}),
+        db.patients.count_documents({"camp_id": camp["_id"], "queue_status": "seen"}),
+    )
     return {
         "active_camp": {"id": str(camp["_id"]), "name": camp["name"]},
         "registered": registered,
@@ -351,10 +345,10 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
 
     facet = counted[0] if counted else {}
     totals = (facet.get("totals") or [{}])[0]
-    arrived = int(totals.get("arrived") or 0)
-    awaiting_print = int(totals.get("awaiting_print") or 0)
-    awaiting_seen = int(totals.get("awaiting_seen") or 0)
-    backlog = int(totals.get("backlog") or 0)
+    arrived = totals.get("arrived", 0)
+    awaiting_print = totals.get("awaiting_print", 0)
+    awaiting_seen = totals.get("awaiting_seen", 0)
+    backlog = totals.get("backlog", 0)
     volunteer_rows = facet.get("activity") or []
     by_vol = {row["_id"]: row for row in volunteer_rows if row["_id"]}
     vol_ids = [ObjectId(v) for v in by_vol if ObjectId.is_valid(v)]
