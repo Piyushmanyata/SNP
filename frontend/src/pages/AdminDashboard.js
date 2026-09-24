@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import api, { formatApiError } from "../lib/api";
 import Layout from "../components/Layout";
@@ -13,6 +13,7 @@ import { formatPower } from "../components/clinical";
 import TemplateEditor from "../components/TemplateEditor";
 import { SPECS_HOURS, displayDate, displayDateRange, displayTimestamp } from "../lib/dates";
 import { SMS_LABELS, SMS_VENUE_MAX, smsVenueFor } from "../lib/sms";
+import { logosAreUnsaved, markLogosUnsaved } from "../components/template/templateHelpers";
 
 const CAMP_VENUE = "Hansa Garden, Rohini Road in Baghmara, Jasidih, Deoghar - 814142";
 const NEW_CAMP = { name: "SNP नेत्र शिविर", venue: CAMP_VENUE, venue_sms: "Hansa Garden, Jasidih, Deoghar", camp_date: "", camp_number: "" };
@@ -31,16 +32,36 @@ const TABS = [
   { id: "exports", label: "Exports", icon: Download },
 ];
 
+function selectAdminTab(current, next) {
+  if (current === "template" && next !== "template" && logosAreUnsaved()
+      && !window.confirm("Discard unsaved logo changes?")) {
+    return current;
+  }
+  if (current === "template" && next !== "template") markLogosUnsaved(false);
+  return next;
+}
+
 export default function AdminDashboard() {
   const [tab, setTab] = useState("overview");
+  const choose = (id) => setTab((current) => selectAdminTab(current, id));
+  const onTabKey = (event) => {
+    const index = TABS.findIndex((item) => item.id === tab);
+    if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      const step = event.key === "ArrowRight" ? 1 : -1;
+      choose(TABS[(index + step + TABS.length) % TABS.length].id);
+    }
+  };
   return (
     <Layout title="Admin">
-      <div className="flex gap-2 mb-5 -mx-4 px-4 overflow-x-auto [scrollbar-width:none] sm:mx-0 sm:px-0 sm:flex-wrap sm:overflow-visible" data-testid="admin-tabs">
+      <div role="tablist" aria-label="Admin" onKeyDown={onTabKey} className="flex gap-2 mb-5 -mx-4 px-4 overflow-x-auto [scrollbar-width:none] sm:mx-0 sm:px-0 sm:flex-wrap sm:overflow-visible" data-testid="admin-tabs">
         {TABS.map((t) => {
           const Icon = t.icon;
+          const selected = tab === t.id;
           return (
-            <button key={t.id} onClick={() => setTab(t.id)}
-              className={`shrink-0 min-h-[44px] px-4 rounded-xl text-sm font-semibold inline-flex items-center gap-2 transition-colors ${tab === t.id ? "bg-slate-900 text-white" : "bg-white text-slate-600 border border-slate-200 hover:border-emerald-400"}`}
+            <button key={t.id} type="button" role="tab" id={`admin-tab-${t.id}`} aria-selected={selected}
+              tabIndex={selected ? 0 : -1} onClick={() => choose(t.id)}
+              className={`shrink-0 min-h-[44px] px-4 rounded-xl text-sm font-semibold inline-flex items-center gap-2 transition-colors ${selected ? "bg-slate-900 text-white" : "bg-white text-slate-600 border border-slate-200 hover:border-emerald-400"}`}
               data-testid={`admin-tab-${t.id}`}>
               <Icon className="w-4 h-4" /> {t.label}
             </button>
@@ -87,10 +108,11 @@ function Overview() {
         )}
       </Card>
       <SystemCard />
-      <div className="grid grid-cols-3 gap-3">
-        <Stat label="Registered" value={kpi?.registered ?? 0} testid="kpi-registered-count" />
-        <Stat label="Seen" value={kpi?.seen ?? 0} tone="emerald" testid="kpi-seen-count" />
-        <Stat label="Pending" value={kpi?.pending ?? 0} tone="amber" testid="kpi-pending-count" />
+      <SmsHealth />
+      <div className="grid grid-cols-3 gap-3" data-testid="overview-kpis" data-loading={kpi ? "false" : "true"}>
+        <Stat label="Registered" value={kpi ? kpi.registered : "…"} testid="kpi-registered-count" />
+        <Stat label="Seen" value={kpi ? kpi.seen : "…"} tone="emerald" testid="kpi-seen-count" />
+        <Stat label="Pending" value={kpi ? kpi.pending : "…"} tone="amber" testid="kpi-pending-count" />
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Button size="lg" variant="outline" onClick={() => navigate("/desk")} data-testid="goto-desk-button"><Stethoscope className="w-5 h-5" /> Open Registration Desk</Button>
@@ -144,6 +166,11 @@ function SystemCard() {
         <li className={SYSTEM_LEVELS[data.levels.disk].text} data-testid="system-disk">
           Backup disk: {data.disk === "unknown" ? "Unknown" : `${gigabytes(data.disk.free_bytes)} free of ${gigabytes(data.disk.total_bytes)}`}
         </li>
+        {data.levels.reminders && (
+          <li className={SYSTEM_LEVELS[data.levels.reminders].text} data-testid="system-reminders">
+            Reminders: {data.reminders?.heartbeat_at ? `heartbeat ${displayTimestamp(data.reminders.heartbeat_at)}` : "No heartbeat"}
+          </li>
+        )}
         {errorIsLatest && (
           <li className="text-rose-700" data-testid="system-error">
             Last error {displayTimestamp(backup.last_error_at)}: {backup.last_error}
@@ -192,16 +219,25 @@ function Camps() {
   }, [editing, form, load]);
 
   const activate = useCallback(async (id) => {
+    const camp = camps.find((item) => item.id === id);
+    const current = camps.find((item) => item.is_active);
+    const name = camp?.name || "this camp";
+    const message = current && current.id !== id
+      ? `Activate ${name}? ${current.name} will stop being the active camp.`
+      : `Activate ${name}?`;
+    if (!window.confirm(message)) return;
     setErr("");
     try { await api.post(`/camps/${id}/activate`); load(); }
     catch (e) { setErr(formatApiError(e)); }
-  }, [load]);
+  }, [camps, load]);
 
   const deactivate = useCallback(async (id) => {
+    const camp = camps.find((item) => item.id === id);
+    if (!window.confirm(`Deactivate ${camp?.name || "this camp"}? Desks will have no active camp.`)) return;
     setErr("");
     try { await api.post(`/camps/${id}/deactivate`); load(); }
     catch (e) { setErr(formatApiError(e)); }
-  }, [load]);
+  }, [camps, load]);
 
   const del = useCallback(async (camp) => {
     if (!window.confirm(`Delete ${camp.name} and its days? This cannot be undone.`)) return;
@@ -218,7 +254,7 @@ function Camps() {
 
   return (
     <div className="space-y-4">
-      {err && <Alert>{err}</Alert>}
+      {err && !showCamp && <Alert>{err}</Alert>}
       <Button onClick={() => openCamp(null)} data-testid="create-camp-button"><Plus className="w-4 h-4" /> New Camp</Button>
       {camps.map((c) => (
         <Card key={c.id} data-testid={`camp-card-${c.id}`}>
@@ -267,6 +303,7 @@ function Camps() {
 
       <Modal open={showCamp} onClose={() => setShowCamp(false)} title={editing ? "Edit Camp" : "New Camp"}>
         <div className="space-y-3">
+          {err && <Alert>{err}</Alert>}
           <Field label="Camp name" required><Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} data-testid="camp-name-input" /></Field>
           <Field label="Venue" required hint="Full address shown on camp records."><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="camp-venue-input" /></Field>
           <SmsVenueField label="Short venue for SMS" venue={form.venue} value={form.venue_sms} onChange={(venue_sms) => setForm({ ...form, venue_sms })} testid="camp-venue-sms-input" />
@@ -357,7 +394,7 @@ function CampDays({ campId }) {
       ))}
       <div className="flex flex-wrap gap-2 items-end pt-2">
         <Field label="Date"><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} data-testid="new-day-date" /></Field>
-        <Field label="Seat limit"><Input type="number" min="1" value={seat} onChange={(e) => setSeat(e.target.value)} className="w-28" data-testid="new-day-seat" /></Field>
+        <Field label="Seat limit"><Input type="text" inputMode="numeric" value={seat} onChange={(e) => setSeat(e.target.value.replace(/\D/g, ""))} className="w-28" data-testid="new-day-seat" /></Field>
         <Button size="sm" onClick={save} disabled={busy || !date || Number(seat) < 1} data-testid={editing ? "save-day-button" : "add-day-button"}>{editing ? <Pencil className="w-4 h-4" /> : <Plus className="w-4 h-4" />} {editing ? "Save day" : "Add day"}</Button>
         {editing && <Button size="sm" variant="ghost" onClick={cancelEdit}>Cancel</Button>}
       </div>
@@ -436,7 +473,7 @@ function OtSchedule({ onSaved }) {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start pt-4 mt-3 border-t border-slate-100">
           <Field label="Date"><Input type="date" value={form.day_date} onChange={(e) => setForm({ ...form, day_date: e.target.value })} data-testid="ot-date-input" /></Field>
-          <Field label="Seats"><Input type="number" inputMode="numeric" min="1" value={form.seat_limit} onChange={(e) => setForm({ ...form, seat_limit: e.target.value })} data-testid="ot-seat-input" /></Field>
+          <Field label="Seats"><Input type="text" inputMode="numeric" min="1" value={form.seat_limit} onChange={(e) => setForm({ ...form, seat_limit: e.target.value.replace(/\D/g, "") })} data-testid="ot-seat-input" /></Field>
           <Field label="Hospital"><Input value={form.venue} onChange={(e) => setForm({ ...form, venue: e.target.value })} data-testid="ot-venue-input" /></Field>
           <SmsVenueField label="Short name for SMS" venue={form.venue} value={form.venue_sms} onChange={(venue_sms) => setForm({ ...form, venue_sms })} placeholder={HOSPITAL_SMS_VENUE} testid="ot-venue-sms-input" />
           <Button className="sm:col-span-2" onClick={save} disabled={busy || !form.day_date || !form.venue || Number(form.seat_limit) < 1 || Boolean(smsVenueFor(form.venue, form.venue_sms).problem)} data-testid={editing ? "save-ot-day-button" : "add-ot-day-button"}>{editing ? <Pencil className="w-4 h-4" /> : <Plus className="w-4 h-4" />} {editing ? "Save OT day" : "Add OT day"}</Button>
@@ -463,10 +500,13 @@ function SpecsCollectionDays({ onSaved }) {
   useEffect(() => { load(); }, [load]);
 
   const reset = () => { setForm(NEW_SPECS_DAY); setEditing(null); };
+  const saving = useRef(false);
 
   const save = useCallback(async () => {
+    if (saving.current) return;
+    saving.current = true;
     setErr("");
-    if (!camp) { setErr("Activate a camp first."); return; }
+    if (!camp) { setErr("Activate a camp first."); saving.current = false; return; }
     setBusy(true);
     try {
       const body = { camp_id: camp.id, ...form };
@@ -477,7 +517,7 @@ function SpecsCollectionDays({ onSaved }) {
       onSaved();
     }
     catch (e) { setErr(formatApiError(e)); }
-    finally { setBusy(false); }
+    finally { saving.current = false; setBusy(false); }
   }, [camp, form, editing, load, onSaved]);
 
   const edit = (day) => {
@@ -609,7 +649,9 @@ function SmsHealth() {
     finally { setBusy(""); }
   }, []);
 
-  if (!data) return err ? <ErrorCard message={err} onRetry={load} /> : <p className="text-slate-600" data-testid="sms-loading">Loading SMS status…</p>;
+  if (!data?.today || !Array.isArray(data.types)) {
+    return err ? <ErrorCard message={err} onRetry={load} /> : <p className="text-slate-600" data-testid="sms-loading">Loading SMS status…</p>;
+  }
   const today = data.today;
   return (
     <div className="space-y-4" data-testid="sms-health">
@@ -688,13 +730,20 @@ function useCatalogue(resource) {
     }
   }, [resource, load]);
 
+  const toggling = useRef(false);
   const setActive = useCallback(async (id, active) => {
+    if (toggling.current) return;
+    toggling.current = true;
     setErr("");
+    setBusy(true);
     try {
       await api.patch(`/catalogue/${resource}/${id}`, { active });
       load();
     } catch (e) {
       setErr(formatApiError(e));
+    } finally {
+      toggling.current = false;
+      setBusy(false);
     }
   }, [resource, load]);
 

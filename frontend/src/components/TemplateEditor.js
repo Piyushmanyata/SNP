@@ -4,7 +4,7 @@ import { Button, Card, Alert } from "./ui";
 import { v4 } from "../lib/uuid";
 import { forgetLogos } from "../lib/logoCache";
 import { Save } from "lucide-react";
-import { swapItems, validateLogoFile, buildSampleRx } from "./template/templateHelpers";
+import { swapItems, validateLogoFile, buildSampleRx, logosAreUnsaved, markLogosUnsaved } from "./template/templateHelpers";
 import { TemplateLogosEditor } from "./template/TemplateLogosEditor";
 import { TemplatePreview } from "./template/TemplatePreview";
 
@@ -37,7 +37,7 @@ export default function TemplateEditor() {
     setMsg("");
     api
       .get(`/templates/logos?camp_id=${campId}`)
-      .then((r) => { if (active) setLogos((r.data.logos || []).map((l) => ({ ...l }))); })
+      .then((r) => { if (active) { markLogosUnsaved(false); setLogos((r.data.logos || []).map((l) => ({ ...l }))); } })
       .catch((e) => { if (active) setErr(formatApiError(e)); });
     return () => { active = false; };
   }, [campId]);
@@ -54,6 +54,7 @@ export default function TemplateEditor() {
     const reader = new FileReader();
     reader.onload = () => {
       if (selectedCamp.current !== campId) return;
+      markLogosUnsaved(true);
       setLogos((current) => [
         ...(current || []),
         { id: v4(), name: file.name, data_url: reader.result, order: (current || []).length },
@@ -63,10 +64,12 @@ export default function TemplateEditor() {
   }, [campId]);
 
   const moveLogo = useCallback((i, dir) => {
+    markLogosUnsaved(true);
     setLogos((current) => (current ? swapItems(current, i, dir) : current));
   }, []);
 
   const removeLogo = useCallback((i) => {
+    markLogosUnsaved(true);
     setLogos((current) => (current ? current.filter((_, j) => j !== i) : current));
   }, []);
 
@@ -80,6 +83,7 @@ export default function TemplateEditor() {
         camp_id: campId,
         logos: logos.map((l, i) => ({ ...l, order: i })),
       });
+      markLogosUnsaved(false);
       setLogos(data.logos);
       forgetLogos(campId);
       setMsg("Sponsor logos saved. The change is live.");
@@ -106,7 +110,11 @@ export default function TemplateEditor() {
           className="mt-1 w-full sm:w-80 min-h-[44px] px-3 rounded-xl border border-slate-300"
           value={campId}
           disabled={busy}
-          onChange={(e) => setCampId(e.target.value)}
+          onChange={(e) => {
+        if (logosAreUnsaved() && !window.confirm("Discard unsaved logo changes?")) return;
+        markLogosUnsaved(false);
+        setCampId(e.target.value);
+      }}
           data-testid="tpl-camp-select"
         >
           {camps.map((c) => (

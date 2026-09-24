@@ -58,6 +58,15 @@ beforeEach(() => {
     if (url === "/admin/system") {
       return Promise.resolve({ data: SYSTEM });
     }
+    if (url === "/sms/status") {
+      return Promise.resolve({
+        data: {
+          reports_enabled: true,
+          today: { submitted: 0, delivered: 0, dlt_failed: 0, credits: 0 },
+          types: [],
+        },
+      });
+    }
     if (url === "/kpis") {
       return Promise.resolve({
         data: { registered: 120, seen: 90, pending: 30 },
