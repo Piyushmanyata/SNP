@@ -80,6 +80,7 @@ async def init_indexes() -> None:
     await db.patients.create_index([("camp_id", ASCENDING), ("aadhaar_last4", ASCENDING)])
     await db.patients.create_index([("camp_id", ASCENDING), ("phone_normalized", ASCENDING)])
     await db.patients.create_index([("camp_id", ASCENDING), ("queue_status", ASCENDING)])
+    await db.patients.create_index([("camp_day_id", ASCENDING), ("_id", ASCENDING)])
     await db.patients.create_index([("camp_id", ASCENDING), ("created_by", ASCENDING)])
     await db.patients.create_index([("camp_id", ASCENDING), ("registrar_team_lead_id", ASCENDING)])
     await db.transcriptions.create_index("patient_id", unique=True)
@@ -99,6 +100,9 @@ async def init_indexes() -> None:
     await db.specs_collection_days.create_index([("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True)
     await db.reminder_ledger.create_index([("status", ASCENDING), ("created_at", ASCENDING)])
     await db.reminder_ledger.create_index([("camp_id", ASCENDING), ("event_date", ASCENDING), ("status", ASCENDING)])
+    await db.reminder_ledger.create_index(
+        [("message_type", ASCENDING), ("event_date", ASCENDING), ("created_at", ASCENDING)],
+    )
     await db.reminder_ledger.create_index("provider_id", sparse=True)
     await db.reminder_ledger.create_index("created_at")
     await db.reminder_ledger.create_index([("number", ASCENDING), ("message_type", ASCENDING), ("created_at", ASCENDING)])

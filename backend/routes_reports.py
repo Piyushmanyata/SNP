@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
 from catalogue import format_power
 from db import aggregate_list, get_db
-from helpers import as_utc, display_date, display_timestamp, iso, ist_day_bounds, now_utc, today_ist_str
+from helpers import IST, as_utc, display_date, display_timestamp, iso, ist_day_bounds, now_utc, today_ist_str
 from security import require_admin, require_staff, require_any, require_lead
 import sms
 
@@ -261,7 +261,7 @@ def _empty_board(as_of: str, state: str) -> Dict[str, Any]:
 async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
     db = get_db()
     as_of = iso(now_utc())
-    backups_failing = (await _system(db))["status"] == "red"
+    backups_failing = (await _system(db))["levels"]["backup"] == "red"
     camp = await db.camps.find_one({"is_active": True})
     if not camp:
         return {**_empty_board(as_of, "no_camp"), "backups_failing": backups_failing}
@@ -453,10 +453,30 @@ def _disk_level(disk: Dict[str, int] | str) -> str:
     return "red" if free < 0.1 else "amber" if free < 0.2 else "green"
 
 
+def _reminder_level(reminders: Dict[str, Any] | None, now: datetime) -> str:
+    beat = as_utc(reminders.get("heartbeat_at")) if reminders else None
+    if beat is None or now - beat > timedelta(minutes=5):
+        return "red"
+    ist = now.astimezone(IST)
+    done = ((reminders or {}).get("sweeps") or {}).get(ist.date().isoformat()) or {}
+    minutes = ist.hour * 60 + ist.minute
+    if minutes >= 10 * 60 + 30 and not done.get("10"):
+        return "red"
+    if minutes >= 20 * 60 + 30 and not done.get("20"):
+        return "red"
+    return "green"
+
+
 async def _system(db: Any) -> Dict[str, Any]:
     backup = await db.ops_status.find_one({"_id": "backup"})
+    reminders = await db.ops_status.find_one({"_id": "reminders"})
     disk = _disk()
-    levels = {"backup": _backup_level(backup, now_utc()), "disk": _disk_level(disk)}
+    now = now_utc()
+    levels = {
+        "backup": _backup_level(backup, now),
+        "disk": _disk_level(disk),
+        "reminders": _reminder_level(reminders, now),
+    }
     return {
         "status": max(levels.values(), key=LEVELS.index),
         "levels": levels,
@@ -465,6 +485,16 @@ async def _system(db: Any) -> Dict[str, Any]:
             for field in BACKUP_FIELDS
         } if backup else None,
         "disk": disk,
+        "reminders": {
+            "heartbeat_at": iso(reminders.get("heartbeat_at")),
+            "last_call_at": iso(reminders.get("last_call_at")),
+            "last_complete_at": iso(reminders.get("last_complete_at")),
+            "last_error": reminders.get("last_error"),
+            "queued": reminders.get("queued", 0),
+            "failed": reminders.get("failed", 0),
+            "uncertain": reminders.get("uncertain", 0),
+            "paused_types": reminders.get("paused_types") or [],
+        } if reminders else None,
     }
 
 

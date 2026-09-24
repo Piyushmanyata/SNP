@@ -269,7 +269,7 @@ class TestCanary:
 
             await _post(client)
 
-            assert [c["type"] for c in captured] == ["camp", "ot"]
+            assert [c["type"] for c in captured] == ["ot", "camp"]
 
         _run(monkeypatch, body, canary=True)
 

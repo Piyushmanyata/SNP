@@ -317,12 +317,12 @@ class TestBoundedDispatch:
             first = (await _post(client)).json()
             assert first == {"ok": True, "sent": 3, "failed": 0, "complete": False, "waiting": False,
                              "event_date": TOMORROW, "send_date": TODAY}
-            assert [c["type"] for c in captured] == ["camp", "camp", "ot"]
+            assert [c["type"] for c in captured] == ["ot", "ot", "camp"]
 
             second = (await _post(client)).json()
             assert second["sent"] == 1
             assert second["complete"] is True
-            assert [c["type"] for c in captured] == ["camp", "camp", "ot", "ot"]
+            assert [c["type"] for c in captured] == ["ot", "ot", "camp", "camp"]
             assert await database.reminder_ledger.count_documents({}) == 4
 
         _run(monkeypatch, body)
@@ -466,6 +466,8 @@ class TestWorkerFollowsThrough:
                             SimpleNamespace(now=lambda tz: clock.current.astimezone(tz)))
 
         def post(request, timeout):
+            if not request.full_url.endswith("/reminders"):
+                return nullcontext(io.BytesIO(b'{"ok": true, "complete": true}'))
             reply = replies[len(attempts)]
             attempts.append(clock.current)
             clock.stopped = len(attempts) == len(replies)

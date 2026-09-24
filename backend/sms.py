@@ -106,7 +106,13 @@ async def _claim(
     })
     if existing:
         status = existing.get("status")
-        if status not in ("failed", "paused"):
+        if status == "rejected":
+            control = await db.sms_controls.find_one({"_id": message_type}) or {}
+            resumed_at = control.get("resumed_at")
+            if (not resumed_at or existing.get("resumed_retry")
+                    or helpers.as_utc(existing["created_at"]) >= helpers.as_utc(resumed_at)):
+                return None
+        elif status not in ("failed", "paused"):
             return None
         attempts = int(existing.get("attempts") or 0)
         if attempts >= 3:
@@ -118,11 +124,14 @@ async def _claim(
         retryable: Dict[str, Any] = {"_id": existing["_id"], "status": status}
         if retry_after and status == "failed":
             retryable["created_at"] = {"$lte": helpers.now_utc() - retry_after}
+        fields = {
+            "status": "pending", "attempts": attempts + 1, "created_at": helpers.now_utc(),
+            "copy": copy, "number": number, "venue": venue, "camp_id": camp_id,
+        }
+        if status == "rejected":
+            fields["resumed_retry"] = True
         return await db.reminder_ledger.find_one_and_update(
-            retryable,
-            {"$set": {"status": "pending", "attempts": attempts + 1, "created_at": helpers.now_utc(),
-                      "copy": copy, "number": number, "venue": venue, "camp_id": camp_id}},
-            return_document=True,
+            retryable, {"$set": fields}, return_document=True,
         )
     doc = {
         "patient_id": patient_id,
@@ -132,8 +141,8 @@ async def _claim(
         "number": number,
         "venue": venue,
         "copy": copy,
-        "status": "pending",
-        "attempts": 1,
+        "status": "queued",
+        "attempts": 0,
         "provider_id": None,
         "camp_id": camp_id,
         "created_at": helpers.now_utc(),
@@ -226,6 +235,11 @@ async def _submit(db: AsyncDatabase, row: Dict[str, Any], variables: Dict[str, A
     update: Dict[str, Any]
     try:
         provider_id = await asyncio.to_thread(msg91.send_dlt_sms, row["message_type"], row["number"], variables)
+    except msg91.Throttled as exc:
+        update = {
+            "status": "failed", "error": str(exc)[:200],
+            "retry_after": helpers.now_utc() + timedelta(minutes=5),
+        }
     except msg91.Unsent as exc:
         update = {"status": "failed", "error": str(exc)[:200]}
     except msg91.Rejected as exc:
@@ -252,12 +266,16 @@ async def deliver_patient_sms(
     end_date: Optional[str] = None,
     retry_after: Optional[timedelta] = None,
     event_key: Optional[str] = None,
+    camps: Optional[Dict[Any, dict]] = None,
+    staff_phones: Optional[Dict[str, Optional[str]]] = None,
+    fresh: bool = False,
 ) -> str:
     """Returns sent, failed, uncertain, rejected, paused, or skipped. Never raises."""
     row = None
     venue = clean_sms_venue(venue)
     try:
-        camps, staff_phones = await _recipients(db, [patient])
+        if camps is None or staff_phones is None:
+            camps, staff_phones = await _recipients(db, [patient])
         composed = _compose(patient, message_type, event_date, venue, end_date, camps, staff_phones)
         if not composed:
             return "skipped"
@@ -274,12 +292,27 @@ async def deliver_patient_sms(
                 camp_id=patient.get("camp_id"),
             )
             return "skipped"
+        if fresh:
+            doc = {
+                "patient_id": patient["_id"], "message_type": message_type, "event_date": event_date,
+                "event_key": event_key, "number": number, "venue": venue, "copy": copy,
+                "variables": variables, "status": "queued", "attempts": 0, "provider_id": None,
+                "camp_id": patient.get("camp_id"), "created_at": helpers.now_utc(),
+            }
+            try:
+                inserted = await db.reminder_ledger.insert_one(doc)
+            except DuplicateKeyError:
+                return "skipped"
+            return await send_queued(db, inserted.inserted_id)
         row = await _claim(
             db, patient["_id"], message_type, event_date, event_key, number, venue, copy,
             retry_after=retry_after, camp_id=patient.get("camp_id"),
         )
         if not row:
             return "skipped"
+        if row.get("status") == "queued":
+            await db.reminder_ledger.update_one({"_id": row["_id"]}, {"$set": {"variables": variables}})
+            return await send_queued(db, row["_id"])
         return await _submit(db, row, variables)
     except Exception as exc:
         logger.exception("Patient SMS processing failed")
