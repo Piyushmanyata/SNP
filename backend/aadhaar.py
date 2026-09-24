@@ -11,6 +11,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 
 from helpers import IST
+from models import ADDRESS_LIMIT, NAME_LIMIT
 
 # A Secure QR carrying a photo runs to roughly 7k digits; anything larger is not a
 # card, and int(str) is quadratic, so the cap is what keeps an unauthenticated
@@ -226,6 +227,14 @@ def _try_decode_secure_qr(raw: str) -> dict | None:
     return None
 
 
+def _bounded(result: dict) -> dict:
+    data = result.get("data")
+    if data:
+        data["full_name"] = data["full_name"][:NAME_LIMIT]
+        data["address"] = data["address"][:ADDRESS_LIMIT]
+    return result
+
+
 def decode_aadhaar(raw: str) -> dict:
     raw = (raw or "").strip().lstrip("\ufeff")
     if not raw:
@@ -234,10 +243,10 @@ def decode_aadhaar(raw: str) -> dict:
         return {"outcome": "not-aadhaar", "message": "This is a patient QR, not an Aadhaar card."}
     xml_result = _try_decode_xml(raw)
     if xml_result:
-        return xml_result
+        return _bounded(xml_result)
 
     secure_result = _try_decode_secure_qr(raw)
     if secure_result:
-        return secure_result
+        return _bounded(secure_result)
 
     return {"outcome": "garbage", "message": "Could not read an Aadhaar Secure QR."}

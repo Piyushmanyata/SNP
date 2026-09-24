@@ -380,9 +380,12 @@ describe("CHALLENGE 2: Desk.js Form Persistence vs Modal Lifecycle", () => {
     expect(phoneInput.value).toBe("9876543210");
 
     // Close modal
+    const discard = jest.spyOn(window, "confirm").mockReturnValue(true);
     act(() => {
       document.body.querySelector('[data-testid="modal-close-button"]').click();
     });
+    expect(discard).toHaveBeenCalledWith("Discard changes?");
+    discard.mockRestore();
 
     // 2nd open
     act(() => {

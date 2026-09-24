@@ -29,7 +29,7 @@ export default function Login() {
       }).catch(() => {}).finally(() => { inFlight = false; });
     };
     load();
-    const t = setInterval(load, 5000);
+    const t = setInterval(load, 30000);
     document.addEventListener("visibilitychange", load);
     return () => {
       cancelled = true;

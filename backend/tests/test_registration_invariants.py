@@ -1,3 +1,4 @@
+from uuid import uuid4
 import asyncio
 
 import pytest
@@ -11,7 +12,7 @@ from seed import run_camp, seed_camp
 
 
 def _body(day_id, **fields):
-    return RegisterBody(camp_day_id=str(day_id), **{"full_name": "Test User", "phone": "9876543210", "age": 30, **fields})
+    return RegisterBody(camp_day_id=str(day_id), **{"full_name": "Test User", "phone": "9876543210", "age": 30, "manual_reason": "card at home", **fields})
 
 
 async def _staff_register(body):
@@ -42,7 +43,7 @@ def test_a_day_outside_the_active_camp_is_a_404(monkeypatch):
 def test_a_replayed_request_id_returns_the_first_registration_even_concurrently(monkeypatch):
     async def body(database):
         _, (day_id,) = await seed_camp(database)
-        request = _body(day_id, full_name="Concurrency User", age=28, registration_request_id="concurrent-idemp-token")
+        request = _body(day_id, full_name="Concurrency User", age=28, registration_request_id=str(uuid4()))
         first, created = await _staff_register(request)
         assert created is True
         replay, created = await _staff_register(request)
@@ -76,7 +77,8 @@ def test_phone_normalization_variations():
     assert normalize_phone("98765 43210") == "9876543210"
     assert normalize_phone("98765-43210") == "9876543210"
     assert normalize_phone("(+91) 9876543210") == "9876543210"
-    assert normalize_phone("98765") == "98765"
+    assert normalize_phone("98765") is None
+    assert normalize_phone("98765432101") is None
     assert normalize_phone("") is None
     assert normalize_phone(None) is None
 

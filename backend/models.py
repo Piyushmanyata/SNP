@@ -1,11 +1,16 @@
 from datetime import date
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
-from typing import Annotated, Optional, List, Dict, Any
+from typing import Annotated, Literal, Optional, List, Dict, Any
 
 from sms import clean_sms_venue, sms_venue_problem
 
+NAME_LIMIT = 100
+ADDRESS_LIMIT = 300
+
 
 DateString = Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$"), AfterValidator(lambda value: date.fromisoformat(value).isoformat())]
+QrPayload = Annotated[str, Field(max_length=16000)]
+RequestId = Annotated[str, Field(pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")]
 
 
 def _checked_sms_venue(venue: str, venue_sms: Optional[str]) -> Optional[str]:
@@ -30,7 +35,7 @@ class ChangePinBody(BaseModel):
 
 
 class CreateStaffBody(BaseModel):
-    name: str
+    name: str = Field(max_length=80)
     role: str  # admin | team_lead | volunteer | clinical_desk_operator
     phone: Optional[str] = None
     team_lead_id: Optional[str] = None
@@ -54,7 +59,7 @@ class CampSetupDay(BaseModel):
 
 
 class CampBody(BaseModel):
-    name: str
+    name: str = Field(max_length=80)
     venue: str
     venue_sms: Optional[str] = None
     camp_date: Optional[DateString] = None
@@ -86,27 +91,27 @@ class PrintWindowBody(BaseModel):
 
 # ---- aadhaar mock ----
 class AadhaarDecodeBody(BaseModel):
-    payload: str  # simulated QR string
+    payload: QrPayload
 
 
 # ---- registration ----
 class RegisterBody(BaseModel):
-    full_name: str
+    full_name: str = Field(max_length=NAME_LIMIT)
     age: Optional[int] = None
-    phone: Optional[str] = None
-    gender: Optional[str] = None
-    address: Optional[str] = None
-    aadhaar_last4: Optional[str] = None
+    phone: Optional[str] = Field(default=None, max_length=20)
+    gender: Optional[Literal["M", "F", "O"]] = None
+    address: Optional[str] = Field(default=None, max_length=ADDRESS_LIMIT)
+    aadhaar_last4: Optional[str] = Field(default=None, pattern=r"^\d{4}$")
     dob: Optional[str] = None
     aadhaar_scanned: bool = False
-    latin_display_name: Optional[str] = None
-    camp_day_id: str
-    registration_request_id: Optional[str] = None
+    latin_display_name: Optional[str] = Field(default=None, max_length=NAME_LIMIT)
+    camp_day_id: str = Field(max_length=24)
+    registration_request_id: Optional[RequestId] = None
     is_self_registered: bool = False
-    manual_reason: Optional[str] = None
-    failed_scan_attempts: int = 0
+    manual_reason: Optional[str] = Field(default=None, max_length=200)
     at_door: bool = False
-    qr_payload: Optional[str] = None
+    qr_payload: Optional[QrPayload] = None
+    review_confirmed_id: Optional[str] = Field(default=None, max_length=24)
 
 
 class DuplicateCheckBody(BaseModel):
@@ -120,12 +125,12 @@ class QrLookupBody(BaseModel):
 
 
 class ScanBody(BaseModel):
-    payload: str  # Aadhaar Secure QR payload
+    payload: QrPayload
 
 
 class ScanConfirmBody(BaseModel):
     patient_id: str
-    payload: str
+    payload: QrPayload
 
 
 # ---- catalogue ----
@@ -225,8 +230,8 @@ class CorrectionBody(BaseModel):
 
 class IdentityCheckBody(BaseModel):
     patient_id: str
-    reason: str
-    evidence: Optional[str] = None
+    reason: str = Field(max_length=300)
+    evidence: Optional[str] = Field(default=None, max_length=300)
 
 
 class OtScheduleBody(BaseModel):

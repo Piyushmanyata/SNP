@@ -218,15 +218,15 @@ class TestPrintTemplate:
             "full_name": f"TEST Print {TAG}", "gender": "M", "age": 44,
             "phone": "9876500011", "address": "TEST addr", "camp_day_id": day["id"],
             "aadhaar_last4": "5678", "aadhaar_verified": True,
-            "failed_scan_attempts": 3, "manual_reason": "scanner unavailable",
+            "manual_reason": "scanner unavailable",
             "registration_request_id": str(uuid.uuid4())}, timeout=30)
         assert reg.status_code in (200, 201), reg.text
         pid = reg.json()["registration"]["id"]
         blocked = admin.post(f"{API}/desk/print/{pid}", timeout=30)
         assert blocked.status_code == 409, blocked.text
         assert blocked.json()["detail"]["code"] == "NOT_ARRIVED"
-        assert admin.post(f"{API}/desk/arrive/{pid}", timeout=30).status_code == 200
         admin.post(f"{API}/desk/identity-check", json={"patient_id": pid, "reason": "Voter ID seen"}, timeout=30)
+        assert admin.post(f"{API}/desk/arrive/{pid}", timeout=30).status_code == 200
         pr = admin.post(f"{API}/desk/print/{pid}", timeout=30)
         assert pr.status_code == 200, pr.text
         presc = pr.json()["prescription"]

@@ -4,7 +4,8 @@ from xml.etree.ElementTree import Element, tostring
 from bson import ObjectId
 
 from models import ScanBody
-from routes_desk import _material_diff, print_prescription, scan
+from helpers import material_diff
+from routes_desk import print_prescription, scan
 from seed import ACTOR, register, run_camp, seed_camp
 
 CARD_NAME = "Sunita Devi"
@@ -46,52 +47,52 @@ def _assert_silent(out, stored, expected_name=CARD_NAME):
 
 class TestMaterialDiffUnit:
     def test_empty_stored_is_trivial(self):
-        assert _material_diff(card_dict(), {
+        assert material_diff(card_dict(), {
             "full_name": "", "age": None, "gender": "", "dob": None,
             "aadhaar_last4": "", "address": None,
         }) == []
 
     def test_address_is_always_trivial(self):
-        assert _material_diff(card_dict(), {
+        assert material_diff(card_dict(), {
             **card_dict(), "address": "a different village",
         }) == []
 
     def test_name_case_spacing_and_token_order_are_trivial(self):
-        assert _material_diff(card_dict(full_name="Ramesh Kumar"), {
+        assert material_diff(card_dict(full_name="Ramesh Kumar"), {
             **card_dict(), "full_name": "ramesh  kumar.",
         }) == []
-        assert _material_diff(card_dict(full_name="Ramesh Kumar"), {
+        assert material_diff(card_dict(full_name="Ramesh Kumar"), {
             **card_dict(), "full_name": "Kumar Ramesh",
         }) == []
 
     def test_name_material_when_tokens_differ(self):
-        diff = _material_diff(card_dict(full_name="Sunita Devi"), {
+        diff = material_diff(card_dict(full_name="Sunita Devi"), {
             **card_dict(), "full_name": "Ramesh Kumar",
         })
         assert [d["field"] for d in diff] == ["full_name"]
 
     def test_age_within_one_year_is_trivial_else_material(self):
-        assert _material_diff(card_dict(age=51), {**card_dict(), "age": 50}) == []
-        assert _material_diff(card_dict(age=51), {**card_dict(), "age": 52}) == []
-        diff = _material_diff(card_dict(age=51), {**card_dict(), "age": 49})
+        assert material_diff(card_dict(age=51), {**card_dict(), "age": 50}) == []
+        assert material_diff(card_dict(age=51), {**card_dict(), "age": 52}) == []
+        diff = material_diff(card_dict(age=51), {**card_dict(), "age": 49})
         assert [d["field"] for d in diff] == ["age"]
 
     def test_gender_first_char_trivial_else_material(self):
-        assert _material_diff(card_dict(gender="F"), {**card_dict(), "gender": "female"}) == []
-        assert _material_diff(card_dict(gender="M"), {**card_dict(), "gender": "m"}) == []
-        diff = _material_diff(card_dict(gender="F"), {**card_dict(), "gender": "M"})
+        assert material_diff(card_dict(gender="F"), {**card_dict(), "gender": "female"}) == []
+        assert material_diff(card_dict(gender="M"), {**card_dict(), "gender": "m"}) == []
+        diff = material_diff(card_dict(gender="F"), {**card_dict(), "gender": "M"})
         assert [d["field"] for d in diff] == ["gender"]
 
     def test_dob_and_last4_strip_equal_else_material(self):
-        assert _material_diff(card_dict(dob="1975-06-14"), {
+        assert material_diff(card_dict(dob="1975-06-14"), {
             **card_dict(), "dob": " 1975-06-14 ",
         }) == []
-        assert _material_diff(card_dict(), {**card_dict(), "aadhaar_last4": "1234"}) == []
-        diff = _material_diff(card_dict(dob="1975-06-14"), {
+        assert material_diff(card_dict(), {**card_dict(), "aadhaar_last4": "1234"}) == []
+        diff = material_diff(card_dict(dob="1975-06-14"), {
             **card_dict(), "dob": "1970-01-01",
         })
         assert [d["field"] for d in diff] == ["dob"]
-        diff = _material_diff(card_dict(), {**card_dict(), "aadhaar_last4": "9999"})
+        diff = material_diff(card_dict(), {**card_dict(), "aadhaar_last4": "9999"})
         assert [d["field"] for d in diff] == ["aadhaar_last4"]
 
 
@@ -141,15 +142,14 @@ class TestScanTrivialAndMaterial:
             _assert_silent(out, stored, expected_name="Ramesh Kumar")
         run_camp(monkeypatch, run)
 
-    def test_material_name_is_mismatch_review(self, monkeypatch):
+    def test_a_different_name_with_the_same_last4_and_dob_is_another_patient(self, monkeypatch):
         async def run(database):
             _camp_id, (day_id,) = await seed_camp(database)
-            await _manual(day_id, full_name="Ramesh Kumar", aadhaar_last4="1234",
-                          dob=CARD_DOB, gender="F", age=51)
+            reg = await _manual(day_id, full_name="Ramesh Kumar", aadhaar_last4="1234",
+                                dob=CARD_DOB, gender="F", age=51)
             out = await scan(ScanBody(payload=payload()), actor=ACTOR)
-            assert out["outcome"] == "mismatch_review"
-            assert [d["field"] for d in out["diff"]] == ["full_name"]
-            stored = await database.patients.find_one({"_id": ObjectId(out["registration"]["id"])})
+            assert out["outcome"] == "no_match"
+            stored = await database.patients.find_one({"_id": ObjectId(reg["id"])})
             assert stored["full_name"] == "Ramesh Kumar"
             assert stored["arrived_at"] is None
         run_camp(monkeypatch, run)
@@ -176,7 +176,8 @@ class TestScanTrivialAndMaterial:
     def test_gender_case_checks_in_silently(self, monkeypatch):
         async def run(database):
             _camp_id, (day_id,) = await seed_camp(database)
-            reg = await _manual(day_id, gender="female", aadhaar_last4="1234", dob=CARD_DOB)
+            reg = await _manual(day_id, gender="F", aadhaar_last4="1234", dob=CARD_DOB)
+            await database.patients.update_one({"_id": ObjectId(reg["id"])}, {"$set": {"gender": "female"}})
             out = await scan(ScanBody(payload=payload()), actor=ACTOR)
             stored = await database.patients.find_one({"_id": ObjectId(reg["id"])})
             _assert_silent(out, stored)

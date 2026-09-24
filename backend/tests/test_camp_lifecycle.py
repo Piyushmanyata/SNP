@@ -86,7 +86,7 @@ class TestArrival:
     def test_arrival_is_stamped_once(self, monkeypatch):
         async def body(database):
             _camp_id, (day_id,) = await seed_camp(database)
-            reg = await register(day_id, manual_entry=True)
+            reg = await register(day_id, aadhaar_scanned=True, qr_payload=CARD)
             first = (await arrive(reg["id"], actor=ACTOR))["registration"]["arrived_at"]
             second = (await arrive(reg["id"], actor=ACTOR))["registration"]["arrived_at"]
             assert first == second
@@ -134,14 +134,14 @@ class TestScanResolution:
         async def body(database):
             _camp_id, (day_id,) = await seed_camp(database)
             reg = await register(
-                day_id, full_name="Ramesh Kumar", age=48, aadhaar_last4="1234",
+                day_id, full_name="Sunita Devi", age=48, aadhaar_last4="1234",
                 dob="1975-06-14", gender="M", manual_entry=True,
             )
             out = await scan(ScanBody(payload=CARD), actor=ACTOR)
             assert out["outcome"] == "mismatch_review"
             assert out["registration"]["reg_no"] == reg["reg_no"]
             assert out["card"]["full_name"] == "Sunita Devi"
-            assert {d["field"] for d in out["diff"]} >= {"full_name", "age", "gender"}
+            assert {d["field"] for d in out["diff"]} == {"age", "gender"}
             assert "address" not in {d["field"] for d in out["diff"]}
             stored = await database.patients.find_one({"_id": ObjectId(reg["id"])})
             assert stored["age"] == 48
@@ -169,16 +169,17 @@ class TestScanResolution:
             assert after["arrived_at"]
         run_camp(monkeypatch, body)
 
-    def test_confirming_a_registration_that_is_not_manual_is_refused(self, monkeypatch):
+    def test_confirming_a_scanned_registration_arrives_it_without_an_overwrite(self, monkeypatch):
         async def body(database):
             _camp_id, (day_id,) = await seed_camp(database)
             reg = await register(
                 day_id, full_name="Sunita Devi", gender="F", dob="1975-06-14",
                 aadhaar_last4="1234", aadhaar_scanned=True,
             )
-            with pytest.raises(HTTPException) as exc:
-                await scan_confirm(ScanConfirmBody(patient_id=reg["id"], payload=CARD), actor=ACTOR)
-            assert exc.value.detail["code"] == "NOT_A_MANUAL_ENTRY"
+            out = await scan_confirm(ScanConfirmBody(patient_id=reg["id"], payload=CARD), actor=ACTOR)
+            assert out["outcome"] == "arrived" and out["registration"]["id"] == reg["id"]
+            stored = await database.patients.find_one({"_id": ObjectId(reg["id"])})
+            assert stored["arrived_at"] and stored["dob"] == "1975-06-14" and not stored.get("manual_entry")
         run_camp(monkeypatch, body)
 
     def test_a_scan_matching_nothing_registers_nobody(self, monkeypatch):

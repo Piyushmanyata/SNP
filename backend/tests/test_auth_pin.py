@@ -26,16 +26,14 @@ def test_login_and_pin_change_flow(monkeypatch):
             res = await client.post("/api/auth/login", json={"name": "Ramesh Kumar", "pin": "1234"})
             assert res.status_code == 200
             data = res.json()
-            assert "refresh_token" not in res.cookies
+            assert set(res.cookies) == {"access_token"} and "access_token" not in data
             assert data["user"]["must_change_pin"] is True
-            headers = {"Authorization": f"Bearer {data['access_token']}"}
 
-            res = await client.post("/api/auth/change-pin", json={"current_pin": "1234", "new_pin": "123"}, headers=headers)
+            res = await client.post("/api/auth/change-pin", json={"current_pin": "1234", "new_pin": "123"})
             assert res.status_code == 422 or res.status_code == 400
 
-            res = await client.post("/api/auth/change-pin", json={"current_pin": "1234", "new_pin": "2580"}, headers=headers)
+            res = await client.post("/api/auth/change-pin", json={"current_pin": "1234", "new_pin": "2580"})
             assert res.status_code == 200
-            assert "refresh_token" not in res.cookies
             assert res.json()["user"]["must_change_pin"] is False
 
             res = await client.post("/api/auth/login", json={"name": "Ramesh Kumar", "pin": "1234"})
@@ -45,9 +43,8 @@ def test_login_and_pin_change_flow(monkeypatch):
             assert res.status_code == 200
             assert res.json()["user"]["must_change_pin"] is False
 
-            client.cookies.set("refresh_token", "legacy", domain="testserver.local", path="/")
             assert (await client.post("/api/auth/logout")).status_code == 200
-            assert "refresh_token" not in client.cookies
+            assert "access_token" not in client.cookies
 
     run_db(run)
 
@@ -59,7 +56,7 @@ def test_changing_pin_invalidates_other_sessions_and_keeps_current_session(monke
         ))
         async with asgi_client() as client:
             login = await client.post("/api/auth/login", json={"name": "Operator", "pin": "5678"})
-            previous_token = login.json()["access_token"]
+            previous_token = login.cookies["access_token"]
             changed = await client.post("/api/auth/change-pin", json={"current_pin": "5678", "new_pin": "2468"})
             assert changed.status_code == 200
             assert (await client.get("/api/auth/me")).status_code == 200

@@ -6,22 +6,39 @@ from pymongo.asynchronous.database import AsyncDatabase
 from db import get_db, next_seq
 from models import AadhaarDecodeBody, RegisterBody, DuplicateCheckBody
 from helpers import (
-    now_utc, normalize_name, normalize_phone, is_dummy_phone,
-    person_key, new_patient_code, age_from_dob, today_ist_str,
+    OVERWRITTEN_FIELDS, now_utc, normalize_name, normalize_phone, is_dummy_phone,
+    person_key, new_patient_code, age_from_dob, today_ist_str, material_diff,
 )
 from serializers import ser_patient
-from security import require_staff, require_any
-from routes_camps import door_manual_open
+from security import get_current_user, require_staff, require_any
+from routes_camps import door_manual_open, effective_printing
 from aadhaar import decode_aadhaar
 from aadhaar_extract import extract_document
 import sms
 from datetime import date, timedelta
+import asyncio
 import re
 
 router = APIRouter(prefix="/api", tags=["registration"])
 
-# rate limit for self-register (per IP)
 _rl: dict = {}
+_decode_rl: dict = {}
+SELF_REGISTER_PER_NETWORK = 30
+DECODE_PER_NETWORK = 60
+HOUSEHOLD_LIMIT = 6
+
+
+def _rate_limit(store: dict, request: Request, limit: int) -> None:
+    ip = request.client.host if request.client else "unknown"
+    now = now_utc()
+    cutoff = now - timedelta(minutes=10)
+    for seen_ip in [k for k, w in store.items() if w[-1] <= cutoff]:
+        del store[seen_ip]
+    window = store.setdefault(ip, [])
+    window[:] = [t for t in window if t > cutoff]
+    if len(window) >= limit:
+        raise HTTPException(status_code=429, detail="Too many attempts. Please try again later.")
+    window.append(now)
 
 
 @router.post("/aadhaar/extract")
@@ -30,8 +47,12 @@ async def aadhaar_extract(request: Request) -> Dict[str, Any]:
 
 
 @router.post("/aadhaar/decode")
-async def aadhaar_decode(body: AadhaarDecodeBody) -> Dict[str, Any]:
-    return decode_aadhaar(body.payload or "")
+async def aadhaar_decode(body: AadhaarDecodeBody, request: Request) -> Dict[str, Any]:
+    try:
+        await get_current_user(request)
+    except HTTPException:
+        _rate_limit(_decode_rl, request, DECODE_PER_NETWORK)
+    return await asyncio.to_thread(decode_aadhaar, body.payload)
 
 
 # ---------- soft duplicate check ----------
@@ -79,7 +100,8 @@ async def _resolve_person(data: dict) -> Tuple[Dict[str, Any], bool]:
     return doc, True
 
 
-async def _validate_camp_and_day(db: AsyncDatabase, camp_day_id: str) -> tuple[dict, dict]:
+async def _validate_camp_and_day(db: AsyncDatabase, camp_day_id: str) -> tuple[dict, dict, bool]:
+    """Returns the active camp, the day and whether the day is the Operating day."""
     camp = await db.camps.find_one({"is_active": True})
     if not camp:
         raise HTTPException(status_code=409, detail="No active camp")
@@ -87,7 +109,14 @@ async def _validate_camp_and_day(db: AsyncDatabase, camp_day_id: str) -> tuple[d
     day = await db.camp_days.find_one({"_id": ObjectId(camp_day_id), "camp_id": camp["_id"]})
     if not day:
         raise HTTPException(status_code=404, detail="Camp day not found")
-    return camp, day
+    days = await db.camp_days.find({"camp_id": camp["_id"]}).to_list(100)
+    operating = effective_printing(camp, days)["operating_day_id"] == str(day["_id"])
+    if day["day_date"] < today_ist_str() and not operating:
+        raise HTTPException(status_code=409, detail={
+            "code": "DAY_PASSED",
+            "message": "That camp day has passed. Choose a later day.",
+        })
+    return camp, day, operating
 
 
 def _is_manual(p: dict) -> bool:
@@ -107,14 +136,10 @@ def _dup_409(row: dict) -> HTTPException:
 
 
 def _build_duplicate_queries(body: RegisterBody, person: dict | None = None) -> list[dict]:
-    queries = []
+    queries: list[dict] = []
     if person:
         queries.append({"person_id": person["_id"]})
     norm = normalize_name(body.full_name)
-    if body.aadhaar_last4 and norm:
-        queries.append({"aadhaar_last4": body.aadhaar_last4, "full_name_normalized": norm})
-    if body.aadhaar_last4 and body.dob:
-        queries.append({"aadhaar_last4": body.aadhaar_last4, "dob": body.dob})
     phone = normalize_phone(body.phone)
     age = body.age if body.age is not None else (age_from_dob(body.dob) if body.dob else None)
     if norm and age is not None and phone:
@@ -132,15 +157,21 @@ async def _duplicate_hits(
     body: RegisterBody,
     person: dict | None = None,
 ) -> List[Dict[str, Any]]:
-    queries = _build_duplicate_queries(body, person)
+    candidates = []
+    for q in _build_duplicate_queries(body, person):
+        candidates += await db.patients.find({"camp_id": camp_id, **q}).to_list(20)
+    tokens = sorted(normalize_name(body.full_name).split())
+    if body.aadhaar_last4 and tokens:
+        candidates += [
+            d for d in await db.patients.find({"camp_id": camp_id, "aadhaar_last4": body.aadhaar_last4}).to_list(50)
+            if sorted((d.get("full_name_normalized") or "").split()) == tokens
+        ]
     hits = []
     seen = set()
-    for q in queries:
-        docs = await db.patients.find({"camp_id": camp_id, **q}).to_list(20)
-        for d in docs:
-            if d["_id"] not in seen:
-                seen.add(d["_id"])
-                hits.append(d)
+    for d in candidates:
+        if d["_id"] not in seen:
+            seen.add(d["_id"])
+            hits.append(d)
     return hits
 
 
@@ -181,6 +212,7 @@ async def _overwrite_manual(
     if age is None and body.dob:
         age = age_from_dob(body.dob)
     updates = {
+        **({"registration_request_id": body.registration_request_id} if body.registration_request_id else {}),
         "full_name": body.full_name,
         "full_name_normalized": norm,
         "latin_display_name": body.latin_display_name,
@@ -197,7 +229,8 @@ async def _overwrite_manual(
     }
     try:
         p = await db.patients.find_one_and_update(
-            {"_id": target["_id"], "aadhaar_scanned": {"$ne": True}, "person_id": None},
+            {"_id": target["_id"], "aadhaar_scanned": {"$ne": True}, "person_id": None,
+             "printed_at": None, "queue_status": {"$ne": "seen"}},
             {"$set": updates}, return_document=True,
         )
     except DuplicateKeyError:
@@ -207,11 +240,21 @@ async def _overwrite_manual(
                 raise _dup_409(existing)
         raise
     if not p:
-        raise HTTPException(status_code=409, detail={
-            "code": "NOT_A_MANUAL_ENTRY",
-            "message": "This registration already has Aadhaar on file. Scan again.",
-        })
+        raise await _overwrite_refused(db, target["_id"])
     return ser_patient(p), False
+
+
+async def _overwrite_refused(db: AsyncDatabase, patient_id) -> HTTPException:
+    current = await db.patients.find_one({"_id": patient_id}) or {}
+    if current.get("printed_at") or current.get("queue_status") == "seen":
+        return HTTPException(status_code=409, detail={
+            "code": "ALREADY_PRINTED",
+            "message": "This patient's prescription is already printed. Their details cannot change now.",
+        })
+    return HTTPException(status_code=409, detail={
+        "code": "NOT_A_MANUAL_ENTRY",
+        "message": "This registration already has Aadhaar on file. Scan again.",
+    })
 
 
 def _build_patient_document(
@@ -266,8 +309,10 @@ def _build_patient_document(
         "manual_entry": is_manual,
         "manual_exception": True if is_manual else None,
         "manual_reason": body.manual_reason if is_manual else None,
-        "failed_scan_attempts": body.failed_scan_attempts if is_manual else 0,
         "manual_at_door": bool(body.at_door) if is_manual else False,
+        **({
+            "arrived_at": now_utc(), "arrived_by": str(actor_id), "queue_status": "arrived",
+        } if is_manual and body.at_door and actor_id else {}),
         **({"registration_request_id": body.registration_request_id} if body.registration_request_id else {}),
         "reminder_sms_sent_at": None,
         "created_at": now_utc(),
@@ -297,10 +342,21 @@ async def _resolve_registration_conflict(
             "registrations": [ser_patient(h) for h in manual_hits],
         })
     if len(manual_hits) == 1:
+        target = manual_hits[0]
         if is_self:
-            raise _dup_409(manual_hits[0])
+            raise _dup_409(target)
         age = body.age if body.age is not None else (age_from_dob(body.dob) if body.dob else None)
-        return await _overwrite_manual(db, manual_hits[0], body, person, age)
+        card = {**{field: getattr(body, field) for field in OVERWRITTEN_FIELDS}, "age": age}
+        diff = material_diff(card, target)
+        if diff and body.review_confirmed_id != str(target["_id"]):
+            raise HTTPException(status_code=409, detail={
+                "code": "MISMATCH_REVIEW_REQUIRED",
+                "message": "This card differs from the Manual entry. Check the details before replacing them.",
+                "registration": ser_patient(target),
+                "card": card,
+                "diff": diff,
+            })
+        return await _overwrite_manual(db, target, body, person, age)
     return None
 
 
@@ -355,7 +411,7 @@ async def _create_registration(
     request: Request,
 ) -> Tuple[Dict[str, Any], bool]:
     db = get_db()
-    camp, day = await _validate_camp_and_day(db, body.camp_day_id)
+    camp, day, operating = await _validate_camp_and_day(db, body.camp_day_id)
 
     if body.registration_request_id:
         existing = await db.patients.find_one({"registration_request_id": body.registration_request_id})
@@ -367,12 +423,21 @@ async def _create_registration(
             "code": "MANUAL_ENTRY_NOT_ALLOWED",
             "message": "Scan the Aadhaar card. Public registration has no manual entry.",
         })
+    if not body.aadhaar_scanned:
+        _reject_unscanned_staff_entry(body, camp, operating)
 
     phone = normalize_phone(body.phone)
     if is_self and (not phone or is_dummy_phone(phone)):
         raise HTTPException(status_code=400, detail="A valid 10-digit mobile number is required")
     if phone and is_dummy_phone(phone):
         raise HTTPException(status_code=400, detail="Please enter a valid 10-digit mobile number")
+    if is_self and await db.patients.count_documents(
+        {"camp_id": camp["_id"], "phone_normalized": phone}, limit=HOUSEHOLD_LIMIT,
+    ) >= HOUSEHOLD_LIMIT:
+        raise HTTPException(status_code=409, detail={
+            "code": "HOUSEHOLD_LIMIT",
+            "message": f"This mobile number already has {HOUSEHOLD_LIMIT} registrations for this camp. Ask at the camp desk.",
+        })
 
     person = None
     if body.aadhaar_scanned and body.aadhaar_last4 and body.dob:
@@ -389,7 +454,7 @@ async def _create_registration(
     if conflict_result is not None:
         return conflict_result
 
-    walk_in = not is_self and day.get("day_date") == today_ist_str()
+    walk_in = not is_self and operating
     await _assert_capacity(db, day, enforce_limit=not walk_in)
     try:
         age = body.age if body.age is not None else (age_from_dob(body.dob) if body.dob else None)
@@ -424,20 +489,22 @@ async def _create_registration(
         raise
 
 
-async def _confirm_registration(patient: Dict[str, Any], skip_if_today: bool = False) -> None:
+async def _confirm_registration(patient: Dict[str, Any], skip_walk_in: bool = False) -> None:
     db = get_db()
     row = await db.patients.find_one({"_id": ObjectId(patient["id"])})
     day = await db.camp_days.find_one({"_id": ObjectId(patient["camp_day_id"])})
     camp = await db.camps.find_one({"_id": ObjectId(patient["camp_id"])})
     if not row or not day or not camp:
         return
-    if skip_if_today and day["day_date"] == today_ist_str():
-        return
+    if skip_walk_in:
+        days = await db.camp_days.find({"camp_id": camp["_id"]}).to_list(100)
+        if effective_printing(camp, days)["operating_day_id"] == str(day["_id"]):
+            return
     await sms.send_patient_sms(db, row, "registration", day["day_date"], camp.get("venue_sms") or camp["venue"])
 
 
-def _apply_scanned_identity(body: RegisterBody, message: str) -> None:
-    decoded = decode_aadhaar(body.qr_payload or "")
+async def _apply_scanned_identity(body: RegisterBody, message: str) -> None:
+    decoded = await asyncio.to_thread(decode_aadhaar, body.qr_payload or "")
     card = decoded["data"] if decoded.get("outcome") == "card" else None
     if not card:
         raise HTTPException(status_code=400, detail={
@@ -462,8 +529,10 @@ def _validate_manual_identity(body: RegisterBody, now) -> None:
         year_only = bool(re.fullmatch(r'[0-9]{4}', body.dob))
         if not year_only and not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', body.dob):
             raise HTTPException(status_code=400, detail="Enter a valid date of birth as YYYY-MM-DD or a four-digit year")
+        if year_only:
+            body.dob += '-01-01'
         try:
-            dob = date.fromisoformat(body.dob + '-01-01' if year_only else body.dob)
+            dob = date.fromisoformat(body.dob)
         except ValueError:
             raise HTTPException(status_code=400, detail="Enter a valid date of birth as YYYY-MM-DD or a four-digit year")
         if dob > now.date() or now.year - dob.year > 130:
@@ -474,21 +543,23 @@ def _validate_manual_identity(body: RegisterBody, now) -> None:
         raise HTTPException(status_code=400, detail="Enter an age between 0 and 130, or a valid date of birth")
 
 
-MANUAL_CAMERA_ATTEMPTS = 3
-
-
-def _reject_unscanned_staff_entry(body: RegisterBody, camp: dict) -> None:
+def _reject_unscanned_staff_entry(body: RegisterBody, camp: dict, operating: bool) -> None:
     reason = (body.manual_reason or "").strip()
-    if body.failed_scan_attempts < MANUAL_CAMERA_ATTEMPTS or not reason:
+    if not reason:
         raise HTTPException(status_code=400, detail={
             "code": "MANUAL_ENTRY_NOT_ALLOWED",
-            "message": "Scan the Aadhaar card. Manual entry opens after three failed camera attempts, and it needs a reason.",
+            "message": "Scan the Aadhaar card, or give the reason it cannot be scanned.",
         })
     body.manual_reason = reason
     if body.at_door and not door_manual_open(camp):
         raise HTTPException(status_code=403, detail={
             "code": "DOOR_MANUAL_SHUT",
             "message": "Manual entry at the door is closed.",
+        })
+    if body.at_door and not operating:
+        raise HTTPException(status_code=409, detail={
+            "code": "NOT_OPERATING_DAY",
+            "message": "The door registers patients for the Operating day only.",
         })
 
 
@@ -500,7 +571,7 @@ async def desk_register(
     actor: dict = Depends(require_staff),
 ) -> Dict[str, Any]:
     if body.aadhaar_scanned:
-        _apply_scanned_identity(
+        await _apply_scanned_identity(
             body, "We could not read that Aadhaar QR. Scan the card again, or register manually.",
         )
     else:
@@ -508,9 +579,6 @@ async def desk_register(
     phone_norm = normalize_phone(body.phone)
     if not phone_norm or is_dummy_phone(phone_norm):
         raise HTTPException(status_code=400, detail="A valid 10-digit household mobile number is required")
-    if not body.aadhaar_scanned:
-        camp, _day = await _validate_camp_and_day(get_db(), body.camp_day_id)
-        _reject_unscanned_staff_entry(body, camp)
     patient, created = await _create_registration(
         body, actor["_id"], False, request,
     )
@@ -524,18 +592,8 @@ async def desk_register(
 
 @router.post("/self-register")
 async def self_register(body: RegisterBody, request: Request, background_tasks: BackgroundTasks) -> Dict[str, Any]:
-    ip = request.client.host if request.client else "unknown"
-    now = now_utc()
-    cutoff = now - timedelta(minutes=10)
-    for seen_ip in [k for k, w in _rl.items() if w[-1] <= cutoff]:
-        del _rl[seen_ip]
-    window = _rl.setdefault(ip, [])
-    window[:] = [t for t in window if t > cutoff]
-    if len(window) >= 300:
-        raise HTTPException(status_code=429, detail="Too many attempts. Please try again later.")
-    window.append(now)
-
-    _apply_scanned_identity(
+    _rate_limit(_rl, request, SELF_REGISTER_PER_NETWORK)
+    await _apply_scanned_identity(
         body, "We could not read the QR code on this Aadhaar card. Please register at the camp desk.",
     )
     body.is_self_registered = True

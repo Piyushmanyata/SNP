@@ -87,6 +87,7 @@ async def init_indexes() -> None:
     await db.reminder_ledger.create_index([("status", ASCENDING), ("created_at", ASCENDING)])
     await db.reminder_ledger.create_index("provider_id", sparse=True)
     await db.reminder_ledger.create_index("created_at")
+    await db.reminder_ledger.create_index([("number", ASCENDING), ("message_type", ASCENDING), ("created_at", ASCENDING)])
     await db.reminder_ledger.create_index(
         [
             ("patient_id", ASCENDING),

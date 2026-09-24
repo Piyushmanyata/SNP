@@ -134,7 +134,7 @@ class TestConflictsAreNotCrashes:
     def test_confirming_a_card_already_held_in_this_camp_is_a_409(self, monkeypatch):
         async def body(database):
             camp_id, _ = await seed_camp(database)
-            person, _ = await routes_registration._resolve_person(routes_desk._decode_card(CARD))
+            person, _ = await routes_registration._resolve_person(await routes_desk._decode_card(CARD))
             manual_id = ObjectId()
             await database.patients.insert_many([
                 patient_doc(
@@ -228,14 +228,12 @@ class TestPublicOccupancy:
             camp_id, (today_id, later_id, empty_id) = await seed_camp(database, days=(TODAY, day(1), day(2)))
             for day_id, limit in ((today_id, 50), (later_id, 30), (empty_id, 20)):
                 await database.camp_days.update_one({"_id": day_id}, {"$set": {"seat_limit": limit}})
-            await database.patients.insert_many([
-                patient_doc(camp_id=camp_id, camp_day_id=day_id, booked_camp_day_id=day_id)
-                for day_id, n in ((today_id, 3), (later_id, 1)) for _ in range(n)
-            ])
+            for day_id, booked in ((today_id, 3), (later_id, 1)):
+                await database.camp_days.update_one({"_id": day_id}, {"$set": {"booked": booked}})
 
             log.commands.clear()
             board = await routes_camps.active_camp_public()
-            assert [name for name, target in log.commands if target == "patients"] == ["aggregate"]
+            assert [name for name, target in log.commands if target == "patients"] == []
             assert board["total_seats"] == 100
             assert board["total_registered"] == 4
             days = {d["day_date"]: d for d in board["days"]}
@@ -252,10 +250,7 @@ class TestPublicOccupancy:
     def test_an_over_full_day_reports_zero_remaining_not_a_negative(self, monkeypatch):
         async def body(database):
             camp_id, (day_id,) = await seed_camp(database, name="C", venue="V")
-            await database.camp_days.update_one({"_id": day_id}, {"$set": {"seat_limit": 1}})
-            await database.patients.insert_many([
-                patient_doc(camp_id=camp_id, camp_day_id=day_id, booked_camp_day_id=day_id) for _ in range(3)
-            ])
+            await database.camp_days.update_one({"_id": day_id}, {"$set": {"seat_limit": 1, "booked": 3}})
 
             board = await routes_camps.active_camp_public()
             assert board["days"][0]["registered"] == 3

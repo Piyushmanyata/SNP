@@ -73,16 +73,14 @@ def test_first_sign_in_owns_the_account_only_after_a_personal_pin(monkeypatch):
         created = await routes_staff.create_staff(CreateStaffBody(name="Lead Two", role="team_lead"), actor=ADMIN)
         temp = created["temporary_pin"]
         async with asgi_client() as client:
-            token = (await client.post("/api/auth/login", json={"name": "Lead Two", "pin": temp})).json()["access_token"]
-            headers = {"Authorization": f"Bearer {token}"}
-            assert (await client.get("/api/staff", headers=headers)).status_code == 403
+            assert (await client.post("/api/auth/login", json={"name": "Lead Two", "pin": temp})).status_code == 200
+            assert (await client.get("/api/staff")).status_code == 403
             for new_pin, reason in [(temp, "same"), ("2580", "short"), ("111111", "weak")]:
-                refused = await client.post("/api/auth/change-pin", json={"current_pin": temp, "new_pin": new_pin}, headers=headers)
+                refused = await client.post("/api/auth/change-pin", json={"current_pin": temp, "new_pin": new_pin})
                 assert refused.status_code == 400, reason
-            changed = await client.post("/api/auth/change-pin", json={"current_pin": temp, "new_pin": "258014"}, headers=headers)
+            changed = await client.post("/api/auth/change-pin", json={"current_pin": temp, "new_pin": "258014"})
             assert changed.status_code == 200, changed.text
-            headers = {"Authorization": f"Bearer {changed.json()['access_token']}"}
-            assert (await client.get("/api/staff", headers=headers)).status_code == 200
+            assert (await client.get("/api/staff")).status_code == 200
             assert (await client.post("/api/auth/login", json={"name": "Lead Two", "pin": temp})).status_code == 401
 
     run_db(run)
@@ -95,7 +93,7 @@ def test_reset_gives_a_new_one_time_pin_ends_old_sessions_and_clears_the_lockout
         vol_id = created["staff"]["id"]
         await database.users.update_one({"_id": ObjectId(vol_id)}, {"$set": {"pin_hash": hash_pin("2580"), "must_change_pin": False}})
         async with asgi_client() as client:
-            old_token = (await client.post("/api/auth/login", json={"name": "Vol", "pin": "2580"})).json()["access_token"]
+            old_token = (await client.post("/api/auth/login", json={"name": "Vol", "pin": "2580"})).cookies["access_token"]
         for _ in range(5):
             assert await _refused("Vol", "9051") == 401
         assert await _refused("Vol", "2580") == 429

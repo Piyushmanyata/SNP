@@ -13,7 +13,7 @@ async def _desk_register(body):
     return await desk_register(body, Request(), actor=ACTOR, background_tasks=None)
 
 
-def test_unscanned_staff_registration_needs_three_camera_attempts_and_a_reason(monkeypatch):
+def test_unscanned_staff_registration_needs_a_reason(monkeypatch):
     async def run(database):
         _camp_id, (day_id,) = await seed_camp(database)
         body = RegisterBody(
@@ -25,19 +25,17 @@ def test_unscanned_staff_registration_needs_three_camera_attempts_and_a_reason(m
         assert exc.value.detail["code"] == "MANUAL_ENTRY_NOT_ALLOWED"
         assert await database.patients.count_documents({}) == 0
 
-        body.failed_scan_attempts = 2
-        body.manual_reason = "camera would not start"
+        body.manual_reason = "   "
         with pytest.raises(HTTPException) as exc:
             await _desk_register(body)
         assert exc.value.detail["code"] == "MANUAL_ENTRY_NOT_ALLOWED"
 
-        body.failed_scan_attempts = 3
+        body.manual_reason = "camera would not start"
         opened = await _desk_register(body)
         assert opened["created"] is True
         assert opened["registration"]["manual_entry"] is True
         stored = await database.patients.find_one({})
         assert stored["manual_reason"] == "camera would not start"
-        assert stored["failed_scan_attempts"] == 3
         assert stored["manual_at_door"] is False
 
     run_camp(monkeypatch, run)
@@ -48,8 +46,8 @@ def test_door_manual_entry_stays_shut_until_an_admin_opens_the_gate(monkeypatch)
         camp_id, (day_id,) = await seed_camp(database)
         body = RegisterBody(
             full_name="Door Patient", age=40, phone="9876500002", camp_day_id=str(day_id),
-            failed_scan_attempts=3, manual_reason="scanners are down", at_door=True,
-            registration_request_id="door-1",
+            manual_reason="scanners are down", at_door=True,
+            registration_request_id="7b3f2a10-4c5d-4e6f-8a9b-0c1d2e3f4a5b",
         )
         with pytest.raises(HTTPException) as exc:
             await _desk_register(body)
@@ -72,7 +70,7 @@ def test_scan_confirm_rejects_a_wrong_camp_or_stale_candidate(monkeypatch):
         camp_id, (day_id,) = await seed_camp(database)
         body = RegisterBody(
             full_name="Other Person", age=44, phone="9876500003", camp_day_id=str(day_id),
-            failed_scan_attempts=3, manual_reason="camera would not start", manual_entry=True,
+            manual_reason="camera would not start", manual_entry=True,
         )
         created = await _desk_register(body)
         patient_id = created["registration"]["id"]
@@ -108,7 +106,7 @@ def test_scan_confirm_reports_a_card_holder_already_in_the_camp(monkeypatch):
         )
         other = await _desk_register(
             RegisterBody(full_name="Other Person", age=44, phone="9876500005", camp_day_id=str(day_id),
-                         failed_scan_attempts=3, manual_reason="camera would not start"),
+                         manual_reason="camera would not start"),
         )
         with pytest.raises(HTTPException) as exc:
             await scan_confirm(
@@ -125,7 +123,7 @@ def test_an_unscanned_staff_registration_is_a_manual_entry_whatever_the_client_c
         _camp_id, (day_id,) = await seed_camp(database)
         body = RegisterBody(
             full_name="Typed Patient", age=60, phone="9876500006", camp_day_id=str(day_id),
-            failed_scan_attempts=3, manual_reason="card QR is scratched",
+            manual_reason="card QR is scratched",
             manual_entry=False, manual_exception=False,
         )
         created = await _desk_register(body)

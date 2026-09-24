@@ -116,8 +116,7 @@ class TestStaffScannedIdentityIsServerDerived:
             _camp_id, (day_id,) = await seed_camp(database)
             result = await _register(
                 day_id, manual_entry=True, manual_reason="Card not readable",
-                failed_scan_attempts=3,
-            )
+                )
             stored = await database.patients.find_one(
                 {"_id": ObjectId(result["registration"]["id"])},
             )

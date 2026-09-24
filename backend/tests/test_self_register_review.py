@@ -34,7 +34,7 @@ def _self_register(monkeypatch, **fields):
 def test_public_registration_without_a_readable_qr_is_refused(monkeypatch):
     response = _self_register(
         monkeypatch, gender='F', aadhaar_last4='1234', aadhaar_scanned=True,
-        manual_entry=False, is_self_registered=False, registration_request_id='review-1',
+        manual_entry=False, is_self_registered=False, registration_request_id='8f14e45f-ceea-4671-a1d2-5a2b3c4d5e6f',
     )
     assert response.status_code == 400, response.text
     assert response.json()['detail']['code'] == 'AADHAAR_QR_REQUIRED'
@@ -70,10 +70,10 @@ def test_desk_reviewed_details_reject_unstorable_dates_of_birth(fields):
     run_db(run)
 
 
-@pytest.mark.parametrize('dob,expected_age', [('1975', 2026 - 1975), ('1975-06-14', None)])
-def test_desk_reviewed_year_only_birth_year_is_accepted_and_dates_age(dob, expected_age):
+@pytest.mark.parametrize('dob,stored', [('1975', '1975-01-01'), ('1975-06-14', '1975-06-14')])
+def test_desk_reviewed_year_only_birth_year_is_accepted_and_dates_age(dob, stored):
     body = RegisterBody(full_name='Reviewed Patient', phone='9876500001', manual_entry=True,
                         camp_day_id=str(ObjectId()), age=None, dob=dob)
     _validate_manual_identity(body, now_utc())
-    assert body.dob == dob
+    assert body.dob == stored
     assert body.age is not None and 0 <= body.age <= 130

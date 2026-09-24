@@ -733,6 +733,32 @@ describe("AadhaarScanner component", () => {
     }
   });
 
+  test("a USB scan into the door box while a lookup is pending is read, not dropped", async () => {
+    let finish;
+    const resolvePayload = jest.fn()
+      .mockImplementationOnce(() => new Promise((done) => { finish = done; }))
+      .mockResolvedValue({ outcome: "card", source: "desk_scan" });
+    act(() => root.render(<AadhaarScanner usbFirst resolvePayload={resolvePayload} />));
+    const textarea = container.querySelector('[data-testid="aadhaar-qr-input"]');
+    const scan = async (text) => {
+      act(() => {
+        textarea.value = text;
+        textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await act(async () => {
+        textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      });
+    };
+    await scan("1".repeat(60));
+    expect(textarea.readOnly).toBe(false);
+    expect(textarea.value).toBe("");
+    await scan("2".repeat(60));
+    expect(resolvePayload).toHaveBeenCalledTimes(2);
+    expect(resolvePayload).toHaveBeenLastCalledWith("2".repeat(60));
+    await act(async () => finish({ outcome: "card", source: "desk_scan" }));
+    expect(container.textContent).toContain("Identity locked from card");
+  });
+
   test("the door's USB listener is off while the door is busy", async () => {
     let now = 0;
     jest.spyOn(performance, "now").mockImplementation(() => now);

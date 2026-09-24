@@ -197,7 +197,7 @@ The single camp day currently selected for door check-in and printing. Automatic
 _Avoid_: calendar today, booked day (a patient may have booked a different day)
 
 **Manual entry**:
-A desk registration typed instead of scanned. Marked on the registration; camp-day identity rechecking is required. Registration reveals it after three Failures — permission denial, stall, cancel, frames, network and busy do not count. Scan at the door never reveals it by counting Failures; there it is behind the Door manual gate. Self-register has no typed path: without a readable QR the public endpoint refuses with `AADHAAR_QR_REQUIRED` and sends the patient to the desk. No client-supplied flag can mint a registration without a Lock: the desk and the public endpoint both re-decode the payload themselves and take name, age, gender, DOB, last-4 and address from that decode, so a registration that claims a scan and carries no payload is refused with `AADHAAR_QR_REQUIRED`. The server, not the request, decides that an unscanned registration is a Manual entry. Its identity hold is released only by a card that replaces it, or by an admin's Identity check (ADR 0044).
+A desk registration typed instead of scanned. Marked on the registration; camp-day identity rechecking is required. The server accepts one only with a written reason, and at the door only while the Door manual gate is open; it never trusts a failure count from the browser (ADR 0063). Registration reveals the typed form after three Failures — permission denial, stall, cancel, frames, network and busy do not count — as desk help, not as a server rule. Scan at the door never counts Failures; there the form shows as soon as the gate is open. Self-register has no typed path: without a readable QR the public endpoint refuses with `AADHAAR_QR_REQUIRED` and sends the patient to the desk. No client-supplied flag can mint a registration without a Lock: the desk and the public endpoint both re-decode the payload themselves and take name, age, gender, DOB, last-4 and address from that decode, so a registration that claims a scan and carries no payload is refused with `AADHAAR_QR_REQUIRED`. The server, not the request, decides that an unscanned registration is a Manual entry. Its identity hold is released only by a card that replaces it, or by an admin's Identity check (ADR 0044).
 _Avoid_: permission fallback, two-failure unlock, public reviewed details
 
 **Identity check**:
@@ -205,7 +205,7 @@ An admin's recorded decision that a Manual entry's patient was identified at cam
 _Avoid_: verification, override, alternative scan
 
 **Door manual gate**:
-The admin decision that Scan at the door may accept typed identity today, taken because the scanners are down. Stamped on the active camp as the IST date it was opened, so it lapses when that camp day ends and an admin must take the decision again tomorrow. It reveals the typed form and the OCR transcription route at the door and nothing else: a Manual entry it produces still carries `identity_recheck_required` and still cannot print until an admin records an identity check.
+The admin decision that Scan at the door may accept typed identity today, taken because the scanners are down. Stamped on the active camp as the IST date it was opened, so it lapses when that camp day ends and an admin must take the decision again tomorrow. It reveals the typed form and the OCR transcription route at the door and nothing else: a Manual entry it produces is arrived when saved, still carries `identity_recheck_required` and still cannot print until an admin records an identity check.
 _Avoid_: manual mode, break-glass, override, failure unlock (the door has no failure counter)
 
 **Patient code**:
@@ -217,19 +217,23 @@ Twenty seconds of live scan with no Detect. Does not count as a Failure and does
 _Avoid_: scan timeout, camera failure, give up
 
 **Arrival**:
-The patient is physically at the camp on a camp day. Stamped by a desk Lock that matches their registration in this camp, by the registration that creates a walk-in, or by Print Prescription on a registration whose Lock was already taken at registration. Registration is a booking; Arrival is presence. Stamped once: a second Lock does not re-stamp it or move the patient again. Arrival is never a step the desk performs on its own — it has no button and no screen of its own. Print Prescription is gated on Arrival, not on Registration, and closes at Doctor seen — reprints included, until a clinical undo. Doctor seen is gated on clinical completion after print, not on Arrival alone. A Manual entry has no Lock and still needs one at the door: the desk offers no print control from a name or number lookup.
+The patient is physically at the camp on a camp day. Stamped by a desk Lock that matches their registration in this camp, by the registration that creates a walk-in, or by Print Prescription on a registration whose Lock was already taken at registration. Registration is a booking; Arrival is presence. Stamped once: a second Lock does not re-stamp it or move the patient again. Arrival is never a step the desk performs on its own — it has no button and no screen of its own. Print Prescription is gated on Arrival, not on Registration, and closes at Doctor seen — reprints included, until a clinical undo. Doctor seen is gated on clinical completion after print, not on Arrival alone. A Manual entry has no Lock and still needs one at the door: the desk offers no print control from a name or number lookup, and Arrival refuses it without a Lock or an Identity check, unless it was typed at the door with the gate open. A door Lock stamps Arrival only on the same Person's registration.
 _Avoid_: check-in, checking in, presence, attendance, walk-in (a walk-in registers and arrives in one action), door re-scan (a Lock is taken once)
 
+**Household phone**:
+The one mobile number stored for a registration and used for its SMS. Ten local digits starting 6–9. Input may carry `+91`, `0`, spaces or dashes; the server strips them and refuses anything else. Screens keep what was typed and send the canonical value. One household phone can self-register at most six patients per camp, and receives at most six registration SMS per IST day.
+_Avoid_: contact, mobile of the patient (it is the household's)
+
 **Door walk-in**:
-A registration created at the door from the card a Scan at the door has already decoded, needing only the household phone typed. Registers and stamps Arrival in one action, and is a scanned registration, not a Manual entry.
+A registration created at the door from the card a Scan at the door has already decoded, needing only the household phone typed. The phone field starts empty for every card. Registers and stamps Arrival in one action, and is a scanned registration, not a Manual entry. Walk-in means a staff registration for the Operating day, not for the IST calendar date.
 _Avoid_: rescan, second scan, walk-in registration (also used for the typed path)
 
 **Aadhaar overwrite**:
-A Lock that matches exactly one Manual entry updates that registration in place. Name, age, gender, DOB, last-4, and address come from the card. Household phone, camp day, and reg_no stay. The Manual entry mark clears. Not a second registration. On a camp day the overwrite is not silent: it goes through Mismatch review first.
+A Lock that matches exactly one Manual entry updates that registration in place. Name, age, gender, DOB, last-4, and address come from the card. Household phone, camp day, and reg_no stay. The Manual entry mark clears. Not a second registration. A material diff goes through Mismatch review first, at the door and at the registration desk. Never after print or Doctor seen (`ALREADY_PRINTED`).
 _Avoid_: merge, bind Aadhaar, rescan button
 
 **Mismatch review**:
-The camp-day screen shown when a Lock matches a registration whose stored fields differ materially from the card. Card values and stored values side by side; a volunteer or team lead confirms. Confirming applies the Aadhaar overwrite and stamps Arrival. There is no way to keep the stored values and no way to edit the card values. A Trivial diff never reaches this screen.
+The screen shown, at the door or at the registration desk, when a Lock matches a registration whose stored fields differ materially from the card. Card values and stored values side by side; a volunteer or team lead confirms. For a Manual entry, confirming applies the Aadhaar overwrite and stamps Arrival. For a registration that was already scanned from another card, confirming stamps Arrival and replaces nothing. There is no way to keep the stored values and no way to edit the card values. A Trivial diff never reaches this screen.
 _Avoid_: conflict resolution, merge screen, override prompt
 
 **Trivial diff**:
@@ -237,11 +241,11 @@ A difference between a stored registration and the card that a Lock resolves on 
 _Avoid_: fuzzy match, close enough, auto-merge
 
 **Duplicate in camp**:
-A second registration in the same camp for the same person. Blocked when Person, last-4+name, last-4+DOB, or name+age+household phone already exists in that camp. There is no override.
+A second registration in the same camp for the same person. Blocked when Person, last-4 + name (word order ignored), or name + age + household phone already exists in that camp. There is no override. Last-4 + DOB alone is not a duplicate: year-only card DOBs make it collide for different people.
 _Avoid_: register anyway, likely duplicate
 
 **Public occupancy**:
-The headline on the unauthenticated login page for the active camp: total seats across the camp's days, and registrations so far. Refreshes on its own. No patient details, no per-patient anything.
+The headline on the unauthenticated login page for the active camp: total seats across the camp's days, and registrations so far, read from the camp-day counters. Refreshes every 30 seconds. No patient details, no per-patient anything.
 _Avoid_: live feed, registration ticker, public patient list
 
 **Camp-day capacity**:

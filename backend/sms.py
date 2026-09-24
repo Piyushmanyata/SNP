@@ -65,6 +65,17 @@ def valid_phone(raw: Optional[str]) -> Optional[str]:
     return n
 
 
+REGISTRATION_DAILY_CAP = 6
+
+
+async def _over_daily_cap(db: AsyncDatabase, number: str) -> bool:
+    start, end = helpers.ist_day_bounds(helpers.today_ist_str())
+    return await db.reminder_ledger.count_documents({
+        "number": number, "message_type": "registration", "status": {"$ne": "skipped"},
+        "created_at": {"$gte": start, "$lt": end},
+    }, limit=REGISTRATION_DAILY_CAP) >= REGISTRATION_DAILY_CAP
+
+
 async def paused(db: AsyncDatabase, message_type: str) -> bool:
     control = await db.sms_controls.find_one({"_id": message_type})
     return bool(control and control.get("paused"))
@@ -128,16 +139,17 @@ async def _claim(
     return doc
 
 
-async def _record_paused(
+async def _record_unsent(
     db: AsyncDatabase, patient_id: Any, message_type: str, event_date: str, event_key: Optional[str],
-    number: str, venue: str, copy: str,
+    number: str, venue: str, copy: str, status: str, reason: Optional[str] = None,
 ) -> None:
     try:
         await db.reminder_ledger.insert_one({
             "patient_id": patient_id, "message_type": message_type, "event_date": event_date,
             "event_key": event_key,
-            "number": number, "venue": venue, "copy": copy, "status": "paused", "attempts": 0,
+            "number": number, "venue": venue, "copy": copy, "status": status, "attempts": 0,
             "provider_id": None, "created_at": helpers.now_utc(),
+            **({"reason": reason} if reason else {}),
         })
     except DuplicateKeyError:
         pass
@@ -204,8 +216,13 @@ async def deliver_patient_sms(
             return "skipped"
         copy = template.format(**variables)
         if await paused(db, message_type):
-            await _record_paused(db, patient["_id"], message_type, event_date, event_key, number, venue, copy)
+            await _record_unsent(db, patient["_id"], message_type, event_date, event_key, number, venue, copy, "paused")
             return "paused"
+        if message_type == "registration" and await _over_daily_cap(db, number):
+            await _record_unsent(
+                db, patient["_id"], message_type, event_date, event_key, number, venue, copy, "skipped", "daily_cap",
+            )
+            return "skipped"
         row = await _claim(
             db, patient["_id"], message_type, event_date, event_key, number, venue, copy,
             retry_after=retry_after,

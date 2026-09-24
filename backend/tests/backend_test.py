@@ -51,7 +51,7 @@ class TestAuth:
         data = r.json()
         assert data["user"]["role"] == "admin"
         assert data["user"]["name"].lower() == admin_credentials["name"].lower()
-        assert isinstance(data["access_token"], str) and len(data["access_token"]) > 20
+        assert "access_token" not in data
         assert "access_token" in r.cookies, f"cookies={r.cookies.get_dict()}"
         # httpOnly flag present on Set-Cookie header
         raw = r.headers.get("set-cookie", "")
@@ -192,7 +192,7 @@ class TestRegistration:
             "full_name": f"TESTPATIENT Alpha {TAG}", "age": 55, "gender": "M",
             "phone": "9876543210", "camp_day_id": STATE["day_id"],
             "registration_request_id": rid,
-            "failed_scan_attempts": 3, "manual_reason": "scanner unavailable",
+            "manual_reason": "scanner unavailable",
         }, timeout=30)
         assert r.status_code == 200, r.text
         body = r.json()
@@ -222,7 +222,7 @@ class TestRegistration:
             "full_name": f"TESTPATIENT Alpha {TAG}", "age": 55, "gender": "M",
             "phone": "9876543210", "camp_day_id": STATE["day_id"],
             "registration_request_id": STATE["req_id"],
-            "failed_scan_attempts": 3, "manual_reason": "scanner unavailable",
+            "manual_reason": "scanner unavailable",
         }, timeout=30)
         assert r.status_code == 200, r.text
         body = r.json()
@@ -246,7 +246,7 @@ class TestRegistration:
             "full_name": f"TESTPATIENT Beta {TAG}", "age": 62, "gender": "F",
             "phone": "9812345670", "camp_day_id": STATE["day_id"],
             "registration_request_id": str(uuid.uuid4()),
-            "failed_scan_attempts": 3, "manual_reason": "scanner unavailable",
+            "manual_reason": "scanner unavailable",
         }, timeout=30)
         assert r.status_code == 200, r.text
         STATE["p2"] = r.json()["registration"]
@@ -394,6 +394,14 @@ def _catalogue(admin):
     return STATE["medicine_id"]
 
 
+def _signed_in(name, pin):
+    s = requests.Session()
+    s.headers.update({"Content-Type": "application/json"})
+    r = s.post(f"{API}/auth/login", json={"name": name, "pin": pin}, timeout=30)
+    assert r.status_code == 200, r.text
+    return s
+
+
 def _clinical(admin):
     _catalogue(admin)
     if "clinical_http" in STATE:
@@ -410,7 +418,6 @@ def _clinical(admin):
     assert changed.status_code == 200, changed.text
     logged = s.post(f"{API}/auth/login", json={"name": name, "pin": "2580"}, timeout=30)
     assert logged.status_code == 200, logged.text
-    s.headers.update({"Authorization": f"Bearer {logged.json()['access_token']}"})
     STATE["clinical_http"] = s
     return s
 
@@ -437,12 +444,12 @@ def _arrived_printed(admin, label, phone):
         "full_name": f"TESTPATIENT {label} {TAG}", "age": 48, "gender": "F",
         "phone": phone, "camp_day_id": STATE["day_id"],
         "registration_request_id": str(uuid.uuid4()),
-        "failed_scan_attempts": 3, "manual_reason": "scanner unavailable",
+        "manual_reason": "scanner unavailable",
     }, timeout=30)
     assert r.status_code == 200, r.text
     patient = r.json()["registration"]
-    assert admin.post(f"{API}/desk/arrive/{patient['id']}", timeout=30).status_code == 200
     _identity_checked(admin, patient["id"])
+    assert admin.post(f"{API}/desk/arrive/{patient['id']}", timeout=30).status_code == 200
     assert admin.post(f"{API}/desk/print/{patient['id']}", timeout=30).status_code == 200
     return patient
 
@@ -820,12 +827,7 @@ class TestStaff:
 
     def test_team_lead_can_only_create_volunteers(self, anon):
         lead = STATE["team_lead"]
-        r = anon.post(f"{API}/auth/login", json={"name": lead["name"], "pin": lead["pin"]},
-                      timeout=30)
-        assert r.status_code == 200, r.text
-        tok = r.json()["access_token"]
-        s = requests.Session()
-        s.headers.update({"Authorization": f"Bearer {tok}"})
+        s = _signed_in(lead["name"], lead["pin"])
         r = s.post(f"{API}/staff", json={"email": f"TEST_admin2_{TAG}@x.org",
                                          "password": "GoodPass@12345", "name": "x", "role": "admin"},
                    timeout=30)
@@ -837,10 +839,7 @@ class TestStaff:
 
     def test_clinical_operator_cannot_register_or_print(self, anon):
         c = STATE["clinical_desk_operator"]
-        r = anon.post(f"{API}/auth/login", json={"name": c["name"], "pin": c["pin"]}, timeout=30)
-        assert r.status_code == 200, r.text
-        s = requests.Session()
-        s.headers.update({"Authorization": f"Bearer {r.json()['access_token']}"})
+        s = _signed_in(c["name"], c["pin"])
         assert s.post(f"{API}/desk/print/{STATE['p1']['id']}", timeout=30).status_code == 403
         # but clinical lookup works
         r = s.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
@@ -848,10 +847,7 @@ class TestStaff:
 
     def test_volunteer_cannot_access_clinical(self, anon):
         v = STATE["volunteer"]
-        r = anon.post(f"{API}/auth/login", json={"name": v["name"], "pin": v["pin"]}, timeout=30)
-        assert r.status_code == 200, r.text
-        s = requests.Session()
-        s.headers.update({"Authorization": f"Bearer {r.json()['access_token']}"})
+        s = _signed_in(v["name"], v["pin"])
         r = s.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
         assert r.status_code == 403, r.text
 
@@ -911,10 +907,7 @@ class TestReports:
 
     def test_exports_require_admin(self, anon):
         c = STATE["clinical_desk_operator"]
-        r = anon.post(f"{API}/auth/login", json={"name": c["name"], "pin": c["pin"]}, timeout=30)
-        assert r.status_code == 200, r.text
-        s = requests.Session()
-        s.headers.update({"Authorization": f"Bearer {r.json()['access_token']}"})
+        s = _signed_in(c["name"], c["pin"])
         assert s.get(f"{API}/exports/camp-records", timeout=30).status_code == 403
 
 
@@ -960,12 +953,12 @@ class TestFixRegressions:
             "full_name": f"TESTUNDO Gamma {TAG}", "age": 44, "gender": "M",
             "phone": "9876500011", "camp_day_id": STATE["day_id"],
             "registration_request_id": rid,
-            "failed_scan_attempts": 3, "manual_reason": "scanner unavailable",
+            "manual_reason": "scanner unavailable",
         }, timeout=30)
         assert r.status_code == 200, r.text
         pid = r.json()["registration"]["id"]
-        assert admin.post(f"{API}/desk/arrive/{pid}", timeout=30).status_code == 200
         _identity_checked(admin, pid)
+        assert admin.post(f"{API}/desk/arrive/{pid}", timeout=30).status_code == 200
         pr = admin.post(f"{API}/desk/print/{pid}", timeout=30)
         assert pr.status_code == 200, pr.text
         printed_at = pr.json()["registration"]["printed_at"]

@@ -130,26 +130,18 @@ def admin_credentials():
 
 
 @pytest.fixture(scope="session")
-def admin_token(admin_credentials):
+def admin(admin_credentials):
     _require_live_api()
-    r = requests.post(f"{API}/auth/login", json=admin_credentials, timeout=30)
+    s = requests.Session()
+    s.headers.update({"Content-Type": "application/json"})
+    r = s.post(f"{API}/auth/login", json=admin_credentials, timeout=30)
     if r.status_code != 200:
         pytest.fail(f"admin login failed {r.status_code}: {r.text[:300]}")
     if r.json()["user"].get("must_change_pin"):
         new_pin = "975310" if admin_credentials["pin"] != "975310" else "864200"
-        r = requests.post(f"{API}/auth/change-pin", json={"current_pin": admin_credentials["pin"], "new_pin": new_pin}, headers={"Authorization": f"Bearer {r.json()['access_token']}"}, timeout=30)
+        r = s.post(f"{API}/auth/change-pin", json={"current_pin": admin_credentials["pin"], "new_pin": new_pin}, timeout=30)
         assert r.status_code == 200, r.text
         admin_credentials["pin"] = new_pin
-    tok = r.json().get("access_token")
-    assert tok
-    return tok
-
-
-@pytest.fixture(scope="session")
-def admin(admin_token):
-    _require_live_api()
-    s = requests.Session()
-    s.headers.update({"Authorization": f"Bearer {admin_token}", "Content-Type": "application/json"})
     return s
 
 

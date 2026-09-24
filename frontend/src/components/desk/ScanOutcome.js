@@ -1,5 +1,7 @@
-import React from "react";
-import { Button, Badge, Alert, Input, Field } from "../ui";
+import React, { useEffect, useRef } from "react";
+import { Button, Badge, Alert, Field } from "../ui";
+import { PhoneInput } from "../PhoneInput";
+import { normalizePhone } from "../../lib/phone";
 import { Printer } from "lucide-react";
 import { displayDate } from "../../lib/dates";
 
@@ -50,8 +52,9 @@ export function MismatchReview({ registration, diff, busy, onConfirm }) {
     <div className="rounded-xl border border-amber-300 bg-amber-50 p-4" data-testid="mismatch-review">
       <p className="font-display font-bold text-slate-900">Mismatch review</p>
       <p className="text-xs text-amber-900 mt-1 mb-3">
-        Reg #{registration.reg_no} was typed in. The card is the authority on identity.
-        Confirming replaces the stored values and lets the prescription print.
+        {registration.manual_entry === false
+          ? `Reg #${registration.reg_no} was registered from another card. Confirm only if this is the same person. Nothing is replaced.`
+          : `Reg #${registration.reg_no} was typed in. The card is the authority on identity. Confirming replaces the stored values and lets the prescription print.`}
       </p>
       <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -76,9 +79,11 @@ export function MismatchReview({ registration, diff, busy, onConfirm }) {
         </tbody>
       </table>
       </div>
-      <p className="text-xs text-slate-600 mt-3">
-        Household phone, camp day and registration number are kept.
-      </p>
+      {registration.manual_entry !== false && (
+        <p className="text-xs text-slate-600 mt-3">
+          Household phone, camp day and registration number are kept.
+        </p>
+      )}
       <Button
         size="sm"
         className="mt-3"
@@ -120,7 +125,9 @@ export function AmbiguousMatch({ registrations, busy, onSelect }) {
 }
 
 export function NoMatch({ card, phone, setPhone, busy, onSubmit }) {
-  const ready = /^\d{10}$/.test(phone || "");
+  const phoneRef = useRef(null);
+  const ready = Boolean(normalizePhone(phone));
+  useEffect(() => { phoneRef.current?.focus(); }, [card]);
   return (
     <form
       className="rounded-xl border border-slate-300 bg-slate-50 p-4"
@@ -136,11 +143,10 @@ export function NoMatch({ card, phone, setPhone, busy, onSubmit }) {
       </div>
       <div className="mt-3">
         <Field label="Household mobile" required>
-          <Input
+          <PhoneInput
+            ref={phoneRef}
             value={phone}
-            onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-            inputMode="numeric"
-            autoComplete="tel"
+            onChange={setPhone}
             enterKeyHint="done"
             data-testid="door-phone-input"
           />

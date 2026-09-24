@@ -80,10 +80,11 @@ async def _ensure_user(db, actor):
 
 async def _register_printed(day_id, registrar=VOLUNTEER, arrived=True, printed=True, **fields):
     pid = (await register(day_id, actor=registrar, **fields))["id"]
+    if arrived or printed:
+        await _identity_checked(pid)
     if arrived:
         await arrive(pid, actor=registrar)
     if printed:
-        await _identity_checked(pid)
         await print_prescription(pid, actor=registrar)
     return pid
 
@@ -707,7 +708,9 @@ class TestPrintingMatrix:
         async def run(db):
             camp_id, day_id = await _seed_camp(db)
             await routes_camps.toggle_print_window(str(day_id), PrintWindowBody(mode="disable"), actor=ADMIN)
-            pid = (await register(day_id, actor=VOLUNTEER, full_name="Walk", age=40, phone="9876500033"))["id"]
+            pid = (await register(
+                day_id, actor=VOLUNTEER, full_name="Walk", aadhaar_scanned=True, aadhaar_last4="7766", dob="1970-02-02",
+            ))["id"]
             with pytest.raises(HTTPException) as exc:
                 await arrive(pid, actor=VOLUNTEER)
             assert exc.value.detail["code"] == "PRINT_WINDOW_CLOSED"
@@ -831,6 +834,7 @@ class TestPrintingMatrix:
             )
             await db.camp_days.update_many({"camp_id": camp_id}, {"$set": {"seat_limit": 1}})
             pid = (await register(d1, actor=VOLUNTEER, full_name="Booked", age=40, phone="9876500044"))["id"]
+            await _identity_checked(pid)
             await arrive(pid, actor=VOLUNTEER)
             day1 = await db.camp_days.find_one({"_id": d1})
             day2 = await db.camp_days.find_one({"_id": d2})

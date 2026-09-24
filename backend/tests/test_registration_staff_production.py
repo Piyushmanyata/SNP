@@ -20,7 +20,7 @@ def test_registrations_without_request_ids_do_not_collide(monkeypatch):
     async def run(database):
         camp_id, (day_id,) = await seed_camp(database)
         for name in ("First Patient", "Second Patient"):
-            body = RegisterBody(full_name=name, age=40, phone="9876543210", camp_day_id=str(day_id))
+            body = RegisterBody(full_name=name, age=40, phone="9876543210", camp_day_id=str(day_id), manual_reason="card at home")
             _, created = await routes_registration._create_registration(body, ObjectId(), False, None)
             assert created
         assert await database.patients.count_documents({"camp_id": camp_id}) == 2
@@ -192,18 +192,18 @@ def test_request_id_reuse_cannot_return_another_patients_record(monkeypatch, ins
         camp_id, (day_id,) = await seed_camp(database)
         await database.patients.insert_one(patient_doc(
             camp_id=camp_id, camp_day_id=day_id, full_name="Another Patient",
-            registration_request_id="reused-request", aadhaar_last4="1234", dob="1970-01-01",
+            registration_request_id="3a4b5c6d-7e8f-4a0b-9c1d-2e3f4a5b6c7d", aadhaar_last4="1234", dob="1970-01-01",
             phone="9876543210", address="Private address", patient_qr="private-token",
         ))
         body = RegisterBody(
             full_name="New Patient", camp_day_id=str(day_id), phone="9876543210",
-            registration_request_id="reused-request", aadhaar_scanned=True, aadhaar_last4="5678", dob="1980-01-01",
+            registration_request_id="3a4b5c6d-7e8f-4a0b-9c1d-2e3f4a5b6c7d", aadhaar_scanned=True, aadhaar_last4="5678", dob="1980-01-01",
         )
 
         with pytest.raises(HTTPException) as exc:
             if insert_conflict:
                 await routes_registration._insert_patient_document(
-                    database, patient_doc(registration_request_id="reused-request"), body, None, camp_id,
+                    database, patient_doc(registration_request_id="3a4b5c6d-7e8f-4a0b-9c1d-2e3f4a5b6c7d"), body, None, camp_id,
                 )
             else:
                 await routes_registration._create_registration(body, None, True, None)

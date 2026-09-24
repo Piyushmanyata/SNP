@@ -30,6 +30,9 @@ jest.mock("../components/AadhaarScanner", () => ({
       scan
     </button>
     <button type="button" data-testid="fake-failure" onClick={() => onFailure("garbage")}>fail</button>
+    <button type="button" data-testid="fake-not-aadhaar" onClick={() => onFailure("not-aadhaar")}>not aadhaar</button>
+    <button type="button" data-testid="fake-network" onClick={() => onFailure("request")}>network</button>
+    <button type="button" data-testid="fake-camera" onClick={() => onFailure("error")}>camera</button>
     </>
   ),
 }));
@@ -84,21 +87,37 @@ test("submit stays disabled without a mobile number", async () => {
   expect(container.querySelector('[data-testid="self-register-missing"]').textContent).toBe("Still needed: 10-digit mobile");
 });
 
-test.each([
-  ["+91 98765 00001", "9876500001"],
-  ["09876500001", "9876500001"],
-  ["98765-00001", "9876500001"],
-  ["98765000012", "9876500001"],
-  ["9123456789", "9123456789"],
-])("the mobile field normalises %s to %s", async (typed, stored) => {
-  await act(async () => root.render(<SelfRegister />));
+function typePhone(value) {
   const input = container.querySelector('[data-testid="self-phone-input"]');
   act(() => {
-    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, typed);
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(input, value);
     input.dispatchEvent(new Event("input", { bubbles: true }));
   });
-  expect(input.value).toBe(stored);
-  expect(container.querySelector('[data-testid="self-register-missing"]').textContent).toBe("Still needed: Aadhaar card scan");
+  return input;
+}
+
+test.each([
+  ["+91 98765 00001", "9876500001"],
+  ["+91-98765-00001", "9876500001"],
+  ["09876500001", "9876500001"],
+  ["98765-00001", "9876500001"],
+  ["9123456789", "9123456789"],
+])("the mobile field keeps %s as typed and registers %s", async (typed, stored) => {
+  await act(async () => root.render(<SelfRegister />));
+  await act(async () => container.querySelector('[data-testid="fake-scan"]').click());
+  expect(typePhone(typed).value).toBe(typed);
+  expect(container.querySelector('[data-testid="self-register-missing"]')).toBeNull();
+  api.post.mockResolvedValueOnce({ data: { receipt: { reg_no: 14, patient_qr: "qr-14" } } });
+  await submit();
+  expect(api.post.mock.calls[0][1].phone).toBe(stored);
+});
+
+test.each(["98765000012", "1234567890", "0091 98765 00001", "98765"])("the mobile %s is refused before registration", async (typed) => {
+  await act(async () => root.render(<SelfRegister />));
+  await act(async () => container.querySelector('[data-testid="fake-scan"]').click());
+  typePhone(typed);
+  expect(container.querySelector('[data-testid="self-register-submit"]').disabled).toBe(true);
+  expect(container.querySelector('[data-testid="self-register-missing"]').textContent).toBe("Still needed: 10-digit mobile");
 });
 
 test("a scan submits the QR payload and never typed identity", async () => {
@@ -134,6 +153,21 @@ test("a failed read sends the patient to the desk and offers no typed path", asy
   expect(container.querySelector('[data-testid="self-enter-details"]')).toBeNull();
   expect(container.querySelector('[data-testid="aadhaar-review-form"]')).toBeNull();
   expect(container.querySelector('[data-testid="self-register-submit"]').disabled).toBe(true);
+});
+
+test("a card that is not an Aadhaar QR also sends the patient to the desk", async () => {
+  await act(async () => root.render(<SelfRegister />));
+  await act(async () => container.querySelector('[data-testid="fake-not-aadhaar"]').click());
+  expect(container.querySelector('[data-testid="self-scan-required"]')).not.toBeNull();
+});
+
+test.each(["fake-network", "fake-camera"])("a %s failure asks the patient to try again, not to go to the desk", async (trigger) => {
+  await act(async () => root.render(<SelfRegister />));
+  await act(async () => container.querySelector(`[data-testid="${trigger}"]`).click());
+  expect(container.querySelector('[data-testid="self-scan-required"]')).toBeNull();
+  expect(container.querySelector('[data-testid="self-scan-retry"]').textContent).toContain("try again");
+  await act(async () => container.querySelector('[data-testid="fake-scan"]').click());
+  expect(container.querySelector('[data-testid="self-scan-retry"]')).toBeNull();
 });
 
 test("a locked card scan clears the go-to-the-desk notice", async () => {

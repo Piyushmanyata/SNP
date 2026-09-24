@@ -108,7 +108,6 @@ async def register(day_id, actor=ACTOR, background_tasks=None, **fields):
             dob=body.dob or "", uid=body.aadhaar_last4 or "", street=body.address or "",
         ), encoding="unicode")
     if not body.aadhaar_scanned and not body.manual_reason:
-        body.failed_scan_attempts = 3
         body.manual_reason = "scanner unavailable"
     result = await desk_register(body, Request(), actor=actor, background_tasks=background_tasks)
     return result["registration"]
