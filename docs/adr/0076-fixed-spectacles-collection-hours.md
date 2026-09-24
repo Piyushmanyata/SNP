@@ -1,3 +1,5 @@
+Renumbered from `backend/docs/adr/0049-fixed-spectacles-collection-hours.md`.
+
 # 0049 Fixed spectacles collection hours
 
 Amended by ADR 0066 (S8): the hours are constants and are no longer stored on days or Tokens. "Days with older hours" no longer exist.

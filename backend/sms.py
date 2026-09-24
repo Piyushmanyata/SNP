@@ -97,6 +97,7 @@ async def _claim(
     copy: str,
     retry_after: Optional[timedelta] = None,
     camp_id: Any = None,
+    variables: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     existing = await db.reminder_ledger.find_one({
         "patient_id": patient_id,
@@ -127,6 +128,7 @@ async def _claim(
         fields = {
             "status": "pending", "attempts": attempts + 1, "created_at": helpers.now_utc(),
             "copy": copy, "number": number, "venue": venue, "camp_id": camp_id,
+            "variables": variables or {},
         }
         if status == "rejected":
             fields["resumed_retry"] = True
@@ -142,6 +144,7 @@ async def _claim(
         "venue": venue,
         "copy": copy,
         "status": "queued",
+        "variables": variables or {},
         "attempts": 0,
         "provider_id": None,
         "camp_id": camp_id,
@@ -306,12 +309,11 @@ async def deliver_patient_sms(
             return await send_queued(db, inserted.inserted_id)
         row = await _claim(
             db, patient["_id"], message_type, event_date, event_key, number, venue, copy,
-            retry_after=retry_after, camp_id=patient.get("camp_id"),
+            retry_after=retry_after, camp_id=patient.get("camp_id"), variables=variables,
         )
         if not row:
             return "skipped"
         if row.get("status") == "queued":
-            await db.reminder_ledger.update_one({"_id": row["_id"]}, {"$set": {"variables": variables}})
             return await send_queued(db, row["_id"])
         return await _submit(db, row, variables)
     except Exception as exc:

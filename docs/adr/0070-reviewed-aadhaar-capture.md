@@ -1,3 +1,5 @@
+Renumbered from `backend/docs/camp-operations/adr/0002-reviewed-aadhaar-capture.md`.
+
 # Reviewed Aadhaar transcription on the existing backend
 
 Historical decision. The OCR and reviewed-text portions were superseded on 23 September 2026 by [0005](0005-qr-only-aadhaar-capture.md).

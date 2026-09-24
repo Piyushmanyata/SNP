@@ -24,7 +24,7 @@ def test_no_active_camp_is_a_409(monkeypatch):
         with pytest.raises(HTTPException) as exc:
             await _staff_register(_body(ObjectId()))
         assert exc.value.status_code == 409
-        assert "No active camp" in exc.value.detail
+        assert exc.value.detail["message"] == "No active camp"
 
     run_camp(monkeypatch, body)
 
@@ -35,7 +35,7 @@ def test_a_day_outside_the_active_camp_is_a_404(monkeypatch):
         with pytest.raises(HTTPException) as exc:
             await _staff_register(_body(ObjectId()))
         assert exc.value.status_code == 404
-        assert "Camp day not found" in exc.value.detail
+        assert exc.value.detail["message"] == "Camp day not found"
 
     run_camp(monkeypatch, body)
 

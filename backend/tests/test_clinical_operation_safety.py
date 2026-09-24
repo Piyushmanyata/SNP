@@ -149,32 +149,31 @@ def test_an_undo_and_an_issue_on_one_patient_serialize(monkeypatch):
     async def run(db):
         _, _, patient = await _printed_patient(db)
         done = await routes_clinical.complete_prescription(_complete_body(patient["_id"], "complete"), actor=CLINICAL)
-        entered = asyncio.Event()
-        proceed = asyncio.Event()
-        original = routes_clinical.commit_undo
-
-        async def paused(*args, **kwargs):
-            entered.set()
-            await proceed.wait()
-            return await original(*args, **kwargs)
-
-        monkeypatch.setattr(routes_clinical, "commit_undo", paused)
-        undo = asyncio.create_task(routes_clinical.undo_completion(UndoCompletionBody(
-            patient_id=str(patient["_id"]), operation_id="undo", expected_generation=1,
-            reason="Entered in error",
-        ), actor=CLINICAL))
-        await entered.wait()
-        issue = asyncio.create_task(routes_clinical.record_fulfilment(
-            _issue_body(done["transcription"]["id"], done["revision"]["id"], 1, "issue"), actor=CLINICAL,
-            background_tasks=None))
-        await asyncio.sleep(0.2)
-        proceed.set()
-        await undo
-        with pytest.raises(HTTPException) as exc:
-            await issue
-        assert exc.value.status_code == 409
-        assert await db.fulfilments.count_documents({}) == 0
-        assert not (await db.patients.find_one({"_id": patient["_id"]})).get("committed_revision_id")
+        undo_result, issue_result = await asyncio.gather(
+            routes_clinical.undo_completion(UndoCompletionBody(
+                patient_id=str(patient["_id"]), operation_id="undo", expected_generation=1,
+                reason="Entered in error",
+            ), actor=CLINICAL),
+            routes_clinical.record_fulfilment(
+                _issue_body(done["transcription"]["id"], done["revision"]["id"], 1, "issue"),
+                actor=CLINICAL, background_tasks=None,
+            ),
+            return_exceptions=True,
+        )
+        stored = await db.patients.find_one({"_id": patient["_id"]})
+        fulfilments = await db.fulfilments.count_documents({})
+        if isinstance(undo_result, HTTPException):
+            assert undo_result.status_code == 409
+            assert undo_result.detail["code"] == "UNDO_AFTER_ISSUE"
+            assert not isinstance(issue_result, Exception)
+            assert fulfilments == 1
+            assert stored.get("committed_revision_id")
+        else:
+            assert not isinstance(undo_result, Exception)
+            assert isinstance(issue_result, HTTPException)
+            assert issue_result.status_code == 409
+            assert fulfilments == 0
+            assert not stored.get("committed_revision_id")
 
     run_camp(monkeypatch, run)
 

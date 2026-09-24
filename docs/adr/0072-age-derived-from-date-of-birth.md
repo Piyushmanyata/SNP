@@ -1,3 +1,5 @@
+Renumbered from `backend/docs/camp-operations/adr/0004-age-derived-from-date-of-birth.md`.
+
 # Age is derived from date of birth wherever both are captured
 
 Decision accepted 8 September 2026.

@@ -1,3 +1,5 @@
+Renumbered from `backend/docs/adr/0048-enable-only-configured-sms-flows.md`.
+
 # ADR 0048: Enable each approved SMS flow independently
 
 ## Context

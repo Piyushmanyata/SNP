@@ -205,7 +205,7 @@ class TestClinicalMatrix:
             with pytest.raises(HTTPException) as exc:
                 await complete_prescription(_complete_body(pid, "op-c05"), actor=CLINICAL)
             assert exc.value.status_code == 409
-            assert _code(exc) in ("not_arrived", "never_printed")
+            assert _code(exc) in ("NOT_ARRIVED", "NEVER_PRINTED")
             patient = await db.patients.find_one({"_id": ObjectId(pid)})
             assert patient.get("committed_revision_id") is None
         run_camp(monkeypatch, run)
@@ -873,8 +873,8 @@ class TestScoringAndMessages:
             await complete_prescription(_complete_body(patient["_id"], "op-s01"), actor=CLINICAL)
             board = await routes_reports.leaderboard(actor=LEAD)
             lead = next(x for x in board["team_leads"] if x["id"] == str(LEAD["_id"]))
-            assert lead["personal_points"] == 1
-            assert lead["points"] == 1
+            assert lead["personal_completed"] == 1
+            assert lead["completed"] == 1
         run_camp(monkeypatch, run)
 
     def test_s02_team_change_keeps_original_credit(self, monkeypatch):
@@ -890,8 +890,8 @@ class TestScoringAndMessages:
             await db.users.update_one({"_id": vol["_id"]}, {"$set": {"team_lead_id": str(lead_b)}})
             board = await routes_reports.leaderboard(actor=ADMIN)
             leads = {x["id"]: x for x in board["team_leads"]}
-            assert leads[str(lead_a)]["points"] == 1
-            assert leads.get(str(lead_b), {}).get("points", 0) == 0
+            assert leads[str(lead_a)]["completed"] == 1
+            assert leads.get(str(lead_b), {}).get("completed", 0) == 0
         run_camp(monkeypatch, run)
 
     def test_s03_self_registration_no_staff_point(self, monkeypatch):
@@ -910,7 +910,7 @@ class TestScoringAndMessages:
             await complete_prescription(_complete_body(pid, "op-s03"), actor=CLINICAL)
             board = await routes_reports.leaderboard(actor=VOLUNTEER)
             for row in board["volunteers"]:
-                assert row["points"] == 0
+                assert row["completed"] == 0
         run_camp(monkeypatch, run)
 
     def test_s04_point_follows_valid_completion(self, monkeypatch):
@@ -919,7 +919,7 @@ class TestScoringAndMessages:
             done = await complete_prescription(_complete_body(patient["_id"], "op-s04"), actor=CLINICAL)
             board = await routes_reports.leaderboard(actor=VOLUNTEER)
             vol = next(v for v in board["volunteers"] if v["id"] == str(VOLUNTEER["_id"]))
-            assert vol["points"] == 1
+            assert vol["completed"] == 1
             await undo_completion(
                 UndoCompletionBody(
                     patient_id=str(patient["_id"]),
@@ -931,14 +931,14 @@ class TestScoringAndMessages:
             )
             board = await routes_reports.leaderboard(actor=VOLUNTEER)
             vol = next(v for v in board["volunteers"] if v["id"] == str(VOLUNTEER["_id"]))
-            assert vol["points"] == 0
+            assert vol["completed"] == 0
             await complete_prescription(
                 _complete_body(patient["_id"], "op-s04-b", expected_generation=2),
                 actor=CLINICAL,
             )
             board = await routes_reports.leaderboard(actor=VOLUNTEER)
             vol = next(v for v in board["volunteers"] if v["id"] == str(VOLUNTEER["_id"]))
-            assert vol["points"] == 1
+            assert vol["completed"] == 1
         run_camp(monkeypatch, run)
 
     def test_s05_shared_mobile_not_collapsed(self, monkeypatch):

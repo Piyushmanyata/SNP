@@ -1,3 +1,5 @@
+Renumbered from `backend/docs/adr/0051-one-sms-venue-rule-at-thirty-characters.md`.
+
 # ADR 0051: One SMS venue rule, at thirty characters
 
 **Amends ADR 0050.**

@@ -1,3 +1,5 @@
+Renumbered from `backend/docs/camp-operations/adr/0005-qr-only-aadhaar-capture.md`.
+
 # QR-only Aadhaar capture
 
 Decision accepted 23 September 2026. Supersedes the OCR portion of [0002](0002-reviewed-aadhaar-capture.md) and the reviewed-text path discussed in [0003](0003-manual-entry-as-a-recovery-route.md).

@@ -1,6 +1,6 @@
 # Aadhaar QR capture
 
-Status: QR-only behavior adopted 23 September 2026. See [ADR 0005](../../backend/docs/camp-operations/adr/0005-qr-only-aadhaar-capture.md).
+Status: QR-only behavior adopted 23 September 2026. See [ADR 0073](../../docs/adr/0073-qr-only-aadhaar-capture.md).
 
 Camera, USB/paste, phone photos, HEIC/HEIF images and e-Aadhaar PDFs are QR inputs. Browser native and WASM readers handle eligible photos; the backend reads larger photos, HEIC files and PDFs. A password prompt lets the user retry an encrypted PDF without retaining its password. The scanner never extracts printed text or offers OCR suggestions.
 

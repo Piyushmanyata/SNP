@@ -1,33 +1,32 @@
-# Camp-day accounts
+# Camp day
 
-A **Desk account** is an ordinary `volunteer` or `clinical_desk_operator` staff account. It is created by an admin, named for the desk, and signed in once in the morning by a team lead. Volunteers never receive a password. Attribution of work is the **On-desk volunteer** pick from the **Volunteer roster**, not the Desk account login.
+Each person has their own account and PIN. A Volunteer or Clinical operator uses 4 digits. An Admin or Team Lead uses 6. A new account gets a random one-time PIN, shown once, and must choose their own PIN at first sign-in. There is no shared desk login and no default PIN.
 
-## Before camp
+## Morning
 
-Create these staff accounts in Admin → Staff:
+1. Open the admin Overview. The System card should be green: backup, disk, and the reminder heartbeat. SMS Health should show today's sends, not a blank card.
+2. On each registration laptop, start Chrome with `--kiosk-printing` and set the A4 printer as the default. Print one test sheet and confirm the whole page is on the paper, including the longest venue.
+3. Sign each volunteer into their own account. The token lasts twelve hours.
+4. The door opens when today's camp day is the operating day. Scan one test card, print, and press **Printed — next patient** only when that sheet is in hand.
 
-- Ten **Registration desks**: `Desk 1` … `Desk 10`, role `volunteer`.
-- Doctor's Rx and each **Fulfilment line**: `Rx 1` … and the line accounts, role `clinical_desk_operator`, with the matching line set.
+## During the day
 
-Paste the volunteer names into Admin → Roster (one name per line) for the active camp.
+Registration is Scan at the door, then the household phone if there is no booking, then Print, then Paper check. **Reprint** prints again. **Printer problem** or Escape records nothing.
 
-## Morning of camp
+A clinical operator copies the paper in the wizard and saves it. That save is what marks the patient Seen. They then issue medicine or schedule Hospital or spectacles at the same desk. A scheduled IOL surgery or spectacles order prints an A6 Token. A Hospital referral or Surgery declined does not.
 
-Team leads sign each laptop in as its Desk account. The access token lasts twelve hours, so a laptop signed in at 07:00 needs a fresh login at 19:00.
+## Internet outage
 
-When a volunteer sits down they pick their name. Hand over clears the pick for the next person. Team leads and admins keep personal accounts and never see the picker.
+Switch to the second SIM router. If the camp still has no connection, write arrivals on a paper register. When the network returns, enter those patients as Manual entries and record an Identity check. Do not invent a scan.
 
-## Desk laptops and printers
+## SMS pause
 
-Each desk prints in the page and never leaves the Desk screen. To remove the print dialog, start Chrome with `--kiosk-printing` and set the desk's A4 printer as the default. The browser still reports when printing ends, so the Paper check opens after each sheet.
+If SMS Health shows a type paused, stop that send. An admin resumes it from the SMS tab after the provider reason is fixed. Rejected rows from before the resume can be tried once.
 
-After every sheet, the volunteer checks the paper in hand. **Printed — next patient** (Enter) records it. **Reprint** prints again. **Printer problem** or Escape records nothing, so the patient can be printed again once the printer works.
+## Lost PIN
 
-## Moving an OT or Specs day
+The person's Team Lead or an Admin resets the PIN from Team. The new one-time PIN is shown once. Unlock clears a lockout and keeps the current PIN.
 
-Edit the day in Admin → OT & Specs; never add a second day on the same date. A date or venue change replaces every patient's Token on that day and sends each patient one SMS saying their old paper is void.
+## End of day
 
-- Check **Patients to phone** at the top of that tab. It lists everyone whose SMS was not sent, failed, or is paused. Phone each one with the new date and venue, then press **Phoned — done**.
-- Until MSG91 approves the two change templates (`MSG91_TEMPLATE_OT_CHANGE`, `MSG91_TEMPLATE_SPECS_CHANGE`), every moved patient appears on that list.
-- When a patient comes to a station with an old Token, the station says "Print this new Token and take back the old one". A reprint of the old Token is stamped "Replaced — not valid".
-
+Admin → Exports → camp records. The file has one row per patient, including people who did not arrive. Keep that file with the day's papers.

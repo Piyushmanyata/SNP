@@ -1,3 +1,5 @@
+Renumbered from `backend/docs/adr/0050-check-dlt-variables-before-sms-submission.md`.
+
 # ADR 0050: Check DLT variables before SMS submission
 
 ## Context

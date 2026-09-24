@@ -1,3 +1,5 @@
+Renumbered from `backend/docs/adr/0052-delivery-reports-pause-and-canary.md`.
+
 # ADR 0052: Delivery reports pause a failing message type, and reminders send a canary first
 
 ## Context

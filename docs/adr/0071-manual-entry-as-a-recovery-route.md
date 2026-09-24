@@ -1,3 +1,5 @@
+Renumbered from `backend/docs/camp-operations/adr/0003-manual-entry-as-a-recovery-route.md`.
+
 # Manual Aadhaar entry is a recovery route, not a starting option
 
 Historical decision. Its OCR review route was superseded on 23 September 2026 by [0005](0005-qr-only-aadhaar-capture.md). Staff manual entry remains available after unreadable QR capture.

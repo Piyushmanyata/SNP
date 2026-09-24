@@ -265,11 +265,11 @@ The headline on the unauthenticated login page for the active camp: total seats 
 _Avoid_: live feed, registration ticker, public patient list
 
 **Camp-day capacity**:
-Every camp day has a seat limit greater than zero. The limit blocks self-registration and pre-registration, and never blocks a walk-in: a patient who has come to the camp is registered whatever the count says, so a camp day's bookings can exceed its limit (ADR 0042). The limit counts bookings, which Arrival never moves: a patient booked for one camp day who arrives on another is checked in on the day they came without consuming a seat there or releasing one on the day they left. Camp-day capacity is a planning number for footfall. OT Schedule Day and Specs collection day seats are surgical and workshop capacity, and those stay a hard block.
+Every camp day has a seat limit greater than zero. The limit blocks self-registration and pre-registration, and never blocks a walk-in: a patient who has come to the camp is registered whatever the count says, so a camp day's bookings can exceed its limit (ADR 0042). The limit counts bookings, which Arrival never moves: a patient booked for one camp day who arrives on another is checked in on the day they came without consuming a seat there or releasing one on the day they left. Camp-day capacity is a planning number for footfall. An OT Schedule Day has a seat limit and that limit is a hard block. A Specs collection day has no seats.
 _Avoid_: seats_taken (that counter is OT and Spectacles to be made only), unlimited day, turning away a walk-in
 
 **Camp-day board**:
-The read-only page a team lead watches during a camp day. Per Registration desk, Arrivals in the last fifteen minutes and the last hour, with a desk that has gone quiet highlighted; the transcription backlog; each Fulfilment line's count today; seats left on the next OT Schedule Day and Specs collection day; SMS failures; one banner when the System card is red. Counts only, refreshes on its own, no actions and no patient names.
+The read-only page a team lead watches during a camp day. Per Registration desk, Arrivals in the last fifteen minutes and the last hour, with a desk that has gone quiet highlighted; the transcription backlog; each Fulfilment line's count today; seats left on the next OT Schedule Day; the next Specs collection day with no seat count; SMS failures; one banner when backups are red. Counts only, refreshes on its own, no actions and no patient names. The clock on the page is the server's.
 _Avoid_: dashboard (that is the admin area), live feed, monitor, alerts (the board pushes nothing)
 
 **Transcription backlog**:
@@ -287,6 +287,14 @@ _Avoid_: opening the prescription, automatic approval
 **Camp records export**:
 The single admin-only CSV for a camp, one row per patient including no-shows. Carries identity (name, age, gender, household phone, address, Aadhaar last-4, reg_no), the Manual entry mark, the registration / arrival / seen timestamps, diagnosis, BP and blood sugar, each eye's power, the medicines prescribed and any not given, the prescribed and issued fixed powers, the status of each of the four Fulfilment lines with blank meaning the patient was never recorded at that desk, and the assigned clinical day and venue for each deferral. It is a wide file of patient data and is not downloadable by a volunteer.
 _Avoid_: camp records, clinical audit, the reports (there is exactly one export)
+
+**Clinical operation**:
+One clinical write — completing a prescription, undoing it, issuing a line, or recording a correction — identified by the operation id the desk sent. The same id and the same payload replay the saved result. A different payload for that id is refused. The write and its ledger intent commit together, or not at all.
+_Avoid_: request id (that is the registration idempotency key), correction id
+
+**SMS intent**:
+A `reminder_ledger` row written before any send: queued, then pending while the provider has the message, then sent, failed, uncertain, rejected, paused, abandoned or skipped. A restart sends queued rows older than 30 seconds and failed rows whose retry time has passed. A pending row older than five minutes becomes uncertain and is never sent again.
+_Avoid_: outbox message, SMS job
 
 **Ops status**:
 The record a background service keeps about its own health, one document per service. For backups: when the last backup and the last off-site copy succeeded, the last error message, and the patient count when the dump started. It never holds patient data.

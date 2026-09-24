@@ -1,3 +1,5 @@
+Renumbered from `backend/docs/camp-operations/adr/0006-retain-staff-history-on-deletion.md`.
+
 # ADR 0006: Retain staff history on deletion
 
 ## Context
