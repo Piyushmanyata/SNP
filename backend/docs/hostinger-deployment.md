@@ -225,7 +225,7 @@ Before this deployment, production had one future spectacles day (5 October–6 
 
 ## SMS cost guard — 23 September 2026
 
-[ADR 0051](adr/0051-one-sms-venue-rule-at-thirty-characters.md) limits every DLT variable to 30 characters and holds every SMS venue to one rule. [ADR 0052](adr/0052-delivery-reports-pause-and-canary.md) reads MSG91 delivery reports, pauses a message type after a DLT failure, and sends one reminder per type before the rest of the batch. Admin → SMS shows each message type, pauses and today's credits, and resumes a paused type.
+[ADR 0078](../../docs/adr/0078-one-sms-venue-rule-at-thirty-characters.md) limits every DLT variable to 30 characters and holds every SMS venue to one rule. [ADR 0079](../../docs/adr/0079-delivery-reports-pause-and-canary.md) reads MSG91 delivery reports, pauses a message type after a DLT failure, and sends one reminder per type before the rest of the batch. Admin → SMS shows each message type, pauses and today's credits, and resumes a paused type.
 
 Delivery reports need one shared secret. `MSG91_WEBHOOK_SECRET` is set in `/opt/snp/.env.production`, which only root can read; read it on the VPS with:
 

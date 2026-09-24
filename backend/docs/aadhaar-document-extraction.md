@@ -1,6 +1,6 @@
 # Aadhaar QR extraction from documents
 
-Status: implemented, 23 September 2026. [ADR 0005](camp-operations/adr/0005-qr-only-aadhaar-capture.md) records the removal of OCR.
+Status: implemented, 23 September 2026. [ADR 0073](../../docs/adr/0073-qr-only-aadhaar-capture.md) records the removal of OCR.
 
 ## Interface
 
