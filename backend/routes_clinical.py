@@ -635,7 +635,7 @@ async def record_fulfilment(
     if not revision:
         raise conflict("not_completed", "Issue requires a completed prescription.")
     if str(revision.get("patient_id")) != str(patient["_id"]):
-        raise api_error(404, "TRANSCRIPTION_NOT_FOUND", 'Transcription not found')
+        raise conflict("stale_review", "The reviewed prescription is no longer current. Review the paper again.")
     if body.item_type not in PRESCRIBED_LINE_KEYS:
         raise api_error(400, "INVALID_FULFILMENT_ITEM_STATUS", 'Invalid fulfilment item/status')
     if revision.get("none_prescribed") or body.item_type not in (revision.get("prescribed_lines") or []):

@@ -17,7 +17,7 @@ import {
 } from "../components/clinical";
 import { Alert, Badge, Button, Field, Input, Modal } from "../components/ui";
 
-const RELOAD_CODES = new Set(["draft_version_conflict", "stale_generation"]);
+const RELOAD_CODES = new Set(["DRAFT_VERSION_CONFLICT", "STALE_GENERATION"]);
 
 
 const emptyRx = {

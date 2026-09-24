@@ -67,6 +67,28 @@ def test_issue_operation_rejects_a_different_request(monkeypatch, foreign_patien
     run_camp(monkeypatch, run)
 
 
+def test_a_revision_for_another_patient_is_a_stale_review(monkeypatch):
+    async def run(db):
+        _, _, patient = await _printed_patient(db)
+        done = await routes_clinical.complete_prescription(
+            _complete_body(patient["_id"], "complete"), actor=CLINICAL,
+        )
+        await db.prescription_revisions.update_one(
+            {"_id": ObjectId(done["revision"]["id"])},
+            {"$set": {"patient_id": ObjectId()}},
+        )
+        with pytest.raises(HTTPException) as exc:
+            await routes_clinical.record_fulfilment(
+                _issue_body(done["transcription"]["id"], done["revision"]["id"], 1, "issue-mismatch"),
+                actor=CLINICAL, background_tasks=None,
+            )
+        assert exc.value.status_code == 409
+        assert exc.value.detail["code"] == "STALE_REVIEW"
+        assert await db.fulfilments.count_documents({}) == 0
+
+    run_camp(monkeypatch, run)
+
+
 def test_correction_can_clear_prescribed_lines_and_content(monkeypatch):
     async def run(db):
         _, _, patient = await _printed_patient(db)
