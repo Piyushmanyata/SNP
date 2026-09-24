@@ -100,8 +100,8 @@ async def init_indexes() -> None:
         "operation_id", unique=True, partialFilterExpression={"operation_id": {"$type": "string"}},
     )
     await db.fulfilments.create_index([
-        ("camp_id", ASCENDING), ("patient_seen_at", ASCENDING),
-        ("item_type", ASCENDING), ("status", ASCENDING),
+        ("camp_id", ASCENDING), ("item_type", ASCENDING),
+        ("status", ASCENDING), ("patient_seen_at", ASCENDING),
     ])
     await db.ot_schedule_days.create_index([("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True)
     await db.specs_collection_days.create_index([("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True)

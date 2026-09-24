@@ -265,6 +265,13 @@ def _empty_board(as_of: str, state: str) -> Dict[str, Any]:
     }
 
 
+FULFILMENT_BUCKETS = [
+    (item_type, status)
+    for item_type, statuses in _empty_board("", "")["fulfilment"].items()
+    for status in statuses
+]
+
+
 @router.get("/board")
 async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
     db = get_db()
@@ -288,41 +295,32 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
             {"delivery": "failed"},
         ],
     }
-    day, counted, seen_today, fulfilments, sms_groups, (paused_rows, ot_day, specs_day) = await asyncio.gather(
+    day, volunteer_rows, seen_today, fulfilments, sms_groups, (paused_rows, ot_day, specs_day) = await asyncio.gather(
         db.camp_days.find_one({"camp_id": camp_id, "day_date": today}),
         aggregate_list(db.patients, [
             {"$match": arrival_filter},
-            {"$project": {
-                "_id": 0, "arrived_at": 1, "arrived_by": 1,
-                "printed_at": 1, "seen_at": 1, "committed_revision_id": 1,
-            }},
-            {"$facet": {
-                "totals": [{"$group": {
-                    "_id": None,
-                    "arrived": {"$sum": 1},
-                    "awaiting_print": {"$sum": {"$cond": [{"$eq": ["$printed_at", None]}, 1, 0]}},
-                    "awaiting_seen": {"$sum": {"$cond": [
-                        {"$and": [{"$ne": ["$printed_at", None]}, {"$eq": ["$seen_at", None]}]}, 1, 0,
-                    ]}},
-                    "backlog": {"$sum": {"$cond": [
-                        {"$and": [
-                            {"$ne": ["$printed_at", None]},
-                            {"$eq": ["$committed_revision_id", None]},
-                        ]}, 1, 0,
-                    ]}},
-                }}],
-                "activity": [{"$group": {
-                    "_id": "$arrived_by",
-                    "last": {"$max": "$arrived_at"},
-                    "last_15m": {"$sum": {"$cond": [{"$gte": ["$arrived_at", quiet_cutoff]}, 1, 0]}},
-                    "last_60m": {"$sum": {"$cond": [{"$gte": ["$arrived_at", hour_cutoff]}, 1, 0]}},
-                }}],
+            {"$group": {
+                "_id": "$arrived_by",
+                "arrived": {"$sum": 1},
+                "awaiting_print": {"$sum": {"$cond": [{"$eq": ["$printed_at", None]}, 1, 0]}},
+                "awaiting_seen": {"$sum": {"$cond": [
+                    {"$and": [{"$ne": ["$printed_at", None]}, {"$eq": ["$seen_at", None]}]}, 1, 0,
+                ]}},
+                "backlog": {"$sum": {"$cond": [
+                    {"$and": [{"$ne": ["$printed_at", None]}, {"$eq": ["$committed_revision_id", None]}]}, 1, 0,
+                ]}},
+                "last": {"$max": "$arrived_at"},
+                "last_15m": {"$sum": {"$cond": [{"$gte": ["$arrived_at", quiet_cutoff]}, 1, 0]}},
+                "last_60m": {"$sum": {"$cond": [{"$gte": ["$arrived_at", hour_cutoff]}, 1, 0]}},
             }},
         ]),
         db.patients.count_documents({"camp_id": camp_id, "seen_at": {"$gte": start, "$lt": end}}),
-        aggregate_list(db.fulfilments, [
-            {"$match": {"camp_id": camp_id, "patient_seen_at": {"$gte": start, "$lt": end}}},
-            {"$group": {"_id": {"item_type": "$item_type", "status": "$status"}, "count": {"$sum": 1}}},
+        asyncio.gather(*[
+            db.fulfilments.count_documents({
+                "camp_id": camp_id, "item_type": item_type, "status": status,
+                "patient_seen_at": {"$gte": start, "$lt": end},
+            })
+            for item_type, status in FULFILMENT_BUCKETS
         ]),
         sms.ledger_groups(db, sms_match, by_camp=True),
         asyncio.gather(
@@ -343,13 +341,10 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
         empty["backups_failing"] = backups_failing
         return empty
 
-    facet = counted[0] if counted else {}
-    totals = (facet.get("totals") or [{}])[0]
-    arrived = totals.get("arrived", 0)
-    awaiting_print = totals.get("awaiting_print", 0)
-    awaiting_seen = totals.get("awaiting_seen", 0)
-    backlog = totals.get("backlog", 0)
-    volunteer_rows = facet.get("activity") or []
+    arrived = sum(row["arrived"] for row in volunteer_rows)
+    awaiting_print = sum(row["awaiting_print"] for row in volunteer_rows)
+    awaiting_seen = sum(row["awaiting_seen"] for row in volunteer_rows)
+    backlog = sum(row["backlog"] for row in volunteer_rows)
     by_vol = {row["_id"]: row for row in volunteer_rows if row["_id"]}
     vol_ids = [ObjectId(v) for v in by_vol if ObjectId.is_valid(v)]
     volunteers = await db.users.find({"_id": {"$in": vol_ids}}).to_list(None) if vol_ids else []
@@ -371,11 +366,8 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
     quiet_count = sum(1 for r in activity if r["quiet"])
 
     fulfil_counts = _empty_board(as_of, "current")["fulfilment"]
-    for f in fulfilments:
-        bucket = fulfil_counts.get(f["_id"].get("item_type"))
-        status = f["_id"].get("status")
-        if bucket is not None and status in bucket:
-            bucket[status] += f["count"]
+    for (item_type, status), count in zip(FULFILMENT_BUCKETS, fulfilments):
+        fulfil_counts[item_type][status] = count
 
     sms_failures = 0
     sms_not_sent = 0

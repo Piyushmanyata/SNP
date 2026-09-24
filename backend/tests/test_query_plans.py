@@ -100,17 +100,19 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
                 }},
             ], "cursor": {}},
             "board fulfilment": {"aggregate": "fulfilments", "pipeline": [
-                {"$match": {"camp_id": camp, "patient_seen_at": {"$gte": start, "$lt": end}}},
-                {"$group": {"_id": {"item_type": "$item_type", "status": "$status"}, "count": {"$sum": 1}}},
+                {"$match": {
+                    "camp_id": camp, "item_type": "medicine", "status": "fulfilled",
+                    "patient_seen_at": {"$gte": start, "$lt": end},
+                }},
+                {"$group": {"_id": 1, "n": {"$sum": 1}}},
             ], "cursor": {}},
             "board activity": {"aggregate": "patients", "pipeline": [
                 {"$match": {"camp_id": camp, "arrived_at": {"$gte": start, "$lt": end}}},
-                {"$project": {
-                    "_id": 0, "arrived_at": 1, "arrived_by": 1,
-                    "printed_at": 1, "seen_at": 1, "committed_revision_id": 1,
-                }},
                 {"$group": {"_id": "$arrived_by", "last": {"$max": "$arrived_at"},
-                            "last_15m": {"$sum": {"$cond": [{"$gte": ["$arrived_at", quiet]}, 1, 0]}}}},
+                            "last_15m": {"$sum": {"$cond": [{"$gte": ["$arrived_at", quiet]}, 1, 0]}},
+                            "awaiting_print": {"$sum": {"$cond": [{"$eq": ["$printed_at", None]}, 1, 0]}},
+                            "backlog": {"$sum": {"$cond": [{"$eq": ["$committed_revision_id", None]}, 1, 0]}},
+                            "awaiting_seen": {"$sum": {"$cond": [{"$eq": ["$seen_at", None]}, 1, 0]}}}},
             ], "cursor": {}},
             "sms groups": {"aggregate": "reminder_ledger", "pipeline": [
                 {"$match": {
