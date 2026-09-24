@@ -90,7 +90,7 @@ def test_resolve_medicines_refuses_ids_outside_the_catalogue(bad):
     with pytest.raises(HTTPException) as exc:
         _with_catalogue(lambda db: resolve_medicines(db, bad, active_only=True), medicines=[{"_id": ObjectId(), "name": "Moxifloxacin"}])
     assert exc.value.status_code == 400
-    assert exc.value.detail["code"] == "unknown_medicine"
+    assert exc.value.detail["code"] == "UNKNOWN_MEDICINE"
 
 
 def test_stocked_power_passes_through_none_and_accepts_a_stocked_value():
@@ -101,7 +101,7 @@ def test_stocked_power_passes_through_none_and_accepts_a_stocked_value():
 def test_stocked_power_refuses_a_power_the_camp_does_not_carry():
     with pytest.raises(HTTPException) as exc:
         _with_catalogue(lambda db: stocked_power(db, "+2.25", active_only=True), powers=[2.0])
-    assert exc.value.detail["code"] == "unknown_power"
+    assert exc.value.detail["code"] == "UNKNOWN_POWER"
 
 
 class TestCatalogueRoutes:

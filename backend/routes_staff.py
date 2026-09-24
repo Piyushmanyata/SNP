@@ -1,12 +1,12 @@
 import asyncio
 from datetime import timedelta
 from typing import Any, Dict, Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 from db import aggregate_list, get_db
 from models import CreateStaffBody, PatchStaffLineBody, PatchStaffTeamLeadBody
-from helpers import iso, now_utc, normalize_name
+from helpers import iso, now_utc, normalize_name, api_error
 from routes_auth import MAX_ATTEMPTS
 from security import (
     hash_pin,
@@ -30,7 +30,7 @@ def assigned_line(role: str, line: Optional[str]) -> Optional[str]:
     if line is None or line == "":
         return None
     if line not in VALID_LINES:
-        raise HTTPException(status_code=400, detail="Invalid line")
+        raise api_error(400, "INVALID_LINE", 'Invalid line')
     return line
 
 
@@ -38,27 +38,27 @@ def assigned_line(role: str, line: Optional[str]) -> Optional[str]:
 async def create_staff(body: CreateStaffBody, actor: dict = Depends(get_current_user)) -> Dict[str, Any]:
     db = get_db()
     if body.role not in VALID_ROLES:
-        raise HTTPException(status_code=400, detail="Invalid role")
+        raise api_error(400, "INVALID_ROLE", 'Invalid role')
 
     name = (body.name or "").strip()
     if not name:
-        raise HTTPException(status_code=400, detail="Name is required")
+        raise api_error(400, "NAME_IS_REQUIRED", 'Name is required')
 
     norm = normalize_name(name)
     if not norm:
-        raise HTTPException(status_code=400, detail="Valid name is required")
+        raise api_error(400, "VALID_NAME_IS_REQUIRED", 'Valid name is required')
 
     # permission model
     if actor["role"] == "admin":
         pass
     elif actor["role"] == "team_lead":
         if body.role != "volunteer":
-            raise HTTPException(status_code=403, detail="Team leads can only create volunteers")
+            raise api_error(403, "TEAM_LEADS_CAN_ONLY_CREATE_VOLUNTEERS", 'Team leads can only create volunteers')
     else:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+        raise api_error(403, "INSUFFICIENT_PERMISSIONS", 'Insufficient permissions')
 
     if await db.users.find_one({"name_normalized": norm}):
-        raise HTTPException(status_code=409, detail="Name already exists")
+        raise api_error(409, "NAME_ALREADY_EXISTS", 'Name already exists')
 
     team_lead_id = body.team_lead_id
     if actor["role"] == "team_lead":
@@ -67,10 +67,10 @@ async def create_staff(body: CreateStaffBody, actor: dict = Depends(get_current_
         try:
             tl_oid = ObjectId(team_lead_id)
         except Exception:
-            raise HTTPException(status_code=400, detail="Invalid team lead id")
+            raise api_error(400, "INVALID_TEAM_LEAD_ID", 'Invalid team lead id')
         lead = await db.users.find_one({"_id": tl_oid, "role": "team_lead", "disabled_at": None})
         if not lead:
-            raise HTTPException(status_code=400, detail="Team lead not found or inactive")
+            raise api_error(400, "TEAM_LEAD_NOT_FOUND_OR_INACTIVE", 'Team lead not found or inactive')
 
     pin = temporary_pin(body.role)
     doc = {
@@ -89,7 +89,7 @@ async def create_staff(body: CreateStaffBody, actor: dict = Depends(get_current_
     try:
         res = await db.users.insert_one(doc)
     except DuplicateKeyError:
-        raise HTTPException(status_code=409, detail="Name already exists")
+        raise api_error(409, "NAME_ALREADY_EXISTS", 'Name already exists')
     doc["_id"] = res.inserted_id
     return {"staff": serialize_user(doc), "temporary_pin": pin}
 
@@ -131,15 +131,15 @@ async def team_leads(actor: dict = Depends(require_admin)) -> Dict[str, Any]:
 
 async def _managed(db: Any, staff_id: str, actor: dict) -> dict:
     if not ObjectId.is_valid(staff_id):
-        raise HTTPException(status_code=400, detail="Invalid staff id")
+        raise api_error(400, "INVALID_STAFF_ID", 'Invalid staff id')
     user = await db.users.find_one({"_id": ObjectId(staff_id), "deleted_at": None})
     if not user:
-        raise HTTPException(status_code=404, detail="Staff not found")
+        raise api_error(404, "STAFF_NOT_FOUND", 'Staff not found')
     if actor["role"] == "team_lead":
         if user.get("role") != "volunteer" or user.get("team_lead_id") != str(actor["_id"]):
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
+            raise api_error(403, "INSUFFICIENT_PERMISSIONS", 'Insufficient permissions')
     elif actor["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+        raise api_error(403, "INSUFFICIENT_PERMISSIONS", 'Insufficient permissions')
     return user
 
 
@@ -176,7 +176,7 @@ async def patch_staff_line(staff_id: str, body: PatchStaffLineBody, actor: dict 
     db = get_db()
     user = await db.users.find_one({"_id": ObjectId(staff_id), "deleted_at": None})
     if not user:
-        raise HTTPException(status_code=404, detail="Staff not found")
+        raise api_error(404, "STAFF_NOT_FOUND", 'Staff not found')
     line = assigned_line(user["role"], body.line)
     await db.users.update_one({"_id": user["_id"]}, {"$set": {"line": line}})
     user["line"] = line
@@ -187,19 +187,19 @@ async def patch_staff_line(staff_id: str, body: PatchStaffLineBody, actor: dict 
 async def reassign_volunteer(staff_id: str, body: PatchStaffTeamLeadBody, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     if not ObjectId.is_valid(staff_id):
-        raise HTTPException(status_code=400, detail="Invalid staff id")
+        raise api_error(400, "INVALID_STAFF_ID", 'Invalid staff id')
     user = await db.users.find_one({"_id": ObjectId(staff_id), "role": "volunteer", "deleted_at": None})
     if not user:
-        raise HTTPException(status_code=404, detail="Volunteer not found")
+        raise api_error(404, "VOLUNTEER_NOT_FOUND", 'Volunteer not found')
     lead_id = body.team_lead_id
     if lead_id:
         if not ObjectId.is_valid(lead_id):
-            raise HTTPException(status_code=400, detail="Invalid team lead id")
+            raise api_error(400, "INVALID_TEAM_LEAD_ID", 'Invalid team lead id')
         lead = await db.users.find_one({
             "_id": ObjectId(lead_id), "role": "team_lead", "disabled_at": None, "deleted_at": None,
         })
         if not lead:
-            raise HTTPException(status_code=400, detail="Team lead not found or inactive")
+            raise api_error(400, "TEAM_LEAD_NOT_FOUND_OR_INACTIVE", 'Team lead not found or inactive')
     await db.users.update_one({"_id": user["_id"]}, {"$set": {"team_lead_id": lead_id}})
     user["team_lead_id"] = lead_id
     return {"staff": serialize_user(user)}
@@ -210,10 +210,7 @@ async def disable_staff(staff_id: str, actor: dict = Depends(get_current_user)) 
     db = get_db()
     user = await _managed(db, staff_id, actor)
     if user["_id"] == actor["_id"]:
-        raise HTTPException(status_code=409, detail={
-            "code": "CANNOT_DISABLE_SELF",
-            "message": "You cannot disable your own account.",
-        })
+        raise api_error(409, "CANNOT_DISABLE_SELF", 'You cannot disable your own account.')
 
     await db.users.update_one(
         {"_id": user["_id"]}, {"$set": {"disabled_at": now_utc()}, "$inc": {"session_version": 1}}
@@ -223,10 +220,7 @@ async def disable_staff(staff_id: str, actor: dict = Depends(get_current_user)) 
         and not await db.users.count_documents({"role": "admin", "disabled_at": None})
     ):
         await db.users.update_one({"_id": user["_id"]}, {"$set": {"disabled_at": None}})
-        raise HTTPException(status_code=409, detail={
-            "code": "LAST_ADMIN",
-            "message": "At least one admin must stay enabled.",
-        })
+        raise api_error(409, "LAST_ADMIN", 'At least one admin must stay enabled.')
     return {"ok": True}
 
 
@@ -245,15 +239,15 @@ async def delete_staff(staff_id: str, actor: dict = Depends(get_current_user)) -
     db = get_db()
     user = await _managed(db, staff_id, actor)
     if user["_id"] == actor["_id"]:
-        raise HTTPException(status_code=409, detail="You cannot delete your own account.")
+        raise api_error(409, "YOU_CANNOT_DELETE_YOUR_OWN_ACCOUNT", 'You cannot delete your own account.')
     if user["role"] == "admin" and not user.get("disabled_at"):
         enabled = await db.users.count_documents({"role": "admin", "disabled_at": None, "deleted_at": None})
         if enabled <= 1:
-            raise HTTPException(status_code=409, detail="At least one admin must stay enabled.")
+            raise api_error(409, "AT_LEAST_ONE_ADMIN_MUST_STAY_ENABLED", 'At least one admin must stay enabled.')
     if user["role"] == "team_lead" and await db.users.find_one({
         "role": "volunteer", "team_lead_id": str(user["_id"]), "deleted_at": None,
     }):
-        raise HTTPException(status_code=409, detail="Reassign this team lead's volunteers before deletion.")
+        raise api_error(409, "REASSIGN_THIS_TEAM_LEAD_S_VOLUNTEERS_BEFORE_DELETION", "Reassign this team lead's volunteers before deletion.")
     now = now_utc()
     await db.users.update_one({"_id": user["_id"], "deleted_at": None}, {
         "$set": {
@@ -271,5 +265,5 @@ async def delete_staff(staff_id: str, actor: dict = Depends(get_current_user)) -
             "disabled_at": user.get("disabled_at"),
             "name_normalized": user.get("name_normalized"),
         }})
-        raise HTTPException(status_code=409, detail="At least one admin must stay enabled.")
+        raise api_error(409, "AT_LEAST_ONE_ADMIN_MUST_STAY_ENABLED", 'At least one admin must stay enabled.')
     return {"ok": True}

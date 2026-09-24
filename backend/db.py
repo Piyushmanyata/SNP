@@ -1,5 +1,5 @@
 import os
-from typing import Any, Awaitable, Callable, TypeVar
+from typing import Any, Awaitable, Callable, TypeVar, cast
 from pymongo import ASCENDING, AsyncMongoClient, ReturnDocument
 from pymongo.asynchronous.client_session import AsyncClientSession
 from pymongo.asynchronous.collection import AsyncCollection
@@ -26,11 +26,8 @@ def get_db() -> AsyncDatabase:
 
 
 async def in_transaction(callback: Callable[[AsyncClientSession], Awaitable[T]]) -> T:
-    async def run(session: AsyncClientSession) -> T:
-        return await callback(session)
-
     async with get_client().start_session() as session:
-        return await session.with_transaction(run)
+        return await session.with_transaction(cast(Any, callback))
 
 
 async def aggregate_list(collection: AsyncCollection, pipeline: list[dict[str, Any]]) -> list[dict[str, Any]]:

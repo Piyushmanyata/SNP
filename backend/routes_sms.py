@@ -2,12 +2,12 @@ import hmac
 import os
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 
 import msg91
 import sms
 from db import get_db
-from helpers import ist_day_bounds, iso, today_ist_str
+from helpers import ist_day_bounds, iso, today_ist_str, api_error
 from security import require_admin
 
 router = APIRouter(prefix="/api", tags=["sms"])
@@ -42,11 +42,11 @@ async def msg91_delivery_report(request: Request) -> Dict[str, Any]:
     expected = (os.environ.get("MSG91_WEBHOOK_SECRET") or "").encode()
     got = (request.headers.get(WEBHOOK_HEADER) or "").encode()
     if not expected or not hmac.compare_digest(expected, got):
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise api_error(401, "UNAUTHORIZED", 'Unauthorized')
     try:
         body = await request.json()
     except ValueError:
-        raise HTTPException(status_code=400, detail="Delivery report must be JSON")
+        raise api_error(400, "DELIVERY_REPORT_MUST_BE_JSON", 'Delivery report must be JSON')
     reports = body if isinstance(body, list) else [body]
     db = get_db()
     recorded = 0
@@ -85,6 +85,6 @@ async def sms_status(actor: dict = Depends(require_admin)) -> Dict[str, Any]:
 @router.post("/sms/{message_type}/resume")
 async def resume_sms(message_type: str, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     if message_type not in sms.MESSAGE_COPY:
-        raise HTTPException(status_code=404, detail="Unknown message type")
+        raise api_error(404, "UNKNOWN_MESSAGE_TYPE", 'Unknown message type')
     await sms.resume(get_db(), message_type, str(actor["_id"]))
     return await sms_status(actor)

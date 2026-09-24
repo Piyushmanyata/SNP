@@ -2,7 +2,7 @@ from typing import Any, Dict, List
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pymongo import ASCENDING
 from pymongo.errors import DuplicateKeyError
 
@@ -14,7 +14,7 @@ from catalogue import (
     ser_power,
 )
 from db import get_db
-from helpers import now_utc
+from helpers import now_utc, api_error
 from models import CatalogueActiveBody, FixedPowerBody, MedicineBody
 from security import require_admin, require_any
 
@@ -25,7 +25,7 @@ def _oid(raw: str) -> ObjectId:
     try:
         return ObjectId(raw)
     except (InvalidId, TypeError, ValueError):
-        raise HTTPException(status_code=404, detail="Not found")
+        raise api_error(404, "NOT_FOUND", 'Not found')
 
 
 async def _list(collection, sort_key: str, include_inactive: bool, serialize) -> List[Dict[str, Any]]:
@@ -64,7 +64,7 @@ async def _set_active(collection, item_id: str, active: bool, serialize) -> Dict
         return_document=True,
     )
     if not row:
-        raise HTTPException(status_code=404, detail="Not found")
+        raise api_error(404, "NOT_FOUND", 'Not found')
     return serialize(row)
 
 

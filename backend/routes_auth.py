@@ -2,11 +2,11 @@ import asyncio
 import os
 from datetime import timedelta
 from typing import Any, Dict, Literal
-from fastapi import APIRouter, Request, Response, HTTPException, Depends
+from fastapi import APIRouter, Request, Response, Depends
 from pymongo.errors import DuplicateKeyError
 from db import get_db
 from models import LoginBody, ChangePinBody
-from helpers import now_utc, as_utc, normalize_name
+from helpers import now_utc, as_utc, normalize_name, api_error
 from security import (
     verify_pin,
     hash_pin,
@@ -45,7 +45,7 @@ async def _claim_pin_attempt(db, identifier: str, limit: int = MAX_ATTEMPTS) -> 
         return_document=True,
     )
     if not claimed:
-        raise HTTPException(status_code=429, detail="Too many attempts. Try again later.")
+        raise api_error(429, "TOO_MANY_ATTEMPTS_TRY_AGAIN_LATER", 'Too many attempts. Try again later.')
     return claimed
 
 
@@ -84,10 +84,10 @@ async def login(body: LoginBody, request: Request, response: Response) -> Dict[s
     if not user or not user_hash or not matched:
         if user and claimed["count"] >= MAX_ATTEMPTS:
             await db.login_lockouts.insert_one({"name_normalized": name_norm, "source": source, "at": now_utc()})
-        raise HTTPException(status_code=401, detail="Invalid name or PIN")
+        raise api_error(401, "INVALID_NAME_OR_PIN", 'Invalid name or PIN')
 
     if user.get("disabled_at"):
-        raise HTTPException(status_code=403, detail="Account disabled")
+        raise api_error(403, "ACCOUNT_DISABLED", 'Account disabled')
 
     await db.login_attempts.delete_one({"identifier": identifier})
     await db.login_sources.update_one(
@@ -102,16 +102,16 @@ async def login(body: LoginBody, request: Request, response: Response) -> Dict[s
 @router.post("/change-pin")
 async def change_pin(body: ChangePinBody, response: Response, user: dict = Depends(get_current_user)) -> Dict[str, Any]:
     if body.new_pin == body.current_pin:
-        raise HTTPException(status_code=400, detail={"code": "PIN_UNCHANGED", "message": "Choose a new PIN, not the current one."})
+        raise api_error(400, "PIN_UNCHANGED", 'Choose a new PIN, not the current one.')
     err = validate_pin_policy(body.new_pin, user["role"])
     if err:
-        raise HTTPException(status_code=400, detail={"code": "PIN_POLICY", "message": err})
+        raise api_error(400, "PIN_POLICY", err)
     db = get_db()
     identifier = f"change-pin:{user['_id']}"
     await _claim_pin_attempt(db, identifier)
     current_hash = user.get("pin_hash")
     if not current_hash or not await asyncio.to_thread(verify_pin, body.current_pin, current_hash):
-        raise HTTPException(status_code=400, detail="Current PIN is incorrect")
+        raise api_error(400, "CURRENT_PIN_IS_INCORRECT", 'Current PIN is incorrect')
     new_hash = await asyncio.to_thread(hash_pin, body.new_pin)
     updated = await db.users.find_one_and_update(
         {"_id": user["_id"], "pin_hash": current_hash},
@@ -119,7 +119,7 @@ async def change_pin(body: ChangePinBody, response: Response, user: dict = Depen
         return_document=True,
     )
     if not updated:
-        raise HTTPException(status_code=409, detail="PIN changed in another session; sign in again")
+        raise api_error(409, "PIN_CHANGED_IN_ANOTHER_SESSION_SIGN_IN_AGAIN", 'PIN changed in another session; sign in again')
     user = updated
     await db.login_attempts.delete_one({"identifier": identifier})
     access = create_access_token(str(user["_id"]), user.get("name", ""), user["role"], user["session_version"])

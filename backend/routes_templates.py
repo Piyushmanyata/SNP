@@ -3,11 +3,11 @@ import base64
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends
 from bson import ObjectId
 from PIL import Image, ImageOps
 from db import get_db
-from helpers import now_utc
+from helpers import now_utc, api_error
 from security import require_admin, require_any
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
@@ -42,7 +42,7 @@ def _stored_logo(raw: bytes) -> str:
         source = Image.open(BytesIO(raw))
         source.load()
     except Exception:
-        raise HTTPException(status_code=400, detail=INVALID_IMAGE)
+        raise api_error(400, "INVALID_IMAGE", INVALID_IMAGE)
     source_format = source.format
     if len(raw) <= STORED_LOGO_BYTES and max(source.size) <= STORED_LOGO_EDGE and source_format in ("PNG", "JPEG"):
         return f"data:image/{source_format.lower()};base64," + base64.b64encode(raw).decode()
@@ -62,30 +62,30 @@ def _stored_logo(raw: bytes) -> str:
         if len(png) < len(jpeg):
             best, mime = png, "image/png"
     if len(best) > STORED_LOGO_BYTES:
-        raise HTTPException(status_code=400, detail="This logo is too detailed to store at 150 KB. Use a simpler image.")
+        raise api_error(400, "THIS_LOGO_IS_TOO_DETAILED_TO_STORE_AT_150_KB_USE_A_SIMPLER_I", 'This logo is too detailed to store at 150 KB. Use a simpler image.')
     return f"data:{mime};base64," + base64.b64encode(best).decode()
 
 
 def _validate_logos(logos: Optional[List[dict]]) -> List[Dict[str, Any]]:
     if logos is not None and not isinstance(logos, list):
-        raise HTTPException(status_code=400, detail="Logos must be a list.")
+        raise api_error(400, "LOGOS_MUST_BE_A_LIST", 'Logos must be a list.')
     if len(logos or []) > MAX_LOGOS:
-        raise HTTPException(status_code=400, detail=f"At most {MAX_LOGOS} sponsor logos.")
+        raise api_error(400, "AT_MOST_SPONSOR_LOGOS", f'At most {MAX_LOGOS} sponsor logos.')
     out = []
     for lg in logos or []:
         data_url = lg.get("data_url") if isinstance(lg, dict) else None
         if not isinstance(data_url, str) or not data_url.startswith("data:") or "," not in data_url:
-            raise HTTPException(status_code=400, detail=INVALID_IMAGE)
+            raise api_error(400, "INVALID_IMAGE", INVALID_IMAGE)
         header, b64 = data_url.split(",", 1)
         mime = header.split(";")[0].replace("data:", "")
         if mime not in ALLOWED_MIME:
-            raise HTTPException(status_code=400, detail=f"Unsupported image type: {mime}. Use PNG/JPEG/WebP.")
+            raise api_error(400, "UNSUPPORTED_IMAGE_TYPE_USE_PNG_JPEG_WEBP", f'Unsupported image type: {mime}. Use PNG/JPEG/WebP.')
         try:
             raw = base64.b64decode(b64, validate=True)
         except Exception:
-            raise HTTPException(status_code=400, detail=INVALID_IMAGE)
+            raise api_error(400, "INVALID_IMAGE", INVALID_IMAGE)
         if len(raw) > MAX_LOGO_BYTES:
-            raise HTTPException(status_code=400, detail="Each logo must be 2 MB or smaller.")
+            raise api_error(400, "EACH_LOGO_MUST_BE_2_MB_OR_SMALLER", 'Each logo must be 2 MB or smaller.')
         out.append({"id": lg.get("id"), "name": lg.get("name", "logo"), "data_url": _stored_logo(raw), "order": lg.get("order", 0)})
     return out
 
@@ -93,9 +93,9 @@ def _validate_logos(logos: Optional[List[dict]]) -> List[Dict[str, Any]]:
 async def _assert_camp(camp_id: str | None) -> None:
     db = get_db()
     if not camp_id:
-        raise HTTPException(status_code=400, detail="camp_id is required")
+        raise api_error(400, "CAMP_ID_IS_REQUIRED", 'camp_id is required')
     if not await db.camps.find_one({"_id": ObjectId(camp_id)}):
-        raise HTTPException(status_code=404, detail="Camp not found")
+        raise api_error(404, "CAMP_NOT_FOUND", 'Camp not found')
 
 
 @router.get("/logos")

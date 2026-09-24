@@ -1,3 +1,4 @@
+from helpers import api_error
 import asyncio
 import hmac
 import os
@@ -6,7 +7,7 @@ from datetime import timedelta
 from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.errors import DuplicateKeyError
@@ -32,7 +33,7 @@ def _require_cron_secret(request: Request) -> None:
     expected = os.environ.get("CRON_SECRET") or ""
     got = request.headers.get("X-Cron-Secret") or ""
     if not expected or not hmac.compare_digest(expected, got):
-        raise HTTPException(status_code=401, detail="Unauthorized")
+        raise api_error(401, "UNAUTHORIZED", 'Unauthorized')
 
 
 async def _pages(

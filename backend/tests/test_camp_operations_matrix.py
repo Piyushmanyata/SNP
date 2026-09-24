@@ -223,7 +223,7 @@ class TestClinicalMatrix:
                     actor=CLINICAL,
                 )
             assert exc.value.status_code == 400
-            assert exc.value.detail["code"] == "incomplete_prescription"
+            assert exc.value.detail["code"] == "INCOMPLETE_PRESCRIPTION"
             refreshed = await db.patients.find_one({"_id": patient["_id"]})
             assert refreshed.get("seen_at") is None
         run_camp(monkeypatch, run)
@@ -510,7 +510,7 @@ class TestFulfilmentMatrix:
                     actor=CLINICAL,
                  background_tasks=None)
             assert exc.value.status_code == 409
-            assert _code(exc) == "stale_review"
+            assert _code(exc) == "STALE_REVIEW"
             ok = await record_fulfilment(
                 _issue_body(
                     done["transcription"]["id"],
@@ -797,7 +797,7 @@ class TestPrintingMatrix:
                     actor=ADMIN,
                 )
             assert exc.value.status_code == 409
-            assert exc.value.detail["code"] == "camp_setup_incomplete"
+            assert exc.value.detail["code"] == "CAMP_SETUP_INCOMPLETE"
             camp_id = exc.value.detail["camp_id"]
             camp = await db.camps.find_one({"_id": ObjectId(camp_id)})
             assert camp["is_active"] is False

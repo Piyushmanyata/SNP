@@ -11,12 +11,13 @@ load_dotenv()
 
 from bson.errors import InvalidId
 from fastapi import FastAPI, Request, Response
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from db import get_db, init_indexes
 from security import hash_pin, validate_pin_policy
-from helpers import now_utc
+from helpers import api_error, now_utc
 
 import routes_auth
 import routes_staff
@@ -105,9 +106,22 @@ async def request_context(request: Request, call_next: Callable[[Request], Await
 app.middleware("http")(request_context)
 
 
+def _error_body(exc) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
 @app.exception_handler(InvalidId)
 async def invalid_id_handler(request: Request, exc: InvalidId) -> JSONResponse:
-    return JSONResponse(status_code=400, content={"detail": "Malformed identifier"})
+    return _error_body(api_error(400, "INVALID_ID", "That id is not valid."))
+
+
+@app.exception_handler(RequestValidationError)
+async def invalid_input_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    fields = {}
+    for error in exc.errors():
+        parts = [str(part) for part in error.get("loc", ()) if part not in ("body", "query", "path")]
+        fields[".".join(parts) or "request"] = str(error.get("msg") or "Check this field.")
+    return _error_body(api_error(422, "INVALID_INPUT", "Check the highlighted fields.", fields=fields))
 
 def cors_origin_list(raw: str | None) -> list[str]:
     if not raw:

@@ -7,9 +7,15 @@ import secrets
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Any, Dict, List, overload
+
+from fastapi import HTTPException
 from uuid import UUID
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+def api_error(status: int, code: str, message: str, **extra: Any) -> HTTPException:
+    return HTTPException(status_code=status, detail={"code": code, "message": message, **extra})
 
 # ---- time helpers ----
 

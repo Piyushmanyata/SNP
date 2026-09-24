@@ -61,7 +61,7 @@ def test_issue_operation_rejects_a_different_request(monkeypatch, foreign_patien
                 _issue_body(done["transcription"]["id"], done["revision"]["id"], 1, "issue", status="not_available"),
                 actor=CLINICAL, background_tasks=None)
         assert exc.value.status_code == 409
-        assert exc.value.detail["code"] == "operation_conflict"
+        assert exc.value.detail["code"] == "OPERATION_CONFLICT"
         assert await db.fulfilments.count_documents({}) == 1
 
     run_camp(monkeypatch, run)
@@ -207,7 +207,7 @@ def test_a_failed_correction_rolls_back_and_the_retry_applies_one_generation(mon
         changed = body.model_copy(update={"bp": "140/90"})
         with pytest.raises(HTTPException) as exc:
             await routes_clinical.add_correction(changed, actor=CLINICAL)
-        assert exc.value.detail["code"] == "operation_conflict"
+        assert exc.value.detail["code"] == "OPERATION_CONFLICT"
 
     run_camp(monkeypatch, run)
 
@@ -227,7 +227,7 @@ def test_a_stale_correction_leaves_nothing_and_its_retry_lands_on_the_newer_one(
         ), actor=CLINICAL)
         with pytest.raises(HTTPException) as exc:
             await routes_clinical.add_correction(stale, actor=CLINICAL)
-        assert exc.value.detail["code"] == "stale_generation"
+        assert exc.value.detail["code"] == "STALE_GENERATION"
         assert await db.prescription_revisions.count_documents({"operation_id": "stale"}) == 0
         retry = await routes_clinical.add_correction(stale.model_copy(update={"expected_generation": generation + 1}), actor=CLINICAL)
         assert retry["revision"]["bp"] == "130/85" and retry["revision"]["blood_sugar"] == "140"

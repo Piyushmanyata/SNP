@@ -302,7 +302,7 @@ class TestDeskPrintWindow:
     def test_mark_seen_blocked_before_arrival(self, admin):
         r = admin.post(f"{API}/desk/mark-seen/{STATE['p1']['id']}", timeout=30)
         assert r.status_code == 409, r.text
-        assert r.json()["detail"]["code"] == "completion_required"
+        assert r.json()["detail"]["code"] == "COMPLETION_REQUIRED"
 
     def test_arrival_stamps_presence(self, admin):
         r = admin.post(f"{API}/desk/arrive/{STATE['p1']['id']}", timeout=30)
@@ -322,7 +322,7 @@ class TestDeskPrintWindow:
     def test_mark_seen_refused_when_never_printed(self, admin):
         r = admin.post(f"{API}/desk/mark-seen/{STATE['p1']['id']}", timeout=30)
         assert r.status_code == 409, r.text
-        assert r.json()["detail"]["code"] == "completion_required"
+        assert r.json()["detail"]["code"] == "COMPLETION_REQUIRED"
 
     def test_open_print_window(self, admin):
         r = admin.patch(f"{API}/camps/days/{STATE['day_id']}/print-window",
@@ -369,14 +369,14 @@ class TestDeskPrintWindow:
     def test_mark_seen_and_idempotency(self, admin):
         r = admin.post(f"{API}/desk/mark-seen/{STATE['p1']['id']}", timeout=30)
         assert r.status_code == 409, r.text
-        assert r.json()["detail"]["code"] == "completion_required"
+        assert r.json()["detail"]["code"] == "COMPLETION_REQUIRED"
         looked = admin.post(f"{API}/desk/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
         assert looked.json()["registration"]["queue_status"] != "seen"
 
     def test_undo_seen_within_window(self, admin):
         r = admin.post(f"{API}/desk/undo-seen/{STATE['p1']['id']}", timeout=30)
         assert r.status_code == 409, r.text
-        assert r.json()["detail"]["code"] == "completion_required"
+        assert r.json()["detail"]["code"] == "COMPLETION_REQUIRED"
 
     def test_undo_seen_on_not_seen_patient(self, admin):
         r = admin.post(f"{API}/desk/undo-seen/{STATE['p2']['id']}", timeout=30)
@@ -676,7 +676,7 @@ class TestClinical:
         r = _defer(_clinical(admin), STATE["trans_id"], STATE["rev_id"], STATE["gen"], f"op-referral-{TAG}",
                    item_type="ot", ot_schedule_day_id=STATE["ot_day_id"])
         assert r.status_code == 409, r.text
-        assert r.json()["detail"]["code"] == "hospital_referral"
+        assert r.json()["detail"]["code"] == "HOSPITAL_REFERRAL"
 
     def test_iol_surgery_deferral_consumes_seat_and_prints_slip(self, admin):
         assert admin.post(f"{API}/desk/arrive/{STATE['p2']['id']}", timeout=30).status_code == 200
@@ -960,10 +960,10 @@ class TestFixRegressions:
         assert printed_at
         seen = admin.post(f"{API}/desk/mark-seen/{pid}", timeout=30)
         assert seen.status_code == 409, seen.text
-        assert seen.json()["detail"]["code"] == "completion_required"
+        assert seen.json()["detail"]["code"] == "COMPLETION_REQUIRED"
         u = admin.post(f"{API}/desk/undo-seen/{pid}", timeout=30)
         assert u.status_code == 409, u.text
-        assert u.json()["detail"]["code"] == "completion_required"
+        assert u.json()["detail"]["code"] == "COMPLETION_REQUIRED"
         g = admin.post(f"{API}/desk/lookup", json={"value": str(r.json()["registration"]["reg_no"])}, timeout=30)
         reg = g.json()["registration"]
         assert reg["queue_status"] == "arrived"
@@ -1050,7 +1050,7 @@ class TestFixRegressions:
             "reviewed_generation": STATE["gen"], "operation_id": f"op-rerecord-sp-fix-{TAG}",
         }, timeout=30)
         assert r.status_code == 409, r.text
-        assert r.json()["detail"]["code"] == "line_not_prescribed"
+        assert r.json()["detail"]["code"] == "LINE_NOT_PRESCRIBED"
         assert seats(day_b) == 0
         looked = clin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
         assert looked.status_code == 200, looked.text

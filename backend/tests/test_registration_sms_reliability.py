@@ -37,7 +37,7 @@ def test_legacy_patient_qr_resolves_at_desk_and_clinical_lookup(monkeypatch, ent
         with pytest.raises(HTTPException) as exc:
             await routes_clinical.clinical_lookup({"value": entry}, CLINICAL)
         assert exc.value.status_code == 409
-        assert exc.value.detail["code"] == "not_arrived"
+        assert exc.value.detail["code"] == "NOT_ARRIVED"
 
     run_camp(monkeypatch, run)
 

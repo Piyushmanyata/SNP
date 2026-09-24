@@ -1,10 +1,10 @@
+from helpers import api_error
 import math
 import re
 from typing import Any, Dict, List
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from fastapi import HTTPException
 
 MAX_NAME_LEN = 120
 POWER_MIN = -20.0
@@ -15,12 +15,9 @@ _WHITESPACE = re.compile(r"\s+")
 def normalize_medicine_name(raw: Any) -> str:
     name = _WHITESPACE.sub(" ", str(raw or "").strip())
     if not name:
-        raise HTTPException(status_code=400, detail="Medicine name is required")
+        raise api_error(400, "MEDICINE_NAME_IS_REQUIRED", 'Medicine name is required')
     if len(name) > MAX_NAME_LEN:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Medicine name must be {MAX_NAME_LEN} characters or fewer",
-        )
+        raise api_error(400, "MEDICINE_NAME_MUST_BE_CHARACTERS_OR_FEWER", f'Medicine name must be {MAX_NAME_LEN} characters or fewer')
     return name
 
 
@@ -30,21 +27,18 @@ def medicine_key(raw: Any) -> str:
 
 def parse_power(raw: Any) -> float:
     if isinstance(raw, bool):
-        raise HTTPException(status_code=400, detail="Power must be a number")
+        raise api_error(400, "POWER_MUST_BE_A_NUMBER", 'Power must be a number')
     try:
         value = float(str(raw).strip())
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="Power must be a number")
+        raise api_error(400, "POWER_MUST_BE_A_NUMBER", 'Power must be a number')
     if not math.isfinite(value):
-        raise HTTPException(status_code=400, detail="Power must be a number")
+        raise api_error(400, "POWER_MUST_BE_A_NUMBER", 'Power must be a number')
     value = round(value, 2)
     if value == 0:
         value = 0.0
     if not POWER_MIN <= value <= POWER_MAX:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Power must be between {POWER_MIN:+.2f} and {POWER_MAX:+.2f} dioptres",
-        )
+        raise api_error(400, "POWER_MUST_BE_BETWEEN_AND_DIOPTRES", f'Power must be between {POWER_MIN:+.2f} and {POWER_MAX:+.2f} dioptres')
     return value
 
 
@@ -73,10 +67,7 @@ def _medicine_oid(raw: Any) -> ObjectId:
     try:
         return ObjectId(str(raw))
     except (InvalidId, TypeError, ValueError):
-        raise HTTPException(status_code=400, detail={
-            "code": "unknown_medicine",
-            "message": "That medicine is not in the camp's list.",
-        })
+        raise api_error(400, "UNKNOWN_MEDICINE", "That medicine is not in the camp's list.")
 
 
 async def resolve_medicines(db, ids: List[Any], *, active_only: bool) -> List[Dict[str, Any]]:
@@ -94,10 +85,7 @@ async def resolve_medicines(db, ids: List[Any], *, active_only: bool) -> List[Di
     rows = await db.medicines.find(query).to_list(len(ordered))
     names = {str(row["_id"]): row["name"] for row in rows}
     if set(names) != set(ordered):
-        raise HTTPException(status_code=400, detail={
-            "code": "unknown_medicine",
-            "message": "That medicine is not in the camp's list.",
-        })
+        raise api_error(400, "UNKNOWN_MEDICINE", "That medicine is not in the camp's list.")
     return [{"medicine_id": key, "name": names[key]} for key in ordered]
 
 
@@ -109,8 +97,5 @@ async def stocked_power(db, raw: Any, *, active_only: bool) -> Any:
     if active_only:
         query["active"] = {"$ne": False}
     if not await db.fixed_powers.find_one(query):
-        raise HTTPException(status_code=400, detail={
-            "code": "unknown_power",
-            "message": f"{format_power(value)} is not one of the camp's fixed powers.",
-        })
+        raise api_error(400, "UNKNOWN_POWER", f"{format_power(value)} is not one of the camp's fixed powers.")
     return value
