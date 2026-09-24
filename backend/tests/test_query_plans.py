@@ -105,16 +105,29 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
             ], "cursor": {}},
             "board activity": {"aggregate": "patients", "pipeline": [
                 {"$match": {"camp_id": camp, "arrived_at": {"$gte": start, "$lt": end}}},
+                {"$project": {
+                    "_id": 0, "arrived_at": 1, "arrived_by": 1,
+                    "printed_at": 1, "seen_at": 1, "committed_revision_id": 1,
+                }},
                 {"$group": {"_id": "$arrived_by", "last": {"$max": "$arrived_at"},
                             "last_15m": {"$sum": {"$cond": [{"$gte": ["$arrived_at", quiet]}, 1, 0]}}}},
             ], "cursor": {}},
             "sms groups": {"aggregate": "reminder_ledger", "pipeline": [
-                {"$match": {"camp_id": camp, "created_at": {"$gte": start, "$lt": end}}},
+                {"$match": {
+                    "camp_id": camp,
+                    "created_at": {"$gte": start, "$lt": end},
+                    "$or": [
+                        {"status": {"$in": ["failed", "abandoned", "rejected", "paused"]}},
+                        {"delivery": "failed"},
+                    ],
+                }},
                 {"$group": {"_id": {"camp_id": "$camp_id", "message_type": "$message_type", "status": "$status"}, "n": {"$sum": 1}}},
             ], "cursor": {}},
         }
         for name, command in group_plans.items():
             stages = _stages(await _winning(db, command))
             assert "COLLSCAN" not in stages, name
+            if name.startswith("board"):
+                assert "FETCH" not in stages, (name, stages)
 
     run_db(run)

@@ -72,7 +72,10 @@ async def init_indexes() -> None:
         partialFilterExpression={"person_id": {"$type": "objectId"}},
     )
     await db.patients.create_index([("camp_id", ASCENDING), ("full_name_normalized", ASCENDING)])
-    await db.patients.create_index([("camp_id", ASCENDING), ("arrived_at", ASCENDING)])
+    await db.patients.create_index([
+        ("camp_id", ASCENDING), ("arrived_at", ASCENDING), ("arrived_by", ASCENDING),
+        ("printed_at", ASCENDING), ("seen_at", ASCENDING), ("committed_revision_id", ASCENDING),
+    ])
     await db.patients.create_index([("camp_id", ASCENDING), ("seen_at", ASCENDING)])
     await db.patients.create_index([("camp_id", ASCENDING), ("aadhaar_last4", ASCENDING)])
     await db.patients.create_index([("camp_id", ASCENDING), ("phone_normalized", ASCENDING)])
@@ -105,6 +108,12 @@ async def init_indexes() -> None:
     await db.reminder_ledger.create_index([("status", ASCENDING), ("created_at", ASCENDING)])
     await db.reminder_ledger.create_index([("camp_id", ASCENDING), ("event_date", ASCENDING), ("status", ASCENDING)])
     await db.reminder_ledger.create_index([("camp_id", ASCENDING), ("created_at", ASCENDING)])
+    await db.reminder_ledger.create_index(
+        [("camp_id", ASCENDING), ("status", ASCENDING), ("created_at", ASCENDING)],
+    )
+    await db.reminder_ledger.create_index(
+        [("camp_id", ASCENDING), ("delivery", ASCENDING), ("created_at", ASCENDING)],
+    )
     await db.reminder_ledger.create_index(
         [("message_type", ASCENDING), ("event_date", ASCENDING), ("created_at", ASCENDING)],
     )
