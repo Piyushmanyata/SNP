@@ -116,8 +116,9 @@ not depend on each other. Sequence only true dependencies.
 
 ## 7. Verification — no dev servers
 
-Forbidden: `npm run dev`, watch mode, browsers, screenshots, computer use,
-manual clicking, "start the server and check".
+Forbidden: `npm run dev`, watch mode, interactive browsers, screenshots, computer use,
+manual clicking, "start the server and check". Headless Playwright (`npx playwright test`)
+is allowed only as the CI and local test runner.
 
 Use instead, in this order:
 
