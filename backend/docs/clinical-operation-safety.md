@@ -23,8 +23,9 @@ Every read and write in the callback passes `session=`. The callback has no side
 | Same id, same kind and hash | The stored result |
 | Same id, different kind or hash | 409 `operation_conflict` |
 | Replayed completion after an undo | 409 `OPERATION_SUPERSEDED` |
+| Replayed undo after a new completion | 409 `OPERATION_SUPERSEDED` |
 
-An operation id that loses a duplicate-key race replays the winner's stored row.
+An operation id that loses a duplicate-key race replays the winner's stored row. A completion retry skips the retired-catalogue check, so it still replays after a medicine or power is retired.
 
 ## Tokens and SMS
 

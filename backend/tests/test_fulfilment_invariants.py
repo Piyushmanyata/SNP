@@ -179,15 +179,12 @@ def test_a_correction_changes_only_allowed_fields_and_keeps_an_audit_row(monkeyp
             full_transcription_confirmed=True,
             none_prescribed=True,
         ), actor=CLINICAL)
-        assert "correction_id" in result
         transcription = await database.transcriptions.find_one({"_id": trans_id})
         assert transcription["bp"] == "135/85"
         assert transcription["diagnosis_options"] == []
         assert transcription["prescribed_medicines"] == []
         assert "unauthorized_field" not in transcription
-        correction = await database.corrections.find_one({"transcription_id": trans_id})
-        assert correction["reason"] == "Correcting BP reading per doctor re-check"
-        assert correction["changes"]["bp"] == "135/85"
+        assert result["revision"]["reason"] == "Correcting BP reading per doctor re-check"
 
     run_camp(monkeypatch, body)
 

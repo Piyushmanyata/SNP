@@ -20,8 +20,9 @@ Issue #50, slice S7. Supersedes the claim, issue-authorization and compensation 
   - same id and hash → the stored result;
   - same id, different kind or hash → 409 `operation_conflict`;
   - a replayed completion whose revision is no longer the committed one (it was undone) → 409 `OPERATION_SUPERSEDED`.
+  - a replayed undo after the patient was completed again → 409 `OPERATION_SUPERSEDED`.
 - **The callback only touches the database**, because the driver may run it more than once. A Token's SMS is a `queued` `reminder_ledger` row, keyed by the Token's id, inserted in the transaction. After commit a background task sends it. The provider is never called inside a transaction.
-- **Deleted:** the write claim, `clinical_write_token`, `issue_authorization`, `issue_auth_op`, `released_issues`, `_ensure_transcription_locked`, `line_review`, the compensation blocks and the fulfilment `current` flag.
+- **Deleted:** the write-only `corrections` collection (revisions already hold the reason, author and predecessor), the write claim, `clinical_write_token`, `issue_authorization`, `issue_auth_op`, `released_issues`, `_ensure_transcription_locked`, `line_review`, the compensation blocks and the fulfilment `current` flag.
 
 Also in S7:
 - A correction that removes or changes Spectacles to be made while its Token is active returns 409 `SPECS_SCHEDULED`. The operator first records `cancelled`, which closes the Token.

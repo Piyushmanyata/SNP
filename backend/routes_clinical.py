@@ -227,11 +227,11 @@ def _content_from_body(body) -> dict:
     return content
 
 
-async def _apply_catalogue(db, body) -> None:
+async def _apply_catalogue(db, body, active_only: bool = True) -> None:
     """The catalogue is the authority: names and powers are resolved server-side, never trusted from the client."""
-    body.prescribed_medicines = await resolve_medicines(db, body.prescribed_medicine_ids, active_only=True)
-    body.fixed_power_r = await stocked_power(db, body.fixed_power_r, active_only=True)
-    body.fixed_power_l = await stocked_power(db, body.fixed_power_l, active_only=True)
+    body.prescribed_medicines = await resolve_medicines(db, body.prescribed_medicine_ids, active_only=active_only)
+    body.fixed_power_r = await stocked_power(db, body.fixed_power_r, active_only=active_only)
+    body.fixed_power_l = await stocked_power(db, body.fixed_power_l, active_only=active_only)
 
 
 def _require_printed(p: dict) -> dict:
@@ -333,7 +333,8 @@ async def complete_prescription(
 ) -> Dict[str, Any]:
     assert_clinical_operator(actor)
     db = get_db()
-    await _apply_catalogue(db, body)
+    replaying = await db.clinical_operations.find_one({"operation_id": body.operation_id}, {"_id": 1})
+    await _apply_catalogue(db, body, active_only=not replaying)
     content, lines, none = validate_completion(body)
     p = await _require_printed_patient(db, body.patient_id)
     digest = payload_hash("complete", {
@@ -390,6 +391,8 @@ async def undo_completion(
     digest = payload_hash("undo", {"patient_id": str(p["_id"]), "reason": reason})
     done = await recover_operation(db, body.operation_id, "undo", digest)
     if done:
+        if generation_of(p) != done["result"]["registration"]["clinical_generation"]:
+            raise conflict("OPERATION_SUPERSEDED", "The prescription changed after this undo, which cannot be replayed.")
         return done["result"]
 
     async def write(session):
@@ -899,17 +902,7 @@ async def add_correction(
         revision = await insert_revision(db, patient, actor, content, lines, none, op_id, "correct", reason, base_id, session)
         committed = await commit_correction(db, patient, revision, session)
         trans = await _upsert_transcription(db, committed, actor, content, locked=True, session=session)
-        await db.corrections.insert_one({
-            "transcription_id": trans["_id"],
-            "patient_id": p["_id"],
-            "reason": body.reason,
-            "changes": body.changes,
-            "revision_id": revision["_id"],
-            "created_by": str(actor["_id"]),
-            "created_at": now_utc(),
-        }, session=session)
         result = _clinical_result(committed, revision, trans)
-        result["correction_id"] = str(revision["_id"])
         await record_operation(db, op_id, "correct", digest, patient["_id"], result, session)
         return result, None
 

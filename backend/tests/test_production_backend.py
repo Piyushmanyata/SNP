@@ -105,6 +105,6 @@ def test_correction_rejects_values_that_would_break_the_prescription_screen(monk
                 changes={"bp": {"invalid": "object"}},
             ), actor=CLINICAL)
         assert error.value.status_code == 400
-        assert await database.corrections.count_documents({"transcription_id": seen["trans_id"]}) == 0
+        assert await database.prescription_revisions.count_documents({"kind": "correct"}) == 0
 
     run_camp(monkeypatch, body)

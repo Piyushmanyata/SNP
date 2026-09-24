@@ -180,7 +180,7 @@ def test_a_failed_completion_write_rolls_back_and_the_retry_applies_once(monkeyp
     run_camp(monkeypatch, run)
 
 
-@pytest.mark.parametrize("failure_stage", ["transcription", "audit", "ledger"])
+@pytest.mark.parametrize("failure_stage", ["transcription", "ledger"])
 def test_a_failed_correction_rolls_back_and_the_retry_applies_one_generation(monkeypatch, failure_stage):
     async def run(db):
         _, _, patient = await _printed_patient(db)
@@ -192,19 +192,16 @@ def test_a_failed_correction_rolls_back_and_the_retry_applies_one_generation(mon
         )
         if failure_stage == "transcription":
             restore = _fail(monkeypatch, "_upsert_transcription", lambda *a, **k: k.get("locked"))
-        elif failure_stage == "audit":
-            restore = intercept(monkeypatch, "corrections", "insert_one", _boom)
         else:
             restore = _fail(monkeypatch, "record_operation", lambda *a, **k: a[2] == "correct")
         with pytest.raises(RuntimeError):
             await routes_clinical.add_correction(body, actor=CLINICAL)
         restore()
         assert (await db.patients.find_one({"_id": patient["_id"]}))["clinical_generation"] == 1
-        assert await db.corrections.count_documents({}) == 0
+        assert await db.prescription_revisions.count_documents({"kind": "correct"}) == 0
         result = await routes_clinical.add_correction(body, actor=CLINICAL)
         assert result["registration"]["clinical_generation"] == 2
         assert await db.prescription_revisions.count_documents({"kind": "correct"}) == 1
-        assert await db.corrections.count_documents({}) == 1
         assert await routes_clinical.add_correction(body, actor=CLINICAL) == result
 
         changed = body.model_copy(update={"bp": "140/90"})

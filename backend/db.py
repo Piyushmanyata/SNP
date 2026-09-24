@@ -88,7 +88,6 @@ async def init_indexes() -> None:
     await db.clinical_operations.create_index("operation_id", unique=True)
     await db.deferred_slips.create_index([("transcription_id", ASCENDING), ("active", ASCENDING)])
     await db.deferred_slips.create_index([("item_type", ASCENDING), ("active", ASCENDING), ("collection_date", ASCENDING)])
-    await db.corrections.create_index([("transcription_id", ASCENDING), ("created_at", ASCENDING)])
     await db.fulfilments.create_index([("transcription_id", ASCENDING), ("item_type", ASCENDING)], unique=True)
     await db.ot_schedule_days.create_index([("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True)
     await db.specs_collection_days.create_index([("camp_id", ASCENDING), ("day_date", ASCENDING)], unique=True)

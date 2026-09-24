@@ -128,6 +128,31 @@ def test_a_replayed_completion_after_undo_is_superseded(monkeypatch):
     run_camp(monkeypatch, run)
 
 
+def test_a_replayed_undo_after_a_new_completion_is_superseded(monkeypatch):
+    async def run(db):
+        _camp, _day, patient = await _printed_patient(db)
+        await complete_prescription(_complete_body(patient["_id"], "complete"), actor=CLINICAL)
+        undo = UndoCompletionBody(patient_id=str(patient["_id"]), expected_generation=1, reason="Wrong patient", operation_id="undo")
+        await undo_completion(undo, actor=CLINICAL)
+        await complete_prescription(_complete_body(patient["_id"], "again", expected_generation=2), actor=CLINICAL)
+        with pytest.raises(HTTPException) as exc:
+            await undo_completion(undo, actor=CLINICAL)
+        assert exc.value.status_code == 409 and exc.value.detail["code"] == "OPERATION_SUPERSEDED"
+
+    run_camp(monkeypatch, run)
+
+
+def test_a_completion_retry_replays_after_its_medicine_is_retired(monkeypatch):
+    async def run(db):
+        _camp, _day, patient = await _printed_patient(db)
+        body = _complete_body(patient["_id"], "complete")
+        first = await complete_prescription(body.model_copy(), actor=CLINICAL)
+        await db.medicines.update_one({"_id": ObjectId(MEDICINE["medicine_id"])}, {"$set": {"active": False}})
+        assert await complete_prescription(body.model_copy(), actor=CLINICAL) == first
+
+    run_camp(monkeypatch, run)
+
+
 def test_only_future_days_count_when_deciding_every_day_is_full(monkeypatch):
     async def run(db):
         camp_id, _day, patient = await _printed_patient(db)

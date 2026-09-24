@@ -764,13 +764,9 @@ class TestClinical:
         assert r.status_code == 200, r.text
         STATE["rev_id"] = r.json()["revision"]["id"]
         STATE["gen"] = r.json()["registration"]["clinical_generation"]
-        r = clin.get(f"{API}/clinical/corrections/{STATE['trans_id']}", timeout=30)
-        assert r.status_code == 200
-        corr = r.json()["corrections"]
-        assert len(corr) == 1
-        assert corr[0]["reason"] == "TEST typo in BP"
         r = clin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
         assert r.json()["transcription"]["bp"] == "140/90"
+        assert r.json()["committed_revision"]["reason"] == "TEST typo in BP"
 
     def test_undo_seen_blocked_after_transcription(self, admin):
         r = admin.post(f"{API}/desk/undo-seen/{STATE['p1']['id']}", timeout=30)

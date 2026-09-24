@@ -194,7 +194,7 @@ async def recover_operation(db, operation_id: str, kind: str, digest: str, sessi
 async def record_operation(db, operation_id: str, kind: str, digest: str, patient_id, result: dict, session) -> None:
     await db.clinical_operations.insert_one({
         "operation_id": operation_id, "kind": kind, "payload_hash": digest, "patient_id": patient_id,
-        "status": "committed", "result": result, "created_at": now_utc(),
+        "result": result, "created_at": now_utc(),
     }, session=session)
 
 

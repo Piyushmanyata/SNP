@@ -22,7 +22,7 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = ReactDOM.createRoot(container);
   jest.clearAllMocks();
-  api.post.mockResolvedValue({ data: { correction_id: "c-1" } });
+  api.post.mockResolvedValue({ data: {} });
 });
 
 afterEach(() => {
