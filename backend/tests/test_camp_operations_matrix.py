@@ -205,7 +205,7 @@ class TestClinicalMatrix:
             with pytest.raises(HTTPException) as exc:
                 await complete_prescription(_complete_body(pid, "op-c05"), actor=CLINICAL)
             assert exc.value.status_code == 409
-            assert _code(exc) in ("not_arrived", "never_printed")
+            assert _code(exc) in ("NOT_ARRIVED", "NEVER_PRINTED")
             patient = await db.patients.find_one({"_id": ObjectId(pid)})
             assert patient.get("committed_revision_id") is None
         run_camp(monkeypatch, run)
