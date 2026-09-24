@@ -37,8 +37,12 @@ The cohort of Volunteers supervised by a specific Team Lead. The Team Lead's lea
 _Avoid_: sub-camp, brigade, shift group
 
 **PIN**:
-The 4-digit personal identification number used with a unique Name to authenticate. Defaults to 1234 on creation with mandatory change on first login.
-_Avoid_: password, secret, OTP
+The personal number used with a unique Name to sign in: 6 digits for an Admin or Team Lead, 4 for a Volunteer or Clinical operator. It is never one digit repeated or a straight run like 1234. A new or reset account gets a random one-time PIN, shown once to the person who created or reset it, and must choose its own PIN at first sign-in.
+_Avoid_: password, secret, OTP, default PIN
+
+**Lockout**:
+Five wrong PINs for one Name within 15 minutes lock that Name for 15 minutes. A network where no one has signed in during the last 12 hours gets 50 wrong PINs across all Names in 15 minutes; the venue, where desks sign in, is not limited this way. The Team page shows a locked account and how often it was locked in the last day, from how many networks. The account's Team Lead or an Admin can Unlock it, which keeps the PIN and is recorded.
+_Avoid_: ban, block (an Admin disables an account; a lockout lapses by itself)
 
 **Reset PIN**:
 The header action beside Logout that lets the signed-in user choose a new PIN after entering their current PIN. Logout ends the session before another person signs in.

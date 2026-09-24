@@ -19,7 +19,7 @@ services:
       DB_NAME: ${DB_NAME:-snp_camps_local}
       JWT_SECRET: ${JWT_SECRET:-local-docker-jwt-secret-change-before-production}
       AADHAAR_HASH_PEPPER: ${AADHAAR_HASH_PEPPER:-local-docker-aadhaar-pepper-change-before-production}
-      ADMIN_BOOTSTRAP_PIN: ${ADMIN_BOOTSTRAP_PIN:-8642}
+      ADMIN_BOOTSTRAP_PIN: ${ADMIN_BOOTSTRAP_PIN:-864200}
       CRON_SECRET: ${CRON_SECRET:-local-docker-reminder-secret}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       COOKIE_SECURE: "false"

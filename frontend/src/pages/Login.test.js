@@ -57,6 +57,20 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
+describe("Login PIN", () => {
+  test("accepts a 6-digit PIN for admins and team leads", async () => {
+    await act(async () => { root.render(<MemoryRouter><Login /></MemoryRouter>); });
+    const input = container.querySelector('[data-testid="login-pin-input"]');
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    act(() => {
+      setter.call(input, "8642001");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    expect(input.value).toBe("864200");
+    expect(input.maxLength).toBe(6);
+  });
+});
+
 describe("Login page occupancy", () => {
   test("does not overlap occupancy requests while a slow response is pending", async () => {
     let resolve;

@@ -10,7 +10,7 @@ Install Docker Desktop and run from this directory:
 docker compose --env-file .env.example up -d --build --wait
 ```
 
-Open http://localhost:3000. Sign in as **admin**, PIN **8642**, then choose a new PIN. These credentials are only for the local stack. MongoDB data persists in a Docker volume; stopping or rebuilding does not erase it. Both frontend and backend run production builds without development servers or source mounts.
+Open http://localhost:3000. Sign in as **admin**, PIN **864200**, then choose a new 6-digit PIN. These credentials are only for the local stack. MongoDB data persists in a Docker volume; stopping or rebuilding does not erase it. Both frontend and backend run production builds without development servers or source mounts.
 
 For phone camera testing, use a trusted HTTPS address; see [local HTTPS setup](docs/dev-https.md). Plain HTTP on a LAN IP cannot use the camera. The local site binds to localhost by default.
 
@@ -32,7 +32,7 @@ Hospital default: Vimla Ramkrishna Bajaj Eye Hospital, Near Canara Bank, Bilasi 
 
 Use a Linux KVM with Docker Engine and the Compose plugin. Hostinger provides an [Ubuntu Docker template](https://www.hostinger.com/support/1583571-what-are-the-available-operating-systems-for-vps-at-hostinger/). Point your domain's DNS to the KVM, and allow TCP 80/443 through the firewall.
 
-Copy `.env.production.example` to `.env.production`. Set the domain, TLS email, a private 4-digit bootstrap PIN other than 1234, and seven independent random secrets: `JWT_SECRET`, `AADHAAR_HASH_PEPPER`, `CRON_SECRET`, `MONGO_PASSWORD` (root, operator only), `MONGO_APP_PASSWORD` (the API), `MONGO_BACKUP_PASSWORD` (backups) and `RESTIC_PASSWORD` (backup encryption; keep a copy off the VPS). Generate each using `openssl rand -hex 32`; hex keeps the database URLs free of escaping. Keep this file private.
+Copy `.env.production.example` to `.env.production`. Set the domain, TLS email, a private 6-digit bootstrap PIN (not one digit repeated or a straight run like 123456), and seven independent random secrets: `JWT_SECRET`, `AADHAAR_HASH_PEPPER`, `CRON_SECRET`, `MONGO_PASSWORD` (root, operator only), `MONGO_APP_PASSWORD` (the API), `MONGO_BACKUP_PASSWORD` (backups) and `RESTIC_PASSWORD` (backup encryption; keep a copy off the VPS). Generate each using `openssl rand -hex 32`; hex keeps the database URLs free of escaping. Keep this file private.
 
 ```sh
 docker compose --env-file .env.production -f docker-compose.prod.yml config --quiet
@@ -55,6 +55,6 @@ Use Node 24 and Python 3.12. Frontend: `npm ci`, `npm run lint`, `npm test -- --
 
 Backend: install `backend/requirements-dev.txt`, run `python -m compileall -q backend`, `python -m flake8 --select=F,E9 backend`, and `python -m pytest backend/tests -q`. The in-process tests need the `rs0` replica set: `docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait mongo` publishes it on `127.0.0.1:27017`. Each test creates and drops its own `snp_t_<id>` database; set `SNP_TEST_MONGO_URL` to use another server.
 
-The complete backend suite includes live HTTP tests. Run it serially against a fresh isolated Docker project with `SNP_LIVE_API=http://localhost:3000`, `SNP_TEST_ADMIN_NAME=admin`, and `SNP_TEST_ADMIN_PIN=8642`. It changes the bootstrap PIN and creates synthetic camp records. Without a live endpoint, those integration tests are explicitly skipped.
+The complete backend suite includes live HTTP tests. Run it serially against a fresh isolated Docker project with `SNP_LIVE_API=http://localhost:3000`, `SNP_TEST_ADMIN_NAME=admin`, and `SNP_TEST_ADMIN_PIN=864200`. It changes the bootstrap PIN and creates synthetic camp records. Without a live endpoint, those integration tests are explicitly skipped.
 
 See [audit evidence and limits](frontend/docs/production-audit.md), [clinical workflow](frontend/docs/clinical-workflow.md) and [scanner audit](frontend/docs/scanner-audit.md). Automated tests do not replace checking the real A6 printer, older phones and SMS carrier before the camp.

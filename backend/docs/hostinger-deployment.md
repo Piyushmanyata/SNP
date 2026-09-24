@@ -275,3 +275,11 @@ Both new flows now show “Verified by DLT” in MSG91. Set `MSG91_TEMPLATE_SPEC
 3. `docker compose --env-file /opt/snp/.env.production -p snp -f docker-compose.prod.yml down` (without `-v`), then `docker volume rm snp_mongo_data`.
 4. `up -d --build --wait`. The `mongo` healthcheck initiates `rs0`; startup recreates `admin` from `ADMIN_BOOTSTRAP_PIN` with a forced PIN change.
 5. Check that `/api/health/ready` returns `ready: true` and that the backend's user lists only `DB_NAME`.
+
+## Staff sign-in (#50 S4)
+
+[ADR 0025](../../docs/adr/0025-name-and-pin-auth-with-team-lead-delegation.md), as amended, makes Admin and Team Lead PINs 6 digits and removes the shared default PIN. Before deploying:
+
+1. Replace `ADMIN_BOOTSTRAP_PIN` in `/opt/snp/.env.production` with 6 digits that are not one digit repeated or a straight run such as `123456`, and update `/opt/snp/initial-admin.txt` and its private copy. The existing `admin` account keeps its PIN; the new value applies when the database is next wiped. A 4-digit value stops the backend at startup on an empty database.
+2. `up -d --build --wait`.
+3. Existing Admins and Team Leads keep signing in with 4 digits until they next change their PIN, which then needs 6.

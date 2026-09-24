@@ -88,15 +88,15 @@ export default function Login() {
                 data-testid="login-name-input"
               />
             </Field>
-            <Field label="4-digit PIN">
+            <Field label="PIN">
               <Input
                 type="password"
                 inputMode="numeric"
                 value={pin}
-                onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
                 placeholder="••••"
                 required
-                maxLength={4}
+                maxLength={6}
                 autoComplete="current-password"
                 data-testid="login-pin-input"
               />

@@ -108,12 +108,12 @@ class TestOperatorLine:
         client = asgi_client()
 
         async def body(database):
-            await create_staff(CreateStaffBody(name="Med", role="clinical_desk_operator", line="medicine"), actor=ADMIN)
+            created = await create_staff(CreateStaffBody(name="Med", role="clinical_desk_operator", line="medicine"), actor=ADMIN)
             listed = await list_staff(actor=ADMIN)
             row = next(s for s in listed["staff"] if s["name"] == "Med")
             assert row["line"] == "medicine"
             async with client:
-                r = await client.post("/api/auth/login", json={"name": "Med", "pin": "1234"})
+                r = await client.post("/api/auth/login", json={"name": "Med", "pin": created["temporary_pin"]})
             assert r.status_code == 200, r.text
             assert r.json()["user"]["line"] == "medicine"
 

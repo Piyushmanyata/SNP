@@ -1,17 +1,20 @@
 import asyncio
+from datetime import timedelta
 from typing import Any, Dict, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
-from db import get_db
+from db import aggregate_list, get_db
 from models import CreateStaffBody, PatchStaffLineBody, PatchStaffTeamLeadBody
-from helpers import now_utc, normalize_name
+from helpers import iso, now_utc, normalize_name
+from routes_auth import MAX_ATTEMPTS
 from security import (
     hash_pin,
     serialize_user,
     require_admin,
     require_lead,
     get_current_user,
+    temporary_pin,
 )
 
 router = APIRouter(prefix="/api/staff", tags=["staff"])
@@ -69,10 +72,11 @@ async def create_staff(body: CreateStaffBody, actor: dict = Depends(get_current_
         if not lead:
             raise HTTPException(status_code=400, detail="Team lead not found or inactive")
 
+    pin = temporary_pin(body.role)
     doc = {
         "name": name,
         "name_normalized": norm,
-        "pin_hash": await asyncio.to_thread(hash_pin, "1234"),
+        "pin_hash": await asyncio.to_thread(hash_pin, pin),
         "must_change_pin": True,
         "role": body.role,
         "phone": body.phone,
@@ -87,7 +91,7 @@ async def create_staff(body: CreateStaffBody, actor: dict = Depends(get_current_
     except DuplicateKeyError:
         raise HTTPException(status_code=409, detail="Name already exists")
     doc["_id"] = res.inserted_id
-    return {"staff": serialize_user(doc)}
+    return {"staff": serialize_user(doc), "temporary_pin": pin}
 
 
 @router.get("")
@@ -97,7 +101,25 @@ async def list_staff(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
     if actor["role"] == "team_lead":
         query.update({"role": "volunteer", "team_lead_id": str(actor["_id"])})
     users = await db.users.find(query).sort("created_at", -1).to_list(500)
-    return {"staff": [serialize_user(u) for u in users]}
+    now = now_utc()
+    names = [u["name_normalized"] for u in users]
+    locked = {
+        a["identifier"].removeprefix("name:"): a["locked_until"]
+        for a in await db.login_attempts.find({
+            "identifier": {"$in": [f"name:{n}" for n in names]},
+            "count": {"$gte": MAX_ATTEMPTS}, "locked_until": {"$gt": now},
+        }).to_list(None)
+    }
+    lockouts = {row["_id"]: row for row in await aggregate_list(db.login_lockouts, [
+        {"$match": {"name_normalized": {"$in": names}, "at": {"$gte": now - timedelta(hours=24)}}},
+        {"$group": {"_id": "$name_normalized", "count": {"$sum": 1}, "sources": {"$addToSet": "$source"}}},
+    ])}
+    return {"staff": [{
+        **serialize_user(u),
+        "locked_until": iso(locked.get(u["name_normalized"])),
+        "lockouts_24h": lockouts.get(u["name_normalized"], {}).get("count", 0),
+        "lockout_sources_24h": len(lockouts.get(u["name_normalized"], {}).get("sources", [])),
+    } for u in users]}
 
 
 @router.get("/team-leads")
@@ -107,27 +129,46 @@ async def team_leads(actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     return {"team_leads": [serialize_user(u) for u in users]}
 
 
-@router.post("/{staff_id}/reset-pin")
-async def reset_staff_pin(staff_id: str, actor: dict = Depends(get_current_user)) -> Dict[str, Any]:
-    db = get_db()
+async def _managed(db: Any, staff_id: str, actor: dict) -> dict:
+    if not ObjectId.is_valid(staff_id):
+        raise HTTPException(status_code=400, detail="Invalid staff id")
     user = await db.users.find_one({"_id": ObjectId(staff_id), "deleted_at": None})
     if not user:
         raise HTTPException(status_code=404, detail="Staff not found")
-
-    if actor["role"] == "admin":
-        pass
-    elif actor["role"] == "team_lead":
+    if actor["role"] == "team_lead":
         if user.get("role") != "volunteer" or user.get("team_lead_id") != str(actor["_id"]):
-            raise HTTPException(status_code=403, detail="Cannot reset PIN for this volunteer")
-    else:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+    elif actor["role"] != "admin":
         raise HTTPException(status_code=403, detail="Insufficient permissions")
+    return user
 
+
+async def _recover(db: Any, user: dict, actor: dict, action: str) -> None:
+    await db.login_attempts.delete_one({"identifier": f"name:{user['name_normalized']}"})
+    await db.staff_audit.insert_one({
+        "action": action, "target_id": str(user["_id"]), "actor_id": str(actor["_id"]), "at": now_utc(),
+    })
+
+
+@router.post("/{staff_id}/reset-pin")
+async def reset_staff_pin(staff_id: str, actor: dict = Depends(get_current_user)) -> Dict[str, Any]:
+    db = get_db()
+    user = await _managed(db, staff_id, actor)
+    pin = temporary_pin(user["role"])
     await db.users.update_one(
         {"_id": user["_id"]},
-        {"$set": {"pin_hash": await asyncio.to_thread(hash_pin, "1234"), "must_change_pin": True},
+        {"$set": {"pin_hash": await asyncio.to_thread(hash_pin, pin), "must_change_pin": True},
          "$inc": {"session_version": 1}},
     )
-    return {"ok": True, "message": "PIN reset to 1234"}
+    await _recover(db, user, actor, "reset_pin")
+    return {"ok": True, "temporary_pin": pin}
+
+
+@router.post("/{staff_id}/unlock")
+async def unlock_staff(staff_id: str, actor: dict = Depends(get_current_user)) -> Dict[str, Any]:
+    db = get_db()
+    await _recover(db, await _managed(db, staff_id, actor), actor, "unlock")
+    return {"ok": True}
 
 
 @router.patch("/{staff_id}")
@@ -167,16 +208,7 @@ async def reassign_volunteer(staff_id: str, body: PatchStaffTeamLeadBody, actor:
 @router.patch("/{staff_id}/disable")
 async def disable_staff(staff_id: str, actor: dict = Depends(get_current_user)) -> Dict[str, Any]:
     db = get_db()
-    user = await db.users.find_one({"_id": ObjectId(staff_id), "deleted_at": None})
-    if not user:
-        raise HTTPException(status_code=404, detail="Staff not found")
-    if actor["role"] == "admin":
-        pass
-    elif actor["role"] == "team_lead":
-        if user.get("role") != "volunteer" or user.get("team_lead_id") != str(actor["_id"]):
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-    else:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    user = await _managed(db, staff_id, actor)
     if user["_id"] == actor["_id"]:
         raise HTTPException(status_code=409, detail={
             "code": "CANNOT_DISABLE_SELF",
@@ -201,17 +233,7 @@ async def disable_staff(staff_id: str, actor: dict = Depends(get_current_user)) 
 @router.patch("/{staff_id}/enable")
 async def enable_staff(staff_id: str, actor: dict = Depends(get_current_user)) -> Dict[str, Any]:
     db = get_db()
-    user = await db.users.find_one({"_id": ObjectId(staff_id), "deleted_at": None})
-    if not user:
-        raise HTTPException(status_code=404, detail="Staff not found")
-    if actor["role"] == "admin":
-        pass
-    elif actor["role"] == "team_lead":
-        if user.get("role") != "volunteer" or user.get("team_lead_id") != str(actor["_id"]):
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-    else:
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
-
+    user = await _managed(db, staff_id, actor)
     await db.users.update_one(
         {"_id": user["_id"]}, {"$set": {"disabled_at": None}}
     )
@@ -221,16 +243,7 @@ async def enable_staff(staff_id: str, actor: dict = Depends(get_current_user)) -
 @router.delete("/{staff_id}")
 async def delete_staff(staff_id: str, actor: dict = Depends(get_current_user)) -> Dict[str, Any]:
     db = get_db()
-    if not ObjectId.is_valid(staff_id):
-        raise HTTPException(status_code=400, detail="Invalid staff id")
-    user = await db.users.find_one({"_id": ObjectId(staff_id), "deleted_at": None})
-    if not user:
-        raise HTTPException(status_code=404, detail="Staff not found")
-    if actor["role"] == "team_lead":
-        if user.get("role") != "volunteer" or user.get("team_lead_id") != str(actor["_id"]):
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-    elif actor["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    user = await _managed(db, staff_id, actor)
     if user["_id"] == actor["_id"]:
         raise HTTPException(status_code=409, detail="You cannot delete your own account.")
     if user["role"] == "admin" and not user.get("disabled_at"):

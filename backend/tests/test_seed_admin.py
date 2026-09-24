@@ -6,7 +6,7 @@ from server import seed_admin
 
 
 def test_seed_admin_creates_when_missing(monkeypatch):
-    monkeypatch.setenv("ADMIN_BOOTSTRAP_PIN", "8642")
+    monkeypatch.setenv("ADMIN_BOOTSTRAP_PIN", "864200")
 
     async def run(database):
         await seed_admin()
@@ -17,7 +17,7 @@ def test_seed_admin_creates_when_missing(monkeypatch):
         assert doc["name_normalized"] == "admin"
         assert doc["role"] == "admin"
         assert doc["must_change_pin"] is True
-        assert verify_pin("8642", doc["pin_hash"])
+        assert verify_pin("864200", doc["pin_hash"])
         assert not verify_pin("1234", doc["pin_hash"])
 
     run_db(run)
@@ -28,16 +28,17 @@ def test_seed_admin_refuses_missing_or_known_pin(monkeypatch):
         monkeypatch.delenv("ADMIN_BOOTSTRAP_PIN", raising=False)
         with pytest.raises(RuntimeError):
             await seed_admin()
-        monkeypatch.setenv("ADMIN_BOOTSTRAP_PIN", "1234")
-        with pytest.raises(RuntimeError):
-            await seed_admin()
+        for pin in ("1234", "8642", "123456", "000000"):
+            monkeypatch.setenv("ADMIN_BOOTSTRAP_PIN", pin)
+            with pytest.raises(RuntimeError):
+                await seed_admin()
         assert await database.users.count_documents({}) == 0
 
     run_db(run)
 
 
 def test_seed_admin_leaves_existing_unchanged(monkeypatch):
-    monkeypatch.setenv("ADMIN_BOOTSTRAP_PIN", "8642")
+    monkeypatch.setenv("ADMIN_BOOTSTRAP_PIN", "864200")
     existing = {"name": "admin", "name_normalized": "admin", "pin_hash": "not-a-real-hash", "role": "admin"}
 
     async def run(database):

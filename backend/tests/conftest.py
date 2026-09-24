@@ -136,7 +136,7 @@ def admin_token(admin_credentials):
     if r.status_code != 200:
         pytest.fail(f"admin login failed {r.status_code}: {r.text[:300]}")
     if r.json()["user"].get("must_change_pin"):
-        new_pin = "9753" if admin_credentials["pin"] != "9753" else "8642"
+        new_pin = "975310" if admin_credentials["pin"] != "975310" else "864200"
         r = requests.post(f"{API}/auth/change-pin", json={"current_pin": admin_credentials["pin"], "new_pin": new_pin}, headers={"Authorization": f"Bearer {r.json()['access_token']}"}, timeout=30)
         assert r.status_code == 200, r.text
         admin_credentials["pin"] = new_pin

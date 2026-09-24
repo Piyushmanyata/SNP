@@ -51,7 +51,7 @@ jobs:
     env:
       SNP_LIVE_API: http://127.0.0.1:3000
       SNP_TEST_ADMIN_NAME: admin
-      SNP_TEST_ADMIN_PIN: "8642"
+      SNP_TEST_ADMIN_PIN: "864200"
       SNP_REQUIRE_LIVE_TESTS: "1"
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -75,7 +75,7 @@ jobs:
           DB_NAME: snp_ci
           JWT_SECRET: ci-jwt-secret-at-least-thirty-two-characters
           AADHAAR_HASH_PEPPER: ci-aadhaar-pepper
-          ADMIN_BOOTSTRAP_PIN: "8642"
+          ADMIN_BOOTSTRAP_PIN: "864200"
           CRON_SECRET: ci-reminder-secret
           RESTIC_PASSWORD: ci-restic-password
         run: |

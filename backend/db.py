@@ -44,6 +44,9 @@ async def init_indexes() -> None:
     await db.users.create_index("name_normalized", unique=True)
     await db.login_attempts.create_index("identifier", unique=True)
     await db.login_attempts.create_index("locked_until", expireAfterSeconds=900)
+    await db.login_lockouts.create_index("at", expireAfterSeconds=7 * 86400)
+    await db.login_sources.create_index("trusted_until", expireAfterSeconds=0)
+    await db.login_lockouts.create_index([("name_normalized", ASCENDING), ("at", ASCENDING)])
     await db.camps.create_index("is_active", unique=True, partialFilterExpression={"is_active": True})
     await db.camps.create_index(
         "setup_request_id", unique=True, partialFilterExpression={"setup_request_id": {"$type": "string"}}

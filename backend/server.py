@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from db import get_db, init_indexes
-from security import hash_pin
+from security import hash_pin, validate_pin_policy
 from helpers import now_utc
 
 import routes_auth
@@ -37,10 +37,9 @@ async def seed_admin() -> None:
     if existing is not None:
         return
     pin = (os.environ.get("ADMIN_BOOTSTRAP_PIN") or "").strip()
-    if not pin or len(pin) != 4 or not pin.isdigit():
-        raise RuntimeError("ADMIN_BOOTSTRAP_PIN must be a 4-digit PIN")
-    if pin == "1234":
-        raise RuntimeError("ADMIN_BOOTSTRAP_PIN cannot be the repository-known PIN")
+    err = validate_pin_policy(pin, "admin")
+    if err:
+        raise RuntimeError(f"ADMIN_BOOTSTRAP_PIN: {err}")
     await db.users.insert_one({
         "name": "admin",
         "name_normalized": "admin",

@@ -21,12 +21,12 @@ def _checked_sms_venue(venue: str, venue_sms: Optional[str]) -> Optional[str]:
 # ---- auth ----
 class LoginBody(BaseModel):
     name: str
-    pin: str = Field(min_length=4, max_length=4)
+    pin: str = Field(min_length=4, max_length=6)
 
 
 class ChangePinBody(BaseModel):
-    current_pin: str = Field(min_length=4, max_length=4)
-    new_pin: str = Field(min_length=4, max_length=4)
+    current_pin: str = Field(min_length=4, max_length=6)
+    new_pin: str = Field(min_length=4, max_length=6)
 
 
 class CreateStaffBody(BaseModel):

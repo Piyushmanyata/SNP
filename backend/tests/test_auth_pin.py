@@ -33,7 +33,7 @@ def test_login_and_pin_change_flow(monkeypatch):
             res = await client.post("/api/auth/change-pin", json={"current_pin": "1234", "new_pin": "123"}, headers=headers)
             assert res.status_code == 422 or res.status_code == 400
 
-            res = await client.post("/api/auth/change-pin", json={"current_pin": "1234", "new_pin": "5678"}, headers=headers)
+            res = await client.post("/api/auth/change-pin", json={"current_pin": "1234", "new_pin": "2580"}, headers=headers)
             assert res.status_code == 200
             assert "refresh_token" not in res.cookies
             assert res.json()["user"]["must_change_pin"] is False
@@ -41,7 +41,7 @@ def test_login_and_pin_change_flow(monkeypatch):
             res = await client.post("/api/auth/login", json={"name": "Ramesh Kumar", "pin": "1234"})
             assert res.status_code == 401
 
-            res = await client.post("/api/auth/login", json={"name": "Ramesh Kumar", "pin": "5678"})
+            res = await client.post("/api/auth/login", json={"name": "Ramesh Kumar", "pin": "2580"})
             assert res.status_code == 200
             assert res.json()["user"]["must_change_pin"] is False
 

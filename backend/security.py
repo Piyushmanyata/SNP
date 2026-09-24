@@ -1,4 +1,5 @@
 import os
+import secrets
 import jwt
 import bcrypt
 from datetime import timedelta
@@ -39,10 +40,25 @@ def create_access_token(user_id: str, name: str = "", role: str = "", session_ve
     return jwt.encode(payload, _secret(), algorithm=JWT_ALGORITHM)
 
 
-def validate_pin_policy(pin: str) -> str | None:
-    if not pin or len(pin) != 4 or not pin.isascii() or not pin.isdigit():
-        return "PIN must be exactly 4 digits."
+def pin_length(role: str) -> int:
+    return 6 if role in ("admin", "team_lead") else 4
+
+
+def validate_pin_policy(pin: str, role: str) -> str | None:
+    length = pin_length(role)
+    if len(pin) != length or not pin.isascii() or not pin.isdigit():
+        return f"PIN must be exactly {length} digits."
+    if len(set(pin)) == 1 or pin in "0123456789" or pin in "9876543210":
+        return "Choose a PIN that is not one digit repeated or a straight run like 1234."
     return None
+
+
+def temporary_pin(role: str) -> str:
+    length = pin_length(role)
+    while True:
+        pin = f"{secrets.randbelow(10 ** length):0{length}d}"
+        if validate_pin_policy(pin, role) is None:
+            return pin
 
 
 def serialize_user(user: dict) -> dict:
@@ -50,6 +66,7 @@ def serialize_user(user: dict) -> dict:
         "id": str(user["_id"]),
         "name": user.get("name"),
         "role": user["role"],
+        "pin_length": pin_length(user["role"]),
         "phone": user.get("phone"),
         "team_lead_id": user.get("team_lead_id"),
         "line": user.get("line"),

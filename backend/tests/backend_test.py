@@ -401,13 +401,14 @@ def _clinical(admin):
     name = f"TEST flow clinical {TAG}"
     created = admin.post(f"{API}/staff", json={"name": name, "role": "clinical_desk_operator"}, timeout=30)
     assert created.status_code == 200, created.text
+    temporary = created.json()["temporary_pin"]
     s = requests.Session()
     s.headers.update({"Content-Type": "application/json"})
-    logged = s.post(f"{API}/auth/login", json={"name": name, "pin": "1234"}, timeout=30)
+    logged = s.post(f"{API}/auth/login", json={"name": name, "pin": temporary}, timeout=30)
     assert logged.status_code == 200, logged.text
-    changed = s.post(f"{API}/auth/change-pin", json={"current_pin": "1234", "new_pin": "5678"}, timeout=30)
+    changed = s.post(f"{API}/auth/change-pin", json={"current_pin": temporary, "new_pin": "2580"}, timeout=30)
     assert changed.status_code == 200, changed.text
-    logged = s.post(f"{API}/auth/login", json={"name": name, "pin": "5678"}, timeout=30)
+    logged = s.post(f"{API}/auth/login", json={"name": name, "pin": "2580"}, timeout=30)
     assert logged.status_code == 200, logged.text
     s.headers.update({"Authorization": f"Bearer {logged.json()['access_token']}"})
     STATE["clinical_http"] = s
@@ -798,11 +799,14 @@ class TestStaff:
             r = admin.post(f"{API}/staff", json={"name": name, "role": role}, timeout=30)
             assert r.status_code == 200, f"{role}: {r.text}"
             assert r.json()["staff"]["role"] == role
-            STATE[role] = {"name": name, "pin": "5678", "id": r.json()["staff"]["id"]}
+            temporary = r.json()["temporary_pin"]
+            assert len(temporary) == (6 if role == "team_lead" else 4)
+            personal = "586042" if role == "team_lead" else "2580"
+            STATE[role] = {"name": name, "pin": personal, "id": r.json()["staff"]["id"]}
             session = requests.Session()
-            logged_in = session.post(f"{API}/auth/login", json={"name": name, "pin": "1234"}, timeout=30)
+            logged_in = session.post(f"{API}/auth/login", json={"name": name, "pin": temporary}, timeout=30)
             assert logged_in.status_code == 200, logged_in.text
-            changed = session.post(f"{API}/auth/change-pin", json={"current_pin": "1234", "new_pin": "5678"}, timeout=30)
+            changed = session.post(f"{API}/auth/change-pin", json={"current_pin": temporary, "new_pin": personal}, timeout=30)
             assert changed.status_code == 200, changed.text
 
         r = admin.post(f"{API}/staff", json={"name": accounts[0][1], "role": "volunteer"}, timeout=30)
