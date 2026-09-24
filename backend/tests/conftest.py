@@ -1,23 +1,65 @@
 import asyncio
+import importlib
 import os
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
+from pymongo import monitoring
 
+BACKEND_DIR = Path(__file__).resolve().parents[1]
 TEST_MONGO_URL = os.environ.get(
     "SNP_TEST_MONGO_URL", "mongodb://127.0.0.1:27017/?replicaSet=rs0&directConnection=true"
 )
+FROZEN_IST = "2026-10-05T09:00"
 
 
-def run_db(body):
+def freeze_clock(monkeypatch, ist=FROZEN_IST):
+    importlib.import_module("server")
+    import helpers
+    frozen = datetime.fromisoformat(ist).replace(tzinfo=ZoneInfo("Asia/Kolkata"))
+    fakes = {
+        "now_ist": (helpers.now_ist, lambda: frozen),
+        "now_utc": (helpers.now_utc, lambda: frozen.astimezone(timezone.utc)),
+    }
+    for module in list(sys.modules.values()):
+        if Path(getattr(module, "__file__", None) or ".").parent != BACKEND_DIR:
+            continue
+        for name, (real, fake) in fakes.items():
+            if getattr(module, name, None) is real:
+                monkeypatch.setattr(module, name, fake)
+    return frozen
+
+
+class CommandLog(monitoring.CommandListener):
+    def __init__(self):
+        self.commands = []
+
+    def started(self, event):
+        self.commands.append((event.command_name, event.command.get(event.command_name)))
+
+    def succeeded(self, event):
+        pass
+
+    def failed(self, event):
+        pass
+
+    def count(self, command, collection=None):
+        return sum(1 for name, target in self.commands if name == command and collection in (None, target))
+
+
+def run_db(body, listener=None):
     import db
     from pymongo import AsyncMongoClient
 
     async def main():
-        client = AsyncMongoClient(TEST_MONGO_URL, serverSelectionTimeoutMS=5000)
+        client = AsyncMongoClient(
+            TEST_MONGO_URL, serverSelectionTimeoutMS=5000, event_listeners=[listener] if listener else [],
+        )
         name = f"snp_t_{uuid4().hex[:8]}"
         database = client[name]
         db._client, db._db = client, database
@@ -33,27 +75,13 @@ def run_db(body):
 
 
 def pytest_configure(config):
-    backend_dir = str(Path(__file__).resolve().parents[1])
-    if backend_dir not in sys.path:
-        sys.path.insert(0, backend_dir)
+    if str(BACKEND_DIR) not in sys.path:
+        sys.path.insert(0, str(BACKEND_DIR))
     os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
     os.environ.setdefault("DB_NAME", "snp_test")
     os.environ.setdefault("AADHAAR_HASH_PEPPER", "test-pepper")
-    import routes_registration
-    original = routes_registration.desk_register
 
-    async def allowing_fixtures(body, *args, **kwargs):
-        if (
-            not body.aadhaar_scanned
-            and body.failed_scan_attempts < 3
-            and not (body.manual_reason or "").strip()
-        ):
-            body.failed_scan_attempts = 3
-            body.manual_reason = "scanner unavailable"
-        return await original(body, *args, **kwargs)
 
-    routes_registration.desk_register_strict = original
-    routes_registration.desk_register = allowing_fixtures
 try:
     import requests
 except ImportError:
