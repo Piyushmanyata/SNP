@@ -221,7 +221,7 @@ jobs:
         run: docker compose -f docker-compose.prod.yml -f docker-compose.prod-ci.yml -p snp-e2e up -d --build --wait --wait-timeout 300
       - run: npm ci
       - run: npx playwright install --with-deps chromium
-      - run: npx playwright test
+      - run: npm run e2e
       - name: Compose logs
         if: failure()
         working-directory: .

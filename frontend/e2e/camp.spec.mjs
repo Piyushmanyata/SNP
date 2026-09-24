@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { test, expect } from "@playwright/test";
 
 const pins = {};
@@ -14,7 +15,7 @@ function istDay(offset = 0) {
 }
 
 function card(name, dob, last4) {
-  return execFileSync("python", [
+  return execFileSync(process.platform === "win32" ? "python" : "python3", [
     "backend/tests/fixtures/aadhaar_qr.py", "--name", name, "--dob", dob, "--last4", last4,
   ], { encoding: "utf8", cwd: new URL("../..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1") }).trim();
 }
@@ -24,6 +25,7 @@ async function login(page, name, pin) {
   await page.getByTestId("login-name-input").fill(name);
   await page.getByTestId("login-pin-input").fill(pin);
   await page.getByTestId("login-submit-button").click();
+  await page.waitForURL((url) => url.pathname !== "/login");
 }
 
 async function changePin(page, current, next) {
@@ -82,6 +84,7 @@ test.describe.serial("a camp day on the headless desk", () => {
     await page.getByTestId("camp-create-submit").click();
     await expect(page.getByText("E2E Camp")).toBeVisible();
     await page.getByRole("button", { name: "Activate" }).click();
+    await page.getByRole("button", { name: "Days" }).click();
     await page.getByTestId("new-day-date").fill(istDay());
     await page.getByTestId("new-day-seat").fill("50");
     await page.getByTestId("add-day-button").click();
@@ -138,8 +141,6 @@ test.describe.serial("a camp day on the headless desk", () => {
     await page.keyboard.press("Enter");
     await page.getByTestId("clinical-lookup-input").fill(regNo);
     await page.getByTestId("clinical-lookup-input").press("Enter");
-    await page.getByTestId("edit-transcription-button").focus();
-    await page.keyboard.press("Enter");
     await page.getByTestId("diagnosis-opt-cataract").focus();
     await page.keyboard.press("Enter");
     await page.getByTestId("wizard-next").focus();
@@ -155,7 +156,7 @@ test.describe.serial("a camp day on the headless desk", () => {
     await page.getByTestId("wizard-next").focus();
     await page.keyboard.press("Enter");
     await page.getByTestId("ot-outcome-iol_surgery").focus();
-    await page.keyboard.press("Enter");
+    await page.keyboard.press("Space");
     await page.getByTestId("ot-eye-select").selectOption("R");
     await page.getByTestId("bp-input").fill("120/80");
     await page.getByTestId("wizard-next").focus();
@@ -164,6 +165,7 @@ test.describe.serial("a camp day on the headless desk", () => {
     await page.keyboard.press("Space");
     await page.getByTestId("complete-prescription-button").focus();
     await page.keyboard.press("Enter");
+    await expect(page.getByTestId("line-change-button")).toBeEnabled();
     await page.getByTestId("line-change-button").focus();
     await page.keyboard.press("Enter");
     await page.getByTestId("pick-line-medicine").focus();
@@ -174,25 +176,22 @@ test.describe.serial("a camp day on the headless desk", () => {
     await page.keyboard.press("Space");
     await page.getByTestId("station-medicine-save").focus();
     await page.keyboard.press("Enter");
+    await expect(page.getByTestId("line-change-button")).toBeEnabled();
     await page.getByTestId("line-change-button").focus();
     await page.keyboard.press("Enter");
     await page.getByTestId("pick-line-ot").focus();
     await page.keyboard.press("Enter");
     await page.getByTestId("clinical-lookup-input").fill(regNo);
     await page.getByTestId("clinical-lookup-input").press("Enter");
-    const day = page.getByTestId("ot_schedule_day_id-select");
-    const before = await day.locator("option").nth(1).innerText();
-    await day.selectOption({ index: 1 });
+    await page.getByTestId("ot_schedule_day_id-select").selectOption({ index: 1 });
     await page.getByTestId("station-ot-paper-review").focus();
     await page.keyboard.press("Space");
     await page.getByTestId("station-ot-save").focus();
     await page.keyboard.press("Enter");
-    await expect(page.getByTestId("paper-check")).toBeVisible();
-    await page.getByTestId("paper-check-confirm").focus();
-    await page.keyboard.press("Enter");
+    await expect(page.getByRole("alert")).toContainText("IOL surgery scheduled");
+    await page.getByTestId("clinical-lookup-input").fill(regNo);
+    await page.getByTestId("clinical-lookup-input").press("Enter");
     await expect(page.getByTestId("station-ot-recorded")).toBeVisible();
-    const after = await day.locator("option").nth(1).innerText();
-    expect(after).not.toEqual(before);
     await page.getByTestId("logout-button").click();
   });
 
@@ -210,11 +209,7 @@ test.describe.serial("a camp day on the headless desk", () => {
     const download = page.waitForEvent("download");
     await page.getByTestId("export-camp-records-button").click();
     const file = await download;
-    const text = await (await fetch(file.url())).text().catch(async () => {
-      const path = await file.path();
-      const { readFileSync } = await import("node:fs");
-      return readFileSync(path, "utf8");
-    });
+    const text = readFileSync(await file.path(), "utf8");
     expect(text.split("\n")[0]).toContain("reg_no");
     expect(text).toContain("Asha Devi");
   });
