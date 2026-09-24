@@ -61,7 +61,7 @@ Restore an archive into an isolated MongoDB instance first using `mongorestore -
 
 Use Node 24 and Python 3.12. Frontend: `npm ci`, `npm run lint`, `npm test -- --runInBand`, `npm run build` from `frontend/`.
 
-Backend: install `backend/requirements-dev.txt`, run `python -m compileall -q backend`, `python -m flake8 --select=F,E9 backend`, and `python -m pytest backend/tests -q`.
+Backend: install `backend/requirements-dev.txt`, run `python -m compileall -q backend`, `python -m flake8 --select=F,E9 backend`, and `python -m pytest backend/tests -q`. The in-process tests need the `rs0` replica set: `docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --wait mongo` publishes it on `127.0.0.1:27017`. Each test creates and drops its own `snp_t_<id>` database; set `SNP_TEST_MONGO_URL` to use another server.
 
 The complete backend suite includes live HTTP tests. Run it serially against a fresh isolated Docker project with `SNP_LIVE_API=http://localhost:3000`, `SNP_TEST_ADMIN_NAME=admin`, and `SNP_TEST_ADMIN_PIN=8642`. It changes the bootstrap PIN and creates synthetic camp records. Without a live endpoint, those integration tests are explicitly skipped.
 

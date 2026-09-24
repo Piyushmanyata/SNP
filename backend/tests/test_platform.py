@@ -7,6 +7,7 @@ from fastapi import FastAPI
 
 import db
 from conftest import run_db
+from seed import asgi_client, bearer, run_camp, user_doc
 from server import request_context
 
 
@@ -87,3 +88,13 @@ def test_an_unhandled_error_returns_a_quotable_code_and_logs_no_patient_data():
     logged = json.dumps(lines)
     assert "RuntimeError" in logged and detail["request_id"] in logged
     assert "9876543210" not in logged and "Ramesh" not in logged
+
+
+def test_a_token_signed_under_a_past_frozen_clock_still_authenticates(monkeypatch):
+    async def body(database):
+        user_id = (await database.users.insert_one(user_doc("Lead", "team_lead"))).inserted_id
+        async with asgi_client() as client:
+            response = await client.get("/api/auth/me", headers=bearer(user_id, "Lead", "team_lead"))
+        assert response.status_code == 200, response.text
+
+    run_camp(monkeypatch, body, ist="2020-01-01T09:00")

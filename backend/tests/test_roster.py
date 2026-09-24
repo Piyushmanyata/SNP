@@ -1,18 +1,15 @@
 """Roster API is unregistered; new records attribute authenticated user ids only."""
 import inspect
 
-import httpx
 from bson import ObjectId
 
-import security
-import server
 from db import init_indexes
 from models import ScanBody
 from routes_clinical import record_fulfilment
 from routes_desk import print_prescription, scan
 from routes_reports import leaderboard
 from security import hash_pin
-from seed import CARD, fulfil, patient_doc, register, run_camp, seed_camp, seen_patient, user_doc
+from seed import CARD, bearer, fulfil, http, patient_doc, register, run_camp, seed_camp, seen_patient, user_doc
 
 VOLUNTEER = {"_id": ObjectId(), "role": "volunteer", "name": "Desk 1"}
 TEAM_LEAD = {"_id": ObjectId(), "role": "team_lead", "name": "Lead"}
@@ -24,30 +21,15 @@ SCANNED = {
 }
 
 
-def _http(monkeypatch, body):
-    monkeypatch.setenv("JWT_SECRET", "test-jwt-secret")
-
-    async def with_client(database):
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test") as client:
-            return await body(database, client)
-
-    return run_camp(monkeypatch, with_client)
-
-
 async def _user(database, actor):
     await database.users.insert_one(user_doc(actor["name"], actor["role"], _id=actor["_id"], pin_hash=hash_pin("2468")))
-
-
-def _auth(actor):
-    token = security.create_access_token(str(actor["_id"]), actor["name"], actor["role"])
-    return {"Authorization": f"Bearer {token}"}
 
 
 class TestRosterUnregistered:
     def test_roster_routes_are_not_registered(self, monkeypatch):
         async def body(database, client):
             await _user(database, ADMIN)
-            headers = _auth(ADMIN)
+            headers = bearer(ADMIN["_id"], ADMIN["name"], ADMIN["role"])
             listed = await client.get("/api/roster", headers=headers)
             created = await client.post(
                 "/api/roster",
@@ -61,7 +43,7 @@ class TestRosterUnregistered:
             assert disabled.status_code == 404
             assert enabled.status_code == 404
 
-        _http(monkeypatch, body)
+        http(monkeypatch, body)
 
     def test_init_indexes_does_not_create_roster_index(self):
         assert "roster.create_index" not in inspect.getsource(init_indexes)
@@ -72,22 +54,22 @@ class TestOnDeskVolunteerHeader:
         async def body(database, client):
             await seed_camp(database)
             await _user(database, VOLUNTEER)
-            r = await client.post("/api/desk/scan", json={"payload": CARD}, headers=_auth(VOLUNTEER))
+            r = await client.post("/api/desk/scan", json={"payload": CARD}, headers=bearer(VOLUNTEER["_id"], VOLUNTEER["name"], VOLUNTEER["role"]))
             assert r.status_code != 428
             assert r.status_code == 200
 
-        _http(monkeypatch, body)
+        http(monkeypatch, body)
 
     def test_team_lead_without_header_is_not_refused(self, monkeypatch):
         async def body(database, client):
             await seed_camp(database)
             await _user(database, TEAM_LEAD)
-            r = await client.post("/api/desk/scan", json={"payload": CARD}, headers=_auth(TEAM_LEAD))
+            r = await client.post("/api/desk/scan", json={"payload": CARD}, headers=bearer(TEAM_LEAD["_id"], TEAM_LEAD["name"], TEAM_LEAD["role"]))
             assert r.status_code != 428
             assert r.status_code == 200
             assert r.json()["outcome"] == "no_match"
 
-        _http(monkeypatch, body)
+        http(monkeypatch, body)
 
 
 class TestAuthenticatedAttribution:

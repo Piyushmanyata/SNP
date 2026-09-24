@@ -2,9 +2,12 @@ from datetime import date, datetime, timedelta, timezone
 from itertools import count
 from xml.etree.ElementTree import Element, tostring
 
+import httpx
 from bson import ObjectId
 
 import msg91
+import security
+import server
 import sms
 from conftest import FROZEN_IST, freeze_clock, run_db
 from helpers import IST
@@ -39,7 +42,6 @@ OTHER_CARD = '<PrintLetterBarcodeData name="Ram Prasad" gender="M" dob="1968-01-
 RX = {"r_sph": "-1.00", "l_sph": "-1.25", "add": "+2.00"}
 MEDICINE = {"medicine_id": str(ObjectId()), "name": "Moxifloxacin"}
 MEDICINE_ALT = {"medicine_id": str(ObjectId()), "name": "Chloramphenicol"}
-STOCKED_POWERS = (-1.5, 2.0, 2.25)
 FIXED_POWER = 2.0
 
 
@@ -47,22 +49,34 @@ class Request:
     client = None
 
 
-async def seed_catalogue(database):
-    await database.medicines.insert_many([
-        {"_id": ObjectId(m["medicine_id"]), "name": m["name"], "name_key": m["name"].casefold(), "active": True}
-        for m in (MEDICINE, MEDICINE_ALT)
-    ])
-    await database.fixed_powers.insert_many([{"value": value, "active": True} for value in STOCKED_POWERS])
-
-
 def run_camp(monkeypatch, body, ist=FROZEN_IST, listener=None):
     freeze_clock(monkeypatch, ist)
 
     async def seeded(database):
-        await seed_catalogue(database)
+        await database.medicines.insert_many([
+            {"_id": ObjectId(m["medicine_id"]), "name": m["name"], "name_key": m["name"].casefold(), "active": True}
+            for m in (MEDICINE, MEDICINE_ALT)
+        ])
+        await database.fixed_powers.insert_many([{"value": value, "active": True} for value in (-1.5, 2.0, 2.25)])
         return await body(database)
 
     return run_db(seeded, listener)
+
+
+def asgi_client():
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://testserver")
+
+
+def http(monkeypatch, body):
+    async def with_client(database):
+        async with asgi_client() as client:
+            return await body(database, client)
+
+    return run_camp(monkeypatch, with_client)
+
+
+def bearer(user_id, name="", role=""):
+    return {"Authorization": f"Bearer {security.create_access_token(str(user_id), name, role)}"}
 
 
 async def seed_camp(database, days=(TODAY,), **camp):

@@ -16,6 +16,7 @@ TEST_MONGO_URL = os.environ.get(
     "SNP_TEST_MONGO_URL", "mongodb://127.0.0.1:27017/?replicaSet=rs0&directConnection=true"
 )
 FROZEN_IST = "2026-10-05T09:00"
+JWT_SIGNED_ON_REAL_CLOCK = "security"
 
 
 def freeze_clock(monkeypatch, ist=FROZEN_IST):
@@ -27,6 +28,8 @@ def freeze_clock(monkeypatch, ist=FROZEN_IST):
         "now_utc": (helpers.now_utc, lambda: frozen.astimezone(timezone.utc)),
     }
     for module in list(sys.modules.values()):
+        if module.__name__ == JWT_SIGNED_ON_REAL_CLOCK:
+            continue
         if Path(getattr(module, "__file__", None) or ".").parent != BACKEND_DIR:
             continue
         for name, (real, fake) in fakes.items():
@@ -47,9 +50,6 @@ class CommandLog(monitoring.CommandListener):
 
     def failed(self, event):
         pass
-
-    def count(self, command, collection=None):
-        return sum(1 for name, target in self.commands if name == command and collection in (None, target))
 
 
 def run_db(body, listener=None):
@@ -80,6 +80,8 @@ def pytest_configure(config):
     os.environ.setdefault("MONGO_URL", "mongodb://localhost:27017")
     os.environ.setdefault("DB_NAME", "snp_test")
     os.environ.setdefault("AADHAAR_HASH_PEPPER", "test-pepper")
+    os.environ.setdefault("JWT_SECRET", "test-jwt-secret-of-at-least-32-bytes")
+    os.environ.setdefault("COOKIE_SECURE", "false")
 
 
 try:

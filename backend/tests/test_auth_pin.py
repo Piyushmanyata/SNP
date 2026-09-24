@@ -4,21 +4,13 @@ import time
 import pytest
 from bson import ObjectId
 from fastapi import HTTPException, Request, Response
-from httpx import ASGITransport, AsyncClient
 
 import routes_auth
 import routes_staff
-import server as server_mod
 from conftest import run_db
 from models import LoginBody
 from security import hash_pin
-from seed import NOW, user_doc
-
-
-def _client(monkeypatch):
-    monkeypatch.setenv("JWT_SECRET", "auth-pin-test-secret-at-least-32-bytes")
-    monkeypatch.setenv("COOKIE_SECURE", "false")
-    return AsyncClient(transport=ASGITransport(app=server_mod.app), base_url="http://testserver")
+from seed import NOW, asgi_client, user_doc
 
 
 def test_login_and_pin_change_flow(monkeypatch):
@@ -27,7 +19,7 @@ def test_login_and_pin_change_flow(monkeypatch):
             "Ramesh Kumar", pin_hash=hash_pin("1234"), must_change_pin=True,
         ))
 
-        async with _client(monkeypatch) as client:
+        async with asgi_client() as client:
             res = await client.post("/api/auth/login", json={"name": "Ramesh Kumar", "pin": "0000"})
             assert res.status_code == 401
 
@@ -65,7 +57,7 @@ def test_changing_pin_invalidates_other_sessions_and_keeps_current_session(monke
         await database.users.insert_one(user_doc(
             "Operator", "clinical_desk_operator", pin_hash=hash_pin("5678"), must_change_pin=False,
         ))
-        async with _client(monkeypatch) as client:
+        async with asgi_client() as client:
             login = await client.post("/api/auth/login", json={"name": "Operator", "pin": "5678"})
             previous_token = login.json()["access_token"]
             changed = await client.post("/api/auth/change-pin", json={"current_pin": "5678", "new_pin": "2468"})

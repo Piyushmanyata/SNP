@@ -90,8 +90,7 @@ def test_scan_confirm_rejects_a_wrong_camp_or_stale_candidate(monkeypatch):
         with pytest.raises(HTTPException) as exc:
             await scan_confirm(ScanConfirmBody(patient_id=patient_id, payload=CARD), actor=ACTOR)
         assert exc.value.detail["code"] == "STALE_CANDIDATE"
-        assert log.count("findAndModify", "patients") == 0
-        assert log.count("update", "patients") == 0
+        assert [name for name, target in log.commands if target == "patients" and name in ("findAndModify", "update")] == []
         stored = await database.patients.find_one({"_id": ObjectId(patient_id)})
         assert stored.get("aadhaar_scanned") is not True
         assert stored["full_name"] == "Other Person"

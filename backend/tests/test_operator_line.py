@@ -1,28 +1,20 @@
 """Operator line, fulfilment matrix, correction, and camp-records export."""
-import httpx
 import pytest
 from bson import ObjectId
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-import security
-import server
 from models import CorrectionBody, CreateStaffBody, PatchStaffLineBody
 from routes_clinical import add_correction, record_fulfilment
 from routes_reports import export_camp_records
 from routes_staff import create_staff, list_staff, patch_staff_line
 from seed import (
-    ADMIN, CLINICAL, FIXED_POWER, MEDICINE, OTHER_DAY, TOMORROW, fulfil, recorder, run_camp, seed_camp, seen_patient,
-    user_doc,
+    ADMIN, CLINICAL, FIXED_POWER, MEDICINE, OTHER_DAY, TOMORROW, asgi_client, bearer, fulfil, recorder, run_camp, seed_camp,
+    seen_patient, user_doc,
 )
 
 PASS = "ClinicLine1!"
 LINES = ("rx", "medicine", "specs_fixed", "specs_made", "ot")
-
-
-def _client(monkeypatch):
-    monkeypatch.setenv("JWT_SECRET", "test-jwt-secret-of-at-least-32-bytes")
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test")
 
 
 def _issue(seen, rev_id=None, **kw):
@@ -86,8 +78,7 @@ class TestOperatorLine:
         run_camp(monkeypatch, body)
 
     def test_patch_refuses_a_non_admin(self, monkeypatch):
-        client = _client(monkeypatch)
-        token = security.create_access_token(str(CLINICAL["_id"]), "Clin")
+        client = asgi_client()
 
         async def body(database):
             created = await create_staff(CreateStaffBody(
@@ -101,7 +92,7 @@ class TestOperatorLine:
                 r = await client.patch(
                     f"/api/staff/{created['staff']['id']}",
                     json={"line": "ot"},
-                    headers={"Authorization": f"Bearer {token}"},
+                    headers=bearer(CLINICAL["_id"], "Clin"),
                 )
             assert r.status_code == 403
 
@@ -114,7 +105,7 @@ class TestOperatorLine:
             PatchStaffLineBody(line="rx", role="admin")
 
     def test_listing_and_login_carry_line(self, monkeypatch):
-        client = _client(monkeypatch)
+        client = asgi_client()
 
         async def body(database):
             await create_staff(CreateStaffBody(name="Med", role="clinical_desk_operator", line="medicine"), actor=ADMIN)

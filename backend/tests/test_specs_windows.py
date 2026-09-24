@@ -1,26 +1,14 @@
 """Specs collection days are date/venue/time windows with no capacity."""
-import httpx
 import pytest
 from bson import ObjectId
 from fastapi import HTTPException
 
 import helpers
 import routes_clinical
-import security
-import server
 from routes_clinical import record_fulfilment
-from seed import CLINICAL, TODAY, day, fulfil, recorder, run_camp, seed_camp, seen_patient, user_doc
+from seed import CLINICAL, TODAY, asgi_client, bearer, day, fulfil, recorder, run_camp, seed_camp, seen_patient, user_doc
 
 FUTURE = day(7)
-
-
-def _headers(monkeypatch, user_id, role):
-    monkeypatch.setenv("JWT_SECRET", "test-jwt-secret-of-at-least-32-bytes")
-    return {"Authorization": f"Bearer {security.create_access_token(str(user_id), role, role)}"}
-
-
-def _client():
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test")
 
 
 def _post_specs_day(client, headers, camp_id, **fields):
@@ -44,11 +32,11 @@ def _defer(seen, day_id, operation_id):
 
 def test_specs_create_update_list_window_contract(monkeypatch):
     admin_id = ObjectId()
-    headers = _headers(monkeypatch, admin_id, "admin")
+    headers = bearer(admin_id, "admin", "admin")
 
     async def body(database):
         camp_id = await _camp_with_admin(database, admin_id)
-        async with _client() as client:
+        async with asgi_client() as client:
             created = await _post_specs_day(client, headers, camp_id, venue="Optical")
             assert created.status_code == 200
             assert created.json()["specs_day"]["start_time"] == "10:00"
@@ -92,13 +80,13 @@ def test_specs_create_update_list_window_contract(monkeypatch):
 
 def test_specs_rejects_inactive_past_malformed_and_same_day_ended_window(monkeypatch):
     admin_id = ObjectId()
-    headers = _headers(monkeypatch, admin_id, "admin")
+    headers = bearer(admin_id, "admin", "admin")
 
     async def body(database):
         camp_id = await _camp_with_admin(database, admin_id)
         other = (await database.camps.insert_one({"name": "Other", "venue": "X", "is_active": False})).inserted_id
         window = {"venue": "Hall", "start_time": "09:00", "end_time": "11:00"}
-        async with _client() as client:
+        async with asgi_client() as client:
             assert (await _post_specs_day(client, headers, other, **window)).status_code == 400
             assert (await _post_specs_day(client, headers, "not-an-id", **window)).status_code == 400
             assert (await _post_specs_day(client, headers, camp_id, **{**window, "day_date": day(-1)})).status_code == 400
@@ -157,14 +145,14 @@ def test_clinical_specs_picker_rejects_ended_cross_camp_legacy_and_malformed(mon
 
 def test_specs_token_snapshot_survives_later_schedule_edit(monkeypatch):
     admin_id, operator_id = ObjectId(), ObjectId()
-    headers = _headers(monkeypatch, admin_id, "admin")
-    operator = _headers(monkeypatch, operator_id, "clinical_desk_operator")
+    headers = bearer(admin_id, "admin", "admin")
+    operator = bearer(operator_id, "clinical_desk_operator", "clinical_desk_operator")
 
     async def body(database):
         camp_id = await _camp_with_admin(database, admin_id)
         await database.users.insert_one(user_doc("Op", role="clinical_desk_operator", _id=operator_id))
         seen = await seen_patient(database, camp_id)
-        async with _client() as client:
+        async with asgi_client() as client:
             created = await _post_specs_day(client, headers, camp_id, venue="Optical Desk")
             out = await _defer(seen, created.json()["specs_day"]["id"], "op-snap")
             assert out["slip"]["collection_start_time"] == "10:00"
@@ -185,12 +173,12 @@ def test_specs_token_snapshot_survives_later_schedule_edit(monkeypatch):
 
 def test_specs_window_spans_days_from_a_morning_start_to_an_evening_end(monkeypatch):
     admin_id = ObjectId()
-    headers = _headers(monkeypatch, admin_id, "admin")
+    headers = bearer(admin_id, "admin", "admin")
     until = day(14)
 
     async def body(database):
         camp_id = await _camp_with_admin(database, admin_id)
-        async with _client() as client:
+        async with asgi_client() as client:
             def post(**overrides):
                 return _post_specs_day(client, headers, camp_id, **{
                     "end_date": until, "venue": "SNP कार्यालय, देवघर", "start_time": "10:00", "end_time": "17:00",

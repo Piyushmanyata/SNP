@@ -39,9 +39,9 @@ A provider success followed by a failed ledger write leaves the claim pending an
 
 ## Verification
 
-`python -m pytest backend/tests/test_registration_staff_production.py backend/tests/test_auth_pin.py backend/tests/test_adversarial_challenger.py::TestRegistrationDecomposedAndInvariants backend/tests/test_hardening.py backend/tests/test_camp_operations_matrix.py -q`
+`python -m pytest backend/tests/test_registration_staff_production.py backend/tests/test_auth_pin.py backend/tests/test_registration_invariants.py backend/tests/test_hardening.py backend/tests/test_camp_operations_matrix.py -q`
 
-Regression cases exercise sparse-index null collisions, uniqueness races, account disable/enable token revocation, public error privacy, mismatched request replays, an arrival-day change followed by a valid retry, and invalid versus valid leap dates. Database race outcomes are injected into the existing in-memory test database; production-stack verification is separate.
+Regression cases exercise sparse-index null collisions, uniqueness races, account disable/enable token revocation, public error privacy, mismatched request replays, an arrival-day change followed by a valid retry, and invalid versus valid leap dates. Each test runs against its own real MongoDB database; races are forced into a fixed order with barriers. Production-stack verification is separate.
 
 `python -m pytest backend/tests/test_registration_sms_reliability.py backend/tests/test_reminders.py -q` also covers generated-code collisions, unrelated unique-index failures, database failures during SMS bookkeeping, and prevention of repeat sends after provider acceptance.
 

@@ -1,40 +1,21 @@
-import httpx
 from bson import ObjectId
 
-import security
-import server
 from security import hash_pin
-from seed import patient_doc, run_camp, seed_camp, user_doc
-
-
-def _http(monkeypatch, body):
-    monkeypatch.setenv("JWT_SECRET", "test-jwt-secret")
-    monkeypatch.setenv("COOKIE_SECURE", "false")
-
-    async def with_client(database):
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test") as client:
-            return await body(database, client)
-
-    return run_camp(monkeypatch, with_client)
-
-
-def _auth(user_id, name, role):
-    token = security.create_access_token(str(user_id), name, role)
-    return {"Authorization": f"Bearer {token}"}
+from seed import bearer, http, patient_doc, seed_camp, user_doc
 
 
 def test_staff_creation_delegation_and_pin_reset(monkeypatch):
     async def body(database, client):
         admin_id = ObjectId()
         await database.users.insert_one(user_doc("admin", "admin", _id=admin_id, pin_hash=hash_pin("1234")))
-        admin_headers = _auth(admin_id, "admin", "admin")
+        admin_headers = bearer(admin_id, "admin", "admin")
 
         res = await client.post("/api/staff", json={"name": "Lead One", "role": "team_lead"}, headers=admin_headers)
         assert res.status_code == 200
         lead_id = res.json()["staff"]["id"]
         await database.users.update_one({"_id": ObjectId(lead_id)}, {"$set": {"must_change_pin": False}})
 
-        lead_headers = _auth(lead_id, "Lead One", "team_lead")
+        lead_headers = bearer(lead_id, "Lead One", "team_lead")
 
         res = await client.post("/api/staff", json={"name": "Vol Alpha", "role": "volunteer"}, headers=lead_headers)
         assert res.status_code == 200
@@ -82,7 +63,7 @@ def test_staff_creation_delegation_and_pin_reset(monkeypatch):
         assert "Vol Other" not in names
         assert "Desk Op" not in names
 
-    _http(monkeypatch, body)
+    http(monkeypatch, body)
 
 
 def test_dual_leaderboard_scoring(monkeypatch):
@@ -107,7 +88,7 @@ def test_dual_leaderboard_scoring(monkeypatch):
                         registrar_team_lead_id=str(lead2_id), committed_revision_id=None, arrived_by=str(vol3_id)),
         ])
 
-        res = await client.get("/api/leaderboard", headers=_auth(lead1_id, "Lead One", "team_lead"))
+        res = await client.get("/api/leaderboard", headers=bearer(lead1_id, "Lead One", "team_lead"))
         assert res.status_code == 200
         data = res.json()
 
@@ -124,4 +105,4 @@ def test_dual_leaderboard_scoring(monkeypatch):
         assert leads_by_name["Lead One"]["points"] == 2
         assert leads_by_name["Lead Two"]["points"] == 0
 
-    _http(monkeypatch, body)
+    http(monkeypatch, body)
