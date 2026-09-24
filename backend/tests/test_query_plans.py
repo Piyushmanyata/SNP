@@ -91,12 +91,13 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
         group_plans = {
             "leaderboard": {"aggregate": "patients", "pipeline": [
                 {"$match": {"camp_id": camp}},
-                {"$facet": {
-                    "registrations": [{"$group": {"_id": "$created_by", "count": {"$sum": 1}}}],
-                    "completed": [
-                        {"$match": {"committed_revision_id": {"$ne": None}, "is_self_registered": {"$ne": True}}},
-                        {"$group": {"_id": "$created_by", "count": {"$sum": 1}}},
-                    ],
+                {"$group": {
+                    "_id": {"volunteer": "$created_by", "team_lead": "$registrar_team_lead_id"},
+                    "registered": {"$sum": 1},
+                    "completed": {"$sum": {"$cond": [{"$and": [
+                        {"$gt": ["$committed_revision_id", None]},
+                        {"$ne": ["$is_self_registered", True]},
+                    ]}, 1, 0]}},
                 }},
             ], "cursor": {}},
             "board fulfilment": {"aggregate": "fulfilments", "pipeline": [
@@ -129,7 +130,7 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
         for name, command in group_plans.items():
             stages = _stages(await _winning(db, command))
             assert "COLLSCAN" not in stages, name
-            if name.startswith("board"):
+            if name.startswith("board") or name == "leaderboard":
                 assert "FETCH" not in stages, (name, stages)
 
     run_db(run)

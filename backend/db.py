@@ -81,7 +81,10 @@ async def init_indexes() -> None:
     await db.patients.create_index([("camp_id", ASCENDING), ("phone_normalized", ASCENDING)])
     await db.patients.create_index([("camp_id", ASCENDING), ("queue_status", ASCENDING)])
     await db.patients.create_index([("camp_day_id", ASCENDING), ("_id", ASCENDING)])
-    await db.patients.create_index([("camp_id", ASCENDING), ("created_by", ASCENDING)])
+    await db.patients.create_index([
+        ("camp_id", ASCENDING), ("created_by", ASCENDING), ("registrar_team_lead_id", ASCENDING),
+        ("committed_revision_id", ASCENDING), ("is_self_registered", ASCENDING),
+    ])
     await db.patients.create_index([("camp_id", ASCENDING), ("registrar_team_lead_id", ASCENDING)])
     await db.transcriptions.create_index("patient_id", unique=True)
     await db.transcriptions.create_index([("person_id", ASCENDING), ("created_at", -1)])

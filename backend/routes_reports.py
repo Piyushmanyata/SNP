@@ -2,6 +2,7 @@ import asyncio
 import io
 import csv
 import shutil
+from collections import Counter
 from datetime import datetime, timedelta
 from typing import Any, Dict, List
 from bson import ObjectId
@@ -41,33 +42,32 @@ async def leaderboard(actor: dict = Depends(require_staff)) -> Dict[str, Any]:
     if not camp:
         return {"volunteers": [], "team_leads": []}
 
-    registered = {"camp_id": camp["_id"]}
-    staff_rows, counted = await asyncio.gather(
+    staff, rows = await asyncio.gather(
         db.users.find({"role": {"$in": ["volunteer", "team_lead"]}}).to_list(None),
         aggregate_list(db.patients, [
-            {"$match": registered},
-            {"$facet": {
-                "registrations": [{"$group": {"_id": "$created_by", "count": {"$sum": 1}}}],
-                "completed": [
-                    {"$match": {"committed_revision_id": {"$ne": None}, "is_self_registered": {"$ne": True}}},
-                    {"$group": {"_id": "$created_by", "count": {"$sum": 1}}},
-                ],
-                "team_registrations": [{"$group": {"_id": "$registrar_team_lead_id", "count": {"$sum": 1}}}],
-                "team_completed": [
-                    {"$match": {"committed_revision_id": {"$ne": None}, "is_self_registered": {"$ne": True}}},
-                    {"$group": {"_id": "$registrar_team_lead_id", "count": {"$sum": 1}}},
-                ],
+            {"$match": {"camp_id": camp["_id"]}},
+            {"$group": {
+                "_id": {"volunteer": "$created_by", "team_lead": "$registrar_team_lead_id"},
+                "registered": {"$sum": 1},
+                "completed": {"$sum": {"$cond": [{"$and": [
+                    {"$gt": ["$committed_revision_id", None]},
+                    {"$ne": ["$is_self_registered", True]},
+                ]}, 1, 0]}},
             }},
         ]),
     )
-    staff = staff_rows
-    facet = counted[0] if counted else {}
-
-    def _tallies(name: str) -> Dict[str, int]:
-        return {row["_id"]: row["count"] for row in facet.get(name) or [] if row["_id"]}
-
-    registrations, points = _tallies("registrations"), _tallies("completed")
-    team_registrations, team_points = _tallies("team_registrations"), _tallies("team_completed")
+    registrations: Counter[str] = Counter()
+    points: Counter[str] = Counter()
+    team_registrations: Counter[str] = Counter()
+    team_points: Counter[str] = Counter()
+    for row in rows:
+        volunteer, team_lead = row["_id"].get("volunteer"), row["_id"].get("team_lead")
+        if volunteer:
+            registrations[volunteer] += row["registered"]
+            points[volunteer] += row["completed"]
+        if team_lead:
+            team_registrations[team_lead] += row["registered"]
+            team_points[team_lead] += row["completed"]
 
     volunteers = [{
         "id": str(u["_id"]),
@@ -302,12 +302,12 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
             {"$group": {
                 "_id": "$arrived_by",
                 "arrived": {"$sum": 1},
-                "awaiting_print": {"$sum": {"$cond": [{"$eq": ["$printed_at", None]}, 1, 0]}},
+                "awaiting_print": {"$sum": {"$cond": [{"$lte": ["$printed_at", None]}, 1, 0]}},
                 "awaiting_seen": {"$sum": {"$cond": [
-                    {"$and": [{"$ne": ["$printed_at", None]}, {"$eq": ["$seen_at", None]}]}, 1, 0,
+                    {"$and": [{"$gt": ["$printed_at", None]}, {"$lte": ["$seen_at", None]}]}, 1, 0,
                 ]}},
                 "backlog": {"$sum": {"$cond": [
-                    {"$and": [{"$ne": ["$printed_at", None]}, {"$eq": ["$committed_revision_id", None]}]}, 1, 0,
+                    {"$and": [{"$gt": ["$printed_at", None]}, {"$lte": ["$committed_revision_id", None]}]}, 1, 0,
                 ]}},
                 "last": {"$max": "$arrived_at"},
                 "last_15m": {"$sum": {"$cond": [{"$gte": ["$arrived_at", quiet_cutoff]}, 1, 0]}},
