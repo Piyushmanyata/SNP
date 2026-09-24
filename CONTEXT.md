@@ -137,7 +137,7 @@ The clinical fulfilment outcome for ready-made spectacles handed over at camp. T
 _Avoid_: ready specs, stock specs, issued specs
 
 **Spectacles to be made**:
-The clinical fulfilment outcome for spectacles that cannot be issued at camp and must be collected later. Deferral assigns the patient to a Specs collection day. Never on the same prescription as Fixed-power specs or IOL surgery.
+The clinical fulfilment outcome for spectacles that cannot be issued at camp and must be collected later. Deferral assigns the patient to a Specs collection day. Never on the same prescription as Fixed-power specs or IOL surgery. Recording it as cancelled closes its Token. A correction cannot remove or change the order while its Token is active; cancel it first.
 _Avoid_: to-be specs, TBD specs, specs order, glasses order
 
 **Specs collection day**:
@@ -145,7 +145,7 @@ An admin-created day, unique per camp and date, on which patients deferred for S
 _Avoid_: specs slot, collection appointment, specs schedule
 
 **Token**:
-The short A6 paper printed when IOL surgery or Spectacles to be made is scheduled — never for a Hospital referral or Surgery declined. It contains the patient's name, registration number, date or collection window and venue. An IOL surgery Token is titled as IOL surgery, names the eye, carries BP and blood sugar when recorded, the hospital phone, and the Bring list. Rescheduling cancels the previous Token.
+The short A6 paper printed when IOL surgery or Spectacles to be made is scheduled — never for a Hospital referral or Surgery declined. It contains the patient's name, registration number, date or collection window and venue. Each Token sends its own SMS, so moving a patient A→B→A sends three. An IOL surgery Token is titled as IOL surgery, names the eye, carries BP and blood sugar when recorded, the hospital phone, and the Bring list. Rescheduling cancels the previous Token.
 _Avoid_: slip, deferred slip, thermal slip, queue ticket, final token
 
 **Bring list**:
@@ -269,7 +269,7 @@ Arrived and printed patients who do not yet have a completed prescription. Docto
 _Avoid_: pending Rx after seen, queue at Doctor's Rx (a physical queue is not the backlog)
 
 **Doctor seen**:
-A clinical desk operator's attestation that consultation is complete, committed with whole-prescription completion after arrival and print. Drafts, reprints and volunteer mark-seen cannot confer it.
+A clinical desk operator's attestation that consultation is complete, committed with whole-prescription completion after arrival and print. Drafts, reprints and volunteer mark-seen cannot confer it. Undo completion withdraws it, with a reason, only while no line has been issued; the patient returns to Arrived and can print again.
 _Avoid_: arrival, prescription printed, independent mark-seen
 
 **Paper review**:

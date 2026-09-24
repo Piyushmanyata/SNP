@@ -304,7 +304,6 @@ def _build_patient_document(
         "registrar_team_lead_id": None if is_self else registrar_team_lead_id,
         "clinical_generation": 0,
         "committed_revision_id": None,
-        "issue_auth_op": None,
         "identity_recheck_required": is_manual,
         "manual_entry": is_manual,
         "manual_exception": True if is_manual else None,

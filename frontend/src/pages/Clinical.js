@@ -15,7 +15,9 @@ import {
   HistoryModal,
   ReadOnlyPrescription,
 } from "../components/clinical";
-import { Alert, Badge, Button, Modal } from "../components/ui";
+import { Alert, Badge, Button, Field, Input, Modal } from "../components/ui";
+
+const RELOAD_CODES = new Set(["draft_version_conflict", "stale_generation"]);
 
 
 const emptyRx = {
@@ -82,6 +84,8 @@ export default function Clinical() {
   const [dirty, setDirty] = useState(false);
   const [conflict, setConflict] = useState(false);
   const [pending, setPending] = useState(null);
+  const [wizardRun, setWizardRun] = useState(0);
+  const [undo, setUndo] = useState(null);
   const firstFieldRef = useRef(null);
   const lookupRef = useRef(null);
   const lookupSequence = useRef(0);
@@ -214,6 +218,7 @@ export default function Clinical() {
       if (keepEntries) return;
       setRx(rxFromTranscription(resData.transcription));
       setDirty(false);
+      setWizardRun((n) => n + 1);
       completeOpRef.current = null;
     } catch (err) {
       logger.warn("Failed to reload clinical data:", err);
@@ -222,6 +227,7 @@ export default function Clinical() {
 
   const saveStep = useCallback(async () => {
     if (!data?.registration?.id) return false;
+    if (!dirty) return true;
     setBusy(true);
     setRxError("");
     try {
@@ -235,13 +241,13 @@ export default function Clinical() {
       setConflict(false);
       return true;
     } catch (err) {
-      if (errorPayload(err)?.code === "draft_version_conflict") setConflict(true);
+      if (RELOAD_CODES.has(errorPayload(err)?.code)) setConflict(true);
       else setRxError(formatApiError(err));
       return false;
     } finally {
       setBusy(false);
     }
-  }, [data?.registration?.id, draftVersion, rx]);
+  }, [data?.registration?.id, dirty, draftVersion, rx]);
 
   const completeRx = useCallback(async () => {
     if (!data?.registration?.id) return;
@@ -275,8 +281,10 @@ export default function Clinical() {
       } : current);
       setEditing(false);
       setBanner("Prescription completed. Patient is marked seen.");
+      setLookup("");
+      lookupRef.current?.focus();
     } catch (err) {
-      if (errorPayload(err)?.code === "draft_version_conflict") setConflict(true);
+      if (RELOAD_CODES.has(errorPayload(err)?.code)) setConflict(true);
       else setRxError(formatApiError(err));
     } finally {
       setBusy(false);
@@ -324,6 +332,24 @@ export default function Clinical() {
       setError(formatApiError(err));
     }
   }, [data?.person?.id]);
+
+  const undoCompletion = useCallback(async () => {
+    if (!data?.registration?.id || !undo) return;
+    setUndo({ ...undo, busy: true, error: "" });
+    try {
+      await api.post("/clinical/transcription/undo", {
+        patient_id: data.registration.id,
+        expected_generation: data.clinical_generation ?? data.registration.clinical_generation ?? 0,
+        reason: undo.reason.trim(),
+        operation_id: undo.operationId,
+      });
+      setUndo(null);
+      setBanner("Completion undone. The patient is back to Arrived and can be printed again.");
+      reload();
+    } catch (err) {
+      setUndo({ ...undo, busy: false, error: formatApiError(err) });
+    }
+  }, [data?.registration?.id, data?.registration?.clinical_generation, data?.clinical_generation, undo, reload]);
 
   const clearPatient = useCallback(() => {
     lookupSequence.current += 1;
@@ -414,6 +440,7 @@ export default function Clinical() {
 
           {!locked && (!data.transcription || editing) && (
               <PrescriptionWizard
+                key={`${patientId}:${wizardRun}`}
                 rx={rx}
                 setRx={editRx}
                 diagOpts={diagOpts}
@@ -435,9 +462,15 @@ export default function Clinical() {
             <>
               <ReadOnlyPrescription
                 transcription={data.transcription}
+                lines={data.committed_revision?.prescribed_lines}
                 emphasizePowers={line === "specs_fixed" || line === "specs_made"}
               />
               {locked ? <Button variant="outline" className="mb-3" disabled={busy} onClick={() => setShowCorrection(true)} data-testid="add-correction-button">Add correction</Button> : <Button variant="outline" className="mb-3" disabled={busy} onClick={() => setEditing(true)} data-testid="edit-transcription-button">Edit prescription</Button>}
+              {locked && data.committed_revision && !(data.fulfilments || []).length && (
+                <Button variant="ghost" className="mb-3 ml-2" disabled={busy} onClick={() => setUndo({ reason: "", operationId: v4(), busy: false, error: "" })} data-testid="undo-completion-button">
+                  Undo completion
+                </Button>
+              )}
               {line !== "doctor_rx" && data.committed_revision && !(data.committed_revision.prescribed_lines || []).includes(line) && (
                 <p className="text-sm text-amber-800 mb-3" data-testid="line-mismatch-warning">
                   This prescription does not imply {lineLabel(line)}. Record anyway.
@@ -477,6 +510,24 @@ export default function Clinical() {
           setBanner("Correction added.");
         }}
       />
+
+      <Modal open={Boolean(undo)} onClose={() => setUndo(null)} dirty={Boolean(undo?.reason)} title="Undo completion" size="sm">
+        {undo && (
+          <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (undo.reason.trim() && !undo.busy) undoCompletion(); }}>
+            <p className="text-sm text-slate-900">
+              Nothing has been issued yet. Undoing puts the patient back to Arrived, so the prescription can be printed again and transcribed afresh.
+            </p>
+            <Field label="Reason" required>
+              <Input value={undo.reason} onChange={(e) => setUndo({ ...undo, reason: e.target.value, operationId: v4() })} data-testid="undo-completion-reason" />
+            </Field>
+            <Alert>{undo.error}</Alert>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={() => setUndo(null)}>Keep completion</Button>
+              <Button type="submit" variant="danger" disabled={!undo.reason.trim() || undo.busy} data-testid="undo-completion-confirm">Undo completion</Button>
+            </div>
+          </form>
+        )}
+      </Modal>
 
       <Modal open={!!pending} onClose={() => setPending(null)} title="Discard unsaved prescription?" size="sm">
         <p className="text-sm text-slate-900 mb-4">

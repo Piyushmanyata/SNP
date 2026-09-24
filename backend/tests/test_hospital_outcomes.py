@@ -282,13 +282,14 @@ class TestHospitalStation:
             camp_id, _day, patient = await _printed_patient(db)
             done = await _complete(patient, **_lines(["ot"]))
             day_id = await _ot_day(db, camp_id)
-            original = routes_clinical.prepare_revision
+            original = routes_clinical.in_transaction
 
-            async def schedule_first(*args, **kwargs):
+            async def schedule_first(write):
+                monkeypatch.setattr(routes_clinical, "in_transaction", original)
                 await _record(done, "schedule", "deferred", day_id)
-                return await original(*args, **kwargs)
+                return await original(write)
 
-            monkeypatch.setattr(routes_clinical, "prepare_revision", schedule_first)
+            monkeypatch.setattr(routes_clinical, "in_transaction", schedule_first)
             body = CorrectionBody(
                 patient_id=str(patient["_id"]), reason="Doctor wrote referral", expected_generation=1,
                 operation_id="corr-race", full_transcription_confirmed=True,
@@ -316,7 +317,6 @@ class TestHospitalStation:
             assert (await db.ot_schedule_days.find_one({"_id": day_id}))["seats_taken"] == 0
             assert await db.fulfilments.count_documents({}) == 0
             assert sent == []
-            assert (await db.patients.find_one({"_id": patient["_id"]}))["issue_auth_op"] is None
         run_camp(monkeypatch, run)
 
     def test_fulfilled_is_not_a_hospital_outcome(self, monkeypatch):

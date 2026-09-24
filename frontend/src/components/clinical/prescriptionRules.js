@@ -24,9 +24,14 @@ export function hospitalComplete(rx) {
 }
 
 export function withLines(rx, lines) {
-  return lines.includes("ot")
-    ? { ...rx, prescribed_lines: lines }
-    : { ...rx, prescribed_lines: lines, ot_outcome: null, ot_eye: null };
+  return {
+    ...rx,
+    prescribed_lines: lines,
+    ...(!lines.includes("medicine") && { prescribed_medicine_ids: [] }),
+    ...(!lines.includes("specs_fixed") && { fixed_power_r: null, fixed_power_l: null }),
+    ...(!lines.includes("specs_made") && { specs_measurements: {} }),
+    ...(!lines.includes("ot") && { ot_outcome: null, ot_eye: null }),
+  };
 }
 
 export function withOutcome(rx, outcome) {

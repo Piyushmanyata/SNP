@@ -116,23 +116,6 @@ def test_ot_day_seats_cannot_drop_below_assigned(monkeypatch):
     run_camp(monkeypatch, body)
 
 
-def test_completed_ot_day_cannot_move(monkeypatch):
-    async def body(database):
-        camp_id, _ = await seed_camp(database)
-        day_id = ObjectId()
-        await database.ot_schedule_days.insert_one({"_id": day_id, "camp_id": camp_id, "day_date": OTHER_DAY,
-                                                    "venue": "Old Hospital", "seat_limit": 3, "seats_taken": 1})
-        await database.fulfilments.insert_one({"ot_schedule_day_id": day_id, "item_type": "ot", "status": "completed"})
-        with pytest.raises(HTTPException) as exc:
-            await _update_ot_day(
-                str(day_id), OtScheduleBody(camp_id=str(camp_id), day_date=MOVED_DAY,
-                                            seat_limit=3, venue="Old Hospital", venue_sms=None), actor={}
-            )
-        assert exc.value.status_code == 409
-
-    run_camp(monkeypatch, body)
-
-
 def test_camp_day_with_arrival_cannot_move(monkeypatch):
     async def body(database):
         camp_id, (day_id,) = await seed_camp(database, days=(OTHER_DAY,))

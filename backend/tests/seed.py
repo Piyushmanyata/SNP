@@ -147,7 +147,7 @@ async def seen_patient(database, camp_id=None, measurements=RX, fixed_power=FIXE
         _id=patient_id, camp_id=camp_id, camp_day_id=ObjectId(), full_name="Sunita Devi",
         phone="9876500001", phone_normalized="9876500001",
         queue_status="seen", arrived_at=now, printed_at=now, seen_at=now,
-        committed_revision_id=rev_id, clinical_generation=1, issue_auth_op=None,
+        committed_revision_id=rev_id, clinical_generation=1,
         **patient,
     ))
     await database.prescription_revisions.insert_one({

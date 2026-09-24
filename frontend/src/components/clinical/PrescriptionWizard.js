@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Alert, Card, Button } from "../ui";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { SpecsMeasurementsGrid } from "./SpecsMeasurementsGrid";
@@ -169,138 +169,159 @@ export function PrescriptionWizard({
   const current = steps[Math.min(index, steps.length - 1)];
   const position = Math.min(index, steps.length - 1);
   const canAdvance = stepComplete(current.key, rx);
+  const headingRef = useRef(null);
+  const bodyRef = useRef(null);
+  const shownStep = useRef(position);
+
+  useEffect(() => {
+    if (shownStep.current === position) return;
+    shownStep.current = position;
+    headingRef.current?.focus();
+    bodyRef.current?.querySelector("input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])")?.focus();
+  }, [position]);
 
   const goNext = async () => {
     if (await saveStep?.() === false) return;
     setIndex((i) => Math.min(i + 1, steps.length - 1));
   };
 
+  const submit = (e) => {
+    e.preventDefault();
+    if (busy || !canAdvance) return;
+    if (current.key === "review") completeRx?.();
+    else goNext();
+  };
+
   return (
-    <Card className="mb-5" data-testid="clinical-prescription-form">
-      <h3 className="font-display font-bold text-slate-900 mb-1">{current.label}</h3>
-      <p className="text-xs font-mono uppercase tracking-widest text-slate-500 mb-4" data-testid="wizard-progress">
-        Step {position + 1} of {steps.length}
-      </p>
-
-      {current.key === "diagnosis" && (
-        <DiagnosisFields
-          rx={rx}
-          setRx={setRx}
-          diagOpts={diagOpts}
-          toggleDiag={toggleDiag}
-          firstFieldRef={firstFieldRef}
-        />
-      )}
-
-      {current.key === "lines" && (
-        <fieldset data-testid="prescribed-lines">
-          <legend className="text-sm text-slate-700 mb-2">
-            Tick every line the doctor wrote on the paper.
-          </legend>
-          <LineChoices rx={rx} setRx={setRx} disabled={rx.none_prescribed} />
-          <label className="flex items-center gap-3 min-h-[52px] border-t border-slate-200 mt-2 pt-2">
-            <input
-              type="checkbox"
-              checked={Boolean(rx.none_prescribed)}
-              onChange={(e) =>
-                setRx({
-                  ...withLines(rx, e.target.checked ? [] : rx.prescribed_lines || []),
-                  none_prescribed: e.target.checked,
-                })
-              }
-              data-testid="none-prescribed"
+    <Card className="mb-5">
+      <form onSubmit={submit} data-testid="clinical-prescription-form">
+        <h3 ref={headingRef} tabIndex={-1} className="font-display font-bold text-slate-900 mb-1 focus:outline-none">{current.label}</h3>
+        <p className="text-xs font-mono uppercase tracking-widest text-slate-500 mb-4" data-testid="wizard-progress">
+          Step {position + 1} of {steps.length}
+        </p>
+        <p className="sr-only" aria-live="polite" data-testid="wizard-announcement">
+          Step {position + 1} of {steps.length}: {current.label}
+        </p>
+        <div ref={bodyRef}>
+          {current.key === "diagnosis" && (
+            <DiagnosisFields
+              rx={rx}
+              setRx={setRx}
+              diagOpts={diagOpts}
+              toggleDiag={toggleDiag}
+              firstFieldRef={firstFieldRef}
             />
-            <span className="font-medium text-slate-900">No fulfilment prescribed</span>
-          </label>
-        </fieldset>
-      )}
+          )}
 
-      {current.key === "medicine" && (
-        <MedicinePicker
-          medicines={medicines}
-          selectedIds={rx.prescribed_medicine_ids || []}
-          onChange={(ids) => setRx({ ...rx, prescribed_medicine_ids: ids })}
-          unavailable={medicineUnavailable}
-        />
-      )}
+          {current.key === "lines" && (
+            <fieldset data-testid="prescribed-lines">
+              <legend className="text-sm text-slate-700 mb-2">
+                Tick every line the doctor wrote on the paper.
+              </legend>
+              <LineChoices rx={rx} setRx={setRx} disabled={rx.none_prescribed} />
+              <label className="flex items-center gap-3 min-h-[52px] border-t border-slate-200 mt-2 pt-2">
+                <input
+                  type="checkbox"
+                  checked={Boolean(rx.none_prescribed)}
+                  onChange={(e) =>
+                    setRx({
+                      ...withLines(rx, e.target.checked ? [] : rx.prescribed_lines || []),
+                      none_prescribed: e.target.checked,
+                    })
+                  }
+                  data-testid="none-prescribed"
+                />
+                <span className="font-medium text-slate-900">No fulfilment prescribed</span>
+              </label>
+            </fieldset>
+          )}
 
-      {current.key === "specs_fixed" && (
-        <FixedPowerPicker
-          powers={powers}
-          valueR={rx.fixed_power_r}
-          valueL={rx.fixed_power_l}
-          onChange={(r, l) => setRx({ ...rx, fixed_power_r: r, fixed_power_l: l })}
-          unavailable={powerUnavailable}
-        />
-      )}
-
-      {current.key === "specs_made" && (
-        <SpecsMeasurementsGrid
-          specsMeasurements={rx.specs_measurements}
-          onChange={(specs) => setRx({ ...rx, specs_measurements: specs })}
-        />
-      )}
-
-      {current.key === "ot" && (
-        <>
-          <OtFields rx={rx} setRx={setRx} />
-          <div className="mt-4">
-            <VitalsInputs rx={rx} setRx={setRx} />
-          </div>
-        </>
-      )}
-
-      {current.key === "review" && (
-        <>
-          <Summary rx={rx} medicines={medicines} />
-          <OptionalVitals rx={rx} setRx={setRx} />
-          <label className="flex items-center gap-2 min-h-[52px] mt-4">
-            <input
-              type="checkbox"
-              checked={Boolean(rx.full_transcription_confirmed)}
-              onChange={(e) =>
-                setRx({ ...rx, full_transcription_confirmed: e.target.checked })
-              }
-              data-testid="full-transcription-confirmed"
+          {current.key === "medicine" && (
+            <MedicinePicker
+              medicines={medicines}
+              selectedIds={rx.prescribed_medicine_ids || []}
+              onChange={(ids) => setRx({ ...rx, prescribed_medicine_ids: ids })}
+              unavailable={medicineUnavailable}
             />
-            <span>I copied every instruction on the paper</span>
-          </label>
-        </>
-      )}
+          )}
 
-      <Alert className="mt-5">{error}</Alert>
-      <div className="mt-5 flex items-center gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          disabled={busy || position === 0}
-          onClick={() => setIndex((i) => Math.max(i - 1, 0))}
-          data-testid="wizard-back"
-        >
-          <ChevronLeft className="w-4 h-4" /> Back
-        </Button>
-        {current.key === "review" ? (
+          {current.key === "specs_fixed" && (
+            <FixedPowerPicker
+              powers={powers}
+              valueR={rx.fixed_power_r}
+              valueL={rx.fixed_power_l}
+              onChange={(r, l) => setRx({ ...rx, fixed_power_r: r, fixed_power_l: l })}
+              unavailable={powerUnavailable}
+            />
+          )}
+
+          {current.key === "specs_made" && (
+            <SpecsMeasurementsGrid
+              specsMeasurements={rx.specs_measurements}
+              onChange={(specs) => setRx({ ...rx, specs_measurements: specs })}
+            />
+          )}
+
+          {current.key === "ot" && (
+            <>
+              <OtFields rx={rx} setRx={setRx} />
+              <div className="mt-4">
+                <VitalsInputs rx={rx} setRx={setRx} />
+              </div>
+            </>
+          )}
+
+          {current.key === "review" && (
+            <>
+              <Summary rx={rx} medicines={medicines} />
+              <OptionalVitals rx={rx} setRx={setRx} />
+              <label className="flex items-center gap-2 min-h-[52px] mt-4">
+                <input
+                  type="checkbox"
+                  checked={Boolean(rx.full_transcription_confirmed)}
+                  onChange={(e) =>
+                    setRx({ ...rx, full_transcription_confirmed: e.target.checked })
+                  }
+                  data-testid="full-transcription-confirmed"
+                />
+                <span>I copied every instruction on the paper</span>
+              </label>
+            </>
+          )}
+        </div>
+
+        <Alert className="mt-5">{error}</Alert>
+        <div className="mt-5 flex items-center gap-2">
           <Button
             type="button"
-            className="flex-1"
-            disabled={busy || !canAdvance}
-            onClick={() => completeRx && completeRx()}
-            data-testid="complete-prescription-button"
+            variant="outline"
+            disabled={busy || position === 0}
+            onClick={() => setIndex((i) => Math.max(i - 1, 0))}
+            data-testid="wizard-back"
           >
-            Save prescription &amp; mark seen
+            <ChevronLeft className="w-4 h-4" /> Back
           </Button>
-        ) : (
-          <Button
-            type="button"
-            className="flex-1"
-            disabled={busy || !canAdvance}
-            onClick={goNext}
-            data-testid="wizard-next"
-          >
-            Next <ChevronRight className="w-4 h-4" />
-          </Button>
-        )}
-      </div>
+          {current.key === "review" ? (
+            <Button
+              type="submit"
+              className="flex-1"
+              disabled={busy || !canAdvance}
+              data-testid="complete-prescription-button"
+            >
+              Save prescription &amp; mark seen
+            </Button>
+          ) : (
+            <Button
+              type="submit"
+              className="flex-1"
+              disabled={busy || !canAdvance}
+              data-testid="wizard-next"
+            >
+              Next <ChevronRight className="w-4 h-4" />
+            </Button>
+          )}
+        </div>
+      </form>
     </Card>
   );
 }

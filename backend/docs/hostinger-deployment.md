@@ -77,7 +77,7 @@ The pre-deployment database archive is `/opt/snp/backup-export/pre-audit-1385476
 
 No data migration was required. Startup ran the existing index initializer. Before/after counts and index-name sets were identical across all 18 collections, preserving two patients, one person, one camp and two users. No database reset or volume removal occurred. The prior images retain `rollback-13854767e93b1f95bda958680ef27aff387bd36e` tags. HTTPS homepage returned 200 and `/api/health` returned `{"status":"ok"}`; the deployed clinical module hash matches the release source. The current-release symlink points to the new release.
 
-See `adr-2026-09-ci-reliability.md`, `clinical-audit.md` and `production-registration-security.md` for fixes, verification boundaries and remaining reconciliation requirements.
+See `adr-2026-09-ci-reliability.md`, `clinical-audit.md` and `production-registration-security.md` for fixes and verification boundaries. Clinical writes are transactions (ADR 0065) and need no reconciliation.
 
 ## Hospital outcomes and Clinical find release
 

@@ -42,3 +42,15 @@ test("clinical history shows each visit date as DD-MM-YYYY", () => {
   expect(document.body.textContent).toContain("04-03-2026");
   expect(document.body.textContent).not.toContain("2026-03-0");
 });
+
+test("the saved prescription lists what was prescribed and shows only those lines", () => {
+  act(() => root.render(<ReadOnlyPrescription lines={["medicine"]} transcription={{
+    id: "tx-3", prescribed_medicines: [{ name: "Moxifloxacin" }], fixed_power_r: 2, fixed_power_l: 2,
+    specs_measurements: { r_sph: "-1.00", l_sph: "-1.00" },
+  }} />));
+  expect(q("readonly-prescribed").textContent).toBe("Prescribed:Medicine");
+  expect(container.textContent).toContain("Moxifloxacin");
+  expect(q("readonly-fixed-power")).toBeNull();
+  expect(q("readonly-powers")).toBeNull();
+  expect(q("readonly-hospital")).toBeNull();
+});

@@ -72,7 +72,7 @@ def test_ser_power_labels_the_stored_value():
 def test_resolve_medicines_snapshots_names_in_order_and_dedupes():
     a, b = ObjectId(), ObjectId()
     out = _with_catalogue(
-        lambda db: resolve_medicines(db, [str(b), str(a), str(b)]),
+        lambda db: resolve_medicines(db, [str(b), str(a), str(b)], active_only=True),
         medicines=[{"_id": a, "name": "Moxifloxacin"}, {"_id": b, "name": "Timolol"}],
     )
     assert out == [
@@ -82,25 +82,25 @@ def test_resolve_medicines_snapshots_names_in_order_and_dedupes():
 
 
 def test_resolve_medicines_returns_empty_for_no_ids():
-    assert asyncio.run(resolve_medicines(None, [])) == []
+    assert asyncio.run(resolve_medicines(None, [], active_only=True)) == []
 
 
 @pytest.mark.parametrize("bad", [["not-an-objectid"], [str(ObjectId())]])
 def test_resolve_medicines_refuses_ids_outside_the_catalogue(bad):
     with pytest.raises(HTTPException) as exc:
-        _with_catalogue(lambda db: resolve_medicines(db, bad), medicines=[{"_id": ObjectId(), "name": "Moxifloxacin"}])
+        _with_catalogue(lambda db: resolve_medicines(db, bad, active_only=True), medicines=[{"_id": ObjectId(), "name": "Moxifloxacin"}])
     assert exc.value.status_code == 400
     assert exc.value.detail["code"] == "unknown_medicine"
 
 
 def test_stocked_power_passes_through_none_and_accepts_a_stocked_value():
-    assert asyncio.run(stocked_power(None, None)) is None
-    assert _with_catalogue(lambda db: stocked_power(db, "+2.00"), powers=[2.0]) == 2.0
+    assert asyncio.run(stocked_power(None, None, active_only=True)) is None
+    assert _with_catalogue(lambda db: stocked_power(db, "+2.00", active_only=True), powers=[2.0]) == 2.0
 
 
 def test_stocked_power_refuses_a_power_the_camp_does_not_carry():
     with pytest.raises(HTTPException) as exc:
-        _with_catalogue(lambda db: stocked_power(db, "+2.25"), powers=[2.0])
+        _with_catalogue(lambda db: stocked_power(db, "+2.25", active_only=True), powers=[2.0])
     assert exc.value.detail["code"] == "unknown_power"
 
 

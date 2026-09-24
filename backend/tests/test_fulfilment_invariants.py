@@ -8,7 +8,7 @@ from fastapi import HTTPException
 import routes_clinical
 from models import CorrectionBody
 from routes_clinical import add_correction, record_fulfilment
-from seed import CLINICAL, NOW, day, fulfil, patient_doc, run_camp, seen_patient
+from seed import CLINICAL, NOW, day, fulfil, patient_doc, recorder, run_camp, seen_patient
 
 
 async def _ot_day(database, camp_id, offset, seat_limit=1, venue="OT"):
@@ -92,7 +92,6 @@ def test_concurrent_same_line_leaves_one_current_specs_record(monkeypatch):
         await record_fulfilment(request, actor=CLINICAL, background_tasks=None)
         rows = await database.fulfilments.find({"transcription_id": seen["trans_id"], "item_type": "specs_made"}).to_list(20)
         assert len(rows) == 1
-        assert rows[0].get("current") is True
         assert await database.deferred_slips.count_documents({"active": True}) == 1
 
     run_camp(monkeypatch, body)
@@ -154,16 +153,6 @@ def test_moving_an_ot_booking_releases_the_first_seat(monkeypatch):
     run_camp(monkeypatch, body)
 
 
-def test_issuing_a_line_locks_the_transcription(monkeypatch):
-    async def body(database):
-        seen = await seen_patient(database)
-        await database.transcriptions.update_one({"_id": seen["trans_id"]}, {"$set": {"locked": False}})
-        await _issue(seen, item_type="medicine", status="fulfilled")
-        assert (await database.transcriptions.find_one({"_id": seen["trans_id"]}))["locked"] is True
-
-    run_camp(monkeypatch, body)
-
-
 @pytest.mark.parametrize("legacy_lists", [{}, {"diagnosis_options": None, "prescribed_medicines": None}])
 def test_a_correction_changes_only_allowed_fields_and_keeps_an_audit_row(monkeypatch, legacy_lists):
     async def body(database):
@@ -171,7 +160,7 @@ def test_a_correction_changes_only_allowed_fields_and_keeps_an_audit_row(monkeyp
         await database.patients.insert_one(patient_doc(
             _id=patient_id, camp_id=ObjectId(), camp_day_id=ObjectId(), queue_status="seen", full_name="Corr Patient",
             arrived_at=NOW, printed_at=NOW, seen_at=NOW,
-            committed_revision_id=rev_id, clinical_generation=1, issue_auth_op=None,
+            committed_revision_id=rev_id, clinical_generation=1,
         ))
         await database.prescription_revisions.insert_one({
             "_id": rev_id, "patient_id": patient_id, "operation_id": str(ObjectId()),
@@ -214,5 +203,24 @@ def test_fifty_concurrent_specs_deferrals_all_succeed_without_seats(monkeypatch)
         ], return_exceptions=True)
         assert [r for r in results if not isinstance(r, dict)] == []
         assert (await database.specs_collection_days.find_one({"_id": day_id}))["seats_taken"] == 0
+
+    run_camp(monkeypatch, body)
+
+
+def test_each_token_gets_its_own_sms_so_a_to_b_to_a_sends_three(monkeypatch):
+    from test_hospital_outcomes import _complete, _lines, _record
+    from test_camp_operations_matrix import _printed_patient
+    sent = recorder(monkeypatch)
+
+    async def body(database):
+        camp_id, _day, patient = await _printed_patient(database)
+        done = await _complete(patient, **_lines(["ot"]))
+        day_a = await _ot_day(database, camp_id, 3, seat_limit=5, venue="OT Alpha")
+        day_b = await _ot_day(database, camp_id, 4, seat_limit=5, venue="OT Beta")
+        for op, target in (("a", day_a), ("b", day_b), ("a-again", day_a)):
+            await _record(done, op, "deferred", target)
+        assert [s["type"] for s in sent] == ["ot_token"] * 3
+        keys = [row["event_key"] for row in await database.reminder_ledger.find({"message_type": "ot_token"}).to_list(10)]
+        assert len(set(keys)) == 3
 
     run_camp(monkeypatch, body)

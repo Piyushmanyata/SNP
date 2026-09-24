@@ -61,3 +61,12 @@ test("a 401 outside sign-in announces that the session ended", async () => {
     window.removeEventListener("snp:unauthorized", listener);
   }
 });
+
+test("a validation error lists every field message", () => {
+  const { formatApiError } = jest.requireActual("./api");
+  const err = { response: { data: { detail: {
+    code: "incomplete_prescription",
+    fields: { prescribed_medicines: "Select every medicine written on the paper.", fixed_power: "Select the fixed power for both eyes." },
+  } } } };
+  expect(formatApiError(err)).toBe("Select every medicine written on the paper. Select the fixed power for both eyes.");
+});

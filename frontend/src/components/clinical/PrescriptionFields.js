@@ -10,10 +10,10 @@ const HOSPITAL_OUTCOMES = [
   { value: "referral", label: "Hospital referral" },
 ];
 
-export function DiagnosisFields({ rx, setRx, diagOpts = [], toggleDiag, disabled, firstFieldRef }) {
+export function DiagnosisFields({ rx, setRx, diagOpts = [], toggleDiag, firstFieldRef }) {
   return (
     <>
-      <Field label="Diagnosis">
+      <Field.Group label="Diagnosis">
         <div className="flex flex-wrap gap-2" data-testid="diagnosis-options">
           {diagOpts.map((opt, i) => (
             <button
@@ -21,7 +21,6 @@ export function DiagnosisFields({ rx, setRx, diagOpts = [], toggleDiag, disabled
               type="button"
               ref={i === 0 ? firstFieldRef : undefined}
               aria-pressed={rx.diagnosis_options.includes(opt)}
-              disabled={disabled}
               onClick={() => toggleDiag(opt)}
               className={`min-h-[44px] px-3 rounded-full text-sm font-medium border transition-colors ${
                 rx.diagnosis_options.includes(opt)
@@ -34,13 +33,12 @@ export function DiagnosisFields({ rx, setRx, diagOpts = [], toggleDiag, disabled
             </button>
           ))}
         </div>
-      </Field>
+      </Field.Group>
       <div className="mt-3">
         <Field label="Other diagnosis">
           <Input
             value={rx.diagnosis_other || ""}
             ref={!diagOpts.length ? firstFieldRef : undefined}
-            disabled={disabled}
             autoComplete="off"
             onChange={(e) => setRx({ ...rx, diagnosis_other: e.target.value })}
             data-testid="diagnosis-other-input"
@@ -84,7 +82,7 @@ export function LineChoices({ rx, setRx, disabled }) {
   );
 }
 
-export function OtFields({ rx, setRx, disabled }) {
+export function OtFields({ rx, setRx }) {
   const name = useId();
   const iolClash = lineClash(rx.prescribed_lines, "iol_surgery");
   return (
@@ -100,7 +98,7 @@ export function OtFields({ rx, setRx, disabled }) {
               name={name}
               value={value}
               checked={rx.ot_outcome === value}
-              disabled={disabled || (value === "iol_surgery" && Boolean(iolClash) && rx.ot_outcome !== value)}
+              disabled={value === "iol_surgery" && Boolean(iolClash) && rx.ot_outcome !== value}
               onChange={() => setRx(withOutcome(rx, value))}
               data-testid={`ot-outcome-${value}`}
             />
@@ -115,9 +113,8 @@ export function OtFields({ rx, setRx, disabled }) {
         <Field label="Surgery eye">
           <select
             aria-label="Surgery eye"
-            className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300 disabled:bg-slate-100"
+            className="w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300"
             value={rx.ot_eye || ""}
-            disabled={disabled}
             onChange={(e) => setRx({ ...rx, ot_eye: e.target.value || null })}
             data-testid="ot-eye-select"
           >
@@ -130,7 +127,6 @@ export function OtFields({ rx, setRx, disabled }) {
       <Field label="Hospital notes" hint="Note here if the second eye was also prescribed.">
         <Input
           value={rx.ot_notes || ""}
-          disabled={disabled}
           autoComplete="off"
           onChange={(e) => setRx({ ...rx, ot_notes: e.target.value })}
           data-testid="ot-notes-input"
@@ -140,13 +136,12 @@ export function OtFields({ rx, setRx, disabled }) {
   );
 }
 
-export function VitalsInputs({ rx, setRx, disabled }) {
+export function VitalsInputs({ rx, setRx }) {
   return (
     <div className="grid grid-cols-2 gap-3">
       <Field label="Blood Sugar">
         <Input
           value={rx.blood_sugar || ""}
-          disabled={disabled}
           autoComplete="off"
           placeholder="mg/dL"
           onChange={(e) => setRx({ ...rx, blood_sugar: e.target.value })}
@@ -156,7 +151,6 @@ export function VitalsInputs({ rx, setRx, disabled }) {
       <Field label="Blood Pressure">
         <Input
           value={rx.bp || ""}
-          disabled={disabled}
           autoComplete="off"
           placeholder="120/80"
           onChange={(e) => setRx({ ...rx, bp: e.target.value })}
@@ -167,12 +161,11 @@ export function VitalsInputs({ rx, setRx, disabled }) {
   );
 }
 
-export function RemarksField({ rx, setRx, disabled }) {
+export function RemarksField({ rx, setRx }) {
   return (
     <Field label="Remarks">
       <Input
         value={rx.remarks || ""}
-        disabled={disabled}
         autoComplete="off"
         onChange={(e) => setRx({ ...rx, remarks: e.target.value })}
         data-testid="remarks-input"
@@ -181,11 +174,11 @@ export function RemarksField({ rx, setRx, disabled }) {
   );
 }
 
-export function VitalsFields({ rx, setRx, disabled }) {
+export function VitalsFields({ rx, setRx }) {
   return (
     <div className="space-y-3" data-testid="optional-vitals">
-      <VitalsInputs rx={rx} setRx={setRx} disabled={disabled} />
-      <RemarksField rx={rx} setRx={setRx} disabled={disabled} />
+      <VitalsInputs rx={rx} setRx={setRx} />
+      <RemarksField rx={rx} setRx={setRx} />
     </div>
   );
 }

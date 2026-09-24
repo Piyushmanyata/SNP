@@ -3,7 +3,7 @@ import logging
 import re
 import string
 from datetime import timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from bson import ObjectId
 from pymongo.asynchronous.database import AsyncDatabase
@@ -76,8 +76,8 @@ async def _over_daily_cap(db: AsyncDatabase, number: str) -> bool:
     }, limit=REGISTRATION_DAILY_CAP) >= REGISTRATION_DAILY_CAP
 
 
-async def paused(db: AsyncDatabase, message_type: str) -> bool:
-    control = await db.sms_controls.find_one({"_id": message_type})
+async def paused(db: AsyncDatabase, message_type: str, session=None) -> bool:
+    control = await db.sms_controls.find_one({"_id": message_type}, session=session)
     return bool(control and control.get("paused"))
 
 
@@ -163,6 +163,76 @@ def _template_variables(template: str, values: Dict[str, Any]) -> Dict[str, Any]
     return {name: values[name] for _, name, _, _ in string.Formatter().parse(template) if name}
 
 
+async def _compose(
+    db: AsyncDatabase,
+    patient: dict,
+    message_type: str,
+    event_date: str,
+    venue: str,
+    start_time: Optional[str],
+    end_time: Optional[str],
+    end_date: Optional[str],
+    session=None,
+) -> Optional[Tuple[str, Dict[str, Any], str]]:
+    """The number, DLT variables and copy of a patient SMS, or None when it must not be sent."""
+    if not msg91.configured() or not msg91.template_id(message_type):
+        return None
+    number = valid_phone(patient.get("phone_normalized") or patient.get("phone"))
+    reg_no = patient.get("reg_no")
+    if not number or reg_no is None:
+        return None
+    registrar_id = patient.get("created_by")
+    if registrar_id and ObjectId.is_valid(str(registrar_id)):
+        registrar = await db.users.find_one({"_id": ObjectId(str(registrar_id))}, session=session)
+        if registrar and helpers.normalize_phone(registrar.get("phone")) == number:
+            return None
+    if message_type in ("specs_token", "specs") and not specs_pickup_hours_match(start_time, end_time):
+        return None
+    camp = await db.camps.find_one({"_id": patient["camp_id"]}, session=session) if patient.get("camp_id") else None
+    template = MESSAGE_COPY[message_type]
+    variables = _template_variables(template, {
+        "reg_no": reg_no,
+        "camp_no": str((camp or {}).get("camp_number") or ""),
+        "date": helpers.display_date(event_date),
+        "end_date": helpers.display_date(end_date or event_date),
+        "venue": venue,
+    })
+    missing = [name for name, value in variables.items() if value == ""]
+    if missing:
+        logger.warning("Patient SMS %s not sent: no %s", message_type, ", ".join(missing))
+        return None
+    too_long = [name for name, value in variables.items() if len(str(value)) > VARIABLE_LIMIT]
+    if too_long:
+        logger.warning("Patient SMS %s not sent: %s exceeds DLT variable limit", message_type, ", ".join(too_long))
+        return None
+    venue_problem = sms_venue_problem(str(venue))
+    if venue_problem:
+        logger.warning("Patient SMS %s not sent: %s", message_type, venue_problem)
+        return None
+    return number, variables, template.format(**variables)
+
+
+async def _submit(db: AsyncDatabase, row: Dict[str, Any], variables: Dict[str, Any]) -> str:
+    update: Dict[str, Any]
+    try:
+        provider_id = await asyncio.to_thread(msg91.send_dlt_sms, row["message_type"], row["number"], variables)
+    except msg91.Unsent as exc:
+        update = {"status": "failed", "error": str(exc)[:200]}
+    except msg91.Rejected as exc:
+        update = {"status": "rejected", "error": str(exc)[:200]}
+    except Exception as exc:
+        update = {"status": "uncertain", "error": f"{type(exc).__name__}: {exc}"[:200]}
+    else:
+        update = {"status": "sent", "provider_id": provider_id}
+    if update["status"] != "sent":
+        logger.warning("Patient SMS %s %s: %s", row["message_type"], update["status"], update["error"])
+    try:
+        await db.reminder_ledger.update_one({"_id": row["_id"]}, {"$set": update})
+    except Exception:
+        logger.exception("Could not record patient SMS %s", update["status"])
+    return update["status"]
+
+
 async def deliver_patient_sms(
     db: AsyncDatabase,
     patient: dict,
@@ -177,44 +247,12 @@ async def deliver_patient_sms(
 ) -> str:
     """Returns sent, failed, uncertain, rejected, paused, or skipped. Never raises."""
     row = None
-    submitted = False
     venue = clean_sms_venue(venue)
     try:
-        if not msg91.configured() or not msg91.template_id(message_type):
+        composed = await _compose(db, patient, message_type, event_date, venue, start_time, end_time, end_date)
+        if not composed:
             return "skipped"
-        number = valid_phone(patient.get("phone_normalized") or patient.get("phone"))
-        reg_no = patient.get("reg_no")
-        if not number or reg_no is None:
-            return "skipped"
-        registrar_id = patient.get("created_by")
-        if registrar_id and ObjectId.is_valid(str(registrar_id)):
-            registrar = await db.users.find_one({"_id": ObjectId(str(registrar_id))})
-            if registrar and helpers.normalize_phone(registrar.get("phone")) == number:
-                return "skipped"
-        if message_type in ("specs_token", "specs") and not specs_pickup_hours_match(start_time, end_time):
-            return "skipped"
-        camp = await db.camps.find_one({"_id": patient["camp_id"]}) if patient.get("camp_id") else None
-        template = MESSAGE_COPY[message_type]
-        variables = _template_variables(template, {
-            "reg_no": reg_no,
-            "camp_no": str((camp or {}).get("camp_number") or ""),
-            "date": helpers.display_date(event_date),
-            "end_date": helpers.display_date(end_date or event_date),
-            "venue": venue,
-        })
-        missing = [name for name, value in variables.items() if value == ""]
-        if missing:
-            logger.warning("Patient SMS %s not sent: no %s", message_type, ", ".join(missing))
-            return "skipped"
-        too_long = [name for name, value in variables.items() if len(str(value)) > VARIABLE_LIMIT]
-        if too_long:
-            logger.warning("Patient SMS %s not sent: %s exceeds DLT variable limit", message_type, ", ".join(too_long))
-            return "skipped"
-        venue_problem = sms_venue_problem(str(venue))
-        if venue_problem:
-            logger.warning("Patient SMS %s not sent: %s", message_type, venue_problem)
-            return "skipped"
-        copy = template.format(**variables)
+        number, variables, copy = composed
         if await paused(db, message_type):
             await _record_unsent(db, patient["_id"], message_type, event_date, event_key, number, venue, copy, "paused")
             return "paused"
@@ -229,27 +267,9 @@ async def deliver_patient_sms(
         )
         if not row:
             return "skipped"
-        update: Dict[str, Any]
-        try:
-            provider_id = await asyncio.to_thread(msg91.send_dlt_sms, message_type, number, variables)
-        except msg91.Unsent as exc:
-            update = {"status": "failed", "error": str(exc)[:200]}
-        except msg91.Rejected as exc:
-            update = {"status": "rejected", "error": str(exc)[:200]}
-        except Exception as exc:
-            submitted = True
-            update = {"status": "uncertain", "error": f"{type(exc).__name__}: {exc}"[:200]}
-        else:
-            submitted = True
-            update = {"status": "sent", "provider_id": provider_id}
-        if update["status"] != "sent":
-            logger.warning("Patient SMS %s %s: %s", message_type, update["status"], update["error"])
-        await db.reminder_ledger.update_one({"_id": row["_id"]}, {"$set": update})
-        return update["status"]
+        return await _submit(db, row, variables)
     except Exception as exc:
-        logger.exception("Patient SMS processing failed; submitted=%s", submitted)
-        if submitted:
-            return "uncertain"
+        logger.exception("Patient SMS processing failed")
         if row:
             try:
                 await db.reminder_ledger.update_one(
@@ -259,6 +279,45 @@ async def deliver_patient_sms(
             except Exception:
                 logger.exception("Could not record patient SMS failure")
         return "failed"
+
+
+async def queue_patient_sms(
+    db: AsyncDatabase,
+    patient: dict,
+    message_type: str,
+    event_date: str,
+    venue: str,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    end_date: Optional[str] = None,
+    *,
+    event_key: str,
+    session,
+) -> Optional[ObjectId]:
+    """Writes the SMS intent inside the caller's transaction; send_queued delivers it after commit."""
+    venue = clean_sms_venue(venue)
+    composed = await _compose(db, patient, message_type, event_date, venue, start_time, end_time, end_date, session)
+    if not composed:
+        return None
+    number, variables, copy = composed
+    status = "paused" if await paused(db, message_type, session) else "queued"
+    res = await db.reminder_ledger.insert_one({
+        "patient_id": patient["_id"], "message_type": message_type, "event_date": event_date,
+        "event_key": event_key, "number": number, "venue": venue, "copy": copy, "variables": variables,
+        "status": status, "attempts": 0, "provider_id": None, "created_at": helpers.now_utc(),
+    }, session=session)
+    return res.inserted_id if status == "queued" else None
+
+
+async def send_queued(db: AsyncDatabase, row_id: ObjectId) -> str:
+    row = await db.reminder_ledger.find_one_and_update(
+        {"_id": row_id, "status": "queued"},
+        {"$set": {"status": "pending"}, "$inc": {"attempts": 1}},
+        return_document=True,
+    )
+    if not row:
+        return "skipped"
+    return await _submit(db, row, row["variables"])
 
 
 async def send_patient_sms(

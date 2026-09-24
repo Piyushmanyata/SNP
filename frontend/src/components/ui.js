@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef } from "react";
+import React, { useCallback, useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 import { Loader2, X, AlertTriangle, RefreshCw } from "lucide-react";
 
@@ -48,6 +48,17 @@ export function Field({ label, children, required, hint }) {
     </label>
   );
 }
+
+Field.Group = function FieldGroup({ label, children, hint }) {
+  const id = useId();
+  return (
+    <div role="group" aria-labelledby={id}>
+      <span id={id} className="block text-xs font-mono uppercase tracking-widest text-slate-500 mb-1.5">{label}</span>
+      {children}
+      {hint && <span className="block text-xs text-slate-600 mt-1">{hint}</span>}
+    </div>
+  );
+};
 
 const inputCls =
   "w-full min-h-[44px] px-3.5 rounded-xl border border-slate-300 bg-white text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500";

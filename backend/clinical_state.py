@@ -3,7 +3,6 @@ import json
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
-from pymongo.errors import DuplicateKeyError
 
 from helpers import now_utc
 
@@ -114,6 +113,12 @@ def validate_completion(body: Any) -> Tuple[dict, List[str], bool]:
         })
     lines, none = prescribed_lines_of(body)
     content = extract_content(body)
+    if "medicine" not in lines:
+        content["prescribed_medicines"] = []
+    if "specs_fixed" not in lines:
+        content["fixed_power_r"] = content["fixed_power_l"] = None
+    if "specs_made" not in lines:
+        content["specs_measurements"] = None
     if none and lines:
         raise HTTPException(status_code=400, detail={
             "code": "incomplete_prescription",
@@ -161,12 +166,6 @@ def generation_of(patient: dict) -> int:
     return int(value) if value is not None else 0
 
 
-def _generation_clause(expected: int) -> dict:
-    if expected == 0:
-        return {"$or": [{"clinical_generation": 0}, {"clinical_generation": None}]}
-    return {"clinical_generation": expected}
-
-
 def arrival_ready(patient: dict) -> Optional[str]:
     if not patient.get("arrived_at"):
         return "not_arrived"
@@ -181,14 +180,10 @@ def conflict(code: str, message: str, **extra: Any) -> HTTPException:
     return HTTPException(status_code=409, detail=detail)
 
 
-async def load_operation(db, operation_id: str) -> Optional[dict]:
+async def recover_operation(db, operation_id: str, kind: str, digest: str, session=None) -> Optional[dict]:
     if not operation_id:
         raise HTTPException(status_code=400, detail="operation_id is required")
-    return await db.clinical_operations.find_one({"operation_id": operation_id})
-
-
-async def recover_operation(db, operation_id: str, kind: str, digest: str) -> Optional[dict]:
-    existing = await load_operation(db, operation_id)
+    existing = await db.clinical_operations.find_one({"operation_id": operation_id}, session=session)
     if existing is None:
         return None
     if existing.get("kind") != kind or existing.get("payload_hash") != digest:
@@ -196,33 +191,14 @@ async def recover_operation(db, operation_id: str, kind: str, digest: str) -> Op
     return existing
 
 
-async def save_operation(db, doc: dict) -> dict:
-    existing = await db.clinical_operations.find_one({"operation_id": doc["operation_id"]})
-    if existing:
-        if existing.get("kind") != doc["kind"] or existing.get("payload_hash") != doc["payload_hash"]:
-            raise conflict("operation_conflict", "This operation id was used for a different request.")
-        if doc.get("status") == "pending":
-            return existing
-        await db.clinical_operations.update_one(
-            {"_id": existing["_id"]},
-            {"$set": {k: v for k, v in doc.items() if k != "operation_id"}},
-        )
-        existing.update(doc)
-        return existing
-    try:
-        res = await db.clinical_operations.insert_one(doc)
-        doc["_id"] = res.inserted_id
-        return doc
-    except DuplicateKeyError:
-        found = await db.clinical_operations.find_one({"operation_id": doc["operation_id"]})
-        if not found:
-            raise
-        if found.get("kind") != doc["kind"] or found.get("payload_hash") != doc["payload_hash"]:
-            raise conflict("operation_conflict", "This operation id was used for a different request.")
-        return found
+async def record_operation(db, operation_id: str, kind: str, digest: str, patient_id, result: dict, session) -> None:
+    await db.clinical_operations.insert_one({
+        "operation_id": operation_id, "kind": kind, "payload_hash": digest, "patient_id": patient_id,
+        "status": "committed", "result": result, "created_at": now_utc(),
+    }, session=session)
 
 
-async def prepare_revision(
+async def insert_revision(
     db,
     patient: dict,
     actor: dict,
@@ -233,8 +209,9 @@ async def prepare_revision(
     kind: str,
     reason: Optional[str],
     predecessor_id,
+    session,
 ) -> dict:
-    request = {
+    doc = {
         "patient_id": patient["_id"],
         "camp_id": patient.get("camp_id"),
         "kind": kind,
@@ -243,139 +220,49 @@ async def prepare_revision(
         "prescribed_lines": prescribed_lines,
         "none_prescribed": none_prescribed,
         **content,
-    }
-    existing = await db.prescription_revisions.find_one({"operation_id": operation_id})
-    if not existing:
-        doc = {
-            **request, "operation_id": operation_id,
-            "author_id": str(actor["_id"]), "created_at": now_utc(),
-        }
-        try:
-            res = await db.prescription_revisions.insert_one(doc)
-            doc["_id"] = res.inserted_id
-            return doc
-        except DuplicateKeyError:
-            existing = await db.prescription_revisions.find_one({"operation_id": operation_id})
-            if not existing:
-                raise
-    if any(existing.get(key) != value for key, value in request.items()):
-        raise conflict("operation_conflict", "This operation id was used for a different request.")
-    return existing
-
-
-def _commit_filter(patient_id, expected: int, *, empty_commit: bool, require_commit: bool) -> dict:
-    query = {
-        "_id": patient_id,
-        "issue_auth_op": None,
-        "arrived_at": {"$ne": None},
-        "printed_at": {"$ne": None},
-    }
-    query.update(_generation_clause(expected))
-    if empty_commit:
-        query["committed_revision_id"] = None
-    if require_commit:
-        query["committed_revision_id"] = {"$ne": None}
-    return query
-
-
-async def commit_completion(db, patient: dict, revision: dict, actor: dict, expected: int) -> Optional[dict]:
-    now = now_utc()
-    return await db.patients.find_one_and_update(
-        _commit_filter(patient["_id"], expected, empty_commit=True, require_commit=False),
-        {"$set": {
-            "committed_revision_id": revision["_id"],
-            "queue_status": "seen",
-            "seen_at": now,
-            "seen_by": str(actor["_id"]),
-            "clinical_generation": expected + 1,
-        }},
-        return_document=True,
-    )
-
-
-async def commit_correction(db, patient: dict, revision: dict, actor: dict, expected: int) -> Optional[dict]:
-    now = now_utc()
-    return await db.patients.find_one_and_update(
-        _commit_filter(patient["_id"], expected, empty_commit=False, require_commit=True),
-        {"$set": {
-            "committed_revision_id": revision["_id"],
-            "queue_status": "seen",
-            "seen_at": patient.get("seen_at") or now,
-            "seen_by": patient.get("seen_by") or str(actor["_id"]),
-            "clinical_generation": expected + 1,
-            "line_review": None,
-        }},
-        return_document=True,
-    )
-
-
-async def has_issue_history(db, patient: dict) -> bool:
-    if patient.get("issue_auth_op") or patient.get("issue_authorization"):
-        return True
-    trans = await db.transcriptions.find_one({"patient_id": patient["_id"]})
-    if trans and await db.fulfilments.find_one({"transcription_id": trans["_id"]}):
-        return True
-    return False
-
-
-async def commit_undo(db, patient: dict, expected: int, operation_id: str) -> Optional[dict]:
-    return await db.patients.find_one_and_update(
-        _commit_filter(patient["_id"], expected, empty_commit=False, require_commit=True),
-        {"$set": {
-            "committed_revision_id": None,
-            "queue_status": "arrived",
-            "seen_at": None,
-            "seen_by": None,
-            "clinical_generation": expected + 1,
-            "issue_authorization": None,
-            "issue_auth_op": None,
-            "last_undo_operation_id": operation_id,
-        }},
-        return_document=True,
-    )
-
-
-async def begin_issue_authorization(
-    db,
-    patient: dict,
-    actor: dict,
-    line: str,
-    revision_id,
-    generation: int,
-    operation_id: str,
-) -> dict:
-    pending = {
         "operation_id": operation_id,
-        "line": line,
-        "revision_id": revision_id,
-        "generation": generation,
-        "reviewer_id": str(actor["_id"]),
-        "status": "pending",
-        "started_at": now_utc(),
+        "author_id": str(actor["_id"]),
+        "created_at": now_utc(),
     }
-    if patient.get("issue_auth_op"):
-        raise conflict("issue_pending", "Another issue is already in progress for this patient.")
-    updated = await db.patients.find_one_and_update(
-        {
-            "_id": patient["_id"],
-            "committed_revision_id": revision_id,
-            "clinical_generation": generation,
-            "issue_auth_op": None,
-            "queue_status": "seen",
-        },
-        {"$set": {"issue_authorization": pending, "issue_auth_op": operation_id}},
+    res = await db.prescription_revisions.insert_one(doc, session=session)
+    doc["_id"] = res.inserted_id
+    return doc
+
+
+async def _commit(db, patient: dict, fields: dict, session) -> dict:
+    return await db.patients.find_one_and_update(
+        {"_id": patient["_id"]},
+        {"$set": {**fields, "clinical_generation": generation_of(patient) + 1}},
         return_document=True,
+        session=session,
     )
-    if not updated:
-        raise conflict("stale_review", "The reviewed prescription is no longer current. Review the paper again.")
-    return updated
 
 
-async def release_issue_authorization(db, patient_id, operation_id: str) -> None:
-    await db.patients.update_one(
-        {"_id": patient_id, "issue_auth_op": operation_id},
-        {"$set": {"issue_authorization": None, "issue_auth_op": None}},
-    )
+async def commit_completion(db, patient: dict, revision: dict, actor: dict, session) -> dict:
+    return await _commit(db, patient, {
+        "committed_revision_id": revision["_id"],
+        "queue_status": "seen",
+        "seen_at": now_utc(),
+        "seen_by": str(actor["_id"]),
+    }, session)
+
+
+async def commit_correction(db, patient: dict, revision: dict, session) -> dict:
+    return await _commit(db, patient, {"committed_revision_id": revision["_id"]}, session)
+
+
+async def commit_undo(db, patient: dict, session) -> dict:
+    return await _commit(db, patient, {
+        "committed_revision_id": None,
+        "queue_status": "arrived",
+        "seen_at": None,
+        "seen_by": None,
+    }, session)
+
+
+async def has_issue_history(db, patient: dict, session) -> bool:
+    trans = await db.transcriptions.find_one({"patient_id": patient["_id"]}, session=session)
+    return bool(trans and await db.fulfilments.find_one({"transcription_id": trans["_id"]}, session=session))
 
 
 def serialize_revision(rev: dict | None) -> Optional[dict]:

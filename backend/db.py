@@ -1,8 +1,11 @@
 import os
-from typing import Any
+from typing import Any, Awaitable, Callable, TypeVar
 from pymongo import ASCENDING, AsyncMongoClient, ReturnDocument
+from pymongo.asynchronous.client_session import AsyncClientSession
 from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.asynchronous.database import AsyncDatabase
+
+T = TypeVar("T")
 
 _client: AsyncMongoClient | None = None
 _db: AsyncDatabase | None = None
@@ -20,6 +23,11 @@ def get_db() -> AsyncDatabase:
     if _db is None:
         _db = get_client()[os.environ["DB_NAME"]]
     return _db
+
+
+async def in_transaction(callback: Callable[[AsyncClientSession], Awaitable[T]]) -> T:
+    async with get_client().start_session() as session:
+        return await session.with_transaction(callback)
 
 
 async def aggregate_list(collection: AsyncCollection, pipeline: list[dict[str, Any]]) -> list[dict[str, Any]]:

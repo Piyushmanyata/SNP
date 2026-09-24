@@ -2,6 +2,8 @@
 
 Date: 2026-09-12
 
+Superseded by ADR 0065 and `clinical-operation-safety.md`: clinical writes are now transactions, and the write claim described below is deleted.
+
 ## Context
 
 Undo checked issue history without holding the prescription write claim. An issue could finish between that check and undo's patient update, leaving issued medicine attached to a registration marked unseen. Corrections addressed only by patient ID also skipped the claim. Completion did not participate in the claim and could commit the patient before a transcription or operation-ledger failure made the request impossible to retry.

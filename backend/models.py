@@ -189,9 +189,7 @@ class UndoCompletionBody(BaseModel):
 class FulfilmentBody(BaseModel):
     transcription_id: str
     item_type: str  # medicine | specs_fixed | specs_made | ot
-    status: str  # fulfilled | not_available | partially_fulfilled | deferred | declined
-    collection_date: Optional[str] = None
-    collection_venue: Optional[str] = None
+    status: str  # fulfilled | not_available | partially_fulfilled | deferred | declined | cancelled
     ot_schedule_day_id: Optional[str] = None
     specs_collection_day_id: Optional[str] = None
     medicine_outcomes: List[MedicineOutcome] = []

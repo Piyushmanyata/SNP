@@ -1,6 +1,6 @@
 import React, { act } from "react";
 import ReactDOM from "react-dom/client";
-import { Button, Modal } from "./ui";
+import { Button, Field, Modal } from "./ui";
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -125,5 +125,22 @@ describe("Modal", () => {
   test("a mandatory dialog has no inactive close button", () => {
     act(() => root.render(<Modal open title="Set PIN">Required</Modal>));
     expect(document.querySelector('[data-testid="modal-close-button"]')).toBeNull();
+  });
+});
+
+describe("Field.Group", () => {
+  test("a tap on a button group's label presses nothing", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = ReactDOM.createRoot(container);
+    const onClick = jest.fn();
+    act(() => root.render(<Field.Group label="Diagnosis"><button type="button" aria-pressed="false" onClick={onClick}>Cataract</button></Field.Group>));
+    const group = container.querySelector('[role="group"]');
+    const label = document.getElementById(group.getAttribute("aria-labelledby"));
+    expect(label.textContent).toContain("Diagnosis");
+    act(() => label.click());
+    expect(onClick).not.toHaveBeenCalled();
+    act(() => root.unmount());
+    container.remove();
   });
 });

@@ -92,7 +92,7 @@ export function FixedPowerPicker({
 
       {split ? (
         <>
-          <Field label="Right eye">
+          <Field.Group label="Right eye">
             <PowerRow
               powers={powers}
               value={valueR}
@@ -101,8 +101,8 @@ export function FixedPowerPicker({
               testidPrefix="fixed-power-r"
               firstFieldRef={firstFieldRef}
             />
-          </Field>
-          <Field label="Left eye">
+          </Field.Group>
+          <Field.Group label="Left eye">
             <PowerRow
               powers={powers}
               value={valueL}
@@ -110,10 +110,10 @@ export function FixedPowerPicker({
               disabled={disabled}
               testidPrefix="fixed-power-l"
             />
-          </Field>
+          </Field.Group>
         </>
       ) : (
-        <Field label="Power for both eyes">
+        <Field.Group label="Power for both eyes">
           <PowerRow
             powers={powers}
             value={valueR}
@@ -122,7 +122,7 @@ export function FixedPowerPicker({
             testidPrefix="fixed-power-both"
             firstFieldRef={firstFieldRef}
           />
-        </Field>
+        </Field.Group>
       )}
     </div>
   );

@@ -469,3 +469,29 @@ describe("Fulfilment lines", () => {
     expect(container.querySelector('[data-testid="station-medicine-recorded"]').textContent).toContain("not available");
   });
 });
+
+test("a Spectacles to be made order can be cancelled at its station", async () => {
+  api.post.mockResolvedValueOnce({ data: { fulfilment: { id: "f-9", status: "cancelled" }, slip: null } });
+  const onDone = jest.fn();
+  await renderStation({
+    line: "specs_made",
+    data: {
+      transcription: { id: "tx-1", specs_measurements: { r_sph: "-1.00", l_sph: "-1.00" } },
+      committed_revision: { id: "rev-1" },
+      clinical_generation: 1,
+      registration: { id: "r" },
+      fulfilments: [{ id: "f-9", item_type: "specs_made", status: "deferred", specs_collection_day_id: "sp-1" }],
+      slips: [{ id: "slip-1", item_type: "specs_made", active: true }],
+    },
+    onDone,
+  });
+  const cancel = container.querySelector('[data-testid="station-specs_made-cancelled"]');
+  expect(cancel.textContent).toBe("Cancel spectacles order");
+  expect(cancel.disabled).toBe(true);
+  await act(async () => container.querySelector('[data-testid="station-specs_made-paper-review"]').click());
+  await act(async () => cancel.click());
+  expect(api.post).toHaveBeenCalledWith("/clinical/fulfilment", expect.objectContaining({
+    item_type: "specs_made", status: "cancelled", specs_collection_day_id: null,
+  }));
+  expect(onDone).toHaveBeenCalled();
+});

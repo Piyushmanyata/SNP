@@ -8,6 +8,8 @@ import { displayDateRange, displayTimeRange } from "../../lib/dates";
 import { printDocument } from "../../lib/printJob";
 import { TokenSheet } from "../print/TokenSheet";
 
+const DECLINE = { status: "declined", label: "Patient declined" };
+
 export const FULFILMENT_LINES = {
   medicine: {
     label: "Medicine",
@@ -31,6 +33,8 @@ export const FULFILMENT_LINES = {
     dayField: "specs_collection_day_id",
     dayLabel: "Specs collection day",
     actions: [{ status: "deferred", label: "Defer and print Token" }],
+    withdraw: { status: "cancelled", label: "Cancel spectacles order" },
+    statusLabels: { deferred: "Spectacles ordered", cancelled: "Order cancelled" },
   },
   ot: {
     label: "Hospital",
@@ -38,15 +42,13 @@ export const FULFILMENT_LINES = {
     itemType: "ot",
     dayField: "ot_schedule_day_id",
     dayLabel: "OT Schedule Day",
-    actions: [
-      { status: "deferred", label: "Schedule and print token" },
-      { status: "declined", label: "Patient declined" },
-    ],
+    actions: [{ status: "deferred", label: "Schedule and print token" }, DECLINE],
+    withdraw: DECLINE,
     statusLabels: { deferred: "IOL surgery scheduled", declined: "Surgery declined" },
   },
 };
 
-const STATUS_TONES = { deferred: "amber", declined: "slate" };
+const STATUS_TONES = { deferred: "amber", declined: "slate", cancelled: "slate" };
 
 function statusLabel(line, status) {
   return line.statusLabels?.[status] || status.replace(/_/g, " ");
@@ -64,17 +66,17 @@ export function hasFixedPower(transcription) {
   );
 }
 
-export function earliestFreeDay(days, currentId) {
+function earliestFreeDay(days, currentId) {
   if (currentId) return currentId;
   const free = days.filter((d) => d.seats_free > 0);
   return free.length ? free[0].id : "";
 }
 
-export function selectableSpecsDays(days) {
+function selectableSpecsDays(days) {
   return (days || []).filter((d) => d.start_time && d.end_time && !d.window_required);
 }
 
-export function earliestSpecsDay(days, currentId) {
+function earliestSpecsDay(days, currentId) {
   if (currentId) return currentId;
   const open = selectableSpecsDays(days);
   return open.length ? open[0].id : "";
@@ -310,7 +312,7 @@ export function FulfilmentStation({
       <span>I compared the paper with this saved prescription</span>
     </label>
   );
-  const decline = line.actions.find((a) => a.status === "declined");
+  const withdraw = line.withdraw;
 
   if (line.itemType === "ot" && data?.committed_revision?.ot_outcome === "referral") {
     return (
@@ -341,18 +343,18 @@ export function FulfilmentStation({
             <Printer className="w-4 h-4" /> Reprint Token
           </Button>
         )}
-        {decline && existing.status === "deferred" && (
+        {withdraw && existing.status === "deferred" && (
           <div className="mt-3">
             {paperReview}
             <Button
               size="sm"
               variant="outline"
               className="w-full"
-              onClick={() => save(decline.status)}
+              onClick={() => save(withdraw.status)}
               disabled={!paperReviewed || busy}
-              data-testid={`station-${lineKey}-${decline.status}`}
+              data-testid={`station-${lineKey}-${withdraw.status}`}
             >
-              {decline.label}
+              {withdraw.label}
             </Button>
             <Alert className="mt-2">{error}</Alert>
           </div>

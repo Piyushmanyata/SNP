@@ -206,3 +206,24 @@ test("unchanged prescriptions and blank audit reasons cannot be submitted", asyn
   expect(container.querySelector('[data-testid="save-transcription-button"]').disabled).toBe(true);
   expect(api.post).not.toHaveBeenCalled();
 });
+
+test("a tap on the Medicines or Fixed power label selects nothing", async () => {
+  await act(async () => {
+    root.render(<CorrectionForm
+      transcription={{ id: "tx-1", locked: true, diagnosis_options: [] }}
+      line="doctor_rx"
+      diagOpts={["Cataract"]}
+      medicines={[{ id: "med-1", name: "Moxifloxacin", active: true }]}
+      powers={[{ id: "p1", value: -1.5, label: "-1.50", active: true }]}
+      expectedGeneration={1}
+      patientId="reg-1"
+      prescribedLines={["medicine", "specs_fixed"]}
+      onDone={jest.fn()}
+    />);
+  });
+  const label = (inner) => document.getElementById(inner.closest('[role="group"]').getAttribute("aria-labelledby"));
+  act(() => label(container.querySelector('[data-testid="medicine-picker"]')).click());
+  act(() => label(container.querySelector('[data-testid="fixed-power-both-minus"]')).click());
+  expect(container.querySelector('[data-testid="medicine-opt-med-1"]').getAttribute("aria-pressed")).toBe("false");
+  expect(container.querySelector('[data-testid="fixed-power-both--1.5"]').getAttribute("aria-pressed")).toBe("false");
+});

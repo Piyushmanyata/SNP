@@ -134,7 +134,6 @@ def test_completion_cannot_apply_a_stale_draft_over_a_newer_save(monkeypatch):
         draft = await db.transcriptions.find_one({"patient_id": patient["_id"]})
         assert draft["bp"] == "120/80"
         assert draft["locked"] is False
-        assert draft.get("clinical_write_token") is None
         done = await routes_clinical.complete_prescription(
             _complete_body(patient["_id"], "fresh", expected_draft_version=2), actor=CLINICAL,
         )

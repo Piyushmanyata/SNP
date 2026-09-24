@@ -128,7 +128,7 @@ export function CorrectionForm({
         <LineChoices rx={rx} setRx={setRx} />
       </fieldset>
 
-      <Field label="Medicines">
+      <Field.Group label="Medicines">
         <MedicinePicker
           medicines={medicines}
           selectedIds={(rx.prescribed_medicines || []).map((m) => m.medicine_id)}
@@ -140,16 +140,16 @@ export function CorrectionForm({
             })),
           })}
         />
-      </Field>
+      </Field.Group>
 
-      <Field label="Fixed power">
+      <Field.Group label="Fixed power">
         <FixedPowerPicker
           powers={powers}
           valueR={rx.fixed_power_r}
           valueL={rx.fixed_power_l}
           onChange={(r, l) => setRx({ ...rx, fixed_power_r: r, fixed_power_l: l })}
         />
-      </Field>
+      </Field.Group>
 
       <SpecsMeasurementsGrid
         specsMeasurements={rx.specs_measurements}

@@ -260,7 +260,7 @@ class TestClinicalMatrix:
             assert refreshed["queue_status"] == "seen"
         run_camp(monkeypatch, run)
 
-    def test_c09_orphan_revision_grants_nothing(self, monkeypatch):
+    def test_c09_a_failed_commit_leaves_no_revision_and_grants_nothing(self, monkeypatch):
         async def run(db):
             _camp, _day, patient = await _printed_patient(db)
 
@@ -274,7 +274,7 @@ class TestClinicalMatrix:
             refreshed = await db.patients.find_one({"_id": patient["_id"]})
             assert refreshed.get("seen_at") is None
             assert refreshed.get("committed_revision_id") is None
-            assert await db.prescription_revisions.find_one({"operation_id": "op-c09"})
+            assert not await db.prescription_revisions.find_one({"operation_id": "op-c09"})
             out = await complete_prescription(_complete_body(patient["_id"], "op-c09"), actor=CLINICAL)
             assert out["registration"]["queue_status"] == "seen"
         run_camp(monkeypatch, run)
@@ -905,7 +905,7 @@ class TestScoringAndMessages:
                 full_name="Self Pat", created_by=None, is_self_registered=True,
                 arrived_at=NOW, printed_at=NOW,
                 queue_status="arrived", clinical_generation=0,
-                committed_revision_id=None, issue_auth_op=None,
+                committed_revision_id=None,
             ))
             await complete_prescription(_complete_body(pid, "op-s03"), actor=CLINICAL)
             board = await routes_reports.leaderboard(actor=VOLUNTEER)

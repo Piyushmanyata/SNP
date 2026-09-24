@@ -10,11 +10,9 @@ Surgery is scheduled at Vimla Ramkrishna Bajaj Eye Hospital, Near Canara Bank, B
 
 ## Concurrency and audit
 
-The application uses Mongo conditional updates and unique indexes instead of introducing a replica-set transaction requirement. A prescription has a temporary atomic write claim shared by fulfilments and corrections. Simultaneous writes return 409 so the operator reloads before retrying. Direct transcription updates require an unlocked record with no active claim. Claims expire after two minutes if a worker terminates.
+Each clinical write (complete, undo, correction, fulfilment) is one MongoDB transaction that first increments the patient's `clinical_seq`. Two writers on one patient conflict and the driver retries one on fresh state. The operation record commits with the work, so a replay returns the stored result. An error or crash at any point leaves no seat, Token, fulfilment or revision behind. See `clinical-operation-safety.md` and ADR 0065.
 
-Fulfilment failures release newly reserved OT capacity and restore the prior active slip. The unique `(transcription_id, item_type)` index limits each line to one fulfilment. Corrections preserve their append-only history and validate values using the same prescription model as initial transcription. Fixed-power and made-to-order spectacles remain mutually exclusive.
-
-Consequence: ordinary concurrency and injected write failures are covered. These multi-document operations are not fully atomic during abrupt process termination or loss of Mongo connectivity. After an interrupted clinical write, reconcile the active slip, current fulfilment and schedule occupancy before resuming that patient's booking. A transaction-backed deployment would be required to eliminate this failure window.
+The unique `(transcription_id, item_type)` index limits each line to one fulfilment. Corrections preserve their append-only history and validate values using the same prescription model as initial transcription. A correction cannot remove a line whose Token is active. Fixed-power and made-to-order spectacles remain mutually exclusive.
 
 ## Authentication
 

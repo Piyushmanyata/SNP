@@ -6,7 +6,7 @@ from pydantic import ValidationError
 import routes_clinical
 from conftest import CommandLog
 from models import CorrectionBody, OtScheduleBody
-from seed import ADMIN, CLINICAL, NOW, TOMORROW, day, fulfil, patient_doc, run_camp, seed_camp, seen_patient
+from seed import ADMIN, CLINICAL, NOW, TOMORROW, day, fulfil, patient_doc, recorder, run_camp, seed_camp, seen_patient
 
 
 def test_surgery_venue_is_admin_typed_and_required(monkeypatch):
@@ -70,8 +70,11 @@ def test_patient_history_uses_three_queries_for_twenty_visits(monkeypatch):
 
 
 def test_hospital_token_response_does_not_wait_for_sms(monkeypatch):
+    recorder(monkeypatch)
+
     async def body(database):
-        seen = await seen_patient(database)
+        camp_id, _days = await seed_camp(database)
+        seen = await seen_patient(database, camp_id=camp_id)
         day_id = (await database.ot_schedule_days.insert_one({
             "camp_id": seen["camp_id"], "day_date": TOMORROW, "venue": "Hospital", "seat_limit": 10, "seats_taken": 0,
         })).inserted_id
@@ -80,7 +83,7 @@ def test_hospital_token_response_does_not_wait_for_sms(monkeypatch):
         async def provider(*args, **kwargs):
             sent.append(True)
 
-        monkeypatch.setattr(routes_clinical.sms, "send_patient_sms", provider)
+        monkeypatch.setattr(routes_clinical.sms, "send_queued", provider)
         background = BackgroundTasks()
         result = await routes_clinical.record_fulfilment(fulfil(
             seen["trans_id"], seen["rev_id"], item_type="ot", status="deferred", ot_schedule_day_id=str(day_id),
