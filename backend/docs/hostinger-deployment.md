@@ -334,3 +334,27 @@ Still open:
 Before the update, the running `2046979` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-20469794e7cbf10cbe719f371b48ec6991e074b2`. To roll back, retag them to `:latest`, point `/opt/snp/current` at `/opt/snp/releases/20469794…`, and run `up -d --no-build` from that directory. No data migration was needed.
 
 `up -d --build --wait` recreated all six containers because every bind mount now points at the new release directory; the named volumes stayed attached. Live checks: `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`, the homepage returned 200 and HTTP redirected with 308. The served `AadhaarScanner` chunk carries the `roi, roi, full` region cycle and the hidden-tab check, and the backend log has no errors. The backup container reports `BACKUP_INTERVAL_SECONDS=86400` and wrote a snapshot on start.
+
+## Patient self-registration is the front page — 25 September 2026
+
+[PR 69](https://github.com/Piyushmanyata/SNP/pull/69) merged as `5fec907d33a9f979ac65f666a5b0e6cba585d89f`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/5fec907…`. CI run [36101825264](https://github.com/Piyushmanyata/SNP/actions/runs/36101825264) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify.
+
+Before the update, the running `7a1a304` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-7a1a304f1fbd1ba1e412e50380a0dcc0426108bd`. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/7a1a304…`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed.
+
+`up -d --build --wait` recreated backend, frontend, reminders, caddy and mongo. The backup container kept running unchanged.
+
+Live checks:
+
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200 and HTTP redirected with 308. The CSP, HSTS and `X-Frame-Options: DENY` headers are present.
+- `/api/camps/active/public` carries `is_past` on each day.
+- The served bundle contains the Staff sign in link and the `snp:staff-device` mark.
+- The backend log has no errors.
+
+Staff who were signed in before this release have no staff-device mark yet. Opening `/` shows them the patient page once. Tapping **Staff sign in**, or opening their screen directly, sets the mark.
