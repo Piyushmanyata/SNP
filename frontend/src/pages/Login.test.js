@@ -102,7 +102,7 @@ describe("Login page occupancy", () => {
       );
     });
 
-    expect(container.querySelector('[data-testid="goto-self-register-link"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="goto-self-register-link"]').getAttribute("href")).toBe("/");
     expect(container.querySelector('[data-testid="public-occupancy"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="occupancy-headline"]').textContent).toBe("15 / 80");
     expect(container.textContent).toContain("registered against 80 seats");

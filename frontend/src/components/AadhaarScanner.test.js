@@ -963,3 +963,52 @@ describe("AadhaarScanner component", () => {
     expect(api.post).not.toHaveBeenCalledWith("/aadhaar/decode", expect.anything());
   });
 });
+
+describe("AadhaarScanner for a patient", () => {
+  test("offers the camera and upload in English and Hindi and no USB / paste box", () => {
+    act(() => root.render(<AadhaarScanner onScanned={jest.fn()} forPatient />));
+    expect(container.querySelector('[data-testid="aadhaar-manual-toggle"]')).toBeNull();
+    expect(container.querySelector('[data-testid="aadhaar-qr-input"]')).toBeNull();
+    expect(container.querySelector('[data-testid="aadhaar-camera-button"]').textContent).toContain("कैमरे से स्कैन करें");
+    expect(container.querySelector('[data-testid="aadhaar-upload-button"]').textContent).toContain("अपलोड करें");
+    expect(container.textContent).toContain("आधार QR स्कैन करें");
+    expect(container.textContent).not.toMatch(/enter details manually/i);
+  });
+
+  test("a stalled camera offers the torch and an upload but no USB / paste", async () => {
+    let now = 10000;
+    let tick;
+    jest.spyOn(Date, "now").mockImplementation(() => now);
+    jest.spyOn(global, "setInterval").mockImplementation((callback) => {
+      tick = callback;
+      return 12345;
+    });
+    act(() => root.render(<AadhaarScanner onScanned={jest.fn()} forPatient />));
+    await act(async () => container.querySelector('[data-testid="aadhaar-camera-button"]').click());
+    now += 21000;
+    await act(async () => tick());
+    expect(container.querySelector('[data-testid="fallback-upload-button"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="fallback-manual-button"]')).toBeNull();
+    expect(container.querySelector('[data-testid="aadhaar-fallback-panel"]').textContent).toContain("कैमरा यह कार्ड नहीं पढ़ पा रहा है");
+  });
+
+  test("a reader error that suggests typing sends the patient to the camp desk instead", async () => {
+    api.post.mockRejectedValueOnce({ response: { data: { detail: { code: "QR_NOT_FOUND", message: "No readable Aadhaar QR was found. Try another photo or enter details manually at the desk." } } } });
+    act(() => root.render(<AadhaarScanner onScanned={jest.fn()} forPatient />));
+    const fileInput = container.querySelector('[data-testid="aadhaar-file-input"]');
+    await act(async () => {
+      Object.defineProperty(fileInput, "files", { value: [new File(["%PDF-1.7"], "card.pdf", { type: "application/pdf" })] });
+      fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(container.textContent).not.toMatch(/manually/i);
+    expect(container.textContent).toContain("register at the camp desk");
+    expect(container.textContent).toContain("कैंप डेस्क पर रजिस्टर करें");
+  });
+
+  test("the desk keeps USB / paste and the manual-entry hint", () => {
+    act(() => root.render(<AadhaarScanner onScanned={jest.fn()} />));
+    expect(container.querySelector('[data-testid="aadhaar-manual-toggle"]')).not.toBeNull();
+    expect(container.textContent).toMatch(/enter details manually at the desk/i);
+  });
+});

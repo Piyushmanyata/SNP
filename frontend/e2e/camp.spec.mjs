@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test, expect } from "@playwright/test";
 
 const pins = {};
@@ -14,10 +16,14 @@ function istDay(offset = 0) {
   return date.toISOString().slice(0, 10);
 }
 
-function card(name, dob, last4) {
+function card(name, dob, last4, ...extra) {
   return execFileSync(process.platform === "win32" ? "python" : "python3", [
-    "backend/tests/fixtures/aadhaar_qr.py", "--name", name, "--dob", dob, "--last4", last4,
+    "backend/tests/fixtures/aadhaar_qr.py", "--name", name, "--dob", dob, "--last4", last4, ...extra,
   ], { encoding: "utf8", cwd: new URL("../..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1") }).trim();
+}
+
+function cardImage(name, dob, last4) {
+  return card(name, dob, last4, "--png", join(tmpdir(), `snp-card-${last4}.png`));
 }
 
 async function login(page, name, pin) {
@@ -214,13 +220,12 @@ test.describe.serial("a camp day on the headless desk", () => {
     expect(text).toContain("Asha Devi");
   });
 
-  test("self-register shows a receipt", async ({ page }) => {
+  test("a patient registers from the front page by uploading the card", async ({ page }) => {
     await page.setViewportSize({ width: 393, height: 851 });
-    await page.goto("/self-register");
-    await page.getByTestId("aadhaar-manual-toggle").click();
-    const usb = page.getByTestId("aadhaar-qr-input");
-    await usb.fill(card("Champa Devi", "1978-07-07", "3333"));
-    await usb.press("Enter");
+    await page.goto("/");
+    await expect(page.getByTestId("goto-staff-login-link")).toBeVisible();
+    await expect(page.getByTestId("aadhaar-manual-toggle")).toHaveCount(0);
+    await page.getByTestId("aadhaar-file-input").setInputFiles(cardImage("Champa Devi", "1978-07-07", "3333"));
     await expect(page.getByTestId("self-scanned-preview")).toContainText("Champa Devi");
     await page.getByTestId("self-phone-input").fill("9898989898");
     await page.getByTestId("self-register-submit").click();

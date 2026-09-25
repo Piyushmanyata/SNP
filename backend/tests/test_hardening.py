@@ -239,7 +239,7 @@ class TestPublicOccupancy:
             assert board["total_registered"] == 4
             days = {d["day_date"]: d for d in board["days"]}
             assert days[TODAY] == {
-                "id": str(today_id), "day_date": TODAY, "is_today": True,
+                "id": str(today_id), "day_date": TODAY, "is_today": True, "is_past": False,
                 "registered": 3, "seat_limit": 50, "remaining": 47,
             }
             assert days[day(1)]["remaining"] == 29

@@ -3,6 +3,24 @@ import api from "../lib/api";
 import { clearSessionLine } from "../lib/operatorLines";
 
 const AuthContext = createContext(null);
+const STAFF_DEVICE = "snp:staff-device";
+
+function isStaffDevice() {
+  try {
+    return localStorage.getItem(STAFF_DEVICE) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markStaffDevice(on) {
+  try {
+    if (on) localStorage.setItem(STAFF_DEVICE, "1");
+    else localStorage.removeItem(STAFF_DEVICE);
+  } catch {
+    return;
+  }
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null); // null=checking, false=anon, obj=authed
@@ -10,7 +28,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     const path = window.location.pathname || "";
-    if (path === "/login" || path === "/self-register") {
+    if (path === "/login" || path === "/self-register" || (path === "/" && !isStaffDevice())) {
       setUser(false);
       setLoading(false);
       return;
@@ -22,6 +40,7 @@ export function AuthProvider({ children }) {
         .get("/auth/me")
         .then((r) => {
           if (cancelled) return;
+          markStaffDevice(Boolean(r.data.user));
           setUser(r.data.user);
           setLoading(false);
         })
@@ -29,6 +48,7 @@ export function AuthProvider({ children }) {
           if (cancelled) return;
           const status = err?.response?.status;
           if (status && status < 500) {
+            markStaffDevice(false);
             setUser(false);
             setLoading(false);
             return;
@@ -45,6 +65,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     const signOut = () => {
+      markStaffDevice(false);
       setUser(false);
       setLoading(false);
     };
@@ -55,6 +76,7 @@ export function AuthProvider({ children }) {
   const login = useCallback(async (name, pin) => {
     clearSessionLine();
     const r = await api.post("/auth/login", { name, pin });
+    markStaffDevice(true);
     setUser(r.data.user);
     return r.data.user;
   }, []);
@@ -68,6 +90,7 @@ export function AuthProvider({ children }) {
   const logout = useCallback(async () => {
     await api.post("/auth/logout");
     clearSessionLine();
+    markStaffDevice(false);
     setUser(false);
   }, []);
 

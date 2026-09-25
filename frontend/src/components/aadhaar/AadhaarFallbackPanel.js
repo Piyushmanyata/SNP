@@ -9,6 +9,7 @@ export function AadhaarFallbackPanel({
   toggleTorch,
   onUpload,
   onManual,
+  forPatient = false,
 }) {
   if (!revealed) return null;
   return (
@@ -17,10 +18,11 @@ export function AadhaarFallbackPanel({
       data-testid="aadhaar-fallback-panel"
     >
       <p className="text-sm font-semibold text-amber-900">
-        The camera is not reading this card.
+        The camera is not reading this card.{forPatient && " / कैमरा यह कार्ड नहीं पढ़ पा रहा है।"}
       </p>
       <p className="text-xs text-amber-800 mt-1 mb-3">
         Hold the card a little farther away, tap the picture to focus, turn on the torch, or upload a photo of the QR instead.
+        {forPatient && " / कार्ड थोड़ा दूर रखें, फोकस के लिए तस्वीर पर टैप करें, टॉर्च चालू करें, या QR की फोटो अपलोड करें।"}
       </p>
       <div className="flex flex-wrap gap-2">
         {torchAvailable && (
@@ -32,6 +34,7 @@ export function AadhaarFallbackPanel({
             data-testid="fallback-torch-button"
           >
             <Flashlight className="w-4 h-4" /> {torchOn ? "Torch off" : "Torch on"}
+            {forPatient && (torchOn ? " / टॉर्च बंद" : " / टॉर्च चालू")}
           </Button>
         )}
         <Button
@@ -41,17 +44,19 @@ export function AadhaarFallbackPanel({
           onClick={onUpload}
           data-testid="fallback-upload-button"
         >
-          <Upload className="w-4 h-4" /> Upload photo
+          <Upload className="w-4 h-4" /> Upload photo{forPatient && " / फोटो अपलोड करें"}
         </Button>
-        <Button
-          variant="outline"
-          size="md"
-          type="button"
-          onClick={onManual}
-          data-testid="fallback-manual-button"
-        >
-          <Keyboard className="w-4 h-4" /> USB / paste
-        </Button>
+        {!forPatient && (
+          <Button
+            variant="outline"
+            size="md"
+            type="button"
+            onClick={onManual}
+            data-testid="fallback-manual-button"
+          >
+            <Keyboard className="w-4 h-4" /> USB / paste
+          </Button>
+        )}
       </div>
     </div>
   );

@@ -10,7 +10,7 @@ Install Docker Desktop and run from this directory:
 docker compose --env-file .env.example up -d --build --wait
 ```
 
-Open http://localhost:3000. Sign in as **admin**, PIN **864200**, then choose a new 6-digit PIN. These credentials are only for the local stack. MongoDB data persists in a Docker volume; stopping or rebuilding does not erase it. Both frontend and backend run production builds without development servers or source mounts.
+Open http://localhost:3000. The front page is patient self-registration; staff tap **Staff sign in** at the top right, or open `/login`. Sign in as **admin**, PIN **864200**, then choose a new 6-digit PIN. These credentials are only for the local stack. MongoDB data persists in a Docker volume; stopping or rebuilding does not erase it. Both frontend and backend run production builds without development servers or source mounts.
 
 For phone camera testing, use a trusted HTTPS address; see [local HTTPS setup](docs/dev-https.md). Plain HTTP on a LAN IP cannot use the camera. The local site binds to localhost by default.
 

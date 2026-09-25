@@ -6,12 +6,18 @@ import api from "../lib/api";
 jest.mock("../lib/api", () => ({
   __esModule: true,
   default: { get: jest.fn(), post: jest.fn() },
-  formatApiError: (e) => e?.message || "error",
+  formatApiError: (e) => e?.response?.data?.detail?.message || e?.message || "error",
+  errorPayload: (e) => e?.response?.data?.detail,
 }));
+
+let mockScannerProps = null;
 
 jest.mock("../components/AadhaarScanner", () => ({
   __esModule: true,
-  default: ({ onScanned, onFailure }) => (
+  default: (props) => {
+    mockScannerProps = props;
+    const { onScanned, onFailure } = props;
+    return (
     <>
     <button
       type="button"
@@ -34,15 +40,27 @@ jest.mock("../components/AadhaarScanner", () => ({
     <button type="button" data-testid="fake-network" onClick={() => onFailure("request")}>network</button>
     <button type="button" data-testid="fake-camera" onClick={() => onFailure("error")}>camera</button>
     </>
-  ),
+    );
+  },
 }));
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
+const STILL_NEEDED_MOBILE = "Still needed / अभी बाकी: 10-digit mobile / 10 अंकों का मोबाइल";
+const PAST = { id: "d0", day_date: "2026-08-31", is_today: false, is_past: true, registered: 5, seat_limit: 50, remaining: 45 };
+const TODAY_OPEN = { id: "d1", day_date: "2026-09-01", is_today: true, is_past: false, registered: 12, seat_limit: 50, remaining: 38 };
+const TODAY_FULL = { ...TODAY_OPEN, registered: 50, remaining: 0 };
+const TOMORROW_OPEN = { id: "d2", day_date: "2026-09-02", is_today: false, is_past: false, registered: 3, seat_limit: 30, remaining: 27 };
+const TOMORROW_FULL = { ...TOMORROW_OPEN, registered: 30, remaining: 0 };
+
 const CAMP = {
   camp: { id: "c1", name: "Sikar Camp", venue: "Sikar Bhawan" },
-  days: [{ id: "d1", day_date: "2026-09-01", is_today: true }],
+  days: [TODAY_OPEN],
 };
+
+function withDays(days) {
+  api.get.mockResolvedValue({ data: { ...CAMP, days } });
+}
 
 let container;
 let root;
@@ -84,7 +102,7 @@ test("submit stays disabled without a mobile number", async () => {
     container.querySelector('[data-testid="fake-scan"]').click();
   });
   expect(container.querySelector('[data-testid="self-register-submit"]').disabled).toBe(true);
-  expect(container.querySelector('[data-testid="self-register-missing"]').textContent).toBe("Still needed: 10-digit mobile");
+  expect(container.querySelector('[data-testid="self-register-missing"]').textContent).toBe(STILL_NEEDED_MOBILE);
 });
 
 function typePhone(value) {
@@ -117,7 +135,7 @@ test.each(["98765000012", "1234567890", "0091 98765 00001", "98765"])("the mobil
   await act(async () => container.querySelector('[data-testid="fake-scan"]').click());
   typePhone(typed);
   expect(container.querySelector('[data-testid="self-register-submit"]').disabled).toBe(true);
-  expect(container.querySelector('[data-testid="self-register-missing"]').textContent).toBe("Still needed: 10-digit mobile");
+  expect(container.querySelector('[data-testid="self-register-missing"]').textContent).toBe(STILL_NEEDED_MOBILE);
 });
 
 test("a scan submits the QR payload and never typed identity", async () => {
@@ -136,7 +154,7 @@ test("a scan submits the QR payload and never typed identity", async () => {
 
 test("dates read DD-MM-YYYY in the day picker, the card preview and the receipt", async () => {
   await renderAndScan();
-  expect(container.querySelector('[data-testid="self-day-select"]').textContent).toBe("01-09-2026 (today)");
+  expect(container.querySelector('[data-testid="self-day-select"]').textContent).toBe("01-09-2026 (today / आज) · 38 seats left / 38 सीटें बाकी");
   expect(container.querySelector('[data-testid="self-scanned-preview"]').textContent).toContain("14-06-1975");
   api.post.mockResolvedValueOnce({ data: { receipt: { reg_no: 14, patient_qr: "qr-14", day_date: "2026-09-01" } } });
   await submit();
@@ -234,4 +252,84 @@ test("registering another patient starts a new request id", async () => {
   await submit();
 
   expect(api.post.mock.calls[1][1].registration_request_id).not.toBe(firstId);
+});
+
+test("the camp day comes first, lists today and later only, and starts on the first day with seats", async () => {
+  withDays([PAST, TODAY_FULL, TOMORROW_OPEN]);
+  await renderAndScan();
+  const select = container.querySelector('[data-testid="self-day-select"]');
+  const options = [...select.options];
+  expect(options.map((o) => o.value)).toEqual(["d1", "d2"]);
+  expect(options[0].disabled).toBe(true);
+  expect(options[0].textContent).toContain("Full / भरा हुआ");
+  expect(options[1].disabled).toBe(false);
+  expect(options[1].textContent).toContain("27 seats left / 27 सीटें बाकी");
+  expect(select.value).toBe("d2");
+  expect(container.textContent).not.toContain("31-08-2026");
+  const scanner = container.querySelector('[data-testid="fake-scan"]');
+  expect(select.compareDocumentPosition(scanner) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  api.post.mockResolvedValueOnce({ data: { receipt: { reg_no: 3, patient_qr: "qr-3" } } });
+  await submit();
+  expect(api.post.mock.calls[0][1].camp_day_id).toBe("d2");
+});
+
+test("when every remaining day is full the page says the desk still registers everyone who comes", async () => {
+  withDays([PAST, TODAY_FULL, TOMORROW_FULL]);
+  await act(async () => root.render(<SelfRegister />));
+  const notice = container.querySelector('[data-testid="self-all-full"]');
+  expect(notice.textContent).toContain("Online booking is full");
+  expect(notice.textContent).toContain("01-09-2026, 02-09-2026");
+  expect(notice.textContent).toContain("Sikar Bhawan");
+  expect(notice.textContent).toContain("registers everyone who comes");
+  expect(notice.textContent).toContain("ऑनलाइन बुकिंग भर गई है");
+  expect(notice.textContent).not.toContain("31-08-2026");
+  expect(container.querySelector('[data-testid="fake-scan"]')).toBeNull();
+  expect(container.querySelector('[data-testid="self-register-submit"]')).toBeNull();
+});
+
+test("a camp whose days have all passed offers no booking", async () => {
+  withDays([PAST]);
+  await act(async () => root.render(<SelfRegister />));
+  expect(container.querySelector('[data-testid="self-no-camp"]')).not.toBeNull();
+  expect(container.querySelector('[data-testid="fake-scan"]')).toBeNull();
+});
+
+test("staff sign in is a quiet link to the staff page", async () => {
+  await act(async () => root.render(<SelfRegister />));
+  const link = container.querySelector('[data-testid="goto-staff-login-link"]');
+  expect(link.getAttribute("href")).toBe("/login");
+  expect(link.textContent).toBe("Staff sign in");
+});
+
+test("the scanner runs for a patient, without the USB / paste box", async () => {
+  await act(async () => root.render(<SelfRegister />));
+  expect(mockScannerProps.forPatient).toBe(true);
+});
+
+test.each(["CAMP_DAY_FULL", "DAY_PASSED"])("a %s refusal reloads the days and moves to the next day with seats", async (code) => {
+  withDays([TODAY_OPEN, TOMORROW_OPEN]);
+  await renderAndScan();
+  withDays([TODAY_FULL, TOMORROW_OPEN]);
+  api.post.mockRejectedValueOnce({ response: { data: { detail: { code, message: "This camp day is full." } } } });
+  await submit();
+  expect(api.get).toHaveBeenCalledTimes(2);
+  expect(container.querySelector('[data-testid="self-day-select"]').value).toBe("d2");
+  expect(container.textContent).toContain("This camp day is full.");
+  expect(container.querySelector('[data-testid="self-scanned-preview"]')).not.toBeNull();
+});
+
+test("a network failure on submit keeps the page as it is", async () => {
+  await renderAndScan();
+  api.post.mockRejectedValueOnce(new Error("Network Error"));
+  await submit();
+  expect(api.get).toHaveBeenCalledTimes(1);
+});
+
+test("registering another patient reloads the seats left", async () => {
+  await renderAndScan();
+  api.post.mockResolvedValueOnce({ data: { receipt: { reg_no: 12, patient_qr: "qr-12" } } });
+  await submit();
+  expect(container.querySelector('[data-testid="self-receipt"]').textContent).toContain("आपका रजिस्ट्रेशन हो गया");
+  await act(async () => container.querySelector('[data-testid="self-register-another"]').click());
+  expect(api.get).toHaveBeenCalledTimes(2);
 });
