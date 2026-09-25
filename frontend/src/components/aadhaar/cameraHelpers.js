@@ -49,11 +49,11 @@ export function buildCameraConstraintAttempts(deviceId) {
   if (deviceId) {
     const device = { deviceId: { exact: deviceId } };
     attempts.push({ video: { ...device, ...FULL_HD, ...FOCUS } });
-    attempts.push({ video: { ...device, ...HD } });
+    attempts.push({ video: { ...device, ...HD, ...FOCUS } });
   }
   const rear = { facingMode: { ideal: "environment" } };
   attempts.push({ video: { ...rear, ...FULL_HD, ...FOCUS } });
-  attempts.push({ video: { ...rear, ...HD } });
+  attempts.push({ video: { ...rear, ...HD, ...FOCUS } });
   attempts.push({ video: { facingMode: "environment" } });
   attempts.push({ video: { facingMode: "user" } });
   attempts.push({ video: true });

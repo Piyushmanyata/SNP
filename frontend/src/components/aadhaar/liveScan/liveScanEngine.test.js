@@ -47,6 +47,22 @@ function makeEngine({ lanes, decode = jest.fn().mockResolvedValue({ outcome: "ga
 }
 
 describe("createLiveScanEngine", () => {
+  test("a hidden tab grabs and decodes no frames until it is visible again", async () => {
+    const { engine, native, wasm } = makeEngine();
+    const hidden = jest.spyOn(document, "hidden", "get").mockReturnValue(true);
+    engine.start();
+    engine.tick();
+    await flush();
+    expect(native.detect).not.toHaveBeenCalled();
+    expect(wasm.detect).not.toHaveBeenCalled();
+    hidden.mockReturnValue(false);
+    engine.tick();
+    await flush();
+    expect(native.detect).toHaveBeenCalledTimes(1);
+    expect(wasm.detect).toHaveBeenCalledTimes(1);
+    hidden.mockRestore();
+  });
+
   test("runs the native and WASM lanes side by side, one detect in flight per lane", async () => {
     const { engine, native, wasm } = makeEngine();
     const nativeHit = deferred();

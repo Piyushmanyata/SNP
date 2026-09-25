@@ -6,7 +6,6 @@ from fastapi import HTTPException
 
 from helpers import api_error, now_utc
 
-CLINICAL_ROLE = "clinical_desk_operator"
 PRESCRIBED_LINE_KEYS = ("medicine", "specs_fixed", "specs_made", "ot")
 CONTENT_FIELDS = (
     "diagnosis_options",
@@ -33,12 +32,6 @@ EXCLUSIVE_LINE_LABELS = {
 
 def normalize_ot_eye(value: Any) -> Optional[str]:
     return SURGERY_EYES.get(str(value or "").strip().lower())
-
-
-def assert_clinical_operator(actor: dict | None) -> dict:
-    if not actor or actor.get("role") != CLINICAL_ROLE:
-        raise api_error(403, "INSUFFICIENT_PERMISSIONS", 'Insufficient permissions')
-    return actor
 
 
 def payload_hash(kind: str, data: dict) -> str:

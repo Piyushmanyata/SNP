@@ -89,7 +89,7 @@ export function createLiveScanEngine({
   }
 
   function tick() {
-    if (!running || holding) return;
+    if (!running || holding || document.hidden) return;
     watchClock();
     const mine = session;
     for (const slot of slots) {

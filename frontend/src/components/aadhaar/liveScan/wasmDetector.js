@@ -1,10 +1,12 @@
 export const WASM_LOAD_TIMEOUT_MS = 45000;
 export const WASM_DETECT_TIMEOUT_MS = 4000;
+export const WASM_MAX_STALLS = 3;
 const WASM_PHOTO_TIMEOUT_MS = 20000;
 
 let worker = null;
 let ready = null;
 let seq = 0;
+let stalls = 0;
 const pending = new Map();
 
 function workerUrl() {
@@ -28,6 +30,7 @@ function reset() {
   }
   worker = null;
   ready = null;
+  stalls = 0;
   for (const id of [...pending.keys()]) settle(id, null);
 }
 
@@ -51,6 +54,7 @@ export function loadZxingWorker() {
         resolve();
         return;
       }
+      if (pending.has(data.id)) stalls = 0;
       settle(data.id, data.text || null);
     };
     current.onerror = fail;
@@ -65,7 +69,10 @@ function detect(image, timeoutMs, message, transfer) {
     const current = worker;
     const id = (seq += 1);
     const timer = setTimeout(() => {
-      if (worker === current) reset();
+      if (worker !== current) return;
+      stalls += 1;
+      if (stalls >= WASM_MAX_STALLS) reset();
+      else settle(id, null);
     }, timeoutMs);
     pending.set(id, { resolve, timer });
     try {

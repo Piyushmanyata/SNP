@@ -14,7 +14,7 @@ from routes_clinical import (
     add_correction, clinical_lookup, clinical_search, complete_prescription, get_slip, record_fulfilment,
 )
 from routes_reports import _empty_board, export_camp_records
-from seed import FIXED_POWER, MEDICINE, day, patient_doc, recorder, run_camp
+from seed import FIXED_POWER, MEDICINE, asgi_client, bearer, day, patient_doc, recorder, run_camp, user_doc
 from test_camp_operations_matrix import (
     ADMIN, CLINICAL, OT_DATE, RX, _complete_body, _issue_body, _printed_patient, _register_printed,
 )
@@ -382,12 +382,14 @@ class TestClinicalFind:
             assert exc.value.status_code == 404
         run_camp(monkeypatch, run)
 
-    @pytest.mark.parametrize("role", ["volunteer", "team_lead", "admin"])
-    def test_name_search_refuses_other_roles(self, monkeypatch, role):
+    @pytest.mark.parametrize("role", ["volunteer", "team_lead"])
+    def test_name_search_refuses_door_staff(self, monkeypatch, role):
         async def run(db):
-            with pytest.raises(HTTPException) as exc:
-                await clinical_search(q="Sunita", actor={"_id": ObjectId(), "role": role})
-            assert exc.value.status_code == 403
+            user_id = ObjectId()
+            await db.users.insert_one(user_doc(f"Door {role}", role=role, _id=user_id))
+            async with asgi_client() as client:
+                r = await client.get("/api/clinical/search", params={"q": "Sunita"}, headers=bearer(user_id, "Door", role))
+            assert r.status_code == 403, r.text
         run_camp(monkeypatch, run)
 
 
