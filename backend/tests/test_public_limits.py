@@ -248,6 +248,16 @@ def test_public_occupancy_reads_the_day_counters(monkeypatch):
     run_camp(monkeypatch, run, listener=log)
 
 
+def test_public_occupancy_marks_the_camp_days_that_have_passed(monkeypatch):
+    async def run(database):
+        await seed_camp(database, days=(day(-1), TODAY, day(1)))
+        async with asgi_client() as client:
+            data = (await client.get("/api/camps/active/public")).json()
+        assert [(d["day_date"], d["is_past"]) for d in data["days"]] == [(day(-1), True), (TODAY, False), (day(1), False)]
+
+    run_camp(monkeypatch, run)
+
+
 def test_login_answers_with_a_cookie_only_and_checks_unknown_names_in_constant_time(monkeypatch):
     checked = []
     real = routes_auth.verify_pin

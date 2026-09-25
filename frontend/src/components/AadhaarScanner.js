@@ -17,6 +17,7 @@ import { primeFeedback, signalSuccess } from "../lib/feedback";
 
 const PATIENT_CODE = /^snp:[a-z0-9-]+$/i;
 const PRESCRIPTION_QR_ONLY = "Scan the QR on the prescription.";
+const PATIENT_DESK_HINT = "We could not read this card. Try a clearer photo, or register at the camp desk. / कार्ड नहीं पढ़ा जा सका। साफ़ फोटो लें या कैंप डेस्क पर रजिस्टर करें।";
 
 function prefersTouch() {
   return typeof window !== "undefined" && Boolean(window.matchMedia?.("(pointer: coarse)")?.matches);
@@ -30,6 +31,7 @@ export default function AadhaarScanner({
   resolvePayload,
   patientCodeOnly = false,
   usbFirst = false,
+  forPatient = false,
   disabled,
 }) {
   const [touchFirst] = useState(prefersTouch);
@@ -168,11 +170,18 @@ export default function AadhaarScanner({
         <>
           <div className="flex items-center gap-2 mb-2">
             <ScanLine className="w-5 h-5 text-emerald-700" />
-            <p className="font-display font-bold text-slate-900">Scan Aadhaar QR</p>
+            <p className="font-display font-bold text-slate-900">Scan Aadhaar QR{forPatient && " / आधार QR स्कैन करें"}</p>
           </div>
-          <p className="text-xs text-slate-700 mb-3">
-            {onPatientCode ? "Scan the patient's Aadhaar QR or the QR on their registration slip." : "Scan the QR or upload a photo or e-Aadhaar PDF."} If the QR is unreadable, enter details manually at the desk. Uploaded documents and PDF passwords are not retained. Only the last four Aadhaar digits are saved.
-          </p>
+          {forPatient ? (
+            <p className="text-xs text-slate-700 mb-3">
+              Scan the QR on the Aadhaar card, or upload a photo or e-Aadhaar PDF. Only the last four Aadhaar digits are saved.
+              {" / "}आधार कार्ड का QR स्कैन करें, या फोटो / e-Aadhaar PDF अपलोड करें। आधार के सिर्फ़ आखिरी चार अंक सेव होते हैं।
+            </p>
+          ) : (
+            <p className="text-xs text-slate-700 mb-3">
+              {onPatientCode ? "Scan the patient's Aadhaar QR or the QR on their registration slip." : "Scan the QR or upload a photo or e-Aadhaar PDF."} If the QR is unreadable, enter details manually at the desk. Uploaded documents and PDF passwords are not retained. Only the last four Aadhaar digits are saved.
+            </p>
+          )}
         </>
       )}
 
@@ -190,6 +199,7 @@ export default function AadhaarScanner({
           await stopCamera();
           setMode("manual");
         }}
+        forPatient={forPatient}
       />
 
       <AadhaarModeButtons
@@ -204,6 +214,7 @@ export default function AadhaarScanner({
         fileRef={fileRef}
         cameraOnly={patientCodeOnly}
         touchFirst={touchFirst}
+        forPatient={forPatient}
       />
 
       {busy && mode !== "manual" && (
@@ -250,7 +261,7 @@ export default function AadhaarScanner({
         mode={mode}
         outcome={outcome}
         source={source}
-        error={error}
+        error={forPatient && /manual/i.test(error) ? PATIENT_DESK_HINT : error}
         cameraState={cameraState}
         startCamera={startCamera}
       />

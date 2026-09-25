@@ -108,7 +108,7 @@ export default function Login() {
           </form>
 
           <div className="mt-6 pt-6 border-t border-slate-200">
-            <a href="/self-register" className="block text-center text-sm font-semibold text-emerald-600 hover:text-emerald-700 min-h-[44px] flex items-center justify-center" data-testid="goto-self-register-link">
+            <a href="/" className="block text-center text-sm font-semibold text-emerald-600 hover:text-emerald-700 min-h-[44px] flex items-center justify-center" data-testid="goto-self-register-link">
               Patient self-registration →
             </a>
             <div className="lg:hidden mt-4">

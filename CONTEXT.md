@@ -260,8 +260,12 @@ _Avoid_: fuzzy match, close enough, auto-merge
 A second registration in the same camp for the same person. Blocked when Person, last-4 + name (word order ignored), or name + age + household phone already exists in that camp. There is no override. Last-4 + DOB alone is not a duplicate: year-only card DOBs make it collide for different people.
 _Avoid_: register anyway, likely duplicate
 
+**Self-registration**:
+A booking the patient's household makes on its own phone, before or on a camp day, with no staff involved. Identity comes only from the Aadhaar QR the server decodes, read by the phone camera or found in an uploaded card photo or e-Aadhaar PDF; the Household phone and the camp day are the only things chosen by hand. A card that cannot be read sends the patient to the desk — there is no typed path. It never stamps Arrival: the patient is still scanned at the door. When every remaining camp day is full it closes and says the patient can still come, because the door registers every walk-in.
+_Avoid_: patient login, patient sign-in (patients never sign in), online registration
+
 **Public occupancy**:
-The headline on the unauthenticated login page for the active camp: total seats across the camp's days, and registrations so far, read from the camp-day counters. Refreshes every 30 seconds. No patient details, no per-patient anything.
+Seat counts for the active camp shown to anyone, read from the camp-day counters. Staff sign-in shows the camp-wide headline: total seats across the camp's days and registrations so far, refreshed every 30 seconds. Self-registration shows seats left per camp day in its day choice, lists only today and later days, and offers no full day. No patient details, no per-patient anything.
 _Avoid_: live feed, registration ticker, public patient list
 
 **Camp-day capacity**:

@@ -30,10 +30,10 @@ function Protected({ roles, children }) {
   return children;
 }
 
-function HomeRedirect() {
+function Home() {
   const { user, loading } = useAuth();
   if (loading || user === null) return <FullLoader />;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return <SelfRegister />;
   return <Navigate to={roleHome(user.role)} replace />;
 }
 
@@ -44,7 +44,7 @@ export default function App() {
         <BrowserRouter>
         <Suspense fallback={<FullLoader />}>
         <Routes>
-          <Route path="/" element={<HomeRedirect />} />
+          <Route path="/" element={<Home />} />
           <Route path="/login" element={<Login />} />
           <Route path="/self-register" element={<SelfRegister />} />
           <Route path="/admin" element={<Protected roles={ADMIN_ROLES}><AdminDashboard /></Protected>} />

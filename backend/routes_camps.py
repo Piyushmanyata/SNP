@@ -189,6 +189,7 @@ async def active_camp_public() -> Dict[str, Any]:
             "id": str(d["_id"]),
             "day_date": d["day_date"],
             "is_today": d["day_date"] == today,
+            "is_past": d["day_date"] < today,
             "registered": n,
             "seat_limit": limit,
             "remaining": max(0, limit - n),

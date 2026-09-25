@@ -10,6 +10,16 @@ function pick(event, scanFile) {
   event.target.value = "";
 }
 
+function Label({ en, hi, withHindi }) {
+  if (!withHindi) return en;
+  return (
+    <span className="flex flex-col items-start leading-tight">
+      {en}
+      <span className="text-xs font-normal">{hi}</span>
+    </span>
+  );
+}
+
 export function AadhaarModeButtons({
   mode,
   setMode,
@@ -22,6 +32,7 @@ export function AadhaarModeButtons({
   fileRef,
   cameraOnly = false,
   touchFirst = false,
+  forPatient = false,
 }) {
   const photoRef = useRef(null);
   const blocked = disabled || busy || cameraState === "starting";
@@ -49,7 +60,7 @@ export function AadhaarModeButtons({
             </>
           ) : (
             <>
-              <Camera className="w-5 h-5" /> Scan with camera
+              <Camera className="w-5 h-5" /> <Label en="Scan with camera" hi="कैमरे से स्कैन करें" withHindi={forPatient} />
             </>
           )}
         </Button>
@@ -84,7 +95,7 @@ export function AadhaarModeButtons({
                 className="flex-auto whitespace-nowrap sm:flex-none"
                 data-testid="aadhaar-photo-button"
               >
-                <Aperture className="w-4 h-4" /> Take photo
+                <Aperture className="w-4 h-4" /> <Label en="Take photo" hi="फोटो लें" withHindi={forPatient} />
               </Button>
               <input
                 ref={photoRef}
@@ -109,7 +120,7 @@ export function AadhaarModeButtons({
             className="flex-auto whitespace-nowrap sm:flex-none"
             data-testid="aadhaar-upload-button"
           >
-            <Upload className="w-4 h-4" /> Upload photo / PDF
+            <Upload className="w-4 h-4" /> <Label en="Upload photo / PDF" hi="फोटो / PDF अपलोड करें" withHindi={forPatient} />
           </Button>
           <input
             ref={fileRef}
@@ -119,21 +130,23 @@ export function AadhaarModeButtons({
             onChange={(e) => pick(e, scanFile)}
             data-testid="aadhaar-file-input"
           />
-          <Button
-            variant="outline"
-            size="md"
-            type="button"
-            onClick={async () => {
-              if (mode === "camera") await stopCamera();
-              setMode(mode === "manual" ? "idle" : "manual");
-            }}
-            disabled={disabled || busy}
-            className="flex-auto whitespace-nowrap sm:flex-none"
-            aria-pressed={mode === "manual"}
-            data-testid="aadhaar-manual-toggle"
-          >
-            <Keyboard className="w-4 h-4" /> USB / paste
-          </Button>
+          {!forPatient && (
+            <Button
+              variant="outline"
+              size="md"
+              type="button"
+              onClick={async () => {
+                if (mode === "camera") await stopCamera();
+                setMode(mode === "manual" ? "idle" : "manual");
+              }}
+              disabled={disabled || busy}
+              className="flex-auto whitespace-nowrap sm:flex-none"
+              aria-pressed={mode === "manual"}
+              data-testid="aadhaar-manual-toggle"
+            >
+              <Keyboard className="w-4 h-4" /> USB / paste
+            </Button>
+          )}
         </>
       )}
     </div>

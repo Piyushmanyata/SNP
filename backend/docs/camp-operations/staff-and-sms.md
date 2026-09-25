@@ -1,5 +1,7 @@
 # Staff accounts and patient SMS
 
+The site's front page is patient self-registration. Staff sign in from the **Staff sign in** link at the top right of that page, or by opening `/login` directly. A signed-in staff member who opens the site goes straight to their own screen.
+
 `DELETE /api/staff/{staff_id}` removes an account from active staff lists, revokes its sessions, and retains its record for historical attribution. Admins may delete staff other than themselves; team leads may delete only their own volunteers. A team lead with assigned volunteers cannot be deleted until the volunteers are reassigned. Admins can change a volunteer's current team with `PATCH /api/staff/{staff_id}/team-lead` and `{"team_lead_id": "..."}`; `null` assigns the volunteer directly. Earlier registration credit does not move.
 
 The original registrar is stored on each staff registration. Before any patient SMS is claimed or sent, the backend compares the patient's current phone with that registrar's recorded phone after normalizing both to a ten-digit number. A match skips every patient SMS type, including confirmations, appointment updates, and reminders, without cancelling registration or adding an SMS ledger entry. The original staff record remains available for this check after staff deletion. Public self-registration has no staff registrar and is unaffected.
