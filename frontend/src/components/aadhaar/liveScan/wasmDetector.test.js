@@ -132,15 +132,32 @@ test("a worker crash settles every outstanding detect instead of hanging", async
   expect(worker.terminated).toBe(true);
 });
 
-test("a stalled detect times out, terminates the worker and the next frame uses a fresh reader", async () => {
-  const stalled = await loaded();
+test("one slow frame is dropped and the loaded worker is kept for the next frame", async () => {
+  const worker = await loaded();
   const first = detector.detectWasmImageData(IMAGE);
   await settle();
-  const deliverLateReply = stalled.onmessage;
   jest.advanceTimersByTime(detector.WASM_DETECT_TIMEOUT_MS);
   await expect(first).resolves.toBeNull();
+  expect(worker.terminated).toBe(false);
+  expect(() => worker.reply(0, "late")).not.toThrow();
+
+  const next = detector.detectWasmImageData({ ...IMAGE, data: new Uint8ClampedArray(16) });
+  await settle();
+  expect(instances).toHaveLength(1);
+  worker.reply(1, "next-card");
+  await expect(next).resolves.toBe("next-card");
+});
+
+test("a worker that stalls on consecutive frames is replaced even when its late replies arrive", async () => {
+  const stalled = await loaded();
+  for (let i = 0; i < detector.WASM_MAX_STALLS; i += 1) {
+    const frame = detector.detectWasmImageData({ ...IMAGE, data: new Uint8ClampedArray(16) });
+    await settle();
+    jest.advanceTimersByTime(detector.WASM_DETECT_TIMEOUT_MS);
+    await expect(frame).resolves.toBeNull();
+    if (!stalled.terminated) stalled.reply(i, "late");
+  }
   expect(stalled.terminated).toBe(true);
-  expect(() => deliverLateReply({ data: { id: stalled.posted[0].msg.id, text: "late" } })).not.toThrow();
 
   const next = detector.detectWasmImageData({ ...IMAGE, data: new Uint8ClampedArray(16) });
   expect(instances).toHaveLength(2);

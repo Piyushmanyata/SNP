@@ -15,7 +15,7 @@ from models import (
 from catalogue import resolve_medicines, stocked_power
 from clinical_state import (
     CONTENT_FIELDS,
-    PRESCRIBED_LINE_KEYS, assert_clinical_operator, arrival_ready, commit_completion,
+    PRESCRIBED_LINE_KEYS, arrival_ready, commit_completion,
     commit_correction, commit_undo, conflict, extract_content, normalize_ot_eye,
     generation_of, has_issue_history, insert_revision, payload_hash, record_operation, recover_operation,
     serialize_revision, validate_completion,
@@ -159,7 +159,6 @@ async def _fetch_clinical_bundle(db: AsyncDatabase, patient: dict) -> Dict[str, 
 
 @router.post("/lookup")
 async def clinical_lookup(body: dict, actor: dict = Depends(require_clinical)) -> Dict[str, Any]:
-    assert_clinical_operator(actor)
     db = get_db()
     camp = await db.camps.find_one({"is_active": True})
     value = parse_patient_identifier(body.get("value", ""))
@@ -186,7 +185,6 @@ async def clinical_lookup(body: dict, actor: dict = Depends(require_clinical)) -
 
 @router.get("/search")
 async def clinical_search(q: str, actor: dict = Depends(require_clinical)) -> Dict[str, Any]:
-    assert_clinical_operator(actor)
     db = get_db()
     camp = await db.camps.find_one({"is_active": True})
     norm = normalize_name(q)
@@ -300,7 +298,6 @@ async def create_transcription(
     body: TranscriptionBody,
     actor: dict = Depends(require_clinical),
 ) -> Dict[str, Any]:
-    assert_clinical_operator(actor)
     db = get_db()
     p = await _require_printed_patient(db, body.patient_id)
     if p.get("committed_revision_id"):
@@ -318,7 +315,6 @@ async def complete_prescription(
     body: CompletePrescriptionBody,
     actor: dict = Depends(require_clinical),
 ) -> Dict[str, Any]:
-    assert_clinical_operator(actor)
     db = get_db()
     replaying = await db.clinical_operations.find_one({"operation_id": body.operation_id}, {"_id": 1})
     await _apply_catalogue(db, body, active_only=not replaying)
@@ -367,7 +363,6 @@ async def undo_completion(
     body: UndoCompletionBody,
     actor: dict = Depends(require_clinical),
 ) -> Dict[str, Any]:
-    assert_clinical_operator(actor)
     reason = (body.reason or "").strip()
     if not reason:
         raise api_error(400, "UNDO_REQUIRES_A_REASON", 'Undo requires a reason')
@@ -617,7 +612,6 @@ async def record_fulfilment(
     background_tasks: BackgroundTasks,
     actor: dict = Depends(require_clinical),
 ) -> Dict[str, Any]:
-    assert_clinical_operator(actor)
     db = get_db()
     t = await db.transcriptions.find_one({"_id": ObjectId(body.transcription_id)})
     if not t:
@@ -753,7 +747,6 @@ async def _make_slip(
 
 @router.get("/slip/{slip_id}")
 async def get_slip(slip_id: str, actor: dict = Depends(require_clinical)) -> Dict[str, Any]:
-    assert_clinical_operator(actor)
     db = get_db()
     s = await db.deferred_slips.find_one({"_id": ObjectId(slip_id)})
     if not s:
@@ -775,7 +768,6 @@ async def add_correction(
     body: CorrectionBody,
     actor: dict = Depends(require_clinical),
 ) -> Dict[str, Any]:
-    assert_clinical_operator(actor)
     reason = (body.reason or "").strip()
     if not reason:
         raise api_error(400, "CORRECTION_REQUIRES_A_REASON", 'Correction requires a reason')
@@ -866,7 +858,6 @@ async def add_correction(
 
 @router.get("/history/{person_id}")
 async def clinical_history(person_id: str, actor: dict = Depends(require_clinical)) -> Dict[str, Any]:
-    assert_clinical_operator(actor)
     db = get_db()
     items = await db.transcriptions.find({"person_id": ObjectId(person_id)}).sort("created_at", -1).to_list(100)
     patients = await db.patients.find({"_id": {"$in": list({t["patient_id"] for t in items})}}).to_list(100)

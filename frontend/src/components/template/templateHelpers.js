@@ -35,7 +35,7 @@ export function validateLogoFile(file) {
   return { valid: true, error: "" };
 }
 
-export function todayIst(now = new Date()) {
+function todayIst(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit",
   }).formatToParts(now);

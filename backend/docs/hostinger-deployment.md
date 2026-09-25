@@ -203,7 +203,7 @@ Every archive under the `snp_backups` volume and `/opt/snp/backup-export/` was d
 
 ## Backups and remaining integrations
 
-The owner requested daily backups. `/opt/snp/.env.production` now sets `BACKUP_INTERVAL_SECONDS=86400`, and the recreated backup container reports that value. The worker creates a compressed archive on startup, then waits 24 hours after each backup; this is not a fixed midnight schedule. It retains 14 days in the `snp_backups` Docker volume. Set this environment override on any replacement server, because the Compose fallback remains hourly.
+The owner requested daily backups. `/opt/snp/.env.production` now sets `BACKUP_INTERVAL_SECONDS=86400`, and the recreated backup container reports that value. The worker creates a compressed archive on startup, then waits 24 hours after each backup; this is not a fixed midnight schedule. It retains 14 days in the `snp_backups` Docker volume. The Compose fallback is now daily as well.
 
 A post-bootstrap archive, `snp_camps-20260908T072922Z.archive.gz`, was restored into a separate MongoDB instance: one user, zero patients, zero persons, and zero camps. The restore instance was removed afterward. The backup container also completed a new archive after its daily-interval restart. Both archives were deleted in the 22 September wipe above.
 

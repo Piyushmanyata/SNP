@@ -1,11 +1,11 @@
 # Backups
 
-The `backup` service in `docker-compose.prod.yml` runs `ops/backup/backup.sh` every `BACKUP_INTERVAL_SECONDS` (default 3600). Each pass:
+The `backup` service in `docker-compose.prod.yml` runs `ops/backup/backup.sh` every `BACKUP_INTERVAL_SECONDS` (default 86400, once a day); a failed pass is retried after an hour. Each pass:
 
 1. Counts patients, then runs `mongodump --oplog --gzip --archive` as the `snp_backup` user and streams it into restic (`--stdin-from-command`). The oplog makes the dump one point in time even while desks are writing. If the dump fails, restic saves nothing, so the newest snapshot is always a complete one.
 2. Stores the archive in the encrypted local repository `/backups/restic`, tagged `snp` and `patients=<count when the dump started>`.
 3. Copies every snapshot the off-site repository lacks, if `RESTIC_REMOTE_REPOSITORY` is set.
-4. Once a day, keeps 48 hourly, 30 daily and 12 monthly snapshots in each repository and prunes the rest.
+4. Once a day, keeps 30 daily and 12 monthly snapshots in each repository and prunes the rest.
 5. Writes its Ops status (`ops_status`, `_id: "backup"`): last success, last off-site copy, last error message, size and patient count.
 
 The admin overview's System card reads that status. It is red when no backup has succeeded for 6 hours (or three intervals, if longer). It is amber when the last one is more than two intervals old, the off-site copy is missing or stale, or the last pass reported an error. A red System card also shows "Backups failing — tell the admin" on the Camp-day board.
@@ -43,7 +43,7 @@ The old plain archives (`/backups/<DB_NAME>-*.archive.gz`) are no longer written
 ## Check
 
 - The System card on the admin overview is green.
-- `docker compose --env-file .env.production -f docker-compose.prod.yml exec backup restic snapshots` lists hourly snapshots.
+- `docker compose --env-file .env.production -f docker-compose.prod.yml exec backup restic snapshots` lists the daily snapshots.
 - `docker compose --env-file .env.production -f docker-compose.prod.yml logs backup` shows no `backup:` errors.
 
 ## Restore drill

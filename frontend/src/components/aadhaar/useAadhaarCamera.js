@@ -76,6 +76,7 @@ export function useAadhaarCamera({
 
   useEffect(() => {
     mountedRef.current = true;
+    wasmDetector.loadZxingWorker().catch(() => {});
     return () => {
       mountedRef.current = false;
       stopLoop();
@@ -95,7 +96,7 @@ export function useAadhaarCamera({
     }
     lanes.push({
       load: wasmDetector.loadZxingWorker,
-      regions: ["roi", "full"],
+      regions: ["roi", "roi", "full"],
       detect: (region) => wasmDetector.detectWasmImageData(grab.grabFrame(videoRef.current, region)),
     });
     const engine = createLiveScanEngine({

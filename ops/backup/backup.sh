@@ -2,7 +2,7 @@
 set -uo pipefail
 
 : "${DB_NAME:?}" "${MONGO_BACKUP_PASSWORD:?}" "${RESTIC_PASSWORD:?}" "${RESTIC_REPOSITORY:?}"
-interval=${BACKUP_INTERVAL_SECONDS:-3600}
+interval=${BACKUP_INTERVAL_SECONDS:-86400}
 remote=${RESTIC_REMOTE_REPOSITORY:-}
 remote_configured=$([ -n "$remote" ] && echo true || echo false)
 uri="mongodb://snp_backup:${MONGO_BACKUP_PASSWORD}@mongo:27017/?authSource=admin&replicaSet=rs0"
@@ -35,7 +35,7 @@ copy_to_remote() {
 }
 
 forget() {
-  restic forget "$@" --quiet --retry-lock 10m --tag snp --keep-hourly 48 --keep-daily 30 --keep-monthly 12 --prune
+  restic forget "$@" --quiet --retry-lock 10m --tag snp --keep-daily 30 --keep-monthly 12 --prune
 }
 
 prune_once_a_day() {
@@ -81,5 +81,5 @@ while true; do
   run_once
   result=$?
   [ -n "${BACKUP_ONCE:-}" ] && exit "$result"
-  sleep "$interval"
+  sleep "$([ "$result" -eq 0 ] && echo "$interval" || echo 3600)"
 done

@@ -451,7 +451,7 @@ def _backup_level(backup: Dict[str, Any] | None, now: datetime) -> str:
     last = as_utc(backup.get("last_success_at")) if backup else None
     if backup is None or last is None:
         return "red"
-    interval = timedelta(seconds=backup.get("interval_seconds") or 3600)
+    interval = timedelta(seconds=backup.get("interval_seconds") or 86400)
     if now - last > max(timedelta(hours=6), 3 * interval):
         return "red"
     remote = as_utc(backup.get("remote_last_success_at"))

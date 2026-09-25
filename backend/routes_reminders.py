@@ -4,11 +4,10 @@ import hmac
 import os
 import time
 from datetime import timedelta
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 from fastapi import APIRouter, Request
-from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.errors import DuplicateKeyError
 
@@ -26,58 +25,11 @@ LEASE_SECONDS = 90
 CANARY_WAIT = timedelta(minutes=10)
 REMINDER_TYPES = (("ot", "ot"), ("specs", "specs_made"), ("camp", None))
 
-Target = Tuple[dict, str, str | None]
-
-
 def _require_cron_secret(request: Request) -> None:
     expected = os.environ.get("CRON_SECRET") or ""
     got = request.headers.get("X-Cron-Secret") or ""
     if not expected or not hmac.compare_digest(expected, got):
         raise api_error(401, "UNAUTHORIZED", 'Unauthorized')
-
-
-async def _pages(
-    collection: AsyncCollection, query: Dict[str, Any]
-) -> AsyncGenerator[List[dict], None]:
-    after: Any = None
-    while True:
-        scoped = dict(query)
-        if after is not None:
-            scoped["_id"] = {"$gt": after}
-        page = await collection.find(scoped).sort("_id", 1).limit(PAGE_SIZE).to_list(PAGE_SIZE)
-        if not page:
-            return
-        yield page
-        if len(page) < PAGE_SIZE:
-            return
-        after = page[-1]["_id"]
-
-
-async def _camp_targets(db: AsyncDatabase, event_date: str) -> AsyncGenerator[Target, None]:
-    days = await db.camp_days.find({"day_date": event_date}).to_list(None)
-    for day in days:
-        camp = await db.camps.find_one({"_id": day["camp_id"]})
-        venue = (camp.get("venue_sms") or camp["venue"]) if camp else ""
-        async for page in _pages(db.patients, {"camp_day_id": day["_id"]}):
-            for patient in page:
-                yield patient, venue, None
-
-
-async def _token_targets(
-    db: AsyncDatabase, item_type: str, event_date: str
-) -> AsyncGenerator[Target, None]:
-    query = {"item_type": item_type, "active": True, "collection_date": event_date}
-    async for page in _pages(db.deferred_slips, query):
-        for s in page:
-            patient = await db.patients.find_one({"_id": s["patient_id"]})
-            if not patient:
-                continue
-            venue = s.get("collection_venue_sms") or s.get("collection_venue") or ""
-            if item_type == "ot" and s.get("ot_schedule_day_id"):
-                day = await db.ot_schedule_days.find_one({"_id": s["ot_schedule_day_id"]})
-                if day:
-                    venue = day.get("venue_sms") or day["venue"]
-            yield patient, venue, s.get("collection_end_date")
 
 
 async def _gate(db: AsyncDatabase, message_type: str, event_date: str) -> str:
@@ -135,11 +87,6 @@ async def _release_lease(db: AsyncDatabase, holder: str, cursor: Any) -> None:
         {"_id": "reminder_lease", "holder": holder},
         {"$set": {"holder": None, "expires_at": helpers.now_utc(), "cursor": cursor}},
     )
-
-
-def _cursor_state(doc: Optional[dict]) -> Tuple[int, Any]:
-    cursor = (doc or {}).get("cursor") or {}
-    return int(cursor.get("type_index") or 0), cursor.get("last_id")
 
 
 async def _write_ops(db: AsyncDatabase, *, complete: bool, error: Optional[str] = None) -> None:

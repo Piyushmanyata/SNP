@@ -437,9 +437,9 @@ def _defer(client, transcription_id, revision_id, generation, operation_id, **ex
 
 # ---------------- clinical ----------------
 class TestClinical:
-    def test_admin_cannot_transcribe(self, admin):
+    def test_admin_has_clinical_operator_access(self, admin):
         r = admin.post(f"{API}/clinical/lookup", json={"value": str(STATE["p1"]["reg_no"])}, timeout=30)
-        assert r.status_code == 403, r.text
+        assert r.status_code != 403, r.text
 
     def test_lookup_not_arrived_refusal_no_phi(self, admin):
         clin = _clinical(admin)

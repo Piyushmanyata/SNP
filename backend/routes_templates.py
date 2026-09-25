@@ -1,5 +1,6 @@
 import asyncio
 import base64
+from functools import cache
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -22,6 +23,7 @@ INVALID_IMAGE = "Invalid image data."
 _RUPA_PNG = Path(__file__).resolve().parent / "assets" / "rupa-sponsor.png"
 
 
+@cache
 def default_logos() -> List[Dict[str, Any]]:
     if not _RUPA_PNG.exists():
         return []

@@ -7,19 +7,7 @@ export function displayDateRange(start, end) {
   return end && end !== start ? `${displayDate(start)} – ${displayDate(end)}` : displayDate(start);
 }
 
-export function displayTime(value) {
-  const match = /^(\d{2}):(\d{2})$/.exec(value || "");
-  if (!match) return value || "";
-  const hour = Number(match[1]);
-  if (hour > 23 || Number(match[2]) > 59) return value;
-  return `${hour % 12 || 12}:${match[2]} ${hour < 12 ? "AM" : "PM"}`;
-}
-
-export function displayTimeRange(start, end) {
-  return `${displayTime(start)}–${displayTime(end)}`;
-}
-
-export const SPECS_HOURS = displayTimeRange("10:00", "17:00");
+export const SPECS_HOURS = "10:00 AM–5:00 PM";
 
 const IST_PARTS = new Intl.DateTimeFormat("en-GB", {
   timeZone: "Asia/Kolkata",

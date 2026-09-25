@@ -596,7 +596,7 @@ describe("AadhaarScanner component", () => {
       const video = container.querySelector('[data-testid="aadhaar-camera-region"]');
       expect(nativeDetector.detectNative).toHaveBeenCalledWith(video);
       expect(wasmDetector.detectWasmImageData).toHaveBeenCalled();
-      expect(grab.grabFrame.mock.calls.map((call) => call[1]).slice(0, 2)).toEqual(["roi", "full"]);
+      expect(grab.grabFrame.mock.calls.map((call) => call[1]).slice(0, 3)).toEqual(["roi", "roi", "full"]);
       expect(window.ImageCapture).not.toHaveBeenCalled();
       expect(takePhoto).not.toHaveBeenCalled();
     } finally {

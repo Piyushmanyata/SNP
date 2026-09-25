@@ -108,7 +108,6 @@ function Overview() {
         )}
       </Card>
       <SystemCard />
-      <SmsHealth />
       <div className="grid grid-cols-3 gap-3" data-testid="overview-kpis" data-loading={kpi ? "false" : "true"}>
         <Stat label="Registered" value={kpi ? kpi.registered : "…"} testid="kpi-registered-count" />
         <Stat label="Seen" value={kpi ? kpi.seen : "…"} tone="emerald" testid="kpi-seen-count" />

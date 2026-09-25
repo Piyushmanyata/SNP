@@ -34,8 +34,8 @@ from routes_clinical import (
 from routes_desk import arrive, preview_prescription, print_prescription, record_identity_check
 from routes_registration import _create_registration
 from seed import (
-    FIXED_POWER, MEDICINE, MEDICINE_ALT, NOW, TODAY, TOMORROW, Request, day, patient_doc, register, run_camp,
-    seed_camp, user_doc,
+    FIXED_POWER, MEDICINE, MEDICINE_ALT, NOW, TODAY, TOMORROW, Request, asgi_client, bearer, day, patient_doc, register,
+    run_camp, seed_camp, user_doc,
 )
 
 VOLUNTEER = {"_id": ObjectId(), "role": "volunteer", "name": "Vol"}
@@ -154,17 +154,23 @@ class TestClinicalMatrix:
             assert out["transcription"] is None
         run_camp(monkeypatch, run)
 
-    def test_c02_non_operator_cannot_mutate_clinical(self, monkeypatch):
+    def test_c02_door_staff_cannot_mutate_clinical_but_admin_can(self, monkeypatch):
         async def run(db):
             _camp, _day, patient = await _printed_patient(db)
             body = _complete_body(patient["_id"], "op-c02")
-            for actor in (VOLUNTEER, LEAD, ADMIN):
-                with pytest.raises(HTTPException) as exc:
-                    await complete_prescription(body, actor=actor)
-                assert exc.value.status_code == 403
+            async with asgi_client() as client:
+                for actor in (VOLUNTEER, LEAD):
+                    r = await client.post(
+                        "/api/clinical/transcription/complete", json=body.model_dump(mode="json"),
+                        headers=bearer(actor["_id"], actor["name"], actor["role"]),
+                    )
+                    assert r.status_code == 403, r.text
             refreshed = await db.patients.find_one({"_id": patient["_id"]})
             assert refreshed.get("committed_revision_id") is None
             assert refreshed.get("queue_status") != "seen"
+            await complete_prescription(body, actor=ADMIN)
+            refreshed = await db.patients.find_one({"_id": patient["_id"]})
+            assert refreshed.get("committed_revision_id") is not None
         run_camp(monkeypatch, run)
 
     def test_c04_draft_saves_without_seen_or_fulfilment(self, monkeypatch):

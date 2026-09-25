@@ -189,6 +189,8 @@ describe("AdminDashboard component", () => {
     const gotoClinical = container.querySelector('[data-testid="goto-clinical-button"]');
     expect(gotoDesk).not.toBeNull();
     expect(gotoClinical).not.toBeNull();
+    expect(container.querySelector('[data-testid="sms-refresh"]')).toBeNull();
+    expect(api.get).not.toHaveBeenCalledWith("/sms/status");
   });
 
   test("only the active camp offers the door manual-entry gate, and opening it posts today", async () => {
