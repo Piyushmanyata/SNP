@@ -326,3 +326,11 @@ Still open:
 - No off-VPS restic remote (`RESTIC_REMOTE_REPOSITORY`) is configured.
 - The old plain archives under the `snp_backups` volume (`/backups/snp_camps-*.archive.gz`) are no longer written or pruned. They can be deleted by the operator now that the drill has passed.
 - The `ot_change` and `specs_change` SMS templates still need DLT and MSG91 registration, as PR 59 notes.
+
+## Scan speed, admin clinical access and daily backups — 25 September 2026
+
+[PR 68](https://github.com/Piyushmanyata/SNP/pull/68) merged as `7a1a304f1fbd1ba1e412e50380a0dcc0426108bd` and was deployed from a `git archive` of that commit into `/opt/snp/releases/7a1a304…`. CI run [36077950577](https://github.com/Piyushmanyata/SNP/actions/runs/36077950577) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify. See ADRs 0080 (admin holds clinical desk operator access), 0081 (daily backups) and 0082 (the live scan keeps its reader through slow frames).
+
+Before the update, the running `2046979` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-20469794e7cbf10cbe719f371b48ec6991e074b2`. To roll back, retag them to `:latest`, point `/opt/snp/current` at `/opt/snp/releases/20469794…`, and run `up -d --no-build` from that directory. No data migration was needed.
+
+`up -d --build --wait` recreated all six containers because every bind mount now points at the new release directory; the named volumes stayed attached. Live checks: `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`, the homepage returned 200 and HTTP redirected with 308. The served `AadhaarScanner` chunk carries the `roi, roi, full` region cycle and the hidden-tab check, and the backend log has no errors. The backup container reports `BACKUP_INTERVAL_SECONDS=86400` and wrote a snapshot on start.
