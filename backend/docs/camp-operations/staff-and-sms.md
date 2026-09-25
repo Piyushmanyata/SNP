@@ -1,6 +1,6 @@
 # Staff accounts and patient SMS
 
-The site's front page is patient self-registration. Staff sign in from the **Staff sign in** link at the top right of that page, or by opening `/login` directly. A signed-in staff member who opens the site goes straight to their own screen.
+The site's front page is patient self-registration. Staff sign in from the **Staff sign in** link at the top right of that page, or by opening `/login` directly. A device that has signed in before remembers it is a staff device, so opening the site there goes straight to that person's screen while the session lasts. A patient's phone never asks the server for a session, so the front page makes no sign-in request. Signing out, or an expired session, clears the mark.
 
 `DELETE /api/staff/{staff_id}` removes an account from active staff lists, revokes its sessions, and retains its record for historical attribution. Admins may delete staff other than themselves; team leads may delete only their own volunteers. A team lead with assigned volunteers cannot be deleted until the volunteers are reassigned. Admins can change a volunteer's current team with `PATCH /api/staff/{staff_id}/team-lead` and `{"team_lead_id": "..."}`; `null` assigns the volunteer directly. Earlier registration credit does not move.
 

@@ -72,7 +72,45 @@ describe("session check", () => {
     act(() => root.unmount());
     container.remove();
     window.history.replaceState({}, "", "/");
+    localStorage.clear();
     jest.useRealTimers();
+  });
+
+  test("a patient's phone at the front page is not asked for a session", async () => {
+    window.history.replaceState({}, "", "/");
+    await act(async () => root.render(<AuthProvider><Probe /></AuthProvider>));
+    expect(api.get).not.toHaveBeenCalled();
+    expect(probe()).toBe("signed out");
+  });
+
+  test("a staff device at the front page checks its session", async () => {
+    localStorage.setItem("snp:staff-device", "1");
+    window.history.replaceState({}, "", "/");
+    api.get.mockResolvedValueOnce({ data: { user: { id: "u1", name: "Operator", role: "volunteer" } } });
+    await act(async () => root.render(<AuthProvider><Probe /></AuthProvider>));
+    expect(api.get).toHaveBeenCalledWith("/auth/me");
+    expect(probe()).toBe("Operator");
+  });
+
+  test("a live session marks the device as staff and a sign-out clears the mark", async () => {
+    api.get.mockResolvedValueOnce({ data: { user: { id: "u1", name: "Operator", role: "volunteer" } } });
+    await act(async () => root.render(<AuthProvider><Probe /></AuthProvider>));
+    expect(localStorage.getItem("snp:staff-device")).toBe("1");
+    await act(async () => { window.dispatchEvent(new Event("snp:unauthorized")); });
+    expect(localStorage.getItem("snp:staff-device")).toBeNull();
+  });
+
+  test("signing in marks the device as staff", async () => {
+    window.history.replaceState({}, "", "/login");
+    api.post.mockResolvedValueOnce({ data: { user: { id: "u1", name: "Operator", role: "volunteer" } } });
+    let auth;
+    function Grab() {
+      auth = useAuth();
+      return null;
+    }
+    await act(async () => root.render(<AuthProvider><Grab /></AuthProvider>));
+    await act(async () => { await auth.login("Operator", "1234"); });
+    expect(localStorage.getItem("snp:staff-device")).toBe("1");
   });
 
   test("a network failure keeps the session loading and retries", async () => {
