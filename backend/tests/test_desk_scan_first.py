@@ -267,7 +267,7 @@ class TestAadhaarOverwrite:
     def test_overwrite_does_not_consume_second_seat(self, admin, anon):
         camp_id = _camp(admin, "owseat")
         day = _day(admin, camp_id, TODAY_IST, seat_limit=1)
-        typed = _reg(admin, day["id"], full_name=f"TEST Seat {TAG}", age=50,
+        typed = _reg(admin, day["id"], full_name=f"TEST Seat {TAG}", age=50, gender="M",
                      phone="9876500302", aadhaar_last4="8882", dob="1976-02-02",
                      manual_entry=True)
         assert typed.status_code == 200, typed.text
