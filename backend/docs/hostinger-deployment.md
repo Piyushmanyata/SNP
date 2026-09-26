@@ -358,3 +358,23 @@ Live checks:
 - The backend log has no errors.
 
 Staff who were signed in before this release have no staff-device mark yet. Opening `/` shows them the patient page once. Tapping **Staff sign in**, or opening their screen directly, sets the mark.
+
+## Camp-day fixes from the 15,000-patient audit — 26 September 2026
+
+[PR 84](https://github.com/Piyushmanyata/SNP/pull/84) merged as `41d046bcfd619e0a8ab9b93dc819fc2ccc897dba`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/41d046b…`. CI run [36234297720](https://github.com/Piyushmanyata/SNP/actions/runs/36234297720) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify.
+
+Before the update, the running `5fec907` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-5fec907d33a9f979ac65f666a5b0e6cba585d89f`. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/5fec907…`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed. Duplicate in camp now ignores a scanned namesake whose scanned DOB proves another birth (ADR 0083). Existing registrations are unchanged.
+
+Live checks:
+
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Every service is running, and backend, frontend and mongo report healthy.
+- The served bundle contains the Clinical find "More patients match" note and the "No connection to the server" message.
+- The backend log has no errors.
