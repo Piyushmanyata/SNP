@@ -430,7 +430,9 @@ async def record_delivery_report(db: AsyncDatabase, report: Dict[str, Any]) -> b
     if tel and not tel.endswith(row["number"]):
         return False
     reason = str(report.get("failureReason") or "").strip()[:200]
-    dlt_failure = delivery == "failed" and (code in _DLT_STATUS or bool(_DLT_REASON.search(reason)))
+    dlt_failure = delivery == "failed" and not reason.upper().startswith("DND") and (
+        code in _DLT_STATUS or bool(_DLT_REASON.search(reason))
+    )
     await db.reminder_ledger.update_one({"_id": row["_id"]}, {"$set": {
         "delivery": delivery, "delivery_reason": reason or None, "dlt_failure": dlt_failure,
         "credit": _credit(report.get("credit")), "reported_at": helpers.now_utc(),
