@@ -20,7 +20,7 @@ def test_registrations_without_request_ids_do_not_collide(monkeypatch):
     async def run(database):
         camp_id, (day_id,) = await seed_camp(database)
         for name in ("First Patient", "Second Patient"):
-            body = RegisterBody(full_name=name, age=40, phone="9876543210", camp_day_id=str(day_id), manual_reason="card at home")
+            body = RegisterBody(full_name=name, age=40, phone="9876543210", camp_day_id=str(day_id), manual_reason="no_card")
             _, created = await routes_registration._create_registration(body, ObjectId(), False, None)
             assert created
         assert await database.patients.count_documents({"camp_id": camp_id}) == 2

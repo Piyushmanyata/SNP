@@ -74,7 +74,7 @@ def test_staff_bodies_are_bounded(monkeypatch):
             ("/api/desk/scan/confirm", {"patient_id": str(ObjectId()), "payload": LONG}),
             ("/api/camps", {"name": "C" * 81, "venue": "Hall", "camp_date": TODAY}),
             ("/api/staff", {"name": "S" * 81, "role": "volunteer"}),
-            ("/api/desk/identity-check", {"patient_id": str(ObjectId()), "reason": "r", "evidence": "e" * 301}),
+            ("/api/desk/no-card", {"patient_id": str(ObjectId()), "reason": "other", "note": "n" * 201}),
         ]:
             response = await client.post(path, json=payload, headers=headers)
             assert response.status_code == 422, (path, response.text)
@@ -174,26 +174,25 @@ def test_a_stalled_upload_does_not_make_a_second_upload_busy(monkeypatch):
 def test_a_year_only_birth_date_is_stored_as_the_first_of_january(monkeypatch):
     async def run(database):
         _camp_id, (day_id,) = await seed_camp(database, days=(day(1),))
-        saved = await register(day_id, full_name="Year Only", age=None, dob="1970", manual_reason="no card")
+        saved = await register(day_id, full_name="Year Only", age=None, dob="1970", manual_reason="no_card")
         assert saved["dob"] == "1970-01-01"
 
     run_camp(monkeypatch, run)
 
 
-def test_arrival_needs_a_scan_or_an_identity_check_for_a_manual_entry(monkeypatch):
+def test_arrival_needs_a_scan_or_a_no_card_print_for_a_typed_pre_registration(monkeypatch):
     async def run(database):
-        camp_id, (day_id,) = await seed_camp(database)
-        manual = await register(day_id, full_name="Phone Booking", age=40, manual_reason="booked by phone")
+        _camp_id, (day_id,) = await seed_camp(database)
+        manual = await register(day_id, full_name="Phone Booking", age=40, manual_reason="no_card")
         with pytest.raises(HTTPException) as exc:
             await arrive(manual["id"], actor=ACTOR)
-        assert exc.value.status_code == 409 and exc.value.detail["code"] == "IDENTITY_CHECK_REQUIRED"
-        await database.patients.update_one({"_id": ObjectId(manual["id"])}, {"$set": {"identity_alt_check": {"reason": "ration card"}}})
+        assert exc.value.status_code == 409 and exc.value.detail["code"] == "NEEDS_DOOR_SCAN"
+        await database.patients.update_one({"_id": ObjectId(manual["id"])}, {"$set": {"no_card_print": {"reason": "no_card"}}})
         assert (await arrive(manual["id"], actor=ACTOR))["registration"]["arrived_at"]
 
-        await database.camps.update_one({"_id": camp_id}, {"$set": {"door_manual_date": TODAY}})
         at_door = await desk_register(RegisterBody(
-            full_name="Door Walk In", age=33, phone="9876500031", camp_day_id=str(day_id),
-            manual_reason="scanner down", at_door=True,
+            full_name="Door Walk In", age=33, gender="M", phone="9876500031", camp_day_id=str(day_id),
+            manual_reason="no_card", at_door=True,
         ), Request(), actor=ACTOR, background_tasks=None)
         assert at_door["registration"]["arrived_at"]
 
@@ -297,12 +296,11 @@ def test_a_card_with_a_long_address_scans_and_registers(monkeypatch):
 
 def test_the_door_types_entries_only_for_the_operating_day(monkeypatch):
     async def run(database):
-        camp_id, (today, tomorrow) = await seed_camp(database, days=(TODAY, day(1)))
-        await database.camps.update_one({"_id": camp_id}, {"$set": {"door_manual_date": TODAY}})
+        _camp_id, (_today, tomorrow) = await seed_camp(database, days=(TODAY, day(1)))
         with pytest.raises(HTTPException) as exc:
             await desk_register(RegisterBody(
-                full_name="Door Tomorrow", age=33, phone="9876500032", camp_day_id=str(tomorrow),
-                manual_reason="scanner down", at_door=True,
+                full_name="Door Tomorrow", age=33, gender="M", phone="9876500032", camp_day_id=str(tomorrow),
+                manual_reason="no_card", at_door=True,
             ), Request(), actor=ACTOR, background_tasks=None)
         assert exc.value.status_code == 409 and exc.value.detail["code"] == "NOT_OPERATING_DAY"
         assert await database.patients.count_documents({}) == 0

@@ -7,6 +7,10 @@ import AadhaarScanner from "../components/AadhaarScanner";
 import { useWedgeBurst } from "../components/aadhaar";
 import { ScanOutcome, MismatchReview } from "../components/desk/ScanOutcome";
 import { PaperCheck } from "../components/desk/PaperCheck";
+import { PendingStat } from "../components/desk/Pending";
+import { Lookalikes } from "../components/desk/Lookalikes";
+import { EMPTY_REASON, ManualReason, cardInHand, reasonBody, reasonReady } from "../components/desk/ManualReason";
+import { alreadyPrintedLine, printedLine } from "../components/desk/printed";
 import { PrescriptionSheet } from "../components/print/PrescriptionSheet";
 import { printDocument, IMAGE_WAIT_MS } from "../lib/printJob";
 import { loadLogos } from "../lib/logoCache";
@@ -69,8 +73,9 @@ async function printPrescription(rx) {
   await printDocument(<PrescriptionSheet rx={rx} logos={logos} />, { pageSize: "A4" });
 }
 
-async function registerPatient({ form, qrPayload, dayId, reqId, manualReason, atDoor, reviewConfirmedId }) {
+async function registerPatient({ form, qrPayload, dayId, reqId, reason, atDoor, reviewConfirmedId, differentPerson }) {
   const scanned = Boolean(qrPayload);
+  const manual = scanned ? { code: null, note: null } : reasonBody(reason);
   const { data } = await api.post("/register", {
     full_name: form.full_name,
     age: hasAge(form.age) ? Number(form.age) : null,
@@ -83,9 +88,11 @@ async function registerPatient({ form, qrPayload, dayId, reqId, manualReason, at
     qr_payload: qrPayload || null,
     camp_day_id: dayId,
     registration_request_id: reqId,
-    manual_reason: scanned ? null : (manualReason || null),
+    manual_reason: manual.code,
+    manual_note: manual.note,
     at_door: Boolean(atDoor) && !scanned,
     review_confirmed_id: reviewConfirmedId || null,
+    different_person: Boolean(differentPerson),
   });
   return data;
 }
@@ -96,7 +103,7 @@ export default function Desk() {
   const [loadErr, setLoadErr] = useState("");
   const [days, setDays] = useState([]);
   const [camp, setCamp] = useState(null);
-  const [showReg, setShowReg] = useState(false);
+  const [regMode, setRegMode] = useState("");
   const [scanResult, setScanResult] = useState(null);
   const [scanPayload, setScanPayload] = useState("");
   const [busy, setBusy] = useState(false);
@@ -106,9 +113,6 @@ export default function Desk() {
   const [banner, setBanner] = useState("");
   const [error, setError] = useState("");
   const [doorPhone, setDoorPhone] = useState("");
-  const [doorForm, setDoorForm] = useState(EMPTY_REG_FORM);
-  const [doorReqId, setDoorReqId] = useState(v4());
-  const [doorReason, setDoorReason] = useState("");
   const walkAttempt = useRef({ key: "", reqId: "", patientId: "" });
   const [scanning, setScanning] = useState(false);
   const findSequence = useRef(0);
@@ -162,7 +166,7 @@ export default function Desk() {
   useEffect(() => () => { findSequence.current += 1; }, []);
 
   const countRegistration = useCallback((data) => {
-    if (data.created) setKpi((k) => k && { ...k, registered: k.registered + 1, pending: k.pending + 1 });
+    if (data.created) setKpi((k) => k && { ...k, registered: k.registered + 1 });
   }, []);
 
   const clearScan = useCallback(() => { setScanResult(null); setScanPayload(""); }, []);
@@ -176,6 +180,7 @@ export default function Desk() {
   const resolveDoorScan = useCallback(async (payload) => {
     const request = ++findSequence.current;
     setBanner(""); setError(""); setSearchResults(null); setFound(null); setPaperCheck(null);
+    setRegMode((mode) => (mode === "door" ? "" : mode));
     clearScan();
     setDoorPhone("");
     setScanPayload(payload);
@@ -223,7 +228,7 @@ export default function Desk() {
     confirmPatient(scanResult?.registration?.id);
   }, [confirmPatient, scanResult]);
 
-  const lookupValue = useCallback(async (value) => {
+  const lookupValue = useCallback(async (value, reprint = false) => {
     const request = ++findSequence.current;
     setScanning(false);
     setBanner(""); setError(""); setSearchResults(null); setFound(null); setPaperCheck(null);
@@ -231,7 +236,7 @@ export default function Desk() {
     try {
       const { data } = await api.post("/desk/lookup", { value });
       if (request !== findSequence.current) return false;
-      setFound(data.registration);
+      setFound({ reg: data.registration, reprint });
       return true;
     } catch (err) {
       if (request !== findSequence.current) return false;
@@ -240,6 +245,8 @@ export default function Desk() {
       return false;
     }
   }, [clearScan]);
+
+  const lookupCode = useCallback((value) => lookupValue(value, false), [lookupValue]);
 
   const doFind = useCallback(async (e) => {
     e?.preventDefault();
@@ -260,7 +267,7 @@ export default function Desk() {
       return;
     }
     if (/^\d+$/.test(value) || /^snp:/i.test(value)) {
-      if (await lookupValue(value)) setFindVal("");
+      if (await lookupValue(value, /^\d+$/.test(value))) setFindVal("");
       return;
     }
     const request = ++findSequence.current;
@@ -325,7 +332,7 @@ export default function Desk() {
     setPrintNote(note);
   }, []);
 
-  const reprint = useCallback(() => {
+  const printAgain = useCallback(() => {
     const check = paperCheck;
     dismissPaper("");
     print(check.reg);
@@ -337,29 +344,31 @@ export default function Desk() {
     document.querySelector("[data-usb-box]")?.focus();
   }, [paperCheck]);
 
-  const confirmIdentity = useCallback(async (reg, reason) => {
+  const noCardPrint = useCallback(async (reg, reason) => {
     setError("");
     try {
-      const { data } = await api.post("/desk/identity-check", { patient_id: reg.id, reason });
-      const checked = data.registration;
-      setFound((current) => (current?.id === checked.id ? checked : current));
-      setSearchResults((current) => current && current.map((row) => (row.id === checked.id ? checked : row)));
+      const { data } = await api.post("/desk/no-card", { patient_id: reg.id, reason: reason.code, note: reasonBody(reason).note });
+      const released = data.registration;
+      setFound((current) => (current?.reg.id === released.id ? { ...current, reg: released } : current));
+      setSearchResults((current) => current && current.map((row) => (row.id === released.id ? released : row)));
+      await print(released);
       return true;
     } catch (err) {
       setError(formatApiError(err));
       return false;
     }
-  }, []);
-  const onConfirmIdentity = user?.role === "admin" ? confirmIdentity : undefined;
+  }, [print]);
 
-  const openPreReg = useCallback(() => { setShowReg(true); }, []);
-  const closePreReg = useCallback(() => { setShowReg(false); setPreRegPayload(""); }, []);
+  const openPreReg = useCallback(() => { setRegMode("prereg"); }, []);
+  const openDoorManual = useCallback(() => { setRegMode("door"); }, []);
+  const closeRegistration = useCallback(() => { setRegMode(""); setPreRegPayload(""); }, []);
+  const showRegistered = useCallback((reg) => { setFound({ reg, reprint: true }); }, []);
 
   useWedgeBurst({
-    enabled: !printingOpen && !showReg && !noCamp,
+    enabled: !printingOpen && !regMode && !noCamp,
     onBurst: (payload) => {
       setPreRegPayload(payload);
-      setShowReg(true);
+      setRegMode("prereg");
     },
   });
 
@@ -412,33 +421,6 @@ export default function Desk() {
     } finally { setBusy(false); }
   }, [scanResult, scanPayload, operatingDayId, doorPhone, countRegistration]);
 
-  const submitDoorManual = useCallback(async () => {
-    if (!operatingDayId) {
-      setError("No operating camp day. Use Pre-registration.");
-      return;
-    }
-    setBusy(true); setError("");
-    try {
-      const data = await registerPatient({
-        form: doorForm,
-        dayId: operatingDayId,
-        reqId: doorReqId,
-        manualReason: doorReason,
-        atDoor: true,
-      });
-      countRegistration(data);
-      const reg = data.registration;
-      setFound(reg);
-      setBanner(`Registered and arrived: #${reg.reg_no} — ${reg.full_name}`);
-      setDoorForm(EMPTY_REG_FORM);
-      setDoorReason("");
-      setDoorReqId(v4());
-    } catch (err) {
-      if (errorPayload(err)?.code === REQUEST_CONFLICT) setDoorReqId(v4());
-      setError(registrationError(err));
-    } finally { setBusy(false); }
-  }, [operatingDayId, doorForm, doorReqId, doorReason, countRegistration]);
-
   if (loadErr && !kpi) return <Layout title="Desk"><ErrorCard message={loadErr} onRetry={load} /></Layout>;
 
   return (
@@ -460,7 +442,7 @@ export default function Desk() {
       <div className={`grid gap-2 sm:gap-3 mb-5 ${printingOpen ? "grid-cols-3" : "grid-cols-1"}`}>
         <Stat label="Registered" value={kpi?.registered ?? "—"} testid="kpi-registered-count" />
         {printingOpen && <Stat label="Seen" value={kpi?.seen ?? "—"} tone="emerald" testid="kpi-seen-count" />}
-        {printingOpen && <Stat label="Pending" value={kpi?.pending ?? "—"} tone="amber" testid="kpi-pending-count" />}
+        {printingOpen && <PendingStat value={kpi?.pending ?? "—"} />}
       </div>
 
       {!printingOpen && (
@@ -482,7 +464,8 @@ export default function Desk() {
       {printingOpen && <DoorScanCard
         noCamp={noCamp}
         resolveDoorScan={resolveDoorScan}
-        onPatientCode={lookupValue}
+        onPatientCode={lookupCode}
+        onManual={openDoorManual}
         error={error}
         banner={banner}
         scanResult={scanResult}
@@ -493,13 +476,7 @@ export default function Desk() {
         doorPhone={doorPhone}
         setDoorPhone={setDoorPhone}
         submitDoorWalkIn={submitDoorWalkIn}
-        doorForm={doorForm}
-        setDoorForm={setDoorForm}
-        submitDoorManual={submitDoorManual}
         scanning={scanning}
-        doorManualEntry={Boolean(camp?.door_manual_entry)}
-        doorReason={doorReason}
-        setDoorReason={setDoorReason}
         clearScan={abandonScan}
       />}
 
@@ -523,7 +500,7 @@ export default function Desk() {
 
         {found && (
           <div className="mt-4" data-testid="desk-found-patient">
-            <PatientRow p={found} onPrint={print} printingOpen={printingOpen} onConfirmIdentity={onConfirmIdentity} />
+            <PatientRow p={found.reg} onPrint={print} printingOpen={printingOpen} reprint={found.reprint} onNoCard={noCardPrint} />
           </div>
         )}
 
@@ -535,7 +512,7 @@ export default function Desk() {
             </div>
             <div className="space-y-2" data-testid="desk-search-results">
               {searchResults.map((p) => (
-                <PatientRow key={p.id} p={p} onPrint={print} printingOpen={printingOpen} onConfirmIdentity={onConfirmIdentity} />
+                <PatientRow key={p.id} p={p} onPrint={print} printingOpen={printingOpen} reprint onNoCard={noCardPrint} />
               ))}
             </div>
           </div>
@@ -545,31 +522,30 @@ export default function Desk() {
       <PaperCheck
         check={paperCheck}
         onConfirm={confirmPaper}
-        onReprint={reprint}
+        onPrintAgain={printAgain}
         onProblem={() => dismissPaper("Printer problem. Nothing was recorded. Fix the printer, then press Print again.")}
         onClose={() => dismissPaper("Not recorded as printed. Press Print again when the paper is ready.")}
       />
 
       <RegisterModal
-        open={showReg}
-        onClose={closePreReg}
+        open={Boolean(regMode)}
+        atDoor={regMode === "door"}
+        doorDayId={operatingDayId}
+        onClose={closeRegistration}
         initialPayload={preRegPayload}
         days={days}
         onDone={countRegistration}
         setBanner={setBanner}
-        onRegistered={setFound}
+        onRegistered={showRegistered}
       />
     </Layout>
   );
 }
 
 function DoorScanCard({
-  noCamp, resolveDoorScan, onPatientCode, error, banner, scanResult, busy,
-  print, confirmMismatch, confirmPatient, doorPhone, setDoorPhone, submitDoorWalkIn,
-  doorForm, setDoorForm, submitDoorManual, scanning,
-  doorManualEntry, doorReason, setDoorReason, clearScan,
+  noCamp, resolveDoorScan, onPatientCode, onManual, error, banner, scanResult, busy,
+  print, confirmMismatch, confirmPatient, doorPhone, setDoorPhone, submitDoorWalkIn, scanning, clearScan,
 }) {
-  const manualReady = !busy && !scanning && Boolean(doorReason.trim()) && Boolean(doorForm.full_name) && hasAge(doorForm.age) && Boolean(normalizePhone(doorForm.phone));
   return (
     <Card className="mb-5" data-desk-card="scan" data-testid="desk-card-scan">
       <div className="flex items-center gap-2 mb-3">
@@ -583,6 +559,9 @@ function DoorScanCard({
         disabled={noCamp}
         onCaptureStart={clearScan}
       />
+      <Button variant="outline" className="mt-3" onClick={onManual} disabled={noCamp} data-testid="door-manual-button">
+        <UserPlus className="w-4 h-4" /> Manual entry
+      </Button>
       {scanning && (
         <div data-testid="door-scan-status" role="status" aria-live="polite" aria-atomic="true" className="flex items-center gap-2 mt-3 min-h-[44px] text-slate-900 font-semibold">
           <Spinner className="w-5 h-5 text-emerald-700" />
@@ -603,56 +582,23 @@ function DoorScanCard({
           onChoose={confirmPatient}
         />
       </div>
-      {doorManualEntry && (
-        <form
-          className="mt-4 space-y-3"
-          data-testid="door-manual-form"
-          onSubmit={(e) => { e.preventDefault(); if (manualReady) submitDoorManual(); }}
-        >
-          <p className="text-sm font-semibold text-amber-800" data-testid="manual-entry-note">
-            Manual entry — an admin opened this because the scanners are down. It closes at the end of today.
-            मैनुअल एंट्री के लिए कारण लिखें।
-          </p>
-          <Field label="Reason" required>
-            <Input value={doorReason} onChange={(e) => setDoorReason(e.target.value)} data-testid="door-manual-reason" />
-          </Field>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <Field label="Full name" required>
-              <Input value={doorForm.full_name} onChange={(e) => setDoorForm({ ...doorForm, full_name: e.target.value })} data-testid="reg-fullname-input" />
-            </Field>
-            <Field label="Age" required>
-              <Input type="text" inputMode="numeric" value={doorForm.age} onChange={(e) => setDoorForm({ ...doorForm, age: digitsOnly(e.target.value, 3) })} data-testid="reg-age-input" />
-            </Field>
-            <Field label="Phone (household)" required>
-              <PhoneInput value={doorForm.phone} onChange={(phone) => setDoorForm({ ...doorForm, phone })} data-testid="reg-phone-input" />
-            </Field>
-          </div>
-          <Button
-            type="submit"
-            disabled={!manualReady}
-            data-testid="door-manual-submit"
-          >
-            Register
-          </Button>
-        </form>
-      )}
     </Card>
   );
 }
 
-export function PatientRow({ p, onPrint, printingOpen, onConfirmIdentity }) {
-  const [checking, setChecking] = useState(false);
-  const [reason, setReason] = useState("");
-  const needsDoorScan = !p.arrived_at && !p.aadhaar_scanned && !p.identity_checked;
-  const identityHold = Boolean(p.identity_recheck_required) && !p.printed_at && p.queue_status !== "seen";
+export function PatientRow({ p, onPrint, printingOpen, reprint = false, onNoCard }) {
+  const [noCard, setNoCard] = useState(null);
+  const [sending, setSending] = useState(false);
+  const seen = p.queue_status === "seen";
+  const printed = Boolean(p.printed_at) && !seen;
+  const needsDoorScan = !p.arrived_at && !p.aadhaar_scanned && !p.no_card_print;
   const windowShut = !printingOpen && !p.printed_at;
-  const canPrint = p.queue_status !== "seen" && !needsDoorScan && !windowShut && !identityHold;
-  const submitCheck = async (e) => {
+  const canPrint = !seen && !needsDoorScan && !windowShut && (!printed || reprint);
+  const submitNoCard = async (e) => {
     e.preventDefault();
-    if (await onConfirmIdentity(p, reason.trim())) {
-      setChecking(false);
-      setReason("");
-    }
+    setSending(true);
+    if (await onNoCard(p, noCard)) setNoCard(null);
+    setSending(false);
   };
   return (
     <div
@@ -674,57 +620,62 @@ export function PatientRow({ p, onPrint, printingOpen, onConfirmIdentity }) {
           Scan their Aadhaar at the door to print
         </span>
       )}
-      {!needsDoorScan && identityHold && (
-        <span className="text-xs text-amber-800" data-testid={`identity-hold-${p.reg_no}`}>
-          Typed entry. An admin must confirm identity before printing.
-        </span>
-      )}
-      {!needsDoorScan && !identityHold && p.queue_status !== "seen" && windowShut && (
+      {!needsDoorScan && !seen && windowShut && (
         <span className="text-xs text-slate-600" data-testid={`print-window-closed-${p.reg_no}`}>
           The print window is closed.
         </span>
       )}
+      {printed && reprint && (
+        <span className="text-xs text-slate-600" data-testid={`printed-by-${p.reg_no}`}>{printedLine(p)}</span>
+      )}
+      {printed && !reprint && (
+        <span className="text-xs font-semibold text-amber-800" data-testid={`already-printed-${p.reg_no}`}>
+          {alreadyPrintedLine(p)}
+        </span>
+      )}
       <div className="flex gap-1.5 ml-auto">
         {canPrint && (
-          <Button size="sm" variant="outline" onClick={() => onPrint(p)} data-testid={`print-button-${p.reg_no}`}>
-            <Printer className="w-4 h-4" /> Print
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => onPrint(p)}
+            data-testid={`${printed ? "reprint" : "print"}-button-${p.reg_no}`}
+          >
+            <Printer className="w-4 h-4" /> {printed ? "Reprint" : "Print"}
           </Button>
         )}
-        {identityHold && onConfirmIdentity && !checking && (
-          <Button size="sm" variant="outline" onClick={() => setChecking(true)} data-testid={`identity-check-${p.reg_no}`}>
-            Confirm identity
+        {needsDoorScan && printingOpen && !noCard && (
+          <Button size="sm" variant="outline" onClick={() => setNoCard(EMPTY_REASON)} data-testid={`no-card-${p.reg_no}`}>
+            No-card print
           </Button>
         )}
       </div>
-      {checking && (
-        <form onSubmit={submitCheck} className="w-full flex gap-2">
-          <Input
-            value={reason}
-            onChange={(e) => setReason(e.target.value)}
-            placeholder="ID seen, e.g. voter ID card"
-            aria-label="Identity evidence seen"
-            data-testid={`identity-reason-${p.reg_no}`}
-          />
-          <Button size="sm" type="submit" disabled={!reason.trim()} data-testid={`identity-submit-${p.reg_no}`}>
-            Confirm
-          </Button>
+      {noCard && (
+        <form onSubmit={submitNoCard} className="w-full space-y-2">
+          <ManualReason reason={noCard} onChange={setNoCard} testid={`no-card-reason-${p.reg_no}`} />
+          <div className="flex gap-2">
+            <Button size="sm" type="submit" disabled={sending || !reasonReady(noCard)} data-testid={`no-card-submit-${p.reg_no}`}>
+              <Printer className="w-4 h-4" /> Print
+            </Button>
+            <Button size="sm" variant="ghost" type="button" onClick={() => setNoCard(null)}>Cancel</Button>
+          </div>
         </form>
       )}
     </div>
   );
 }
 
-export function RegisterModal({ open, onClose, initialPayload, days, onDone, setBanner, onRegistered }) {
+export function RegisterModal({ open, atDoor = false, doorDayId, onClose, initialPayload, days, onDone, setBanner, onRegistered }) {
   const [form, setForm] = useState(EMPTY_REG_FORM);
   const [qrPayload, setQrPayload] = useState("");
   const [manualMode, setManualMode] = useState(false);
   const [dayId, setDayId] = useState("");
   const scanRequest = useRef(0);
   const phoneRef = useRef(null);
-  const [failures, setFailures] = useState(0);
-  const [manualReason, setManualReason] = useState("");
+  const [reason, setReason] = useState(EMPTY_REASON);
   const [error, setError] = useState("");
   const [review, setReview] = useState(null);
+  const [lookalikeRows, setLookalikeRows] = useState(null);
   const [busy, setBusy] = useState(false);
   const [wedgeReading, setWedgeReading] = useState(false);
   const [reqId, setReqId] = useState(v4());
@@ -733,13 +684,13 @@ export function RegisterModal({ open, onClose, initialPayload, days, onDone, set
   const reset = useCallback(() => {
     setForm(EMPTY_REG_FORM);
     setQrPayload("");
-    setManualMode(false);
-    setFailures(0);
-    setManualReason("");
+    setManualMode(atDoor);
+    setReason(EMPTY_REASON);
     setError("");
     setReview(null);
+    setLookalikeRows(null);
     setReqId(v4());
-  }, []);
+  }, [atDoor]);
 
   useEffect(() => {
     scanRequest.current += 1;
@@ -782,10 +733,6 @@ export function RegisterModal({ open, onClose, initialPayload, days, onDone, set
     setReqId(v4());
   }, []);
 
-  const onFailure = useCallback((outcome) => {
-    if (outcome === "error") setFailures((n) => n + 1);
-  }, []);
-
   const readCard = useCallback(async (payload) => {
     const request = ++scanRequest.current;
     setError("");
@@ -793,54 +740,58 @@ export function RegisterModal({ open, onClose, initialPayload, days, onDone, set
     try {
       const { data } = await api.post("/aadhaar/decode", { payload });
       if (request !== scanRequest.current) return;
-      if (data.outcome === "card") {
-        onScan(data.data, payload);
-      } else {
-        setError(data.message || "Could not read that card. Scan it again.");
-        onFailure(data.outcome);
-      }
+      if (data.outcome === "card") onScan(data.data, payload);
+      else setError(data.message || "Could not read that card. Scan it again.");
     } catch (err) {
       if (request !== scanRequest.current) return;
       setError(formatApiError(err));
-      onFailure("error");
     } finally {
       if (request === scanRequest.current) setWedgeReading(false);
     }
-  }, [onScan, onFailure]);
+  }, [onScan]);
 
   useEffect(() => {
     if (open && initialPayload) readCard(initialPayload);
   }, [open, initialPayload, readCard]);
 
   const { receiving } = useWedgeBurst({
-    enabled: open && !manualMode && !busy,
+    enabled: open && !atDoor && !manualMode && !busy,
     onBurst: readCard,
     onInterrupted: () => setError("The USB scan was cut off. Scan the card again."),
   });
 
-  const manualAllowed = !scanned && failures >= 3;
+  const bookedDay = atDoor ? doorDayId : dayId;
   const showForm = scanned || manualMode;
-  const dirty = showForm && (Object.values(form).some((value) => String(value ?? "") !== "") || Boolean(manualReason));
+  const dirty = showForm && (Object.values(form).some((value) => String(value ?? "") !== "") || Boolean(reason.code));
+  const manualReady = reasonReady(reason) && Boolean(form.gender)
+    && (!cardInHand(reason) || String(form.aadhaar_last4 ?? "").length === 4);
   const canSubmit = !busy && Boolean(form.full_name) && hasAge(form.age) && Boolean(normalizePhone(form.phone))
-    && Boolean(dayId) && (scanned || Boolean(manualReason.trim()));
+    && Boolean(bookedDay) && (scanned || manualReady);
   const locked = (field) => scanned && form[field] !== "" && form[field] != null;
-  const setField = (field) => (e) => setForm((prev) => ({ ...prev, [field]: e.target.value }));
-  const setDigits = (field, max) => (e) => setForm((prev) => ({ ...prev, [field]: digitsOnly(e.target.value, max) }));
+  const edit = (change) => { setLookalikeRows(null); setForm(change); };
+  const setField = (field) => (e) => edit((prev) => ({ ...prev, [field]: e.target.value }));
+  const setDigits = (field, max) => (e) => edit((prev) => ({ ...prev, [field]: digitsOnly(e.target.value, max) }));
+  const chooseReason = (next) => { setLookalikeRows(null); setReason(next); };
+  const openLookalike = (reg) => { onRegistered?.(reg); onClose(); };
 
-  const save = async ({ next = false, reviewConfirmedId = null } = {}) => {
+  const save = async ({ next = false, reviewConfirmedId = null, differentPerson = false } = {}) => {
     if (!canSubmit) return;
     setBusy(true); setError("");
     try {
       const data = await registerPatient({
         form,
         qrPayload,
-        dayId,
+        dayId: bookedDay,
         reqId,
-        manualReason: manualReason.trim(),
+        reason,
+        atDoor,
         reviewConfirmedId,
+        differentPerson,
       });
       const reg = data.registration;
-      setBanner(`Registered #${reg.reg_no} — ${reg.full_name}. SMS sent.`);
+      setBanner(atDoor
+        ? `Registered and arrived: #${reg.reg_no} — ${reg.full_name}`
+        : `Registered #${reg.reg_no} — ${reg.full_name}. SMS sent.`);
       onRegistered?.(reg);
       onDone(data);
       if (next) reset();
@@ -849,6 +800,10 @@ export function RegisterModal({ open, onClose, initialPayload, days, onDone, set
       const payload = errorPayload(err);
       if (payload?.code === "MISMATCH_REVIEW_REQUIRED") {
         setReview(payload);
+        return;
+      }
+      if (payload?.code === "LOOKALIKES") {
+        setLookalikeRows(payload.registrations);
         return;
       }
       if (payload?.code === REQUEST_CONFLICT) setReqId(v4());
@@ -862,38 +817,27 @@ export function RegisterModal({ open, onClose, initialPayload, days, onDone, set
   };
 
   return (
-    <Modal open={open} onClose={onClose} dirty={dirty} title="New Registration" size="lg">
+    <Modal open={open} onClose={onClose} dirty={dirty} title={atDoor ? "Manual entry" : "New Registration"} size="lg">
       <div className="space-y-4">
-        <AadhaarScanner onScanned={onScan} onFailure={onFailure} disabled={busy || manualMode}
-          onCaptureStart={() => { scanRequest.current += 1; setWedgeReading(false); setQrPayload(""); setReview(null); setForm((prev) => ({ ...EMPTY_REG_FORM, phone: prev.phone })); }} />
+        {!atDoor && (
+          <AadhaarScanner onScanned={onScan} disabled={busy || manualMode}
+            onCaptureStart={() => { scanRequest.current += 1; setWedgeReading(false); setQrPayload(""); setReview(null); setForm((prev) => ({ ...EMPTY_REG_FORM, phone: prev.phone })); }} />
+        )}
         {(receiving || wedgeReading) && (
           <div role="status" aria-live="polite" className="flex items-center gap-2 min-h-[44px] font-semibold text-slate-900" data-testid="reg-wedge-status">
             <Spinner className="w-5 h-5 text-emerald-700" />
             {receiving ? "Receiving from the USB scanner…" : "Reading the card…"}
           </div>
         )}
-        {manualAllowed && (
-          <Button type="button" variant="outline" disabled={busy} data-testid="reg-manual-toggle" onClick={() => {
-            setQrPayload("");
-            setManualMode(!manualMode);
-          }}>{manualMode ? "Use scanner" : "Enter details manually"}</Button>
-        )}
-        {manualAllowed && (
-          <p className="text-sm text-slate-700" data-testid="manual-attempt-count">
-            Camera attempts failed: {failures}. Manual entry is unverified. तीन असफल कोशिशों के बाद ही मैनुअल एंट्री खुलती है।
-          </p>
+        {!atDoor && !scanned && (
+          <Button type="button" variant="outline" disabled={busy} data-testid="reg-manual-toggle" onClick={() => setManualMode(!manualMode)}>
+            {manualMode ? "Use scanner" : <><UserPlus className="w-4 h-4" /> Manual entry</>}
+          </Button>
         )}
 
         {showForm && (
           <form id="register-form" onSubmit={submit} className="space-y-4">
-            {!scanned && (
-              <>
-                <p className="text-sm font-semibold text-amber-800" data-testid="manual-entry-note">Manual entry</p>
-                <Field label="Reason" required>
-                  <Input value={manualReason} onChange={(e) => setManualReason(e.target.value)} maxLength={200} data-testid="manual-reason-input" />
-                </Field>
-              </>
-            )}
+            {!scanned && <ManualReason reason={reason} onChange={chooseReason} />}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label="Full name" required>
                 <Input value={form.full_name} onChange={setField("full_name")} readOnly={locked("full_name")} className={locked("full_name") ? "bg-slate-100" : ""} autoComplete="off" maxLength={100} data-testid="reg-fullname-input" />
@@ -901,22 +845,24 @@ export function RegisterModal({ open, onClose, initialPayload, days, onDone, set
               <Field label="Age" required>
                 <Input type="text" inputMode="numeric" value={form.age} onChange={setDigits("age", 3)} readOnly={locked("age")} className={locked("age") ? "bg-slate-100" : ""} data-testid="reg-age-input" />
               </Field>
-              <Field label="Gender">
-                <Select value={form.gender} onChange={setField("gender")} disabled={locked("gender")} data-testid="reg-gender-select">
+              <Field label="Gender" required={!scanned}>
+                <Select value={form.gender ?? ""} onChange={setField("gender")} disabled={locked("gender")} data-testid="reg-gender-select">
                   <option value="">—</option><option value="M">Male</option><option value="F">Female</option><option value="O">Other</option>
                 </Select>
               </Field>
               <Field label="Phone (household)" required hint="10-digit mobile">
-                <PhoneInput ref={phoneRef} value={form.phone} onChange={(phone) => setForm((prev) => ({ ...prev, phone }))} data-testid="reg-phone-input" />
+                <PhoneInput ref={phoneRef} value={form.phone} onChange={(phone) => edit((prev) => ({ ...prev, phone }))} data-testid="reg-phone-input" />
               </Field>
-              <Field label="Aadhaar last-4">
-                <Input value={form.aadhaar_last4} onChange={setDigits("aadhaar_last4", 4)} readOnly={locked("aadhaar_last4")} className={locked("aadhaar_last4") ? "bg-slate-100" : ""} inputMode="numeric" data-testid="reg-last4-input" />
+              <Field label="Aadhaar last-4" required={!scanned && cardInHand(reason)}>
+                <Input value={form.aadhaar_last4 ?? ""} onChange={setDigits("aadhaar_last4", 4)} readOnly={locked("aadhaar_last4")} className={locked("aadhaar_last4") ? "bg-slate-100" : ""} inputMode="numeric" data-testid="reg-last4-input" />
               </Field>
-              <Field label="Camp day">
-                <Select value={dayId} onChange={(e) => setDayId(e.target.value)} data-testid="reg-day-select">
-                  {days.map((d) => <option key={d.id} value={d.id}>{displayDate(d.day_date)}{d.is_today ? " (today)" : ""}</option>)}
-                </Select>
-              </Field>
+              {!atDoor && (
+                <Field label="Camp day">
+                  <Select value={dayId} onChange={(e) => setDayId(e.target.value)} data-testid="reg-day-select">
+                    {days.map((d) => <option key={d.id} value={d.id}>{displayDate(d.day_date)}{d.is_today ? " (today)" : ""}</option>)}
+                  </Select>
+                </Field>
+              )}
             </div>
             <Field label="Address">
               <Input value={form.address} onChange={setField("address")} readOnly={locked("address")} className={locked("address") ? "bg-slate-100" : ""} maxLength={300} data-testid="reg-address-input" />
@@ -933,16 +879,22 @@ export function RegisterModal({ open, onClose, initialPayload, days, onDone, set
           />
         )}
 
+        {lookalikeRows && (
+          <Lookalikes rows={lookalikeRows} busy={busy} onOpen={openLookalike} onDifferent={() => save({ differentPerson: true })} />
+        )}
+
         <Alert>{error}</Alert>
 
         {showForm && (
           <div className="flex flex-wrap gap-2 justify-end pt-1">
             <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
-            {!review && (
+            {!review && !lookalikeRows && (
               <>
-                <Button type="button" variant="outline" disabled={!canSubmit} onClick={() => save({ next: true })} data-testid="patient-register-next">
-                  Register &amp; next
-                </Button>
+                {!atDoor && (
+                  <Button type="button" variant="outline" disabled={!canSubmit} onClick={() => save({ next: true })} data-testid="patient-register-next">
+                    Register &amp; next
+                  </Button>
+                )}
                 <Button type="submit" form="register-form" disabled={!canSubmit} data-testid="patient-register-submit">
                   {busy ? "Registering…" : "Register"}
                 </Button>

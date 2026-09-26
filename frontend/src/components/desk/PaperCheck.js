@@ -5,7 +5,7 @@ function ignoreSpace(event) {
   if (event.key === " ") event.preventDefault();
 }
 
-export function PaperCheck({ check, onConfirm, onReprint, onProblem, onClose }) {
+export function PaperCheck({ check, onConfirm, onPrintAgain, onProblem, onClose }) {
   const keys = { onKeyDown: ignoreSpace, onKeyUp: ignoreSpace };
   return (
     <Modal open={Boolean(check)} onClose={onClose} title="Paper check">
@@ -19,8 +19,8 @@ export function PaperCheck({ check, onConfirm, onReprint, onProblem, onClose }) 
             <Button size="lg" autoFocus {...keys} onClick={onConfirm} disabled={check.busy} data-testid="paper-check-confirm">
               {check.error ? "Retry" : "Printed — next patient"}
             </Button>
-            <Button variant="outline" {...keys} onClick={onReprint} disabled={check.busy} data-testid="paper-check-reprint">
-              Reprint
+            <Button variant="outline" {...keys} onClick={onPrintAgain} disabled={check.busy} data-testid="paper-check-print-again">
+              Print again
             </Button>
             <Button variant="ghost" {...keys} onClick={onProblem} disabled={check.busy} data-testid="paper-check-problem">
               Printer problem

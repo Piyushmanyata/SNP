@@ -27,11 +27,11 @@ def test_a_manual_entry_needs_only_a_reason_and_is_always_rechecked(monkeypatch)
         _camp_id, (day_id,) = await seed_camp(database, days=(day(1),))
         volunteer = (await database.users.insert_one(user_doc("Desk", "volunteer"))).inserted_id
         headers = bearer(volunteer, "Desk", "volunteer")
-        payload = {"full_name": "Manual Patient", "age": 44, "phone": "9876500011", "camp_day_id": str(day_id)}
+        payload = {"full_name": "Manual Patient", "age": 44, "gender": "F", "phone": "9876500011", "camp_day_id": str(day_id)}
         refused = await client.post("/api/register", json=payload, headers=headers)
         assert refused.status_code == 400
         assert refused.json()["detail"]["code"] == "MANUAL_ENTRY_NOT_ALLOWED"
-        saved = await client.post("/api/register", json={**payload, "manual_reason": "card left at home"}, headers=headers)
+        saved = await client.post("/api/register", json={**payload, "manual_reason": "no_card"}, headers=headers)
         assert saved.status_code == 200, saved.text
         stored = await database.patients.find_one({})
         assert stored["manual_entry"] is True and stored["identity_recheck_required"] is True
@@ -164,7 +164,7 @@ def test_a_past_day_that_is_not_the_operating_day_takes_no_bookings(monkeypatch)
         assert refused.status_code == 409 and refused.detail["code"] == "DAY_PASSED"
         with pytest.raises(HTTPException) as exc:
             await desk_register(RegisterBody(
-                full_name="Too Late Manual", age=40, phone="9876500013", camp_day_id=str(past), manual_reason="no card",
+                full_name="Too Late Manual", age=40, gender="F", phone="9876500013", camp_day_id=str(past), manual_reason="no_card",
             ), Request(), actor=ACTOR, background_tasks=None)
         assert exc.value.detail["code"] == "DAY_PASSED"
         assert await database.patients.count_documents({}) == 0

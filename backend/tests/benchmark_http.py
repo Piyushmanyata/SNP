@@ -133,7 +133,7 @@ async def measure_api(client, seeded: dict) -> list[dict]:
             "full_name": f"Bench Register {register_n} {uuid4().hex[:8]}",
             "age": 40, "gender": "F", "phone": f"97{register_n:08d}",
             "address": "Bench road", "camp_day_id": seeded["day_id"],
-            "registration_request_id": str(uuid4()), "manual_reason": "Benchmark",
+            "registration_request_id": str(uuid4()), "manual_reason": "no_card",
         })
 
     async def clinical_search():

@@ -45,7 +45,7 @@ def test_confirm_and_arrive_carry_the_prescription_only_when_it_can_print(monkey
         assert confirmed["prescription"]["reg_no"] == manual["reg_no"]
 
         held = await register(day_id, full_name="Held Patient", age=40, phone="9876500041")
-        await database.patients.update_one({"_id": ObjectId(held["id"])}, {"$set": {"identity_alt_check": {"reason": "ration card"}}})
+        await database.patients.update_one({"_id": ObjectId(held["id"])}, {"$set": {"no_card_print": {"reason": "no_card"}}})
         assert (await arrive(held["id"], actor=ACTOR))["prescription"] is None
 
         seen = await register(day_id, full_name="Seen Patient", age=60, phone="9876500042", aadhaar_scanned=True,
@@ -116,6 +116,6 @@ def test_the_sheet_is_refused_by_the_same_rules_as_the_stamp(monkeypatch):
         for call in (preview_prescription, print_prescription):
             with pytest.raises(HTTPException) as exc:
                 await call(held["id"], actor=ACTOR)
-            assert exc.value.status_code == 409 and exc.value.detail["code"] == "IDENTITY_CHECK_REQUIRED"
+            assert exc.value.status_code == 409 and exc.value.detail["code"] == "NEEDS_DOOR_SCAN"
 
     run_camp(monkeypatch, run)

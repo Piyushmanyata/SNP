@@ -11,11 +11,12 @@ from helpers import (
 )
 from serializers import ser_patient
 from security import get_current_user, require_staff, require_any
-from routes_camps import door_manual_open, effective_printing
+from routes_camps import effective_printing
 from aadhaar import decode_aadhaar
 from aadhaar_extract import extract_document
 import sms
 from datetime import date, timedelta
+from itertools import permutations
 import asyncio
 import re
 
@@ -26,6 +27,9 @@ _decode_rl: dict = {}
 SELF_REGISTER_PER_NETWORK = 30
 DECODE_PER_NETWORK = 60
 HOUSEHOLD_LIMIT = 6
+CARD_IN_HAND = ("card_unreadable", "scanner_down")
+LOOKALIKE_AGE_SPAN = 5
+LOOKALIKE_MAX_WORDS = 6
 
 
 def _rate_limit(store: dict, request: Request, limit: int) -> None:
@@ -156,6 +160,18 @@ async def _duplicate_hits(
     return hits
 
 
+async def _lookalikes(db: AsyncDatabase, camp_id: ObjectId | str, body: RegisterBody) -> List[Dict[str, Any]]:
+    tokens = normalize_name(body.full_name).split()
+    if body.age is None or not tokens:
+        return []
+    orders = {" ".join(order) for order in permutations(tokens)} if len(tokens) <= LOOKALIKE_MAX_WORDS else {" ".join(tokens)}
+    return await db.patients.find({
+        "camp_id": camp_id,
+        "full_name_normalized": {"$in": list(orders)},
+        "age": {"$gte": body.age - LOOKALIKE_AGE_SPAN, "$lte": body.age + LOOKALIKE_AGE_SPAN},
+    }).sort("reg_no", 1).to_list(20)
+
+
 def _born_apart(a: Optional[str], b: Optional[str]) -> bool:
     if not a or not b or a == b:
         return False
@@ -280,10 +296,11 @@ def _build_patient_document(
         "registrar_team_lead_id": None if is_self else registrar_team_lead_id,
         "clinical_generation": 0,
         "committed_revision_id": None,
-        "identity_recheck_required": is_manual,
+        "identity_recheck_required": is_manual and not body.at_door,
         "manual_entry": is_manual,
         "manual_exception": True if is_manual else None,
         "manual_reason": body.manual_reason if is_manual else None,
+        "manual_note": body.manual_note if is_manual else None,
         "manual_at_door": bool(body.at_door) if is_manual else False,
         **({
             "arrived_at": now_utc(), "arrived_by": str(actor_id), "queue_status": "arrived",
@@ -383,7 +400,7 @@ async def _create_registration(
     if is_self and not body.aadhaar_scanned:
         raise api_error(400, "MANUAL_ENTRY_NOT_ALLOWED", 'Scan the Aadhaar card. Public registration has no manual entry.')
     if not body.aadhaar_scanned:
-        _reject_unscanned_staff_entry(body, camp, operating)
+        _reject_unscanned_staff_entry(body, operating)
 
     phone = normalize_phone(body.phone)
     if is_self and (not phone or is_dummy_phone(phone)):
@@ -408,6 +425,12 @@ async def _create_registration(
     conflict_result = await _resolve_registration_conflict(db, hits, body, person, is_self)
     if conflict_result is not None:
         return conflict_result
+    lookalikes = [] if body.aadhaar_scanned else await _lookalikes(db, camp["_id"], body)
+    if lookalikes and not body.different_person:
+        raise api_error(
+            409, "LOOKALIKES", 'Someone with this name and a similar age is already registered. Check them first.',
+            registrations=[ser_patient(p) for p in lookalikes],
+        )
 
     walk_in = not is_self and operating
     await _assert_capacity(db, day, enforce_limit=not walk_in)
@@ -435,6 +458,8 @@ async def _create_registration(
             is_self=is_self,
             registrar_team_lead_id=team_lead_id,
         )
+        if not body.aadhaar_scanned:
+            doc["lookalikes_overridden"] = [p["_id"] for p in lookalikes]
         patient, created = await _insert_patient_document(db, doc, body, person, camp["_id"])
         if not created:
             await _release_capacity(db, day["_id"])
@@ -496,15 +521,25 @@ def _validate_manual_identity(body: RegisterBody, now) -> None:
             body.age = age_from_dob(dob.isoformat())
     if body.age is None or not 0 <= body.age <= 130:
         raise api_error(400, "ENTER_AN_AGE_BETWEEN_0_AND_130_OR_A_VALID_DATE_OF_BIRTH", 'Enter an age between 0 and 130, or a valid date of birth')
+    if not body.gender:
+        raise api_error(400, "GENDER_REQUIRED", "Choose the patient's gender.")
 
 
-def _reject_unscanned_staff_entry(body: RegisterBody, camp: dict, operating: bool) -> None:
-    reason = (body.manual_reason or "").strip()
+def checked_manual_note(reason: Optional[str], note: Optional[str]) -> Optional[str]:
     if not reason:
-        raise api_error(400, "MANUAL_ENTRY_NOT_ALLOWED", 'Scan the Aadhaar card, or give the reason it cannot be scanned.')
-    body.manual_reason = reason
-    if body.at_door and not door_manual_open(camp):
-        raise api_error(403, "DOOR_MANUAL_SHUT", 'Manual entry at the door is closed.')
+        raise api_error(400, "MANUAL_ENTRY_NOT_ALLOWED", 'Scan the Aadhaar card, or choose why it cannot be scanned.')
+    if reason != "other":
+        return None
+    note = (note or "").strip()
+    if not note:
+        raise api_error(400, "MANUAL_NOTE_REQUIRED", 'Write why the card cannot be scanned.')
+    return note
+
+
+def _reject_unscanned_staff_entry(body: RegisterBody, operating: bool) -> None:
+    body.manual_note = checked_manual_note(body.manual_reason, body.manual_note)
+    if body.manual_reason in CARD_IN_HAND and not body.aadhaar_last4:
+        raise api_error(400, "AADHAAR_LAST4_REQUIRED", 'The card is here: type the last 4 digits of its Aadhaar number.')
     if body.at_door and not operating:
         raise api_error(409, "NOT_OPERATING_DAY", 'The door registers patients for the Operating day only.')
 

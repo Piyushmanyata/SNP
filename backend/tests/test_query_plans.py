@@ -83,10 +83,18 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
                 {"operation_id": {"$type": "string"}},
             ]}, "limit": 1},
             "revision by id": {"find": "prescription_revisions", "filter": {"_id": revision_id}, "limit": 1},
+            "pending": {"find": "patients", "filter": {
+                "camp_day_id": day_id, "queue_status": "arrived", "printed_at": {"$ne": None},
+            }, "sort": {"printed_at": 1}},
+            "lookalikes": {"find": "patients", "filter": {
+                "camp_id": camp, "full_name_normalized": {"$in": [patient["full_name_normalized"]]},
+                "age": {"$gte": 40, "$lte": 50},
+            }, "sort": {"reg_no": 1}, "limit": 20},
         }
         for name, command in plans.items():
             stages = _stages(await _winning(db, command))
             assert "COLLSCAN" not in stages, (name, stages)
+        assert "SORT" not in _stages(await _winning(db, plans["pending"]))
         quiet = now_utc() - timedelta(minutes=15)
         group_plans = {
             "leaderboard": {"aggregate": "patients", "pipeline": [

@@ -115,7 +115,7 @@ class TestStaffScannedIdentityIsServerDerived:
         async def run(database):
             _camp_id, (day_id,) = await seed_camp(database)
             result = await _register(
-                day_id, manual_entry=True, manual_reason="Card not readable",
+                day_id, manual_entry=True, manual_reason="no_card", gender="F",
                 )
             stored = await database.patients.find_one(
                 {"_id": ObjectId(result["registration"]["id"])},

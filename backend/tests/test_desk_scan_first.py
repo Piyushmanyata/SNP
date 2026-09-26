@@ -45,7 +45,7 @@ def _arrive(admin, patient_id):
 
 
 def _identity(admin, patient_id):
-    r = admin.post(f"{API}/desk/identity-check", json={"patient_id": patient_id, "reason": "Voter ID seen"}, timeout=30)
+    r = admin.post(f"{API}/desk/no-card", json={"patient_id": patient_id, "reason": "no_card"}, timeout=30)
     assert r.status_code == 200, r.text
 
 
@@ -66,7 +66,8 @@ def _reg(session, camp_day_id, **fields):
     }
     body.update(fields)
     if not body.get("aadhaar_scanned"):
-        body.setdefault("manual_reason", "scanner unavailable")
+        body.setdefault("manual_reason", "no_card")
+        body.setdefault("gender", "F")
     if body.get("aadhaar_scanned"):
         body["qr_payload"] = tostring(Element(
             "PrintLetterBarcodeData", name=body["full_name"], gender=body["gender"],
@@ -110,10 +111,10 @@ class TestPrintWindowNoCalendar:
         camp_id = _camp(admin, "printclosed")
         day = _day(admin, camp_id, TODAY_IST, seat_limit=20)
         _open_print(admin, day["id"], False)
-        r = _reg(admin, day["id"], full_name=f"TEST PrintClosed {TAG}", phone="9876500102")
+        r = _reg(admin, day["id"], full_name=f"TEST PrintClosed {TAG}", phone="9876500102",
+                 gender="F", dob="1980-03-03", aadhaar_last4="1020", aadhaar_scanned=True)
         assert r.status_code == 200, r.text
         pid = r.json()["registration"]["id"]
-        _identity(admin, pid)
         arrived = admin.post(f"{API}/desk/arrive/{pid}", timeout=30)
         assert arrived.status_code == 409, arrived.text
         assert arrived.json()["detail"]["code"] == "PRINT_WINDOW_CLOSED"
@@ -266,7 +267,7 @@ class TestAadhaarOverwrite:
     def test_overwrite_does_not_consume_second_seat(self, admin, anon):
         camp_id = _camp(admin, "owseat")
         day = _day(admin, camp_id, TODAY_IST, seat_limit=1)
-        typed = _reg(admin, day["id"], full_name=f"TEST Seat {TAG}", age=50,
+        typed = _reg(admin, day["id"], full_name=f"TEST Seat {TAG}", age=50, gender="M",
                      phone="9876500302", aadhaar_last4="8882", dob="1976-02-02",
                      manual_entry=True)
         assert typed.status_code == 200, typed.text

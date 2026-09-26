@@ -17,7 +17,7 @@ from models import (
     CompletePrescriptionBody,
     CorrectionBody,
     FulfilmentBody,
-    IdentityCheckBody,
+    NoCardBody,
     PrintWindowBody,
     RegisterBody,
     TranscriptionBody,
@@ -31,7 +31,7 @@ from routes_clinical import (
     record_fulfilment,
     undo_completion,
 )
-from routes_desk import arrive, preview_prescription, print_prescription, record_identity_check
+from routes_desk import arrive, preview_prescription, print_prescription, record_no_card_print
 from routes_registration import _create_registration
 from seed import (
     FIXED_POWER, MEDICINE, MEDICINE_ALT, NOW, TODAY, TOMORROW, Request, asgi_client, bearer, day, patient_doc, register,
@@ -81,7 +81,7 @@ async def _ensure_user(db, actor):
 async def _register_printed(day_id, registrar=VOLUNTEER, arrived=True, printed=True, **fields):
     pid = (await register(day_id, actor=registrar, **fields))["id"]
     if arrived or printed:
-        await _identity_checked(pid)
+        await _no_card_print(pid)
     if arrived:
         await arrive(pid, actor=registrar)
     if printed:
@@ -98,10 +98,8 @@ async def _printed_patient(db, registrar=VOLUNTEER, **fields):
     return camp_id, day_id, await db.patients.find_one({"_id": ObjectId(pid)})
 
 
-async def _identity_checked(patient_id):
-    await record_identity_check(
-        IdentityCheckBody(patient_id=str(patient_id), reason="Voter ID seen"), actor=ADMIN,
-    )
+async def _no_card_print(patient_id):
+    await record_no_card_print(NoCardBody(patient_id=str(patient_id), reason="no_card"), actor=VOLUNTEER)
 
 
 def _complete_body(patient_id, operation_id, **extra):
@@ -844,7 +842,7 @@ class TestPrintingMatrix:
             )
             await db.camp_days.update_many({"camp_id": camp_id}, {"$set": {"seat_limit": 1}})
             pid = (await register(d1, actor=VOLUNTEER, full_name="Booked", age=40, phone="9876500044"))["id"]
-            await _identity_checked(pid)
+            await _no_card_print(pid)
             await arrive(pid, actor=VOLUNTEER)
             day1 = await db.camp_days.find_one({"_id": d1})
             day2 = await db.camp_days.find_one({"_id": d2})

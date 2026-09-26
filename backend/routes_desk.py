@@ -5,14 +5,15 @@ from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 from pymongo.asynchronous.database import AsyncDatabase
 from db import get_db
-from models import IdentityCheckBody, QrLookupBody, ScanBody, ScanConfirmBody, RegisterBody
+from models import NoCardBody, QrLookupBody, ScanBody, ScanConfirmBody, RegisterBody
 from helpers import OVERWRITTEN_FIELDS, now_utc, age_from_dob, material_diff, normalize_name, parse_patient_identifier, person_key, api_error
 from serializers import ser_patient
-from security import require_admin, require_staff
+from security import require_staff
 from routes_camps import effective_printing
 from aadhaar import decode_aadhaar
 from routes_registration import (
     _dup_409, _duplicate_hits, _is_manual, _is_scanned_row, _overwrite_refused, _resolve_person,
+    checked_manual_note,
 )
 router = APIRouter(prefix="/api/desk", tags=["desk"])
 
@@ -268,8 +269,8 @@ async def arrive(
     if not p:
         raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
     _require_in_camp(p, camp)
-    if not (p.get("aadhaar_scanned") or p.get("identity_alt_check") or p.get("arrived_at")):
-        raise api_error(409, "IDENTITY_CHECK_REQUIRED", "Scan this patient's Aadhaar card, or ask an admin to record an identity check, before Arrival.")
+    if not (p.get("aadhaar_scanned") or p.get("no_card_print") or p.get("arrived_at")):
+        raise api_error(409, "NEEDS_DOOR_SCAN", "Scan this patient's Aadhaar card at the door, or record a No-card print.")
     state = await (_printing_state(db, camp) if p.get("arrived_at") else _require_door_open(db, camp))
     arrived = await _stamp_arrival(db, p, str(actor["_id"]), camp, state)
     return {"registration": ser_patient(arrived), "prescription": await _printable_prescription(db, arrived, camp, state)}
@@ -285,7 +286,7 @@ def _print_refusal(p: dict, state: dict) -> Optional[HTTPException]:
     if not state.get("printing_open"):
         return api_error(409, "PRINT_WINDOW_CLOSED", 'The print window is closed.')
     if p.get("identity_recheck_required"):
-        return api_error(409, "IDENTITY_CHECK_REQUIRED", 'Confirm identity before printing.')
+        return api_error(409, "NEEDS_DOOR_SCAN", "Scan this patient's Aadhaar card at the door, or record a No-card print.")
     return None
 
 
@@ -305,6 +306,7 @@ async def _prescription_payload(db, p: dict, actor: dict, stamp: bool, camp: dic
             {"$set": {
                 "printed_at": now_utc(),
                 "checked_in_by": str(actor["_id"]),
+                "printed_by_name": actor.get("name"),
             }},
             return_document=True,
         )
@@ -333,7 +335,7 @@ def _prescription(p: dict, camp: Optional[dict], day_date: str) -> Dict[str, Any
 
 
 async def _printable_prescription(db: AsyncDatabase, p: dict, camp: dict, state: dict) -> Optional[Dict[str, Any]]:
-    if _print_refusal(p, state):
+    if p.get("printed_at") or _print_refusal(p, state):
         return None
     day = await db.camp_days.find_one({"_id": p["camp_day_id"]})
     return _prescription(p, camp, day["day_date"]) if day else None
@@ -367,27 +369,25 @@ async def print_prescription(
     return await _prescription_payload(db, p, actor, True, camp)
 
 
-@router.post("/identity-check")
-async def record_identity_check(
-    body: IdentityCheckBody,
-    actor: dict = Depends(require_admin),
+@router.post("/no-card")
+async def record_no_card_print(
+    body: NoCardBody,
+    actor: dict = Depends(require_staff),
 ) -> Dict[str, Any]:
-    if not (body.reason or "").strip():
-        raise api_error(400, "A_REASON_IS_REQUIRED", 'A reason is required')
+    note = checked_manual_note(body.reason, body.note)
     db = get_db()
+    camp = await _active_camp(db)
+    await _require_door_open(db, camp)
     p = await db.patients.find_one({"_id": ObjectId(body.patient_id)})
     if not p:
         raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
-    await db.patients.update_one({"_id": p["_id"]}, {"$set": {
-        "identity_recheck_required": False,
-        "identity_alt_check": {
-            "reason": body.reason.strip(),
-            "evidence": body.evidence,
-            "admin_id": str(actor["_id"]),
-            "checked_at": now_utc(),
-        },
-    }})
-    p = await db.patients.find_one({"_id": p["_id"]})
-    if not p:
-        raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
-    return {"registration": ser_patient(p)}
+    _require_in_camp(p, camp)
+    released = await db.patients.find_one_and_update(
+        {"_id": p["_id"], "identity_recheck_required": True},
+        {"$set": {
+            "identity_recheck_required": False,
+            "no_card_print": {"reason": body.reason, "note": note, "by": str(actor["_id"]), "at": now_utc()},
+        }},
+        return_document=True,
+    )
+    return {"registration": ser_patient(released or p)}

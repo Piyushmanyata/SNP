@@ -107,8 +107,9 @@ async def register(day_id, actor=ACTOR, background_tasks=None, **fields):
             "PrintLetterBarcodeData", name=body.full_name, gender=body.gender or "",
             dob=body.dob or "", uid=body.aadhaar_last4 or "", street=body.address or "",
         ), encoding="unicode")
-    if not body.aadhaar_scanned and not body.manual_reason:
-        body.manual_reason = "scanner unavailable"
+    if not body.aadhaar_scanned:
+        body.manual_reason = body.manual_reason or "no_card"
+        body.gender = body.gender or "F"
     result = await desk_register(body, Request(), actor=actor, background_tasks=background_tasks)
     return result["registration"]
 
