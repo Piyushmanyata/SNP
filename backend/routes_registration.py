@@ -16,7 +16,7 @@ from aadhaar import decode_aadhaar
 from aadhaar_extract import extract_document
 import sms
 from datetime import date, timedelta
-from itertools import islice, permutations
+from itertools import permutations
 import asyncio
 import re
 
@@ -29,7 +29,7 @@ DECODE_PER_NETWORK = 60
 HOUSEHOLD_LIMIT = 6
 CARD_IN_HAND = ("card_unreadable", "scanner_down")
 LOOKALIKE_AGE_SPAN = 5
-LOOKALIKE_NAME_ORDERS = 120
+LOOKALIKE_MAX_WORDS = 6
 
 
 def _rate_limit(store: dict, request: Request, limit: int) -> None:
@@ -164,10 +164,10 @@ async def _lookalikes(db: AsyncDatabase, camp_id: ObjectId | str, body: Register
     tokens = normalize_name(body.full_name).split()
     if body.age is None or not tokens:
         return []
-    orders = {" ".join(order) for order in islice(permutations(tokens), LOOKALIKE_NAME_ORDERS)}
+    orders = {" ".join(order) for order in permutations(tokens)} if len(tokens) <= LOOKALIKE_MAX_WORDS else {" ".join(tokens)}
     return await db.patients.find({
         "camp_id": camp_id,
-        "full_name_normalized": {"$in": sorted(orders)},
+        "full_name_normalized": {"$in": list(orders)},
         "age": {"$gte": body.age - LOOKALIKE_AGE_SPAN, "$lte": body.age + LOOKALIKE_AGE_SPAN},
     }).sort("reg_no", 1).to_list(20)
 

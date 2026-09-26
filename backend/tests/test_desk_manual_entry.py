@@ -4,7 +4,7 @@ import io
 import pytest
 from bson import ObjectId
 
-from seed import asgi_client, bearer, run_camp, seed_camp, user_doc
+from seed import TOMORROW, asgi_client, bearer, run_camp, seed_camp, user_doc
 
 
 async def _desk(database, role="volunteer"):
@@ -97,6 +97,37 @@ def test_a_no_card_print_needs_a_reason_and_a_desk_role(monkeypatch):
             no_note = await client.post("/api/desk/no-card", json={"patient_id": reg["id"], "reason": "other"}, headers=headers)
             assert no_note.json()["detail"]["code"] == "MANUAL_NOTE_REQUIRED"
         assert (await database.patients.find_one({}))["identity_recheck_required"] is True
+
+    run_camp(monkeypatch, run)
+
+
+def test_a_no_card_print_is_refused_while_the_print_window_is_closed(monkeypatch):
+    async def run(database):
+        _camp_id, (tomorrow_id,) = await seed_camp(database, days=(TOMORROW,))
+        user_id = ObjectId()
+        await database.users.insert_one(user_doc("Ramesh", _id=user_id))
+        headers = bearer(user_id, "Ramesh", "volunteer")
+        async with asgi_client() as client:
+            reg = (await client.post("/api/register", json=_typed(tomorrow_id), headers=headers)).json()["registration"]
+            r = await client.post("/api/desk/no-card", json={"patient_id": reg["id"], "reason": "no_card"}, headers=headers)
+        assert r.status_code == 409
+        assert r.json()["detail"]["code"] == "PRINT_WINDOW_CLOSED"
+        assert "no_card_print" not in await database.patients.find_one({})
+
+    run_camp(monkeypatch, run)
+
+
+def test_a_six_word_name_in_any_order_is_a_lookalike(monkeypatch):
+    async def run(database):
+        day_id, headers = await _desk(database)
+        async with asgi_client() as client:
+            await client.post("/api/register", json=_typed(day_id, full_name="Mohd Abdul Rahim Khan Pathan Saab"), headers=headers)
+            r = await client.post(
+                "/api/register", json=_typed(day_id, full_name="Saab Pathan Khan Rahim Abdul Mohd", phone="9876500022"),
+                headers=headers,
+            )
+        assert r.status_code == 409, r.text
+        assert r.json()["detail"]["code"] == "LOOKALIKES"
 
     run_camp(monkeypatch, run)
 

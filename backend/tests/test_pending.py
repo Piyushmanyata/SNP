@@ -46,8 +46,9 @@ def test_the_clinical_desk_operator_cannot_list_pending(monkeypatch):
         await seed_camp(database)
         user_id = ObjectId()
         await database.users.insert_one(user_doc("Clin", role="clinical_desk_operator", _id=user_id))
+        headers = bearer(user_id, "Clin", "clinical_desk_operator")
         async with asgi_client() as client:
-            r = await client.get("/api/pending", headers=bearer(user_id, "Clin", "clinical_desk_operator"))
-        assert r.status_code == 403
+            assert (await client.get("/api/pending", headers=headers)).status_code == 403
+            assert (await client.get("/api/kpis", headers=headers)).status_code == 403
 
     run_camp(monkeypatch, run)

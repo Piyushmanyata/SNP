@@ -3,7 +3,7 @@ import api, { formatApiError } from "../../lib/api";
 import { Alert, Modal, Spinner, Stat } from "../ui";
 import { printedLine } from "./printed";
 
-function waited(printedAt) {
+function sincePrint(printedAt) {
   const minutes = Math.max(0, Math.floor((Date.now() - new Date(printedAt).getTime()) / 60000));
   return minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ${minutes % 60} min ago`;
 }
@@ -36,10 +36,10 @@ function PendingList({ open, onClose }) {
 
   return (
     <Modal open={open} onClose={onClose} title="Pending" size="lg">
-      <p className="text-sm text-slate-600 mb-3">Printed today and not yet seen by the doctor. Longest wait first.</p>
+      <p className="text-sm text-slate-600 mb-3">Printed today and not yet seen by the doctor. Longest since print first.</p>
       <Alert>{error}</Alert>
       {!rows && !error && <Spinner className="w-6 h-6 text-emerald-700" />}
-      {rows?.length === 0 && <p className="text-slate-700" data-testid="pending-empty">No one is waiting for the doctor.</p>}
+      {rows?.length === 0 && <p className="text-slate-700" data-testid="pending-empty">No one is pending. Everyone printed today has seen the doctor.</p>}
       {rows?.length > 0 && (
         <ul className="space-y-2" data-testid="pending-list">
           {rows.map((p) => (
@@ -55,7 +55,7 @@ function PendingList({ open, onClose }) {
                     {p.phone}
                   </a>
                 )}
-                <span>{printedLine(p)} · {waited(p.printed_at)}</span>
+                <span>{printedLine(p)} · {sincePrint(p.printed_at)}</span>
               </div>
             </li>
           ))}

@@ -12,7 +12,7 @@ from catalogue import format_power
 from db import aggregate_list, get_db
 from helpers import IST, as_utc, display_date, display_timestamp, iso, ist_day_bounds, now_utc, today_ist_str
 from routes_camps import effective_printing
-from security import require_admin, require_staff, require_any, require_lead
+from security import require_admin, require_staff, require_lead
 from serializers import ser_patient
 import sms
 
@@ -35,7 +35,7 @@ async def _pending_count(db, camp: dict) -> int:
 
 
 @router.get("/kpis")
-async def kpis(actor: dict = Depends(require_any)) -> Dict[str, Any]:
+async def kpis(actor: dict = Depends(require_staff)) -> Dict[str, Any]:
     db = get_db()
     camp = await db.camps.find_one({"is_active": True})
     if not camp:

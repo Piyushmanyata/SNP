@@ -335,7 +335,6 @@ def _prescription(p: dict, camp: Optional[dict], day_date: str) -> Dict[str, Any
 
 
 async def _printable_prescription(db: AsyncDatabase, p: dict, camp: dict, state: dict) -> Optional[Dict[str, Any]]:
-    """A first print only: a Reprint is taken from a typed lookup, never from a scan."""
     if p.get("printed_at") or _print_refusal(p, state):
         return None
     day = await db.camp_days.find_one({"_id": p["camp_day_id"]})
@@ -375,10 +374,10 @@ async def record_no_card_print(
     body: NoCardBody,
     actor: dict = Depends(require_staff),
 ) -> Dict[str, Any]:
-    """Release a typed pre-registration whose patient is at the door with no readable card."""
     note = checked_manual_note(body.reason, body.note)
     db = get_db()
     camp = await _active_camp(db)
+    await _require_door_open(db, camp)
     p = await db.patients.find_one({"_id": ObjectId(body.patient_id)})
     if not p:
         raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
