@@ -111,10 +111,10 @@ class TestPrintWindowNoCalendar:
         camp_id = _camp(admin, "printclosed")
         day = _day(admin, camp_id, TODAY_IST, seat_limit=20)
         _open_print(admin, day["id"], False)
-        r = _reg(admin, day["id"], full_name=f"TEST PrintClosed {TAG}", phone="9876500102")
+        r = _reg(admin, day["id"], full_name=f"TEST PrintClosed {TAG}", phone="9876500102",
+                 gender="F", dob="1980-03-03", aadhaar_last4="1020", aadhaar_scanned=True)
         assert r.status_code == 200, r.text
         pid = r.json()["registration"]["id"]
-        _identity(admin, pid)
         arrived = admin.post(f"{API}/desk/arrive/{pid}", timeout=30)
         assert arrived.status_code == 409, arrived.text
         assert arrived.json()["detail"]["code"] == "PRINT_WINDOW_CLOSED"
