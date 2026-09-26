@@ -101,6 +101,10 @@ async def create_camp(body: CampBody, actor: dict = Depends(require_admin)) -> D
     if body.setup_request_id:
         existing = await db.camps.find_one({"setup_request_id": body.setup_request_id})
     if existing:
+        sent = {"name": body.name, "venue": body.venue, "venue_sms": body.venue_sms,
+                "camp_date": camp_date, "camp_number": body.camp_number}
+        if any(existing.get(field) != value for field, value in sent.items()):
+            raise api_error(409, "CAMP_REQUEST_CONFLICT", 'This camp was already created with other details. Close this form, refresh the list and edit the camp.')
         c = existing
     else:
         doc = {

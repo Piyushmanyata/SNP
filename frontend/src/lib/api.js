@@ -38,7 +38,6 @@ api.interceptors.response.use(undefined, (err) => {
 const NO_ANSWER = {
   ERR_NETWORK: "No connection to the server. Check the internet, then try again.",
   ECONNABORTED: "The server did not answer in time. Check the internet, then try again.",
-  ETIMEDOUT: "The server did not answer in time. Check the internet, then try again.",
 };
 
 export function formatApiError(err) {

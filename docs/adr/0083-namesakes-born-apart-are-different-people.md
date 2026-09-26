@@ -13,6 +13,7 @@
 - A scanned registration whose DOB proves a different birth is not a Duplicate in camp hit, and it is not a door or confirm candidate for that card. The DOBs prove a different birth when:
   - the birth years differ, or
   - both are full dates (neither is 1 January) and they differ.
+- Only a scanned card can prove this. A DOB typed at the desk proves nothing, so a Manual entry still meets every Duplicate in camp rule.
 - A year-only DOB against a full date in the same year may be one person. It still goes to Mismatch review.
 - A registration of the card's own Person is always a hit.
 

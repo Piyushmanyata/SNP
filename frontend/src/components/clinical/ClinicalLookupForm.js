@@ -9,7 +9,7 @@ export function ClinicalLookupForm({
   doLookup,
   openPatient,
   results,
-  more = false,
+  more,
   error,
   banner,
   inputRef,

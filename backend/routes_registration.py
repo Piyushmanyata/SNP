@@ -150,7 +150,7 @@ async def _duplicate_hits(
             continue
         seen.add(d["_id"])
         own = person and d.get("person_id") == person["_id"]
-        if _is_scanned_row(d) and not own and _born_apart(d.get("dob"), body.dob):
+        if body.aadhaar_scanned and _is_scanned_row(d) and not own and _born_apart(d.get("dob"), body.dob):
             continue
         hits.append(d)
     return hits

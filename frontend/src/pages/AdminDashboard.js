@@ -189,7 +189,7 @@ function Camps() {
   const [form, setForm] = useState(NEW_CAMP);
   const [expand, setExpand] = useState(null);
   const [busy, setBusy] = useState(false);
-  const [setupId, setSetupId] = useState("");
+  const setupId = useRef("");
   const campNumber = Number(form.camp_number);
 
   const load = useCallback(() => {
@@ -199,7 +199,7 @@ function Camps() {
 
   const openCamp = (c) => {
     setEditing(c ? c.id : null);
-    setSetupId(c ? "" : v4());
+    if (!c) setupId.current = v4();
     setForm(c ? { name: c.name, venue: c.venue, venue_sms: c.venue_sms || "", camp_date: c.camp_date, camp_number: c.camp_number ?? "" } : NEW_CAMP);
     setShowCamp(true);
   };
@@ -210,7 +210,7 @@ function Camps() {
     try {
       const body = { ...form, camp_number: Number(form.camp_number) };
       if (editing) await api.patch(`/camps/${editing}`, body);
-      else await api.post("/camps", { ...body, setup_request_id: setupId });
+      else await api.post("/camps", { ...body, setup_request_id: setupId.current });
       setShowCamp(false);
       load();
     } catch (e) {
@@ -218,7 +218,7 @@ function Camps() {
     } finally {
       setBusy(false);
     }
-  }, [editing, form, load, setupId]);
+  }, [editing, form, load]);
 
   const activate = useCallback(async (id) => {
     const camp = camps.find((item) => item.id === id);

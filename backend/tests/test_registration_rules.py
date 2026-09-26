@@ -79,6 +79,17 @@ def test_namesakes_sharing_last4_with_different_birth_years_both_register(monkey
     run_camp(monkeypatch, run)
 
 
+def test_a_typed_birth_date_never_proves_a_different_person(monkeypatch):
+    async def run(database):
+        _camp_id, (day_id,) = await seed_camp(database, days=(day(1),))
+        scanned = await register(day_id, full_name="Asha Rani", aadhaar_scanned=True, aadhaar_last4="4411", dob="1980-05-12", gender="F")
+        refused = await _refused(day_id, full_name="Asha Rani", age=scanned["age"], aadhaar_last4="4411", dob="1980-12-05")
+        assert refused.detail["code"] == "DUPLICATE_IN_CAMP"
+        assert refused.detail["registration"]["id"] == scanned["id"]
+
+    run_camp(monkeypatch, run)
+
+
 def test_a_namesake_card_is_never_confirmed_onto_another_registration(monkeypatch):
     async def run(database):
         _camp_id, (day_id,) = await seed_camp(database)
