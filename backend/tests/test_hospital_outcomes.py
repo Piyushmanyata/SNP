@@ -2,6 +2,7 @@
 import csv
 import io
 import re
+from datetime import timedelta
 
 import pytest
 from bson import ObjectId
@@ -14,7 +15,7 @@ from routes_clinical import (
     add_correction, clinical_lookup, clinical_search, complete_prescription, get_slip, record_fulfilment,
 )
 from routes_reports import _empty_board, export_camp_records
-from seed import FIXED_POWER, MEDICINE, asgi_client, bearer, day, patient_doc, recorder, run_camp, user_doc
+from seed import FIXED_POWER, MEDICINE, MEDICINE_ALT, asgi_client, bearer, day, patient_doc, recorder, run_camp, user_doc
 from test_camp_operations_matrix import (
     ADMIN, CLINICAL, OT_DATE, RX, _complete_body, _issue_body, _printed_patient, _register_printed,
 )
@@ -366,9 +367,14 @@ class TestClinicalFind:
             assert (await clinical_search(q="sunita o", actor=CLINICAL))["results"] == []
             for i in range(21):
                 await _register_printed(day_id, full_name=f"Sunita Bai {chr(97 + i)}", age=40, phone=f"98765{i:05d}")
-            results = (await clinical_search(q="Sunita", actor=CLINICAL))["results"]
-            assert len(results) == 20
+            assert out["more"] is False
+            found = await clinical_search(q="Sunita", actor=CLINICAL)
+            results = found["results"]
+            assert len(results) == 20 and found["more"] is True
+            assert results[0]["full_name"] == "Sunita Bai u"
             assert not {not_arrived, not_printed} & {r["id"] for r in results}
+            await db.patients.update_one({"_id": first["_id"]}, {"$set": {"arrived_at": first["arrived_at"] + timedelta(hours=1)}})
+            assert (await clinical_search(q="Sunita", actor=CLINICAL))["results"][0]["full_name"] == "Sunita Devi"
             for row in results:
                 assert set(row) == {"id", "reg_no", "full_name", "age", "gender_label", "phone_last4"}
                 assert re.fullmatch(r"\d{4}", row["phone_last4"])
@@ -461,6 +467,25 @@ class TestDisplayedDates:
             ), actor=CLINICAL, background_tasks=None)
             (row,) = await _csv_rows(camp_id)
             assert row["specs_day"] == _dmy(day(15))
+        run_camp(monkeypatch, run)
+
+    def test_a_medicine_added_by_a_correction_after_issue_is_exported_as_not_given(self, monkeypatch):
+        async def run(db):
+            camp_id, _day, patient = await _printed_patient(db)
+            done = await _complete(patient, **_lines(["medicine"]))
+            await record_fulfilment(_issue_body(
+                done["transcription"]["id"], done["revision"]["id"], done["registration"]["clinical_generation"], "issue",
+            ), actor=CLINICAL, background_tasks=None)
+            stored = await db.patients.find_one({"_id": patient["_id"]})
+            await add_correction(CorrectionBody(
+                transcription_id=done["transcription"]["id"], patient_id=str(patient["_id"]), reason="Missed drops",
+                expected_generation=stored["clinical_generation"], operation_id="corr",
+                full_transcription_confirmed=True, prescribed_lines=["medicine"], diagnosis_options=["Cataract"],
+                prescribed_medicine_ids=[MEDICINE["medicine_id"], MEDICINE_ALT["medicine_id"]], bp="120/80",
+            ), actor=CLINICAL)
+            (row,) = await _csv_rows(camp_id)
+            assert set(row["medicines_prescribed"].split(";")) == {MEDICINE["name"], MEDICINE_ALT["name"]}
+            assert row["medicines_not_given"] == MEDICINE_ALT["name"]
         run_camp(monkeypatch, run)
 
 

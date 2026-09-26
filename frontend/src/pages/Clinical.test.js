@@ -171,6 +171,20 @@ describe("Clinical find", () => {
     expect(container.querySelector('[data-testid="clinical-prescription-form"]')).not.toBeNull();
   });
 
+  test("a name with more matches than listed says so", async () => {
+    const loadGet = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url.startsWith("/clinical/search")
+      ? Promise.resolve({ data: { more: true, results: [
+        { id: "r-7", reg_no: 1007, full_name: "Sunita Devi", age: 51, gender_label: "Female", phone_last4: "4321" },
+      ] } })
+      : loadGet(url)));
+    await renderPage();
+    typeLookup("Sunita");
+    await submitLookup();
+    expect(container.querySelector('[data-testid="clinical-search-more"]').textContent)
+      .toContain("More patients match");
+  });
+
   test("a USB scan of a Patient code opens the patient without pressing the focused button", async () => {
     let now = 0;
     jest.spyOn(performance, "now").mockImplementation(() => now);

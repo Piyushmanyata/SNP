@@ -807,6 +807,21 @@ class TestPrintingMatrix:
             assert await db.camp_days.count_documents({}) == 2
         run_camp(monkeypatch, run)
 
+    def test_p07_a_replayed_setup_with_other_details_is_refused(self, monkeypatch):
+        async def run(db):
+            await routes_camps.create_camp(
+                CampBody(name="Setup", venue="Hall", camp_date=TODAY, setup_request_id="setup-2"), actor=ADMIN,
+            )
+            with pytest.raises(HTTPException) as exc:
+                await routes_camps.create_camp(
+                    CampBody(name="Setup Renamed", venue="Hall", camp_date=TODAY, setup_request_id="setup-2"),
+                    actor=ADMIN,
+                )
+            assert exc.value.status_code == 409
+            assert exc.value.detail["code"] == "CAMP_REQUEST_CONFLICT"
+            assert [c["name"] for c in await db.camps.find().to_list(None)] == ["Setup"]
+        run_camp(monkeypatch, run)
+
     def test_p07_camp_number_is_set_at_setup_and_editable(self, monkeypatch):
         async def run(db):
             out = await routes_camps.create_camp(

@@ -6,8 +6,9 @@ Each person has their own account and PIN. A Volunteer or Clinical operator uses
 
 1. Open the admin Overview. The System card should be green: backup, disk, and the reminder heartbeat. SMS Health should show today's sends, not a blank card.
 2. On each registration laptop, start Chrome with `--kiosk-printing` and set the A4 printer as the default. Print one test sheet and confirm the whole page is on the paper, including the longest venue.
-3. Sign each volunteer into their own account. The token lasts twelve hours.
-4. The door opens when today's camp day is the operating day. Scan one test card, print, and press **Printed — next patient** only when that sheet is in hand.
+3. On each clinical laptop, do the same with the A6 Token printer as the default, and print one test Token. A Token prints on the laptop that issues it.
+4. Sign each volunteer into their own account, a few desks at a time rather than all at once. The token lasts twelve hours.
+5. The door opens when today's camp day is the operating day. Scan one test card, print, and press **Printed — next patient** only when that sheet is in hand.
 
 ## During the day
 

@@ -63,7 +63,7 @@ export default function Clinical() {
   const [line, setLine] = useState(() => effectiveLine(user));
   const [picking, setPicking] = useState(() => !effectiveLine(user));
   const [lookup, setLookup] = useState("");
-  const [results, setResults] = useState(null);
+  const [search, setSearch] = useState(null);
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [rxError, setRxError] = useState("");
@@ -155,13 +155,13 @@ export default function Clinical() {
     setHistory(null);
     setData(null);
     setEditing(false);
-    setResults(null);
+    setSearch(null);
     setDirty(false);
     setConflict(false);
     try {
       if (byName) {
         const { data: found } = await api.get(`/clinical/search?q=${encodeURIComponent(value)}`);
-        if (request === lookupSequence.current) setResults(found.results);
+        if (request === lookupSequence.current) setSearch(found);
         return false;
       }
       const { data: resData } = await api.post("/clinical/lookup", { value });
@@ -400,7 +400,8 @@ export default function Clinical() {
         setLookup={setLookup}
         doLookup={doLookup}
         openPatient={openPatient}
-        results={results}
+        results={search?.results}
+        more={search?.more}
         error={error}
         banner={banner}
         inputRef={lookupRef}

@@ -46,6 +46,13 @@ test("a server fault shows its message with the reference code the admin can mat
   expect(formatApiError({ response: { data: { detail: { code: "X", message: "Plain." } } } })).toBe("Plain.");
 });
 
+test("no answer from the server says the connection failed instead of axios's English", () => {
+  expect(formatApiError({ code: "ERR_NETWORK", message: "Network Error" }))
+    .toBe("No connection to the server. Check the internet, then try again.");
+  expect(formatApiError({ code: "ECONNABORTED", message: "timeout of 30000ms exceeded" }))
+    .toBe("The server did not answer in time. Check the internet, then try again.");
+});
+
 test("a 401 outside sign-in announces that the session ended", async () => {
   const reject401 = (config) => Promise.reject(
     new AxiosError("Unauthorized", "ERR_BAD_REQUEST", config, null, { status: 401, data: {}, headers: {}, config }),

@@ -44,9 +44,11 @@ def test_a_door_scan_never_arrives_someone_else(monkeypatch):
     async def run(database):
         _camp_id, (day_id,) = await seed_camp(database)
         first = await register(day_id, full_name="Asha Rani", aadhaar_scanned=True, aadhaar_last4="4411", dob="1960-01-01", gender="F")
-        other_dob = await scan(ScanBody(payload=card("Asha Rani", "999900004411", "1962-01-01")), actor=ACTOR)
+        full_date = await scan(ScanBody(payload=card("Asha Rani", "999900004411", "1960-05-12")), actor=ACTOR)
+        other_year = await scan(ScanBody(payload=card("Asha Rani", "666600004411", "1962-01-01")), actor=ACTOR)
         same_dob = await scan(ScanBody(payload=card("Kamla Devi", "888800004411", "1960-01-01")), actor=ACTOR)
-        assert other_dob["outcome"] == "mismatch_review"
+        assert full_date["outcome"] == "mismatch_review"
+        assert other_year["outcome"] == "no_match"
         assert same_dob["outcome"] == "no_match"
         assert (await database.patients.find_one({"_id": ObjectId(first["id"])}))["arrived_at"] is None
         own = await scan(ScanBody(payload=card("Asha Rani", "777700004411", "1960-01-01")), actor=ACTOR)
@@ -62,6 +64,42 @@ def test_different_people_sharing_last4_and_a_year_only_birth_date_both_register
         second = await register(day_id, full_name="Kamla Devi", phone="9876500012", aadhaar_scanned=True, aadhaar_last4="4411", dob="1960-01-01")
         assert second["full_name"] == "Kamla Devi"
         assert await database.patients.count_documents({}) == 2
+
+    run_camp(monkeypatch, run)
+
+
+def test_namesakes_sharing_last4_with_different_birth_years_both_register(monkeypatch):
+    async def run(database):
+        _camp_id, (day_id,) = await seed_camp(database, days=(day(1),))
+        first = await register(day_id, full_name="Asha Rani", aadhaar_scanned=True, aadhaar_last4="4411", dob="1960-03-02", gender="F")
+        second = await register(day_id, full_name="Asha Rani", phone="9876500012", aadhaar_scanned=True, aadhaar_last4="4411", dob="1971-08-19", gender="F")
+        assert second["id"] != first["id"]
+        assert await database.patients.count_documents({}) == 2
+
+    run_camp(monkeypatch, run)
+
+
+def test_a_typed_birth_date_never_proves_a_different_person(monkeypatch):
+    async def run(database):
+        _camp_id, (day_id,) = await seed_camp(database, days=(day(1),))
+        scanned = await register(day_id, full_name="Asha Rani", aadhaar_scanned=True, aadhaar_last4="4411", dob="1980-05-12", gender="F")
+        refused = await _refused(day_id, full_name="Asha Rani", age=scanned["age"], aadhaar_last4="4411", dob="1980-12-05")
+        assert refused.detail["code"] == "DUPLICATE_IN_CAMP"
+        assert refused.detail["registration"]["id"] == scanned["id"]
+
+    run_camp(monkeypatch, run)
+
+
+def test_a_namesake_card_is_never_confirmed_onto_another_registration(monkeypatch):
+    async def run(database):
+        _camp_id, (day_id,) = await seed_camp(database)
+        first = await register(day_id, full_name="Asha Rani", aadhaar_scanned=True, aadhaar_last4="4411", dob="1960-03-02", gender="F")
+        namesake = card("Asha Rani", "999900004411", "1960-11-23")
+        assert (await scan(ScanBody(payload=namesake), actor=ACTOR))["outcome"] == "no_match"
+        with pytest.raises(HTTPException) as exc:
+            await scan_confirm(ScanConfirmBody(patient_id=first["id"], payload=namesake), actor=ACTOR)
+        assert exc.value.detail["code"] == "STALE_CANDIDATE"
+        assert (await database.patients.find_one({"_id": ObjectId(first["id"])}))["arrived_at"] is None
 
     run_camp(monkeypatch, run)
 
@@ -138,7 +176,7 @@ def test_confirming_review_of_a_scanned_registration_arrives_it_and_keeps_its_ca
     async def run(database):
         _camp_id, (day_id,) = await seed_camp(database)
         booked = await register(day_id, full_name="Asha Rani", aadhaar_scanned=True, aadhaar_last4="4411", dob="1960-01-01", gender="F")
-        other_card = card("Asha Rani", "999900004411", "1962-01-01")
+        other_card = card("Asha Rani", "999900004411", "1960-05-12")
         review = await scan(ScanBody(payload=other_card), actor=ACTOR)
         assert review["outcome"] == "mismatch_review" and review["registration"]["id"] == booked["id"]
         confirmed = await scan_confirm(ScanConfirmBody(patient_id=booked["id"], payload=other_card), actor=ACTOR)
