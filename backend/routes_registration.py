@@ -146,10 +146,20 @@ async def _duplicate_hits(
     hits = []
     seen = set()
     for d in candidates:
-        if d["_id"] not in seen:
-            seen.add(d["_id"])
-            hits.append(d)
+        if d["_id"] in seen:
+            continue
+        seen.add(d["_id"])
+        own = person and d.get("person_id") == person["_id"]
+        if _is_scanned_row(d) and not own and _born_apart(d.get("dob"), body.dob):
+            continue
+        hits.append(d)
     return hits
+
+
+def _born_apart(a: Optional[str], b: Optional[str]) -> bool:
+    if not a or not b or a == b:
+        return False
+    return a[:4] != b[:4] or not (a.endswith("-01-01") or b.endswith("-01-01"))
 
 
 async def _assert_capacity(db: AsyncDatabase, day: dict, enforce_limit: bool = True) -> None:

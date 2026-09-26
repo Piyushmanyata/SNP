@@ -35,9 +35,15 @@ api.interceptors.response.use(undefined, (err) => {
   return Promise.reject(err);
 });
 
+const NO_ANSWER = {
+  ERR_NETWORK: "No connection to the server. Check the internet, then try again.",
+  ECONNABORTED: "The server did not answer in time. Check the internet, then try again.",
+  ETIMEDOUT: "The server did not answer in time. Check the internet, then try again.",
+};
+
 export function formatApiError(err) {
   const detail = err?.response?.data?.detail;
-  if (detail == null) return err?.message || "Something went wrong. Please try again.";
+  if (detail == null) return NO_ANSWER[err?.code] || err?.message || "Something went wrong. Please try again.";
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail))
     return detail.map((e) => (e && typeof e.msg === "string" ? e.msg : JSON.stringify(e))).join(" ");

@@ -242,7 +242,12 @@ describe("AdminDashboard component", () => {
     act(() => type("camp-venue-sms-input", "Hansa Garden, Baghmara, Jasidih, Deoghar"));
     expect(submit().disabled).toBe(true);
     act(() => type("camp-venue-sms-input", "Hansa Garden, Jasidih, Deoghar"));
+    api.post.mockRejectedValueOnce(new Error("Network Error"));
     await act(async () => submit().click());
+    await act(async () => submit().click());
+    const [lost, retried] = api.post.mock.calls.filter(([url]) => url === "/camps").map(([, sent]) => sent);
+    expect(lost.setup_request_id).toEqual(expect.any(String));
+    expect(retried.setup_request_id).toBe(lost.setup_request_id);
     expect(api.post).toHaveBeenCalledWith("/camps", expect.objectContaining({ camp_date: "2026-10-10", camp_number: 163, venue_sms: "Hansa Garden, Jasidih, Deoghar" }));
 
     await act(async () => container.querySelector('[data-testid="edit-camp-c-1"]').click());

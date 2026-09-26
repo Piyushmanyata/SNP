@@ -69,6 +69,7 @@ def main():
         if os.name == 'posix':
             import resource
 
+            os.nice(10)
             resource.setrlimit(resource.RLIMIT_AS, (1024 * 1024 * 1024, 1024 * 1024 * 1024))
             resource.setrlimit(resource.RLIMIT_CPU, (25, 25))
             resource.setrlimit(resource.RLIMIT_FSIZE, (0, 0))

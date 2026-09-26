@@ -140,11 +140,10 @@ def _power_cell(value: Any) -> str:
 
 
 def _medicine_cells(t: dict, medicine: dict) -> List[str]:
-    prescribed = [m.get("name", "") for m in (t.get("prescribed_medicines") or [])]
-    not_given = [
-        o.get("name", "") for o in (medicine.get("medicine_outcomes") or []) if not o.get("given")
-    ]
-    return [";".join(prescribed), ";".join(not_given)]
+    prescribed = t.get("prescribed_medicines") or []
+    given = {o.get("medicine_id") for o in (medicine.get("medicine_outcomes") or []) if o.get("given")}
+    not_given = [m.get("name", "") for m in prescribed if m.get("medicine_id") not in given] if medicine else []
+    return [";".join(m.get("name", "") for m in prescribed), ";".join(not_given)]
 
 
 def _export_row(p: dict, t: dict, fulfilments: dict, day_dates: dict, revision: dict) -> List[Any]:

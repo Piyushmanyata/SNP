@@ -181,7 +181,7 @@ Every date a person reads — on screen, on paper, in an SMS or in the Camp reco
 _Avoid_: ISO date, YYYY-MM-DD (never shown to a person), DD/MM/YYYY
 
 **Clinical find**:
-How the clinical desk opens a patient: the Patient code on the prescription, read by the USB imager with no click wherever focus is or by the desk camera, or a registration number or name typed into one field. Scoped to the active camp. A name offers only patients who have arrived and been printed, showing the last four digits of the household phone to tell namesakes apart. An Aadhaar card is not a way in; the paper is what gets transcribed.
+How the clinical desk opens a patient: the Patient code on the prescription, read by the USB imager with no click wherever focus is or by the desk camera, or a registration number or name typed into one field. Scoped to the active camp. A name offers only patients who have arrived and been printed, most recent Arrival first, showing the last four digits of the household phone to tell namesakes apart. It lists 20 and says so when more match. An Aadhaar card is not a way in; the paper is what gets transcribed.
 _Avoid_: clinical lookup, Reg # box, patient search
 
 **Reference prescription**:
@@ -257,7 +257,7 @@ A difference between a stored registration and the card that a Lock resolves on 
 _Avoid_: fuzzy match, close enough, auto-merge
 
 **Duplicate in camp**:
-A second registration in the same camp for the same person. Blocked when Person, last-4 + name (word order ignored), or name + age + household phone already exists in that camp. There is no override. Last-4 + DOB alone is not a duplicate: year-only card DOBs make it collide for different people.
+A second registration in the same camp for the same person. Blocked when Person, last-4 + name (word order ignored), or name + age + household phone already exists in that camp. There is no override. Last-4 + DOB alone is not a duplicate: year-only card DOBs make it collide for different people. Two scanned cards born apart are different people even with the same name and last-4: different birth years, or two full dates that differ. A year-only DOB against a full date in the same year may be one person, so it still goes to Mismatch review (ADR 0083).
 _Avoid_: register anyway, likely duplicate
 
 **Self-registration**:

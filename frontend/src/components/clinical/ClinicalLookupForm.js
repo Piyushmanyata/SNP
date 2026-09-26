@@ -9,6 +9,7 @@ export function ClinicalLookupForm({
   doLookup,
   openPatient,
   results,
+  more = false,
   error,
   banner,
   inputRef,
@@ -59,6 +60,11 @@ export function ClinicalLookupForm({
               </span>
             </button>
           ))}
+          {more && (
+            <p className="text-sm font-semibold text-slate-900" data-testid="clinical-search-more">
+              More patients match. Type more of the name, or use the registration number on the paper.
+            </p>
+          )}
         </div>
       )}
     </Card>

@@ -195,7 +195,7 @@ async def clinical_search(q: str, actor: dict = Depends(require_clinical)) -> Di
         "full_name_normalized": {"$regex": "^" + norm},
         "arrived_at": {"$ne": None},
         "printed_at": {"$ne": None},
-    }).sort("reg_no", 1).limit(20).to_list(20)
+    }).sort([("arrived_at", -1), ("reg_no", -1)]).limit(21).to_list(21)
     return {"results": [{
         "id": str(p["_id"]),
         "reg_no": p.get("reg_no"),
@@ -203,7 +203,7 @@ async def clinical_search(q: str, actor: dict = Depends(require_clinical)) -> Di
         "age": p.get("age"),
         "gender_label": ser_patient(p)["gender_label"],
         "phone_last4": (normalize_phone(p.get("phone")) or "")[-4:],
-    } for p in patients]}
+    } for p in patients[:20]], "more": len(patients) > 20}
 
 
 def _content_from_body(body) -> dict:
