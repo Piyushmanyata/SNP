@@ -1,6 +1,6 @@
 # ADR 0044: A typed registration is held until a card or an admin releases it
 
-**Amends ADR 0033, ADR 0035 and ADR 0043.**
+**Amends ADR 0033, ADR 0035 and ADR 0043. Amended by ADR 0084:** a Manual entry typed at the door is not held. The hold stays only for one typed at Pre-registration, and any desk role releases it with a No-card print (`POST /desk/no-card`), which replaces the admin's Identity check.
 
 ## Context
 

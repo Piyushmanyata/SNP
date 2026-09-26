@@ -123,23 +123,6 @@ class TestCamps:
         r = anon.post(f"{API}/camps", json={"name": "x", "venue": "y", "camp_date": TODAY_IST}, timeout=30)
         assert r.status_code in (401, 403)
 
-    def test_door_manual_entry_is_shut_until_an_admin_opens_it(self, admin):
-        assert admin.get(f"{API}/camps/active", timeout=30).json()["camp"]["door_manual_entry"] is False
-
-        r = admin.post(f"{API}/camps/door-manual", json={"enabled": True}, timeout=30)
-        assert r.status_code == 200, r.text
-        assert r.json()["camp"]["door_manual_entry"] is True
-        assert admin.get(f"{API}/camps/active", timeout=30).json()["camp"]["door_manual_entry"] is True
-
-        r = admin.post(f"{API}/camps/door-manual", json={"enabled": False}, timeout=30)
-        assert r.status_code == 200, r.text
-        assert r.json()["camp"]["door_manual_entry"] is False
-        assert admin.get(f"{API}/camps/active", timeout=30).json()["camp"]["door_manual_entry"] is False
-
-    def test_door_manual_entry_refuses_a_non_admin(self, anon):
-        r = anon.post(f"{API}/camps/door-manual", json={"enabled": True}, timeout=30)
-        assert r.status_code in (401, 403)
-
 
 # ---------------- aadhaar mock ----------------
 class TestAadhaarMock:
@@ -173,7 +156,7 @@ class TestAadhaarMock:
 class TestRegistration:
     def test_reject_dummy_phone(self, admin):
         r = admin.post(f"{API}/register", json={
-            "full_name": f"TEST Dummy {TAG}", "age": 40, "phone": "9999999999",
+            "full_name": f"TEST Dummy {TAG}", "age": 40, "gender": "M", "phone": "9999999999",
             "camp_day_id": STATE["day_id"], "registration_request_id": str(uuid.uuid4()),
         }, timeout=30)
         assert r.status_code == 400, r.text
@@ -192,7 +175,7 @@ class TestRegistration:
             "full_name": f"TESTPATIENT Alpha {TAG}", "age": 55, "gender": "M",
             "phone": "9876543210", "camp_day_id": STATE["day_id"],
             "registration_request_id": rid,
-            "manual_reason": "scanner unavailable",
+            "manual_reason": "no_card",
         }, timeout=30)
         assert r.status_code == 200, r.text
         body = r.json()
@@ -206,7 +189,7 @@ class TestRegistration:
         assert isinstance(reg["reg_no"], int)
         assert reg["manual_entry"] is True
         assert reg["identity_recheck_required"] is True
-        _identity_checked(admin, reg["id"])
+        _no_card_print(admin,reg["id"])
         STATE["p1"] = reg
 
         # verify persistence via lookup; there is no patient list on the desk
@@ -222,7 +205,7 @@ class TestRegistration:
             "full_name": f"TESTPATIENT Alpha {TAG}", "age": 55, "gender": "M",
             "phone": "9876543210", "camp_day_id": STATE["day_id"],
             "registration_request_id": STATE["req_id"],
-            "manual_reason": "scanner unavailable",
+            "manual_reason": "no_card",
         }, timeout=30)
         assert r.status_code == 200, r.text
         body = r.json()
@@ -240,11 +223,11 @@ class TestRegistration:
             "full_name": f"TESTPATIENT Beta {TAG}", "age": 62, "gender": "F",
             "phone": "9812345670", "camp_day_id": STATE["day_id"],
             "registration_request_id": str(uuid.uuid4()),
-            "manual_reason": "scanner unavailable",
+            "manual_reason": "no_card",
         }, timeout=30)
         assert r.status_code == 200, r.text
         STATE["p2"] = r.json()["registration"]
-        _identity_checked(admin, STATE["p2"]["id"])
+        _no_card_print(admin,STATE["p2"]["id"])
 
     def test_self_register_requires_aadhaar(self, anon):
         r = anon.post(f"{API}/self-register", json={
@@ -411,19 +394,18 @@ def _arrived_printed(admin, label, phone):
         "full_name": f"TESTPATIENT {label} {TAG}", "age": 48, "gender": "F",
         "phone": phone, "camp_day_id": STATE["day_id"],
         "registration_request_id": str(uuid.uuid4()),
-        "manual_reason": "scanner unavailable",
+        "manual_reason": "no_card",
     }, timeout=30)
     assert r.status_code == 200, r.text
     patient = r.json()["registration"]
-    _identity_checked(admin, patient["id"])
+    _no_card_print(admin,patient["id"])
     assert admin.post(f"{API}/desk/arrive/{patient['id']}", timeout=30).status_code == 200
     assert admin.post(f"{API}/desk/print/{patient['id']}", timeout=30).status_code == 200
     return patient
 
 
-def _identity_checked(admin, patient_id):
-    r = admin.post(f"{API}/desk/identity-check",
-                   json={"patient_id": patient_id, "reason": "Voter ID seen"}, timeout=30)
+def _no_card_print(admin, patient_id):
+    r = admin.post(f"{API}/desk/no-card", json={"patient_id": patient_id, "reason": "no_card"}, timeout=30)
     assert r.status_code == 200, r.text
 
 
@@ -834,7 +816,10 @@ class TestReports:
         assert k["active_camp"]["id"] == STATE["camp_id"]
         assert k["registered"] >= 3
         assert k["seen"] >= 2
-        assert k["pending"] == k["registered"] - k["seen"]
+        assert 0 <= k["pending"] <= k["registered"] - k["seen"]
+        pending = admin.get(f"{API}/pending", timeout=30)
+        assert pending.status_code == 200, pending.text
+        assert len(pending.json()["patients"]) == k["pending"]
 
     def test_leaderboard(self, admin):
         r = admin.get(f"{API}/leaderboard", timeout=30)
@@ -850,7 +835,7 @@ class TestReports:
         header = r.text.splitlines()[0]
         assert header == (
             "reg_no,full_name,age,gender,phone,address,aadhaar_last4,"
-            "manual_entry,camp_day,registered_at,arrived_at,seen_at,"
+            "manual_entry,manual_reason,camp_day,registered_at,arrived_at,seen_at,"
             "diagnosis,bp,blood_sugar,"
             "r_sph,r_cyl,r_axis,l_sph,l_cyl,l_axis,add,"
             "medicines_prescribed,medicines_not_given,"
@@ -891,7 +876,7 @@ class TestFixRegressions:
     # desk registration requires a valid 10-digit household phone
     def test_register_missing_phone_rejected(self, admin):
         r = admin.post(f"{API}/register", json={
-            "full_name": f"TEST NoPhone {TAG}", "age": 33,
+            "full_name": f"TEST NoPhone {TAG}", "age": 33, "gender": "M",
             "camp_day_id": STATE["day_id"], "registration_request_id": str(uuid.uuid4()),
         }, timeout=30)
         assert r.status_code == 400, r.text
@@ -899,7 +884,7 @@ class TestFixRegressions:
 
     def test_register_short_phone_rejected(self, admin):
         r = admin.post(f"{API}/register", json={
-            "full_name": f"TEST ShortPhone {TAG}", "age": 33, "phone": "98765",
+            "full_name": f"TEST ShortPhone {TAG}", "age": 33, "gender": "M", "phone": "98765",
             "camp_day_id": STATE["day_id"], "registration_request_id": str(uuid.uuid4()),
         }, timeout=30)
         assert r.status_code == 400, r.text

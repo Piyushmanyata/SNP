@@ -100,7 +100,7 @@ def test_registration_retries_only_patient_code_collisions(monkeypatch, key):
         await database.counters.insert_one({"_id": "reg_no", "seq": 41})
         taken = {"patient_qr": "AAAAAAAA", "reg_no": 42}
         await database.patients.insert_one(patient_doc(camp_id=ObjectId(), **{key: taken[key]}))
-        body = RegisterBody(full_name="Patient", age=40, camp_day_id=str(day_id), manual_reason="card at home")
+        body = RegisterBody(full_name="Patient", age=40, camp_day_id=str(day_id), manual_reason="no_card")
         if key == "patient_qr":
             patient, created = await routes_registration._create_registration(body, None, False, None)
             assert created and patient["patient_qr"] == "BBBBBBBB"

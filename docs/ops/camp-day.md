@@ -12,13 +12,19 @@ Each person has their own account and PIN. A Volunteer or Clinical operator uses
 
 ## During the day
 
-Registration is Scan at the door, then the household phone if there is no booking, then Print, then Paper check. **Reprint** prints again. **Printer problem** or Escape records nothing.
+Registration is Scan at the door, then the household phone if there is no booking, then Print, then Paper check. **Print again** prints the same sheet again. **Printer problem** or Escape records nothing.
+
+No card, or a card that will not read: press **Manual entry** under the scanner, pick the reason, type the details and Register. The patient prints straight away. If the desk shows someone already registered with that name, open them if it is the same person. A patient booked by typing who arrives without a card gets **No-card print** on their row.
+
+A door scan of a patient who already printed says so and prints nothing. If they lost the paper, find them by registration number or name and press **Reprint**.
+
+**Pending** at the top of the desk is everyone printed today and not yet seen by the doctor. Tap it for the list, longest wait first, with each household phone, to find a patient who has wandered off.
 
 A clinical operator copies the paper in the wizard and saves it. That save is what marks the patient Seen. They then issue medicine or schedule Hospital or spectacles at the same desk. A scheduled IOL surgery or spectacles order prints an A6 Token. A Hospital referral or Surgery declined does not.
 
 ## Internet outage
 
-Switch to the second SIM router. If the camp still has no connection, write arrivals on a paper register. When the network returns, enter those patients as Manual entries and record an Identity check. Do not invent a scan.
+Switch to the second SIM router. If the camp still has no connection, write arrivals on a paper register. When the network returns, enter those patients with **Manual entry**, reason Other, note "network outage". Do not invent a scan.
 
 ## SMS pause
 

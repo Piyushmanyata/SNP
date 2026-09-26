@@ -4,6 +4,7 @@ import { PhoneInput } from "../PhoneInput";
 import { normalizePhone } from "../../lib/phone";
 import { Printer } from "lucide-react";
 import { displayDate } from "../../lib/dates";
+import { alreadyPrintedLine } from "./printed";
 
 const FIELD_LABELS = {
   full_name: "Name",
@@ -33,11 +34,17 @@ export function ArrivedCard({ registration, onPrint }) {
         {registration.phone ? ` · ${registration.phone}` : ""}
       </p>
       <div className="flex gap-2 mt-3">
-        {seen ? (
+        {seen && (
           <span className="text-xs text-slate-600" data-testid="scan-already-seen">
             The doctor has already seen this patient. There is nothing to print.
           </span>
-        ) : (
+        )}
+        {!seen && registration.printed_at && (
+          <span className="text-sm font-semibold text-amber-800" data-testid="scan-already-printed">
+            {alreadyPrintedLine(registration)}
+          </span>
+        )}
+        {!seen && !registration.printed_at && (
           <Button size="lg" onClick={() => onPrint(registration)} data-testid="scan-print-button">
             <Printer className="w-4 h-4" /> Print prescription
           </Button>

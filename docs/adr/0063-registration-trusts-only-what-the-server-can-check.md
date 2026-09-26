@@ -1,6 +1,6 @@
 # ADR 0063: Registration trusts only what the server can check
 
-**Amends ADR 0035.** Issue #50, slice S5.
+**Amends ADR 0035.** Issue #50, slice S5. **Amended by ADR 0084:** the reason is one of four codes, there is no door gate, and Arrival refuses a typed pre-registration with `NEEDS_DOOR_SCAN` until a card or a No-card print.
 
 ## Context
 

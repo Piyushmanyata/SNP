@@ -45,7 +45,7 @@ def _arrive(admin, patient_id):
 
 
 def _identity(admin, patient_id):
-    r = admin.post(f"{API}/desk/identity-check", json={"patient_id": patient_id, "reason": "Voter ID seen"}, timeout=30)
+    r = admin.post(f"{API}/desk/no-card", json={"patient_id": patient_id, "reason": "no_card"}, timeout=30)
     assert r.status_code == 200, r.text
 
 
@@ -66,7 +66,8 @@ def _reg(session, camp_day_id, **fields):
     }
     body.update(fields)
     if not body.get("aadhaar_scanned"):
-        body.setdefault("manual_reason", "scanner unavailable")
+        body.setdefault("manual_reason", "no_card")
+        body.setdefault("gender", "F")
     if body.get("aadhaar_scanned"):
         body["qr_payload"] = tostring(Element(
             "PrintLetterBarcodeData", name=body["full_name"], gender=body["gender"],

@@ -11,6 +11,8 @@ ADDRESS_LIMIT = 300
 DateString = Annotated[str, Field(pattern=r"^\d{4}-\d{2}-\d{2}$"), AfterValidator(lambda value: date.fromisoformat(value).isoformat())]
 QrPayload = Annotated[str, Field(max_length=16000)]
 RequestId = Annotated[str, Field(pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")]
+ManualReason = Literal["no_card", "card_unreadable", "scanner_down", "other"]
+ManualNote = Annotated[str, Field(max_length=200)]
 
 
 def _checked_sms_venue(venue: str, venue_sms: Optional[str]) -> Optional[str]:
@@ -79,10 +81,6 @@ class CampDayBody(BaseModel):
     seat_limit: int = Field(gt=0)
 
 
-class DoorManualBody(BaseModel):
-    enabled: bool
-
-
 class PrintWindowBody(BaseModel):
     printing_open: Optional[bool] = None
     mode: Optional[str] = None
@@ -106,10 +104,12 @@ class RegisterBody(BaseModel):
     aadhaar_scanned: bool = False
     camp_day_id: str = Field(max_length=24)
     registration_request_id: Optional[RequestId] = None
-    manual_reason: Optional[str] = Field(default=None, max_length=200)
+    manual_reason: Optional[ManualReason] = None
+    manual_note: Optional[ManualNote] = None
     at_door: bool = False
     qr_payload: Optional[QrPayload] = None
     review_confirmed_id: Optional[str] = Field(default=None, max_length=24)
+    different_person: bool = False
 
 
 # ---- desk ----
@@ -219,10 +219,10 @@ class CorrectionBody(BaseModel):
     ot_notes: Optional[str] = None
 
 
-class IdentityCheckBody(BaseModel):
-    patient_id: str
-    reason: str = Field(max_length=300)
-    evidence: Optional[str] = Field(default=None, max_length=300)
+class NoCardBody(BaseModel):
+    patient_id: str = Field(max_length=24)
+    reason: ManualReason
+    note: Optional[ManualNote] = None
 
 
 class OtScheduleBody(BaseModel):

@@ -3,17 +3,12 @@ from fastapi import APIRouter, Depends, BackgroundTasks
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 from db import get_db, in_transaction
-from models import CampBody, CampDayBody, DoorManualBody, PrintWindowBody
+from models import CampBody, CampDayBody, PrintWindowBody
 from helpers import IST, as_utc, iso, next_ist_midnight, now_utc, today_ist_str, api_error
 from security import require_admin, require_any
 import sms
 
 router = APIRouter(prefix="/api/camps", tags=["camps"])
-
-
-def door_manual_open(camp: dict | None, today: str | None = None) -> bool:
-    """An admin opens manual entry at the door for one camp day; it lapses on its own."""
-    return (camp or {}).get("door_manual_date") == (today or today_ist_str())
 
 
 def ser_camp(c: dict) -> Dict[str, Any]:
@@ -25,7 +20,6 @@ def ser_camp(c: dict) -> Dict[str, Any]:
         "camp_date": c["camp_date"],
         "camp_number": c.get("camp_number"),
         "is_active": c.get("is_active", False),
-        "door_manual_entry": door_manual_open(c),
         "created_at": iso(c.get("created_at")),
     }
 
@@ -155,23 +149,6 @@ async def active_camp(actor: dict = Depends(require_any)) -> Dict[str, Any]:
         "printing_open", "operating_day_id", "operating_day_date", "mode",
         "override_expires_at", "server_time",
     )}}
-
-
-@router.post("/door-manual")
-async def set_door_manual(body: DoorManualBody, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
-    """Opens manual entry at the door for today only. It shuts itself when the day ends."""
-    db = get_db()
-    c = await db.camps.find_one({"is_active": True})
-    if not c:
-        raise api_error(400, "NO_ACTIVE_CAMP", 'No active camp')
-    await db.camps.update_one(
-        {"_id": c["_id"]},
-        {"$set": {"door_manual_date": today_ist_str() if body.enabled else None}},
-    )
-    updated = await db.camps.find_one({"_id": c["_id"]})
-    if not updated:
-        raise api_error(404, "CAMP_NOT_FOUND", 'Camp not found')
-    return {"camp": ser_camp(updated)}
 
 
 @router.get("/active/public")

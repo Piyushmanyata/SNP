@@ -193,8 +193,14 @@ describe("AdminDashboard component", () => {
     expect(api.get).not.toHaveBeenCalledWith("/sms/status");
   });
 
-  test("only the active camp offers the door manual-entry gate, and opening it posts today", async () => {
-    api.post.mockResolvedValue({ data: {} });
+  test("the overview Pending count opens who is printed and waiting for the doctor", async () => {
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url === "/pending"
+      ? Promise.resolve({ data: { patients: [{
+        id: "p-1", reg_no: 101, full_name: "Kamla Bai", gender_label: "Female", age: 62, phone: "9876500011",
+        printed_at: "2026-09-01T04:42:00Z", printed_by_name: "Ramesh",
+      }] } })
+      : base(url)));
     await act(async () => {
       root.render(
         <MemoryRouter>
@@ -202,16 +208,9 @@ describe("AdminDashboard component", () => {
         </MemoryRouter>
       );
     });
-    await act(async () => container.querySelector('[data-testid="admin-tab-camps"]').click());
-
-    const active = container.querySelector('[data-testid="camp-card-c-1"]');
-    const inactive = container.querySelector('[data-testid="camp-card-c-2"]');
-    expect(active.querySelector('[data-testid="door-manual-control"]')).not.toBeNull();
-    expect(inactive.querySelector('[data-testid="door-manual-control"]')).toBeNull();
-    expect(active.querySelector('[data-testid="door-manual-state"]').textContent).toContain("Closed");
-
-    await act(async () => active.querySelector('[data-testid="door-manual-toggle"]').click());
-    expect(api.post).toHaveBeenCalledWith("/camps/door-manual", { enabled: true });
+    await act(async () => container.querySelector('[data-testid="kpi-pending-count-button"]').click());
+    expect(api.get).toHaveBeenCalledWith("/pending");
+    expect(document.body.querySelector('[data-testid="pending-row-101"]').textContent).toContain("Printed 10:12 by Ramesh");
   });
 
   test("a camp's SMS number is set at creation and can be corrected later", async () => {

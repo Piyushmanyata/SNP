@@ -13,17 +13,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import routes_camps
 from helpers import now_ist
-from models import CampDayBody, DoorManualBody, PrintWindowBody
+from models import CampDayBody, PrintWindowBody
 
 
-@pytest.mark.parametrize("operation", ["door", "day", "print"])
+@pytest.mark.parametrize("operation", ["day", "print"])
 def test_deleted_document_after_camp_write_returns_not_found(monkeypatch, operation):
     day_date = (now_ist().date() + timedelta(days=1)).isoformat()
     camp = {"_id": ObjectId(), "name": "Camp", "venue": "Hall", "camp_date": day_date}
     day = {"_id": ObjectId(), "camp_id": camp["_id"], "day_date": day_date, "seat_limit": 10}
     db = SimpleNamespace(
         camps=SimpleNamespace(
-            find_one=AsyncMock(side_effect=[camp, None if operation == "door" else camp]),
+            find_one=AsyncMock(side_effect=[camp, camp]),
             update_one=AsyncMock(),
         ),
         camp_days=SimpleNamespace(
@@ -36,9 +36,7 @@ def test_deleted_document_after_camp_write_returns_not_found(monkeypatch, operat
 
     async def run():
         with pytest.raises(HTTPException) as error:
-            if operation == "door":
-                await routes_camps.set_door_manual(DoorManualBody(enabled=True), actor={})
-            elif operation == "day":
+            if operation == "day":
                 await routes_camps.upsert_camp_day(
                     CampDayBody(camp_id=str(camp["_id"]), day_date=day["day_date"], seat_limit=10), actor={},
                 )

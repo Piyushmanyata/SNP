@@ -193,12 +193,16 @@ An image of the camp's sponsor, printed in the prescription footer under "Sponso
 _Avoid_: logo (the trust's own emblems are fixed masthead artwork, not sponsor logos), header image
 
 **Paper check**:
-The dialog that follows every prescription print at the desk. "Printed — next patient" records Print Prescription (`printed_at`), clears the card and returns the cursor to the USB box. "Reprint" asks the server for the sheet again and prints it. "Printer problem" and Escape record nothing and keep the patient on the card. A new scan closes the Paper check without recording anything. The browser's print event alone never records a print, because it fires for a cancelled dialog too.
+The dialog that follows every prescription print at the desk. "Printed — next patient" records Print Prescription (`printed_at`), clears the card and returns the cursor to the USB box. "Print again" asks the server for the sheet again and prints it; it is not a Reprint, because nothing reached the patient yet. "Printer problem" and Escape record nothing and keep the patient on the card. A new scan closes the Paper check without recording anything. The browser's print event alone never records a print, because it fires for a cancelled dialog too.
 _Avoid_: print confirmation, printed flag, auto-stamp
 
 **Print Prescription**:
-The paper in the patient's hand, recorded by the Paper check as `printed_at`. The desk prints in the page, with no navigation. An attempted print that is not confirmed is not Print Prescription. Refused after Doctor seen and while an identity hold stands.
+The paper in the patient's hand, recorded by the Paper check as `printed_at`. The desk prints in the page, with no navigation. An attempted print that is not confirmed is not Print Prescription. Refused after Doctor seen, and for a Manual entry from Pre-registration until its door Lock or a No-card print.
 _Avoid_: print attempt, printed (for a dialog that was cancelled)
+
+**Reprint**:
+A fresh copy of the prescription for a patient who already has Print Prescription and has lost the paper. Offered only on a row the desk found from a typed registration number or name, which says when and by whom the first print was made. A door scan or a Patient code read of a printed patient says it is already printed and offers nothing, so a patient who forgets they printed cannot collect a second sheet at another desk. Closes at Doctor seen, like every print.
+_Avoid_: duplicate print, Paper check's Print again (a first print not yet recorded)
 
 **Print window**:
 Server-derived printing availability for the active camp: automatic on the IST calendar camp day, or one admin-selected day, or off. Manual enable/disable expires at the next IST midnight. A stored per-day boolean is not the authority. Chooses Desk mode via the operating day. While it is closed the desk withdraws Print and says so rather than offering a control that fails; a sheet that has already printed keeps its reprint.
@@ -213,27 +217,23 @@ The single camp day currently selected for door check-in and printing. Automatic
 _Avoid_: calendar today, booked day (a patient may have booked a different day)
 
 **Manual entry**:
-A desk registration typed instead of scanned. Marked on the registration; camp-day identity rechecking is required. The server accepts one only with a written reason, and at the door only while the Door manual gate is open; it never trusts a failure count from the browser (ADR 0063). Registration reveals the typed form after three Failures — permission denial, stall, cancel, frames, network and busy do not count — as desk help, not as a server rule. Scan at the door never counts Failures; there the form shows as soon as the gate is open. Self-register has no typed path: without a readable QR the public endpoint refuses with `AADHAAR_QR_REQUIRED` and sends the patient to the desk. No client-supplied flag can mint a registration without a Lock: the desk and the public endpoint both re-decode the payload themselves and take name, age, gender, DOB, last-4 and address from that decode, so a registration that claims a scan and carries no payload is refused with `AADHAAR_QR_REQUIRED`. The server, not the request, decides that an unscanned registration is a Manual entry. Its identity hold is released only by a card that replaces it, or by an admin's Identity check (ADR 0044).
-_Avoid_: permission fallback, two-failure unlock, public reviewed details
+A desk registration typed instead of scanned, for a patient with no Aadhaar card or a card that will not read. Any desk role starts one from the Manual entry button under the scanner, at Pre-registration and, while the Print window is open, at Scan at the door; no count of Failures and no admin switch stands in front of it. The server refuses one without a reason and records who typed it. The reason is one of No Aadhaar card, Card won't scan, Scanner not working, or Other with a written note; No-card print uses the same list. When the card is in hand but will not read, its last-4 is required. Typed at the door, it is arrived when saved and prints at once. Typed at Pre-registration, it still wants its Lock at the door on the camp day: a card that reads applies the Aadhaar overwrite, and a patient with no readable card gets a No-card print. Self-register has no typed path: without a readable QR the public endpoint refuses with `AADHAAR_QR_REQUIRED` and sends the patient to the desk. No client-supplied flag can mint a registration without a Lock: the desk and the public endpoint both re-decode the payload themselves and take name, age, gender, DOB, last-4 and address from that decode, so a registration that claims a scan and carries no payload is refused with `AADHAAR_QR_REQUIRED`. The server, not the request, decides that an unscanned registration is a Manual entry.
+_Avoid_: permission fallback, failure unlock, door manual gate and identity hold (both retired), public reviewed details
 
-**Identity check**:
-An admin's recorded decision that a Manual entry's patient was identified at camp by other evidence, taken for a patient with no readable Aadhaar. It releases the identity hold so the prescription can print, and it stands in for the door scan. It never marks the Aadhaar as verified.
-_Avoid_: verification, override, alternative scan
-
-**Door manual gate**:
-The admin decision that Scan at the door may accept typed identity today, taken because the scanners are down. Stamped on the active camp as the IST date it was opened, so it lapses when that camp day ends and an admin must take the decision again tomorrow. It reveals the typed form at the door and nothing else: a Manual entry it produces is arrived when saved, still carries `identity_recheck_required` and still cannot print until an admin records an identity check.
-_Avoid_: manual mode, break-glass, override, failure unlock (the door has no failure counter)
+**No-card print**:
+The desk's recorded decision, with a reason, to print a Manual entry from Pre-registration whose patient has come to the door with no readable Aadhaar. Any desk role takes it. It stands in for the door Lock and stamps Arrival like any print. It never marks the Aadhaar as verified.
+_Avoid_: identity check (the retired admin step), override, print anyway
 
 **Patient code**:
-The unguessable short code that identifies one registration, printed as a QR on the prescription and shown on the self-registration receipt. Scanning it at the door or at the clinical desk finds the patient; it is not identity evidence and never substitutes for a Lock.
+The unguessable short code that identifies one registration, printed as a QR on the prescription and shown on the self-registration receipt. Scanning it at the door or at the clinical desk finds the patient; it is not identity evidence, never substitutes for a Lock, and never offers a Reprint.
 _Avoid_: patient QR (that is the printed symbol, not the code), reg_no (guessable, and unique only within a camp)
 
 **Scan stall**:
-Twenty seconds of live scan with no Detect. Does not count as a Failure and does not unlock Manual entry.
+Twenty seconds of live scan with no Detect. Does not count as a Failure.
 _Avoid_: scan timeout, camera failure, give up
 
 **Arrival**:
-The patient is physically at the camp on a camp day. Stamped by a desk Lock that matches their registration in this camp, by the registration that creates a walk-in, or by Print Prescription on a registration whose Lock was already taken at registration. Registration is a booking; Arrival is presence. Stamped once: a second Lock does not re-stamp it or move the patient again. Arrival is never a step the desk performs on its own — it has no button and no screen of its own. Print Prescription is gated on Arrival, not on Registration, and closes at Doctor seen — reprints included, until a clinical undo. Doctor seen is gated on clinical completion after print, not on Arrival alone. A Manual entry has no Lock and still needs one at the door: the desk offers no print control from a name or number lookup, and Arrival refuses it without a Lock or an Identity check, unless it was typed at the door with the gate open. A door Lock stamps Arrival only on the same Person's registration.
+The patient is physically at the camp on a camp day. Stamped by a desk Lock that matches their registration in this camp, by the registration that creates a walk-in, or by Print Prescription on a registration whose Lock was already taken at registration. Registration is a booking; Arrival is presence. Stamped once: a second Lock does not re-stamp it or move the patient again. Arrival is never a step the desk performs on its own — it has no button and no screen of its own. Print Prescription is gated on Arrival, not on Registration, and closes at Doctor seen — reprints included, until a clinical undo. Doctor seen is gated on clinical completion after print, not on Arrival alone. A Manual entry from Pre-registration has no Lock and still needs one at the door, or a No-card print; one typed at the door is arrived when saved. A door Lock stamps Arrival only on the same Person's registration.
 _Avoid_: check-in, checking in, presence, attendance, walk-in (a walk-in registers and arrives in one action), door re-scan (a Lock is taken once)
 
 **Household phone**:
@@ -260,6 +260,10 @@ _Avoid_: fuzzy match, close enough, auto-merge
 A second registration in the same camp for the same person. Blocked when Person, last-4 + name (word order ignored), or name + age + household phone already exists in that camp. There is no override. Last-4 + DOB alone is not a duplicate: year-only card DOBs make it collide for different people. Two scanned cards born apart are different people even with the same name and last-4: different birth years, or two full dates that differ. A year-only DOB against a full date in the same year may be one person, so it still goes to Mismatch review (ADR 0083).
 _Avoid_: register anyway, likely duplicate
 
+**Lookalike**:
+A registration already in the camp whose name matches a Manual entry being saved, word order ignored, with an age within five years of it. The desk shows every Lookalike with its status — booked, printed or Doctor seen — before the entry saves. The volunteer either opens that registration, where the usual print rules apply, or records that the patient is a different person. Never a block, unlike Duplicate in camp: namesakes are common. It exists so a patient already seen cannot come back as a second, typed registration.
+_Avoid_: possible duplicate, fuzzy match, similar patient
+
 **Self-registration**:
 A booking the patient's household makes on its own phone, before or on a camp day, with no staff involved. Identity comes only from the Aadhaar QR the server decodes, read by the phone camera or found in an uploaded card photo or e-Aadhaar PDF; the Household phone and the camp day are the only things chosen by hand. A card that cannot be read sends the patient to the desk — there is no typed path. It never stamps Arrival: the patient is still scanned at the door. When every remaining camp day is full it closes and says the patient can still come, because the door registers every walk-in.
 _Avoid_: patient login, patient sign-in (patients never sign in), online registration
@@ -280,6 +284,10 @@ _Avoid_: dashboard (that is the admin area), live feed, monitor, alerts (the boa
 Arrived and printed patients who do not yet have a completed prescription. Doctor seen is committed with completion, not before it.
 _Avoid_: pending Rx after seen, queue at Doctor's Rx (a physical queue is not the backlog)
 
+**Pending**:
+Patients in the active camp who arrived on the Operating day and have Print Prescription but are not yet Doctor seen: the people the camp still owes a consultation today. The same patients the Camp-day board counts as the Transcription backlog. Patients who booked but have not arrived, or arrived but have not printed, are not Pending. The count opens the whole list, longest since print first, with each household phone so a lost patient can be found and called. The list is for finding people and offers no reprint; the clinical desk operator does not see it.
+_Avoid_: registered minus seen, waiting (ambiguous with the physical queue)
+
 **Doctor seen**:
 A clinical desk operator's attestation that consultation is complete, committed with whole-prescription completion after arrival and print. Drafts, reprints and volunteer mark-seen cannot confer it. Undo completion withdraws it, with a reason, only while no line has been issued; the patient returns to Arrived and can print again.
 _Avoid_: arrival, prescription printed, independent mark-seen
@@ -289,7 +297,7 @@ The issuing operator's explicit comparison of a fulfilment line with the physica
 _Avoid_: opening the prescription, automatic approval
 
 **Camp records export**:
-The single admin-only CSV for a camp, one row per patient including no-shows. Carries identity (name, age, gender, household phone, address, Aadhaar last-4, reg_no), the Manual entry mark, the registration / arrival / seen timestamps, diagnosis, BP and blood sugar, each eye's power, the medicines prescribed and any not given, the prescribed and issued fixed powers, the status of each of the four Fulfilment lines with blank meaning the patient was never recorded at that desk, and the assigned clinical day and venue for each deferral. It is a wide file of patient data and is not downloadable by a volunteer.
+The single admin-only CSV for a camp, one row per patient including no-shows. Carries identity (name, age, gender, household phone, address, Aadhaar last-4, reg_no), the Manual entry mark and its reason, the registration / arrival / seen timestamps, diagnosis, BP and blood sugar, each eye's power, the medicines prescribed and any not given, the prescribed and issued fixed powers, the status of each of the four Fulfilment lines with blank meaning the patient was never recorded at that desk, and the assigned clinical day and venue for each deferral. It is a wide file of patient data and is not downloadable by a volunteer.
 _Avoid_: camp records, clinical audit, the reports (there is exactly one export)
 
 **Clinical operation**:

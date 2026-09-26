@@ -72,7 +72,7 @@ def test_desk_reviewed_details_reject_unstorable_dates_of_birth(fields):
 
 @pytest.mark.parametrize('dob,stored', [('1975', '1975-01-01'), ('1975-06-14', '1975-06-14')])
 def test_desk_reviewed_year_only_birth_year_is_accepted_and_dates_age(dob, stored):
-    body = RegisterBody(full_name='Reviewed Patient', phone='9876500001', manual_entry=True,
+    body = RegisterBody(full_name='Reviewed Patient', phone='9876500001', manual_entry=True, gender='F',
                         camp_day_id=str(ObjectId()), age=None, dob=dob)
     _validate_manual_identity(body, now_utc())
     assert body.dob == stored

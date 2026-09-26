@@ -12,7 +12,7 @@ from seed import run_camp, seed_camp
 
 
 def _body(day_id, **fields):
-    return RegisterBody(camp_day_id=str(day_id), **{"full_name": "Test User", "phone": "9876543210", "age": 30, "manual_reason": "card at home", **fields})
+    return RegisterBody(camp_day_id=str(day_id), **{"full_name": "Test User", "phone": "9876543210", "age": 30, "manual_reason": "no_card", **fields})
 
 
 async def _staff_register(body):

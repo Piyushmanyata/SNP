@@ -360,7 +360,7 @@ class TestClinicalFind:
             out = await clinical_search(q="  SUNITA  d", actor=CLINICAL)
             assert out["results"] == [{
                 "id": str(first["_id"]), "reg_no": first["reg_no"], "full_name": "Sunita Devi",
-                "age": first["age"], "gender_label": "-", "phone_last4": "2345",
+                "age": first["age"], "gender_label": "Female", "phone_last4": "2345",
             }]
             assert (await clinical_search(q="sunita k", actor=CLINICAL))["results"] == []
             assert (await clinical_search(q="sunita r", actor=CLINICAL))["results"] == []

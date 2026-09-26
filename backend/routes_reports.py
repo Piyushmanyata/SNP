@@ -4,17 +4,34 @@ import csv
 import shutil
 from collections import Counter
 from datetime import datetime, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from bson import ObjectId
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
 from catalogue import format_power
 from db import aggregate_list, get_db
 from helpers import IST, as_utc, display_date, display_timestamp, iso, ist_day_bounds, now_utc, today_ist_str
+from routes_camps import effective_printing
 from security import require_admin, require_staff, require_any, require_lead
+from serializers import ser_patient
 import sms
 
 router = APIRouter(prefix="/api", tags=["reports"])
+
+
+async def _pending_query(db, camp: Optional[dict]) -> Optional[Dict[str, Any]]:
+    if not camp:
+        return None
+    days = await db.camp_days.find({"camp_id": camp["_id"]}).to_list(100)
+    day_id = effective_printing(camp, days).get("operating_day_id")
+    if not day_id:
+        return None
+    return {"camp_day_id": ObjectId(day_id), "queue_status": "arrived", "printed_at": {"$ne": None}}
+
+
+async def _pending_count(db, camp: dict) -> int:
+    query = await _pending_query(db, camp)
+    return await db.patients.count_documents(query) if query else 0
 
 
 @router.get("/kpis")
@@ -23,16 +40,25 @@ async def kpis(actor: dict = Depends(require_any)) -> Dict[str, Any]:
     camp = await db.camps.find_one({"is_active": True})
     if not camp:
         return {"active_camp": None, "registered": 0, "seen": 0, "pending": 0}
-    registered, seen = await asyncio.gather(
+    registered, seen, pending = await asyncio.gather(
         db.patients.count_documents({"camp_id": camp["_id"]}),
         db.patients.count_documents({"camp_id": camp["_id"], "queue_status": "seen"}),
+        _pending_count(db, camp),
     )
     return {
         "active_camp": {"id": str(camp["_id"]), "name": camp["name"]},
         "registered": registered,
         "seen": seen,
-        "pending": registered - seen,
+        "pending": pending,
     }
+
+
+@router.get("/pending")
+async def pending_patients(actor: dict = Depends(require_staff)) -> Dict[str, Any]:
+    db = get_db()
+    query = await _pending_query(db, await db.camps.find_one({"is_active": True}))
+    rows = await db.patients.find(query).sort("printed_at", 1).to_list(None) if query else []
+    return {"patients": [ser_patient(p) for p in rows]}
 
 
 @router.get("/leaderboard")
@@ -93,7 +119,7 @@ async def leaderboard(actor: dict = Depends(require_staff)) -> Dict[str, Any]:
 
 EXPORT_COLUMNS = [
     "reg_no", "full_name", "age", "gender", "phone", "address", "aadhaar_last4",
-    "manual_entry", "camp_day", "registered_at", "arrived_at", "seen_at",
+    "manual_entry", "manual_reason", "camp_day", "registered_at", "arrived_at", "seen_at",
     "diagnosis", "bp", "blood_sugar",
     "r_sph", "r_cyl", "r_axis", "l_sph", "l_cyl", "l_axis", "add",
     "medicines_prescribed", "medicines_not_given",
@@ -101,6 +127,18 @@ EXPORT_COLUMNS = [
     "medicine", "fixed_power_specs", "spectacles_to_be_made", "ot",
     "ot_day", "ot_venue", "specs_day", "specs_venue", "specs_start", "specs_end",
 ]
+
+
+MANUAL_REASON_LABELS = {
+    "no_card": "No Aadhaar card", "card_unreadable": "Card won't scan", "scanner_down": "Scanner not working",
+}
+
+
+def _manual_reason(p: dict) -> str:
+    reason = p.get("manual_reason") or ""
+    if reason == "other":
+        return f"Other: {p.get('manual_note') or ''}"
+    return MANUAL_REASON_LABELS.get(reason, reason)
 
 
 def _line_statuses(fulfilments: dict) -> List[str]:
@@ -158,6 +196,7 @@ def _export_row(p: dict, t: dict, fulfilments: dict, day_dates: dict, revision: 
         p.get("gender", ""), p.get("phone", ""), p.get("address", ""),
         p.get("aadhaar_last4", ""),
         "yes" if (p.get("manual_entry") or p.get("manual_exception")) else "no",
+        _manual_reason(p),
         display_date(day_dates.get(p.get("camp_day_id"))),
         display_timestamp(p.get("created_at")), display_timestamp(p.get("arrived_at")),
         display_timestamp(p.get("seen_at")),

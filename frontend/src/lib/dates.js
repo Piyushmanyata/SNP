@@ -34,6 +34,13 @@ export function displayClock(value) {
   return `${part.hour}:${part.minute}:${part.second}`;
 }
 
+export function displayTime(value) {
+  const instant = new Date(value || "");
+  if (Number.isNaN(instant.getTime())) return "";
+  const part = Object.fromEntries(IST_PARTS.formatToParts(instant).map((p) => [p.type, p.value]));
+  return `${part.hour}:${part.minute}`;
+}
+
 export function displayTimestamp(value) {
   const instant = new Date(value || "");
   if (Number.isNaN(instant.getTime())) return value || "";

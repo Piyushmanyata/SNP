@@ -1,5 +1,7 @@
 # ADR 0035: Manual entry at the door is admin-gated, not failure-gated
 
+**Superseded by ADR 0084:** there is no Door manual gate. Any desk role opens Manual entry at the door while the Print window is open.
+
 **Amends ADR 0003. Amended by ADR 0063:** the server no longer accepts a client failure count. An unscanned staff registration needs a written reason, and at the door the open gate. The door's typed form shows as soon as the gate is open, and a typed door entry is arrived when it is saved.
 
 ## Context
