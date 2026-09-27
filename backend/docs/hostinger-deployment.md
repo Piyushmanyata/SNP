@@ -419,3 +419,28 @@ Live checks:
 - Every service is running, and backend, frontend and mongo report healthy.
 - The backend and reminders containers both carry the new specs copy.
 - The backend and reminders logs have no errors.
+
+## Clinical command and the clinical search index — 27 September 2026
+
+[PR 90](https://github.com/Piyushmanyata/SNP/pull/90) (#88 slice 7) merged as `986fe54b1097f6d771f5b21185e2e900862889f1`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/986fe54…`. CI run [36325169856](https://github.com/Piyushmanyata/SNP/actions/runs/36325169856) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify.
+
+Before the update, the running `583f3d8` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-583f3d8515a646817f887c26378eef28adbaa056`. The backup container was restarted and took snapshot `b4da3c8e` at 14:32 UTC. Only backend, frontend and reminders were rebuilt; MongoDB stayed up. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/583f3d8…`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed.
+
+What changed:
+
+- **Clinical desk.** All four clinical writes go through one Clinical command. A changed answer gets a new operation id, including on Fulfilment issue. Every stale-state refusal shows the Reload banner. The generation always falls back to 0.
+- **New index.** The backend created `patients` index `camp_id_1_arrived_at_-1_reg_no_-1` at start-up, so the Clinical name search no longer sorts in memory.
+
+Live checks:
+
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Every service is running, and backend, frontend, mongo and reminders report healthy.
+- The production index list includes `camp_id_1_arrived_at_-1_reg_no_-1`.
+- The backend log has no tracebacks and no 5xx.

@@ -58,6 +58,10 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
                 "camp_id": camp, "full_name_normalized": {"$regex": "^synthetic"},
                 "arrived_at": {"$ne": None}, "printed_at": {"$ne": None},
             }, "sort": {"reg_no": 1}, "limit": 20},
+            "clinical name search": {"find": "patients", "filter": {
+                "camp_id": camp, "full_name_normalized": {"$regex": "^synthetic"},
+                "arrived_at": {"$ne": None}, "printed_at": {"$ne": None},
+            }, "sort": {"arrived_at": -1, "reg_no": -1}, "limit": 21},
             "duplicate name": {"find": "patients", "filter": {
                 "camp_id": camp, "full_name_normalized": patient["full_name_normalized"],
                 "age": patient["age"], "phone_normalized": patient["phone_normalized"],
@@ -95,6 +99,7 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
             stages = _stages(await _winning(db, command))
             assert "COLLSCAN" not in stages, (name, stages)
         assert "SORT" not in _stages(await _winning(db, plans["pending"]))
+        assert "SORT" not in _stages(await _winning(db, plans["clinical name search"]))
         quiet = now_utc() - timedelta(minutes=15)
         group_plans = {
             "leaderboard": {"aggregate": "patients", "pipeline": [

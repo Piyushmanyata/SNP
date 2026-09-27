@@ -301,7 +301,7 @@ The single admin-only CSV for a camp, one row per patient including no-shows. Ca
 _Avoid_: camp records, clinical audit, the reports (there is exactly one export)
 
 **Clinical operation**:
-One clinical write — completing a prescription, undoing it, issuing a line, or recording a correction — identified by the operation id the desk sent. The same id and the same payload replay the saved result. A different payload for that id is refused. The write and its ledger intent commit together, or not at all.
+One clinical write — completing a prescription, undoing it, issuing a line, or recording a correction — identified by the operation id the desk sent. The same id and the same payload replay the saved result. A different payload for that id is refused, so the desk mints a new id whenever the operator changes the payload. The write and its ledger intent commit together, or not at all.
 _Avoid_: request id (that is the registration idempotency key), correction id
 
 **SMS intent**:
