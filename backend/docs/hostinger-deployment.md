@@ -504,3 +504,23 @@ Live checks:
 - Every service is running, and backend, frontend, mongo and reminders report healthy.
 - The reminder worker's `/api/cron/outbox` and `/api/cron/heartbeat` calls answer 200 through the new sweep.
 - The backend and reminders logs have no tracebacks and no 5xx.
+
+## Clinical operation runner — 28 September 2026
+
+[PR 94](https://github.com/Piyushmanyata/SNP/pull/94) (#88 slice 3, ADR 0088) merged as `77eeb54f727b99563160d0d9e6902c4662cea2b3`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/77eeb54…`. CI run [36341647341](https://github.com/Piyushmanyata/SNP/actions/runs/36341647341) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify.
+
+Before the update, the running `457b543` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-457b54325bd60e12594f771447043789fadbde60`. The backup container was restarted and took snapshot `06d10925` at 18:57 UTC on 27 September. Only backend, frontend and reminders were rebuilt; MongoDB stayed up. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/457b543…`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed. All four clinical writes now run through one Clinical operation runner. The one visible change: a Fulfilment issue or correction without an operation id is refused with `OPERATION_ID_IS_REQUIRED`, and the desk always sends one.
+
+Live checks:
+
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Every service is running, and backend, frontend, mongo and reminders report healthy.
+- The backend loads `clinical_operation.run`.
+- The backend and reminders logs have no tracebacks and no 5xx.
