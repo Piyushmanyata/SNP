@@ -35,7 +35,7 @@ An operation id that loses a duplicate-key race replays the winner's stored row.
 
 ## Tokens and SMS
 
-Scheduling OT or Spectacles to be made inserts a `queued` `reminder_ledger` row keyed by the new Token's id in the same transaction. After commit, a background task claims it (`queued` → `pending`) and calls the provider. A→B→A sends three messages.
+`tokens.defer` (ADR 0089) records a `queued` `reminder_ledger` row keyed by the new Token's id in the same transaction when it schedules OT or Spectacles to be made. After commit, a background task claims it (`queued` → `pending`) and calls the provider. A→B→A sends three messages.
 
 ## Drafts
 
