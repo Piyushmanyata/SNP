@@ -1,6 +1,6 @@
 # Patient and session safety
 
-Door scans clear the prior result as soon as a new card is submitted. Only the newest scan may update the patient, error, or loading state. Confirming identity and registering a walk-in suspend scanning until the mutation finishes.
+The Desk session (`components/desk/deskSession.js`, a pure reducer, and `useDeskSession.js`, its hook) owns the patient on the card. Every new find — a door scan, a Patient code, a typed number or a typed name — starts a new `seq` and clears the banner, error, search rows, found row, scan result and Paper check, so a new patient never inherits the previous patient's paper. Every reply carries the `seq` it started with and is dropped when stale; the hook bumps `seq` on unmount. Confirming identity and registering a walk-in suspend scanning until the mutation finishes.
 
 Clinical history responses belong to the lookup that opened them. A new patient lookup or clearing the patient invalidates an outstanding history response.
 
@@ -16,6 +16,6 @@ Logout clears local authentication and operator-line selection only after the se
 
 These flows use the existing request sequence and loading-state patterns. Transport cancellation alone cannot prevent an already-completed response from changing patient state.
 
-Regressions live in `Desk.test.js`, `Clinical.test.js`, `PrintPrescription.test.js`, and `AuthContext.test.js`.
+Regressions live in `deskSession.test.js` and `useDeskSession.test.js` (one event sequence per Desk rule), `Desk.test.js`, `Clinical.test.js`, `PrintPrescription.test.js`, and `AuthContext.test.js`.
 
 Fatal QR worker errors settle pending detections and terminate the unusable worker. The next frame creates a fresh worker. An undecodable frame returns no QR result and keeps the healthy worker; `wasmDetector.test.js` covers both paths.
