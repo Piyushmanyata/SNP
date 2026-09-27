@@ -27,6 +27,12 @@ Every read and write in the callback passes `session=`. The callback has no side
 
 An operation id that loses a duplicate-key race replays the winner's stored row. A completion retry skips the retired-catalogue check, so it still replays after a medicine or power is retired.
 
+## Desk side
+
+`frontend/src/components/clinical/useClinicalCommand.js` sends all four writes. It keeps one operation id per unchanged payload, so a retry after a dropped connection replays. A changed payload, a success, a patient change, a reload or `reset()` gets a new id. The expected (or, for issue, reviewed) generation is the patient's clinical generation, falling back to 0.
+
+`STALE_GENERATION`, `DRAFT_VERSION_CONFLICT`, `OPERATION_SUPERSEDED`, `STALE_REVIEW` and `OPERATION_CONFLICT` show the Reload banner. Any other refusal is shown as an error and keeps the id. Draft save uses the same classification.
+
 ## Tokens and SMS
 
 Scheduling OT or Spectacles to be made inserts a `queued` `reminder_ledger` row keyed by the new Token's id in the same transaction. After commit, a background task claims it (`queued` → `pending`) and calls the provider. A→B→A sends three messages.

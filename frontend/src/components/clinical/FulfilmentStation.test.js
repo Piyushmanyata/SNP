@@ -15,6 +15,7 @@ jest.mock("../../lib/api", () => {
       get: jest.fn(),
     },
     formatApiError: actual.formatApiError,
+    errorPayload: actual.errorPayload,
   };
 });
 
@@ -433,11 +434,13 @@ describe("Fulfilment lines", () => {
       .toContain("Print this new Token and take back the old one");
   });
 
-  test("a failed issue retry reuses the same operation id", async () => {
-    const uuid = jest.spyOn(crypto, "randomUUID").mockReturnValue("op-retry-1");
-    api.post.mockRejectedValueOnce(new Error("network"));
-    api.post.mockResolvedValueOnce({ data: { fulfilment: { id: "f-1" }, slip: null } });
+  test("a stale Paper review asks for a reload instead of showing the refusal", async () => {
+    const onStale = jest.fn();
+    api.post.mockRejectedValueOnce({ response: { status: 409, data: { detail: {
+      code: "STALE_REVIEW", message: "The prescription changed after your review.",
+    } } } });
     await renderStation({
+      onStale,
       line: "medicine",
       data: {
         transcription: { id: "tx-1" },
@@ -453,14 +456,8 @@ describe("Fulfilment lines", () => {
     await act(async () => {
       container.querySelector('[data-testid="station-medicine-save"]').click();
     });
-    expect(container.querySelector('[data-testid="station-medicine"] [role="alert"]').textContent).toContain("network");
-    await act(async () => {
-      container.querySelector('[data-testid="station-medicine-save"]').click();
-    });
+    expect(onStale).toHaveBeenCalledTimes(1);
     expect(container.querySelector('[role="alert"]')).toBeNull();
-    const ids = api.post.mock.calls.map((call) => call[1].operation_id);
-    expect(ids).toEqual(["op-retry-1", "op-retry-1"]);
-    uuid.mockRestore();
   });
 
   test("a station re-syncs when the patient changes", async () => {

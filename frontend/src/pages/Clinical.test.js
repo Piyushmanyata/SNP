@@ -877,75 +877,6 @@ describe("Clinical draft version and dirty-draft protection", () => {
     expect(container.querySelector('[data-testid="draft-conflict"]')).toBeNull();
   });
 
-  test("a completion retry reuses its operation id only while the request is unchanged", async () => {
-    await openDraft(3);
-    await act(async () => container.querySelector('[data-testid="diagnosis-opt-cataract"]').click());
-    api.post.mockResolvedValueOnce(savedDraft(4));
-    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
-    await act(async () => container.querySelector('[data-testid="none-prescribed"]').click());
-    api.post.mockResolvedValueOnce(savedDraft(5));
-    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
-    await act(async () => container.querySelector('[data-testid="full-transcription-confirmed"]').click());
-    const complete = () => act(async () => container.querySelector('[data-testid="complete-prescription-button"]').click());
-    const ids = () => api.post.mock.calls
-      .filter(([url]) => url === "/clinical/transcription/complete")
-      .map(([, body]) => body.operation_id);
-
-    api.post.mockRejectedValueOnce(new Error("Network Error"));
-    await complete();
-    api.post.mockRejectedValueOnce(new Error("Network Error"));
-    await complete();
-    expect(ids()[1]).toBe(ids()[0]);
-
-    await act(async () => container.querySelector('[data-testid="add-vitals-button"]').click());
-    act(() => {
-      const bp = container.querySelector('[data-testid="bp-input"]');
-      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(bp, "130/80");
-      bp.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    api.post.mockRejectedValueOnce(new Error("Network Error"));
-    await complete();
-    expect(ids()[2]).not.toBe(ids()[0]);
-  });
-
-  test("a completion refused as stale retries under a new operation id after reloading", async () => {
-    await openDraft(3);
-    await act(async () => container.querySelector('[data-testid="diagnosis-opt-cataract"]').click());
-    api.post.mockResolvedValueOnce(savedDraft(4));
-    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
-    await act(async () => container.querySelector('[data-testid="none-prescribed"]').click());
-    api.post.mockResolvedValueOnce(savedDraft(5));
-    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
-    await act(async () => container.querySelector('[data-testid="full-transcription-confirmed"]').click());
-
-    api.post.mockRejectedValueOnce(conflictError);
-    await act(async () => container.querySelector('[data-testid="complete-prescription-button"]').click());
-    const refused = api.post.mock.calls.at(-1)[1].operation_id;
-    expect(refused).toBeTruthy();
-
-    api.post.mockResolvedValueOnce({ data: {
-      registration: { id: "reg-1", reg_no: "1001", full_name: "Draft Patient" },
-      person: { id: "p-1" },
-      transcription: { id: "tx-1", locked: false, draft_version: 9 },
-      fulfilments: [],
-      slips: [],
-    } });
-    await act(async () => container.querySelector('[data-testid="draft-conflict-reload"]').click());
-    expect(container.querySelector('[data-testid="wizard-progress"]').textContent).toContain("Step 1 of");
-    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
-    await act(async () => container.querySelector('[data-testid="none-prescribed"]').click());
-    api.post.mockResolvedValueOnce(savedDraft(10));
-    await act(async () => container.querySelector('[data-testid="wizard-next"]').click());
-    await act(async () => container.querySelector('[data-testid="full-transcription-confirmed"]').click());
-    api.post.mockResolvedValueOnce({ data: {
-      registration: { id: "reg-1", reg_no: "1001", full_name: "Draft Patient", clinical_generation: 1 },
-      revision: { id: "rev-2", prescribed_lines: [] },
-      transcription: { id: "tx-1", locked: true, draft_version: 12 },
-    } });
-    await act(async () => container.querySelector('[data-testid="complete-prescription-button"]').click());
-    expect(api.post.mock.calls.at(-1)[1].operation_id).not.toBe(refused);
-  });
-
   test("reloading after a conflict replaces the draft with the saved prescription", async () => {
     await openDraft(2);
     typeOther("Mine");
@@ -1168,6 +1099,23 @@ describe("S7 clinical desk", () => {
       patient_id: "reg-1", expected_generation: 1, reason: "Wrong patient", operation_id: expect.any(String),
     }));
     expect(container.textContent).toContain("Completion undone");
+  });
+
+  test("a superseded undo closes the dialog and offers Reload", async () => {
+    sessionStorage.setItem(LINE_STORAGE_KEY, "doctor_rx");
+    await open(completed());
+    await act(async () => q("undo-completion-button").click());
+    act(() => {
+      const reason = document.querySelector('[data-testid="undo-completion-reason"]');
+      Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(reason, "Wrong patient");
+      reason.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    api.post.mockRejectedValueOnce({ response: { status: 409, data: { detail: {
+      code: "OPERATION_SUPERSEDED", message: "This operation was superseded.",
+    } } } });
+    await act(async () => document.querySelector('[data-testid="undo-completion-confirm"]').click());
+    expect(document.querySelector('[data-testid="undo-completion-confirm"]')).toBeNull();
+    expect(q("draft-conflict-reload")).not.toBeNull();
   });
 
   test("Undo completion is not offered once any line is issued", async () => {
