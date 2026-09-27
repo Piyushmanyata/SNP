@@ -8,9 +8,8 @@ import routes_clinical
 import routes_desk
 import routes_registration
 import msg91
-import sms
 from models import RegisterBody
-from seed import CLINICAL, TOMORROW, patient_doc, run_camp, seed_camp
+from seed import send_patient_sms, CLINICAL, TOMORROW, patient_doc, run_camp, seed_camp
 
 
 def _fail_ledger_updates(monkeypatch, failing):
@@ -139,8 +138,8 @@ def test_sms_ledger_failure_does_not_escape_or_resend_an_accepted_message(monkey
 
     async def run(database):
         patient = await _patient_of_a_numbered_camp(database)
-        assert await sms.send_patient_sms(database, patient, "registration", TOMORROW, "Hall") is provider_succeeds
-        assert not await sms.send_patient_sms(database, patient, "registration", TOMORROW, "Hall")
+        assert await send_patient_sms(database, patient, "registration", TOMORROW, "Hall") is provider_succeeds
+        assert not await send_patient_sms(database, patient, "registration", TOMORROW, "Hall")
         assert len(calls) == 1
         assert (await database.reminder_ledger.find_one({}))["status"] == "pending"
 
@@ -155,8 +154,8 @@ def test_accepted_sms_is_not_marked_failed_when_receipt_persistence_fails(monkey
 
     async def run(database):
         patient = await _patient_of_a_numbered_camp(database)
-        assert await sms.send_patient_sms(database, patient, "registration", TOMORROW, "Hall")
-        assert not await sms.send_patient_sms(database, patient, "registration", TOMORROW, "Hall")
+        assert await send_patient_sms(database, patient, "registration", TOMORROW, "Hall")
+        assert not await send_patient_sms(database, patient, "registration", TOMORROW, "Hall")
         assert len(calls) == 1
         assert (await database.reminder_ledger.find_one({}))["status"] == "pending"
 

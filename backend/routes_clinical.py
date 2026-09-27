@@ -21,7 +21,7 @@ from clinical_state import (
     serialize_revision, validate_completion,
 )
 from helpers import (
-    api_error,    now_utc, iso, DIAGNOSIS_OPTIONS, now_ist, ist_local_instant, as_utc,
+    api_error,    now_utc, iso, DIAGNOSIS_OPTIONS, now_ist, ist_local_instant,
     normalize_name, normalize_phone, parse_patient_identifier,
 )
 from bson.errors import InvalidId
@@ -691,17 +691,17 @@ async def record_fulfilment(
             await db.ot_schedule_days.update_one(
                 {"_id": old_ot, "seats_taken": {"$gt": 0}}, {"$inc": {"seats_taken": -1}}, session=session,
             )
-        queued = await sms.queue_sms(
+        queued = await sms.record(
             db, [current], DEFERRAL_CONFIG[doc["item_type"]]["message_type"],
             slip["collection_date"], slip.get("collection_venue_sms") or slip["collection_venue"],
-            slip.get("collection_end_date"), event_key=str(slip["_id"]), session=session,
+            slip.get("collection_end_date"), event_key=sms.token_key(slip), session=session, now=now_utc(),
         ) if slip else []
         result = {"fulfilment": ser_fulfil(doc), "slip": ser_slip(slip) if slip else None}
         await record_operation(db, op_id, "issue", digest, patient["_id"], result, session)
         return result, queued
 
     result, queued = await _run_operation(db, op_id, "issue", digest, write)
-    await sms.dispatch(background_tasks, db, queued)
+    await sms.dispatch(background_tasks, db, queued, now_utc())
     return result
 
 
@@ -909,9 +909,9 @@ async def _supersede_tokens(db: AsyncDatabase, day_field: str, day: dict, messag
     patients = await db.patients.find(
         {"_id": {"$in": [slip["patient_id"] for slip in slips]}}, NOTICE_FIELDS, session=session,
     ).to_list(None)
-    return await sms.queue_sms(
+    return await sms.record(
         db, patients, message_type, day["day_date"], day.get("venue_sms") or day["venue"], end_date,
-        event_key=f"edit:{revision}", session=session,
+        event_key=sms.edit_key(revision), session=session, now=now_utc(),
     )
 
 
@@ -943,7 +943,7 @@ async def _edit_day(
         changed, queued = await in_transaction(write)
     except DuplicateKeyError:
         raise _day_exists()
-    await sms.dispatch(background_tasks, db, queued)
+    await sms.dispatch(background_tasks, db, queued, now_utc())
     return changed
 
 
@@ -1085,14 +1085,6 @@ async def list_specs_days(actor: dict = Depends(require_any)) -> Dict[str, Any]:
 SENT_OR_SENDING = {"queued", "pending", "sent", "uncertain"}
 
 
-def _notice_status(row: dict, stuck_before: datetime) -> str:
-    if row.get("delivery") == "failed":
-        return "failed"
-    if row["status"] in ("queued", "pending") and as_utc(row["created_at"]) <= stuck_before:
-        return "not_sent"
-    return row["status"]
-
-
 @router.get("/schedule-notices")
 async def list_schedule_notices(actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     """Patients whose replaced Token has no SMS on its way: the desk phones them."""
@@ -1106,17 +1098,16 @@ async def list_schedule_notices(actor: dict = Depends(require_admin)) -> Dict[st
     patients = {p["_id"]: p for p in await db.patients.find(
         {"_id": {"$in": [slip["patient_id"] for slip in slips]}, "camp_id": camp["_id"]}, NOTICE_FIELDS,
     ).to_list(None)}
-    rows = await db.reminder_ledger.find({
-        "patient_id": {"$in": list(patients)}, "message_type": {"$in": ["ot_change", "specs_change"]},
-        "event_key": {"$in": [f"edit:{slip['edit_revision']}" for slip in slips]},
-    }, {"patient_id": 1, "event_key": 1, "status": 1, "delivery": 1, "created_at": 1}).to_list(None)
-    stuck_before = now_utc() - sms.RETRY_AFTER
-    sms_status = {(row["patient_id"], row["event_key"]): _notice_status(row, stuck_before) for row in rows}
+    states = await sms.notice_states(db, [
+        (slip["patient_id"], slip["edit_revision"]) for slip in slips if slip["patient_id"] in patients
+    ], now_utc())
     notices = []
     for slip in slips:
         patient = patients.get(slip["patient_id"])
-        status = sms_status.get((slip["patient_id"], f"edit:{slip['edit_revision']}"), "not_sent")
-        if not patient or status in SENT_OR_SENDING:
+        if not patient:
+            continue
+        status = states[(slip["patient_id"], slip["edit_revision"])]
+        if status in SENT_OR_SENDING:
             continue
         notices.append({
             "slip_id": str(slip["_id"]), "item_type": slip["item_type"],

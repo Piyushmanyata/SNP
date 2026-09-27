@@ -16,15 +16,17 @@ TEST_MONGO_URL = os.environ.get(
 )
 FROZEN_IST = "2026-10-05T09:00"
 JWT_SIGNED_ON_REAL_CLOCK = "security"
+_clock = {}
 
 
 def freeze_clock(monkeypatch, ist=FROZEN_IST):
     importlib.import_module("server")
     import helpers
     frozen = datetime.fromisoformat(ist).replace(tzinfo=ZoneInfo("Asia/Kolkata"))
+    _clock["now"] = frozen
     fakes = {
-        "now_ist": (helpers.now_ist, lambda: frozen),
-        "now_utc": (helpers.now_utc, lambda: frozen.astimezone(timezone.utc)),
+        "now_ist": (helpers.now_ist, lambda: _clock["now"]),
+        "now_utc": (helpers.now_utc, lambda: _clock["now"].astimezone(timezone.utc)),
     }
     for module in list(sys.modules.values()):
         if module.__name__ == JWT_SIGNED_ON_REAL_CLOCK:
@@ -35,6 +37,11 @@ def freeze_clock(monkeypatch, ist=FROZEN_IST):
             if getattr(module, name, None) is real:
                 monkeypatch.setattr(module, name, fake)
     return frozen
+
+
+def advance_clock(by):
+    """Moves the frozen clock forward, so time passes the way it does at a camp."""
+    _clock["now"] += by
 
 
 class CommandLog(monitoring.CommandListener):

@@ -9,13 +9,12 @@ from bson import ObjectId
 from fastapi import HTTPException
 
 import routes_clinical
-import sms
 from models import CorrectionBody
 from routes_clinical import (
     add_correction, clinical_lookup, clinical_search, complete_prescription, get_slip, record_fulfilment,
 )
 from routes_reports import _empty_board, export_camp_records
-from seed import FIXED_POWER, MEDICINE, MEDICINE_ALT, asgi_client, bearer, day, patient_doc, recorder, run_camp, user_doc
+from seed import send_patient_sms, FIXED_POWER, MEDICINE, MEDICINE_ALT, asgi_client, bearer, day, patient_doc, recorder, run_camp, user_doc
 from test_camp_operations_matrix import (
     ADMIN, CLINICAL, OT_DATE, RX, _complete_body, _issue_body, _printed_patient, _register_printed,
 )
@@ -409,7 +408,7 @@ class TestDisplayedDates:
             await db.camps.insert_one({"_id": camp_id, "name": "C", "venue": "Hall", "camp_number": 162})
             patient = {"_id": ObjectId(), "camp_id": camp_id, "phone": "9876500001", "reg_no": 7}
             start, end = day(12), day(19)
-            assert await sms.send_patient_sms(db, patient, message_type, start, "Hall", end)
+            assert await send_patient_sms(db, patient, message_type, start, "Hall", end)
             assert sent[0]["date"] == _dmy(start)
             if message_type.startswith("specs"):
                 assert sent[0]["end_date"] == _dmy(end)

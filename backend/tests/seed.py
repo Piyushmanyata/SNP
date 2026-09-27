@@ -7,6 +7,8 @@ from bson import ObjectId
 
 import security
 import server
+import helpers
+import sms
 import sms_recorder
 from conftest import FROZEN_IST, freeze_clock, run_db
 from helpers import IST
@@ -111,6 +113,14 @@ async def register(day_id, actor=ACTOR, background_tasks=None, **fields):
         body.gender = body.gender or "F"
     result = await desk_register(body, Request(), actor=actor, background_tasks=background_tasks)
     return result["registration"]
+
+
+async def record_and_send(database, patient, *args, **kwargs):
+    return await sms.record_and_send(database, patient, *args, now=helpers.now_utc(), **kwargs)
+
+
+async def send_patient_sms(database, patient, *args, **kwargs):
+    return await record_and_send(database, patient, *args, **kwargs) in ("sent", "uncertain")
 
 
 def recorder():

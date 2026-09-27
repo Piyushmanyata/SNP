@@ -2,7 +2,7 @@ import asyncio
 import logging
 import re
 import string
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from bson import ObjectId
@@ -70,7 +70,13 @@ def valid_phone(raw: Optional[str]) -> Optional[str]:
     return n
 
 
+QUEUED_RESEND_AFTER = timedelta(seconds=30)
+PENDING_UNCERTAIN_AFTER = timedelta(minutes=5)
+THROTTLE_BACKOFF = timedelta(minutes=5)
+CANARY_WAIT = timedelta(minutes=10)
+MAX_ATTEMPTS = 3
 REGISTRATION_DAILY_CAP = 6
+NOTICE_TYPES = ("ot_change", "specs_change")
 
 _provider: Any = msg91
 
@@ -90,8 +96,16 @@ def template_id(message_type: str) -> str:
     return _provider.template_id(message_type)
 
 
-async def _over_daily_cap(db: AsyncDatabase, number: str) -> bool:
-    start, end = helpers.ist_day_bounds(helpers.today_ist_str())
+def token_key(token: dict) -> str:
+    return str(token["_id"])
+
+
+def edit_key(revision: Any) -> str:
+    return f"edit:{revision}"
+
+
+async def _over_daily_cap(db: AsyncDatabase, number: str, now: datetime) -> bool:
+    start, end = helpers.ist_day_bounds(now.astimezone(helpers.IST).date().isoformat())
     return await db.reminder_ledger.count_documents({
         "number": number, "message_type": "registration", "status": {"$ne": "skipped"},
         "created_at": {"$gte": start, "$lt": end},
@@ -103,6 +117,14 @@ async def paused(db: AsyncDatabase, message_type: str, session=None) -> bool:
     return bool(control and control.get("paused"))
 
 
+async def controls(db: AsyncDatabase) -> Dict[str, dict]:
+    return {row["_id"]: row for row in await db.sms_controls.find({}).to_list(None)}
+
+
+async def paused_types(db: AsyncDatabase) -> List[str]:
+    return [row["_id"] for row in await db.sms_controls.find({"paused": True}, {"_id": 1}).to_list(None)]
+
+
 async def _claim(
     db: AsyncDatabase,
     patient_id: Any,
@@ -112,6 +134,7 @@ async def _claim(
     number: str,
     venue: str,
     copy: str,
+    now: datetime,
     retry_after: Optional[timedelta] = None,
     camp_id: Any = None,
     variables: Optional[Dict[str, Any]] = None,
@@ -133,7 +156,7 @@ async def _claim(
         elif status not in ("failed", "paused"):
             return None
         attempts = int(existing.get("attempts") or 0)
-        if attempts >= 3:
+        if attempts >= MAX_ATTEMPTS:
             await db.reminder_ledger.update_one(
                 {"_id": existing["_id"], "status": status},
                 {"$set": {"status": "abandoned"}},
@@ -141,9 +164,9 @@ async def _claim(
             return None
         retryable: Dict[str, Any] = {"_id": existing["_id"], "status": status}
         if retry_after and status == "failed":
-            retryable["created_at"] = {"$lte": helpers.now_utc() - retry_after}
+            retryable["created_at"] = {"$lte": now - retry_after}
         fields = {
-            "status": "pending", "attempts": attempts + 1, "created_at": helpers.now_utc(),
+            "status": "pending", "attempts": attempts + 1, "created_at": now,
             "copy": copy, "number": number, "venue": venue, "camp_id": camp_id,
             "variables": variables or {},
         }
@@ -165,7 +188,7 @@ async def _claim(
         "attempts": 0,
         "provider_id": None,
         "camp_id": camp_id,
-        "created_at": helpers.now_utc(),
+        "created_at": now,
     }
     try:
         res = await db.reminder_ledger.insert_one(doc)
@@ -177,7 +200,7 @@ async def _claim(
 
 async def _record_unsent(
     db: AsyncDatabase, patient_id: Any, message_type: str, event_date: str, event_key: Optional[str],
-    number: str, venue: str, copy: str, status: str, reason: Optional[str] = None,
+    number: str, venue: str, copy: str, status: str, now: datetime, reason: Optional[str] = None,
     camp_id: Any = None,
 ) -> None:
     try:
@@ -185,7 +208,7 @@ async def _record_unsent(
             "patient_id": patient_id, "message_type": message_type, "event_date": event_date,
             "event_key": event_key, "camp_id": camp_id,
             "number": number, "venue": venue, "copy": copy, "status": status, "attempts": 0,
-            "provider_id": None, "created_at": helpers.now_utc(),
+            "provider_id": None, "created_at": now,
             **({"reason": reason} if reason else {}),
         })
     except DuplicateKeyError:
@@ -251,15 +274,13 @@ def _compose(
     return number, variables, template.format(**variables)
 
 
-async def _submit(db: AsyncDatabase, row: Dict[str, Any], variables: Dict[str, Any]) -> str:
+async def _settle(db: AsyncDatabase, row: Dict[str, Any], variables: Dict[str, Any], now: datetime) -> str:
+    """Submits one pending intent and records the provider's outcome as its status."""
     update: Dict[str, Any]
     try:
         provider_id = await asyncio.to_thread(_provider.send, row["message_type"], row["number"], variables)
     except msg91.Throttled as exc:
-        update = {
-            "status": "failed", "error": str(exc)[:200],
-            "retry_after": helpers.now_utc() + timedelta(minutes=5),
-        }
+        update = {"status": "failed", "error": str(exc)[:200], "retry_after": now + THROTTLE_BACKOFF}
     except msg91.Unsent as exc:
         update = {"status": "failed", "error": str(exc)[:200]}
     except msg91.Rejected as exc:
@@ -277,13 +298,15 @@ async def _submit(db: AsyncDatabase, row: Dict[str, Any], variables: Dict[str, A
     return update["status"]
 
 
-async def deliver_patient_sms(
+async def record_and_send(
     db: AsyncDatabase,
     patient: dict,
     message_type: str,
     event_date: str,
     venue: str,
     end_date: Optional[str] = None,
+    *,
+    now: datetime,
     retry_after: Optional[timedelta] = None,
     event_key: Optional[str] = None,
     camps: Optional[Dict[Any, dict]] = None,
@@ -302,14 +325,14 @@ async def deliver_patient_sms(
         number, variables, copy = composed
         if await paused(db, message_type):
             await _record_unsent(
-                db, patient["_id"], message_type, event_date, event_key, number, venue, copy, "paused",
+                db, patient["_id"], message_type, event_date, event_key, number, venue, copy, "paused", now,
                 camp_id=patient.get("camp_id"),
             )
             return "paused"
-        if message_type == "registration" and await _over_daily_cap(db, number):
+        if message_type == "registration" and await _over_daily_cap(db, number, now):
             await _record_unsent(
-                db, patient["_id"], message_type, event_date, event_key, number, venue, copy, "skipped", "daily_cap",
-                camp_id=patient.get("camp_id"),
+                db, patient["_id"], message_type, event_date, event_key, number, venue, copy, "skipped", now,
+                "daily_cap", camp_id=patient.get("camp_id"),
             )
             return "skipped"
         if fresh:
@@ -317,22 +340,22 @@ async def deliver_patient_sms(
                 "patient_id": patient["_id"], "message_type": message_type, "event_date": event_date,
                 "event_key": event_key, "number": number, "venue": venue, "copy": copy,
                 "variables": variables, "status": "queued", "attempts": 0, "provider_id": None,
-                "camp_id": patient.get("camp_id"), "created_at": helpers.now_utc(),
+                "camp_id": patient.get("camp_id"), "created_at": now,
             }
             try:
                 inserted = await db.reminder_ledger.insert_one(doc)
             except DuplicateKeyError:
                 return "skipped"
-            return await send_queued(db, inserted.inserted_id)
+            return await send_queued(db, inserted.inserted_id, now)
         row = await _claim(
-            db, patient["_id"], message_type, event_date, event_key, number, venue, copy,
+            db, patient["_id"], message_type, event_date, event_key, number, venue, copy, now,
             retry_after=retry_after, camp_id=patient.get("camp_id"), variables=variables,
         )
         if not row:
             return "skipped"
         if row.get("status") == "queued":
-            return await send_queued(db, row["_id"])
-        return await _submit(db, row, variables)
+            return await send_queued(db, row["_id"], now)
+        return await _settle(db, row, variables, now)
     except Exception as exc:
         logger.exception("Patient SMS processing failed")
         if row:
@@ -346,7 +369,7 @@ async def deliver_patient_sms(
         return "failed"
 
 
-async def queue_sms(
+async def record(
     db: AsyncDatabase,
     patients: List[dict],
     message_type: str,
@@ -356,6 +379,7 @@ async def queue_sms(
     *,
     event_key: str,
     session,
+    now: datetime,
 ) -> List[ObjectId]:
     """Writes one SMS intent per patient inside the caller's transaction and returns the queued ids to send after commit."""
     venue = clean_sms_venue(venue)
@@ -371,7 +395,7 @@ async def queue_sms(
             "patient_id": patient["_id"], "message_type": message_type, "event_date": event_date,
             "event_key": event_key, "number": number, "venue": venue, "copy": copy, "variables": variables,
             "status": status, "attempts": 0, "provider_id": None, "camp_id": patient.get("camp_id"),
-            "created_at": helpers.now_utc(),
+            "created_at": now,
         })
     if not rows:
         return []
@@ -379,7 +403,7 @@ async def queue_sms(
     return res.inserted_ids if status == "queued" else []
 
 
-async def send_queued(db: AsyncDatabase, row_id: ObjectId) -> str:
+async def send_queued(db: AsyncDatabase, row_id: ObjectId, now: datetime) -> str:
     row = await db.reminder_ledger.find_one_and_update(
         {"_id": row_id, "status": "queued"},
         {"$set": {"status": "pending"}, "$inc": {"attempts": 1}},
@@ -387,44 +411,163 @@ async def send_queued(db: AsyncDatabase, row_id: ObjectId) -> str:
     )
     if not row:
         return "skipped"
-    return await _submit(db, row, row["variables"])
+    return await _settle(db, row, row["variables"], now)
 
 
-async def send_queued_rows(db: AsyncDatabase, row_ids: List[ObjectId]) -> None:
+async def _send_queued_rows(db: AsyncDatabase, row_ids: List[ObjectId], now: datetime) -> None:
     for row_id in row_ids:
         try:
-            await send_queued(db, row_id)
+            await send_queued(db, row_id, now)
         except Exception:
             logger.exception("Queued patient SMS could not be sent")
 
 
-async def dispatch(background_tasks: Any, db: AsyncDatabase, row_ids: List[ObjectId]) -> None:
+async def dispatch(background_tasks: Any, db: AsyncDatabase, row_ids: List[ObjectId], now: datetime) -> None:
     """Sends committed intents after the response; without a request context, sends them now."""
     if not row_ids:
         return
     if background_tasks is None:
-        await send_queued_rows(db, row_ids)
+        await _send_queued_rows(db, row_ids, now)
     else:
-        background_tasks.add_task(send_queued_rows, db, row_ids)
+        background_tasks.add_task(_send_queued_rows, db, row_ids, now)
 
 
-async def send_patient_sms(
-    db: AsyncDatabase,
-    patient: dict,
-    message_type: str,
-    event_date: str,
-    venue: str,
-    end_date: Optional[str] = None,
-    event_key: Optional[str] = None,
-) -> bool:
-    """Best-effort per-patient DLT send, recorded once per patient/type/event date.
+async def abandon_if_gone(db: AsyncDatabase, row: dict) -> bool:
+    """A failed intent whose patient, or whose active Token for that date, is gone is never retried."""
+    patient = await db.patients.find_one({"_id": row.get("patient_id")})
+    message_type = row.get("message_type")
+    live = False
+    if patient is not None and message_type in ("ot", "specs"):
+        item = "ot" if message_type == "ot" else "specs_made"
+        slip = await db.deferred_slips.find_one({
+            "patient_id": patient["_id"], "item_type": item, "active": True,
+            "collection_date": row.get("event_date"),
+        })
+        live = bool(slip)
+    elif patient is not None:
+        live = True
+    if live:
+        return False
+    await db.reminder_ledger.update_one({"_id": row["_id"], "status": "failed"}, {"$set": {"status": "abandoned"}})
+    return True
 
-    Never raises: the registration or deferral is the durable outcome.
-    True means the request reached the provider, including when its reply was lost.
-    """
-    return (await deliver_patient_sms(
-        db, patient, message_type, event_date, venue, end_date, event_key=event_key,
-    )) in ("sent", "uncertain")
+
+async def due_retries(db: AsyncDatabase, message_type: str, event_date: str, now: datetime, limit: int) -> List[dict]:
+    return await db.reminder_ledger.find({
+        "message_type": message_type, "event_date": event_date, "status": "failed",
+        "created_at": {"$lte": now - RETRY_AFTER},
+    }).to_list(limit)
+
+
+async def recorded(db: AsyncDatabase, patient_ids: List[Any], message_type: str, event_date: str) -> set:
+    """The patients that already have an intent of this type for this date."""
+    if not patient_ids:
+        return set()
+    rows = await db.reminder_ledger.find({
+        "patient_id": {"$in": patient_ids}, "message_type": message_type, "event_date": event_date,
+    }, {"patient_id": 1}).to_list(len(patient_ids))
+    return {row["patient_id"] for row in rows}
+
+
+async def used(db: AsyncDatabase, message_type: str, event_date: str) -> int:
+    """Intents of this type and date that reached, or tried to reach, the provider."""
+    return await db.reminder_ledger.count_documents({
+        "message_type": message_type, "event_date": event_date,
+        "status": {"$in": ["sent", "rejected", "uncertain", "failed"]},
+    })
+
+
+async def status_counts(db: AsyncDatabase) -> Dict[str, int]:
+    return {
+        status: await db.reminder_ledger.count_documents({"status": status})
+        for status in ("queued", "failed", "uncertain")
+    }
+
+
+async def sweep(db: AsyncDatabase, now: datetime, limit: int) -> Tuple[int, int]:
+    """One outbox pass: pending intents go uncertain, old queued intents are sent and due failures are retried."""
+    await db.reminder_ledger.update_many(
+        {"status": "pending", "created_at": {"$lte": now - PENDING_UNCERTAIN_AFTER}},
+        {"$set": {"status": "uncertain"}},
+    )
+    queued = await db.reminder_ledger.find({
+        "status": "queued", "created_at": {"$lte": now - QUEUED_RESEND_AFTER},
+    }).limit(limit).to_list(limit)
+    failed_rows = await db.reminder_ledger.find({
+        "status": "failed", "retry_after": {"$lte": now},
+    }).limit(limit).to_list(limit)
+    sem = asyncio.Semaphore(4)
+
+    async def send_one(row_id: Any) -> None:
+        async with sem:
+            await send_queued(db, row_id, now)
+
+    await asyncio.gather(*(send_one(row["_id"]) for row in queued))
+    retried = 0
+    for row in failed_rows:
+        if await abandon_if_gone(db, row):
+            continue
+        await db.reminder_ledger.update_one(
+            {"_id": row["_id"], "status": "failed"}, {"$set": {"status": "queued"}},
+        )
+        await send_one(row["_id"])
+        retried += 1
+    return len(queued), retried
+
+
+async def canary(db: AsyncDatabase, message_type: str, event_date: str, now: datetime) -> str:
+    """paused, canary (send one), waiting (hold the batch for the first message's Delivery report) or open."""
+    control = await db.sms_controls.find_one({"_id": message_type}) or {}
+    if control.get("paused"):
+        return "paused"
+    query: Dict[str, Any] = {
+        "message_type": message_type, "event_date": event_date,
+        "status": {"$in": ["sent", "uncertain", "rejected"]},
+    }
+    if control.get("resumed_at"):
+        query["created_at"] = {"$gte": control["resumed_at"]}
+    first = await db.reminder_ledger.find(query).sort("created_at", 1).limit(1).to_list(1)
+    if not first:
+        return "canary"
+    row = first[0]
+    settled = row["status"] == "rejected" or row.get("delivery")
+    if settled or helpers.as_utc(row["created_at"]) <= now - CANARY_WAIT:
+        return "open"
+    return "waiting"
+
+
+async def pause_after_rejection(db: AsyncDatabase, message_type: str, event_date: str, now: datetime) -> None:
+    """A rejected Canary pauses its type, naming the provider's reason."""
+    row = await db.reminder_ledger.find({
+        "message_type": message_type, "event_date": event_date, "status": "rejected",
+    }).sort("created_at", -1).limit(1).to_list(1)
+    if row:
+        await _pause(db, row[0], row[0].get("error") or "Rejected", now)
+
+
+def _notice_status(row: dict, stuck_before: datetime) -> str:
+    if row.get("delivery") == "failed":
+        return "failed"
+    if row["status"] in ("queued", "pending") and helpers.as_utc(row["created_at"]) <= stuck_before:
+        return "not_sent"
+    return row["status"]
+
+
+async def notice_states(db: AsyncDatabase, notices: List[Tuple[Any, Any]], now: datetime) -> Dict[Tuple[Any, Any], str]:
+    """The SMS state of each Schedule edit notice, by (patient id, edit revision). A missing or stuck notice is not_sent."""
+    if not notices:
+        return {}
+    rows = await db.reminder_ledger.find({
+        "patient_id": {"$in": list({patient_id for patient_id, _revision in notices})},
+        "message_type": {"$in": list(NOTICE_TYPES)},
+        "event_key": {"$in": [edit_key(revision) for _patient_id, revision in notices]},
+    }, {"patient_id": 1, "event_key": 1, "status": 1, "delivery": 1, "created_at": 1}).to_list(None)
+    stuck_before = now - RETRY_AFTER
+    found = {(row["patient_id"], row["event_key"]): _notice_status(row, stuck_before) for row in rows}
+    return {
+        (patient_id, revision): found.get((patient_id, edit_key(revision)), "not_sent")
+        for patient_id, revision in notices
+    }
 
 
 def _credit(raw: Any) -> float:
@@ -434,7 +577,7 @@ def _credit(raw: Any) -> float:
         return 0.0
 
 
-async def record_delivery_report(db: AsyncDatabase, report: Dict[str, Any]) -> bool:
+async def record_delivery_report(db: AsyncDatabase, report: Dict[str, Any], now: datetime) -> bool:
     request_id = str(report.get("requestId") or "").strip()
     code = str(report.get("status") or "").strip()
     delivery = REPORT_STATUS.get(code)
@@ -452,21 +595,21 @@ async def record_delivery_report(db: AsyncDatabase, report: Dict[str, Any]) -> b
     )
     await db.reminder_ledger.update_one({"_id": row["_id"]}, {"$set": {
         "delivery": delivery, "delivery_reason": reason or None, "dlt_failure": dlt_failure,
-        "credit": _credit(report.get("credit")), "reported_at": helpers.now_utc(),
+        "credit": _credit(report.get("credit")), "reported_at": now,
     }})
     if dlt_failure:
-        await _pause(db, row, reason or f"Operator status {code}")
+        await _pause(db, row, reason or f"Operator status {code}", now)
     return True
 
 
-async def _pause(db: AsyncDatabase, row: Dict[str, Any], reason: str) -> None:
+async def _pause(db: AsyncDatabase, row: Dict[str, Any], reason: str, now: datetime) -> None:
     control = await db.sms_controls.find_one({"_id": row["message_type"]}) or {}
     resumed_at = control.get("resumed_at")
     if control.get("paused") or (resumed_at and helpers.as_utc(row["created_at"]) < helpers.as_utc(resumed_at)):
         return
     await db.sms_controls.update_one(
         {"_id": row["message_type"]},
-        {"$set": {"paused": True, "paused_at": helpers.now_utc(), "paused_reason": reason,
+        {"$set": {"paused": True, "paused_at": now, "paused_reason": reason,
                   "paused_request_id": row.get("provider_id")}},
         upsert=True,
     )
@@ -499,9 +642,9 @@ async def ledger_groups(db: AsyncDatabase, match: Dict[str, Any], *, by_camp: bo
     ])
 
 
-async def resume(db: AsyncDatabase, message_type: str, actor_id: str) -> None:
+async def resume(db: AsyncDatabase, message_type: str, actor_id: str, now: datetime) -> None:
     await db.sms_controls.update_one(
         {"_id": message_type},
-        {"$set": {"paused": False, "resumed_at": helpers.now_utc(), "resumed_by": actor_id}},
+        {"$set": {"paused": False, "resumed_at": now, "resumed_by": actor_id}},
         upsert=True,
     )

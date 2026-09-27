@@ -10,12 +10,12 @@ from pydantic import ValidationError
 
 import helpers
 import routes_camps
-import sms
 from models import CampBody, CompletePrescriptionBody, ScanBody, ScanConfirmBody
 from routes_clinical import complete_prescription, record_fulfilment
 from routes_desk import arrive, print_prescription, scan, scan_confirm
 from routes_registration import name_search
 from seed import (
+    send_patient_sms,
     ACTOR, CARD, CLINICAL, FIXED_POWER, MEDICINE, MEDICINE_ALT, OTHER_CARD, OTHER_DAY, TODAY,
     day, fulfil, recorder, register, run_camp, seed_camp, seen_patient,
 )
@@ -355,7 +355,7 @@ class TestRegistrationConfirmationSms:
             )
             sent.clear()
             await database.reminder_ledger.delete_many({})
-            await sms.send_patient_sms(
+            await send_patient_sms(
                 database, await database.patients.find_one({"_id": ObjectId(reg["id"])}),
                 "camp", TODAY, "Sikar Bhawan",
             )

@@ -106,8 +106,8 @@ def test_new_ledger_rows_store_camp_id(monkeypatch, sms_provider):
         await database.patients.insert_one(patient)
 
         async def queue(session):
-            return await sms.queue_sms(
-                database, [patient], "registration", TODAY, "Hall A", event_key="reg", session=session,
+            return await sms.record(
+                database, [patient], "registration", TODAY, "Hall A", event_key="reg", session=session, now=NOW,
             )
 
         queued = await in_transaction(queue)
