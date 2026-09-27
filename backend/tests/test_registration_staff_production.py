@@ -7,6 +7,7 @@ from fastapi import HTTPException, Request
 from pymongo.asynchronous.collection import AsyncCollection
 
 import helpers
+import lock_resolution
 import routes_registration
 import routes_staff
 import security
@@ -41,8 +42,8 @@ def test_concurrent_person_creation_returns_the_winning_identity(monkeypatch):
             })
             return await real_next_seq(name)
 
-        monkeypatch.setattr(routes_registration, "next_seq", rival_inserts_first)
-        person, created = await routes_registration._resolve_person({
+        monkeypatch.setattr(lock_resolution, "next_seq", rival_inserts_first)
+        person, created = await lock_resolution.resolve_person(database, {
             "aadhaar_last4": "4321", "full_name": "Patient", "dob": "1980-01-01", "gender": "M",
         })
         assert person["_id"] == winner_id

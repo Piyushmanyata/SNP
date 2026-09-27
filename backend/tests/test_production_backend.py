@@ -70,7 +70,7 @@ def test_patient_history_uses_three_queries_for_twenty_visits(monkeypatch):
 
 
 def test_hospital_token_response_does_not_wait_for_sms(monkeypatch):
-    recorder()
+    sent = recorder()
 
     async def body(database):
         camp_id, _days = await seed_camp(database)
@@ -78,12 +78,6 @@ def test_hospital_token_response_does_not_wait_for_sms(monkeypatch):
         day_id = (await database.ot_schedule_days.insert_one({
             "camp_id": seen["camp_id"], "day_date": TOMORROW, "venue": "Hospital", "seat_limit": 10, "seats_taken": 0,
         })).inserted_id
-        sent = []
-
-        async def provider(*args, **kwargs):
-            sent.append(True)
-
-        monkeypatch.setattr(routes_clinical.sms, "send_queued", provider)
         background = BackgroundTasks()
         result = await routes_clinical.record_fulfilment(fulfil(
             seen["trans_id"], seen["rev_id"], item_type="ot", status="deferred", ot_schedule_day_id=str(day_id),
@@ -91,7 +85,7 @@ def test_hospital_token_response_does_not_wait_for_sms(monkeypatch):
         assert result["slip"]["active"] is True
         assert sent == []
         await background()
-        assert sent == [True]
+        assert [message["type"] for message in sent] == ["ot_token"]
 
     run_camp(monkeypatch, body)
 

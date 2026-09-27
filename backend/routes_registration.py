@@ -7,7 +7,7 @@ from db import get_db, next_seq
 from models import AadhaarDecodeBody, RegisterBody
 from helpers import (
     api_error,    OVERWRITTEN_FIELDS, now_utc, normalize_name, normalize_phone, is_dummy_phone,
-    person_key, new_patient_code, age_from_dob, today_ist_str, material_diff,
+    new_patient_code, age_from_dob, today_ist_str,
 )
 from serializers import ser_patient
 from security import get_current_user, require_staff, require_any
@@ -16,6 +16,8 @@ import arrival
 from aadhaar import decode_aadhaar
 from aadhaar_extract import extract_document
 import sms
+import lock_resolution
+from lock_resolution import duplicate_in_camp
 from datetime import date, timedelta
 from itertools import permutations
 import asyncio
@@ -60,35 +62,6 @@ async def aadhaar_decode(body: AadhaarDecodeBody, request: Request) -> Dict[str,
     return await asyncio.to_thread(decode_aadhaar, body.payload)
 
 
-async def _resolve_person(data: dict) -> Tuple[Dict[str, Any], bool]:
-    """Find or create a Person from scanned aadhaar data. Returns (person, created)."""
-    db = get_db()
-    key = person_key(data["aadhaar_last4"], data["full_name"], data.get("dob", ""), data.get("gender", ""))
-    person = await db.persons.find_one({"aadhaar_key": key})
-    if person:
-        return person, False
-    person_no = await next_seq("person_no")
-    doc = {
-        "aadhaar_key": key,
-        "person_no": person_no,
-        "name_verbatim": data["full_name"],
-        "dob": data.get("dob"),
-        "gender": data.get("gender"),
-        "last4": data["aadhaar_last4"],
-        "locked": True,
-        "created_at": now_utc(),
-    }
-    try:
-        res = await db.persons.insert_one(doc)
-    except DuplicateKeyError:
-        person = await db.persons.find_one({"aadhaar_key": key})
-        if person:
-            return person, False
-        raise
-    doc["_id"] = res.inserted_id
-    return doc, True
-
-
 async def _validate_camp_and_day(db: AsyncDatabase, camp_day_id: str) -> tuple[dict, dict, bool]:
     """Returns the active camp, the day and whether the day is the Operating day."""
     camp = await db.camps.find_one({"is_active": True})
@@ -105,62 +78,6 @@ async def _validate_camp_and_day(db: AsyncDatabase, camp_day_id: str) -> tuple[d
     return camp, day, operating
 
 
-def _is_manual(p: dict) -> bool:
-    return bool(p.get("manual_entry") or p.get("manual_exception"))
-
-
-def _is_scanned_row(p: dict) -> bool:
-    return bool(p.get("aadhaar_scanned") or p.get("person_id"))
-
-
-def _dup_409(row: dict) -> HTTPException:
-    return api_error(409, "DUPLICATE_IN_CAMP", 'Already registered in this camp', registration=ser_patient(row))
-
-
-def _build_duplicate_queries(body: RegisterBody, person: dict | None = None) -> list[dict]:
-    queries: list[dict] = []
-    if person:
-        queries.append({"person_id": person["_id"]})
-    norm = normalize_name(body.full_name)
-    phone = normalize_phone(body.phone)
-    age = body.age if body.age is not None else (age_from_dob(body.dob) if body.dob else None)
-    if norm and age is not None and phone:
-        queries.append({
-            "full_name_normalized": norm,
-            "age": age,
-            "phone_normalized": phone,
-        })
-    return queries
-
-
-async def _duplicate_hits(
-    db: AsyncDatabase,
-    camp_id: ObjectId | str,
-    body: RegisterBody,
-    person: dict | None = None,
-) -> List[Dict[str, Any]]:
-    candidates = []
-    for q in _build_duplicate_queries(body, person):
-        candidates += await db.patients.find({"camp_id": camp_id, **q}).to_list(20)
-    tokens = sorted(normalize_name(body.full_name).split())
-    if body.aadhaar_last4 and tokens:
-        candidates += [
-            d for d in await db.patients.find({"camp_id": camp_id, "aadhaar_last4": body.aadhaar_last4}).to_list(50)
-            if sorted((d.get("full_name_normalized") or "").split()) == tokens
-        ]
-    hits = []
-    seen = set()
-    for d in candidates:
-        if d["_id"] in seen:
-            continue
-        seen.add(d["_id"])
-        own = person and d.get("person_id") == person["_id"]
-        if body.aadhaar_scanned and _is_scanned_row(d) and not own and _born_apart(d.get("dob"), body.dob):
-            continue
-        hits.append(d)
-    return hits
-
-
 async def _lookalikes(db: AsyncDatabase, camp_id: ObjectId | str, body: RegisterBody) -> List[Dict[str, Any]]:
     tokens = normalize_name(body.full_name).split()
     if body.age is None or not tokens:
@@ -171,12 +88,6 @@ async def _lookalikes(db: AsyncDatabase, camp_id: ObjectId | str, body: Register
         "full_name_normalized": {"$in": list(orders)},
         "age": {"$gte": body.age - LOOKALIKE_AGE_SPAN, "$lte": body.age + LOOKALIKE_AGE_SPAN},
     }).sort("reg_no", 1).to_list(20)
-
-
-def _born_apart(a: Optional[str], b: Optional[str]) -> bool:
-    if not a or not b or a == b:
-        return False
-    return a[:4] != b[:4] or not (a.endswith("-01-01") or b.endswith("-01-01"))
 
 
 async def _assert_capacity(db: AsyncDatabase, day: dict, enforce_limit: bool = True) -> None:
@@ -200,55 +111,6 @@ async def _release_capacity(db: AsyncDatabase, day_id) -> None:
         {"_id": day_id, "booked": {"$gt": 0}},
         {"$inc": {"booked": -1}},
     )
-
-
-async def _overwrite_manual(
-    db: AsyncDatabase,
-    target: dict,
-    body: RegisterBody,
-    person: Optional[dict],
-    age: Optional[int],
-) -> Tuple[Dict[str, Any], bool]:
-    norm = normalize_name(body.full_name)
-    if age is None and body.dob:
-        age = age_from_dob(body.dob)
-    updates = {
-        **({"registration_request_id": body.registration_request_id} if body.registration_request_id else {}),
-        "full_name": body.full_name,
-        "full_name_normalized": norm,
-        "gender": body.gender,
-        "age": age,
-        "address": body.address,
-        "aadhaar_last4": body.aadhaar_last4,
-        "dob": body.dob,
-        "aadhaar_scanned": True,
-        "person_id": person["_id"] if person else None,
-        "manual_entry": False,
-        "manual_exception": None,
-        "identity_recheck_required": False,
-    }
-    try:
-        p = await db.patients.find_one_and_update(
-            {"_id": target["_id"], "aadhaar_scanned": {"$ne": True}, "person_id": None,
-             "printed_at": None, "queue_status": {"$ne": "seen"}},
-            {"$set": updates}, return_document=True,
-        )
-    except DuplicateKeyError:
-        if person:
-            existing = await db.patients.find_one({"person_id": person["_id"], "camp_id": target["camp_id"]})
-            if existing:
-                raise _dup_409(existing)
-        raise
-    if not p:
-        raise await _overwrite_refused(db, target["_id"])
-    return ser_patient(p), False
-
-
-async def _overwrite_refused(db: AsyncDatabase, patient_id) -> HTTPException:
-    current = await db.patients.find_one({"_id": patient_id}) or {}
-    if current.get("printed_at") or current.get("queue_status") == "seen":
-        return api_error(409, "ALREADY_PRINTED", "This patient's prescription is already printed. Their details cannot change now.")
-    return api_error(409, "NOT_A_MANUAL_ENTRY", 'This registration already has Aadhaar on file. Scan again.')
 
 
 def _build_patient_document(
@@ -307,35 +169,41 @@ def _build_patient_document(
     }
 
 
+def _registration_card(body: RegisterBody) -> Dict[str, Any]:
+    card = {name: getattr(body, name) for name in OVERWRITTEN_FIELDS}
+    if card["age"] is None and body.dob:
+        card["age"] = age_from_dob(body.dob)
+    return card
+
+
 async def _resolve_registration_conflict(
     db: AsyncDatabase,
-    hits: list[dict],
+    candidates: list[dict],
+    card: dict,
     body: RegisterBody,
     person: dict | None,
     is_self: bool,
 ) -> Optional[Tuple[Dict[str, Any], bool]]:
-    if not body.aadhaar_scanned:
-        if hits:
-            raise _dup_409(hits[0])
+    """The registration desk's translation of the Lock Outcome."""
+    outcome = lock_resolution.classify(card, candidates, person, scanned=bool(body.aadhaar_scanned))
+    if outcome.kind == "none":
         return None
-
-    scanned_hits = [h for h in hits if _is_scanned_row(h)]
-    manual_hits = [h for h in hits if _is_manual(h) and not _is_scanned_row(h)]
-    if scanned_hits:
-        raise _dup_409(scanned_hits[0])
-    if len(manual_hits) > 1:
-        raise api_error(409, "AMBIGUOUS_MANUAL_ENTRY", 'Multiple Manual entries match this card', registrations=[ser_patient(h) for h in manual_hits])
-    if len(manual_hits) == 1:
-        target = manual_hits[0]
-        if is_self:
-            raise _dup_409(target)
-        age = body.age if body.age is not None else (age_from_dob(body.dob) if body.dob else None)
-        card = {**{field: getattr(body, field) for field in OVERWRITTEN_FIELDS}, "age": age}
-        diff = material_diff(card, target)
-        if diff and body.review_confirmed_id != str(target["_id"]):
-            raise api_error(409, "MISMATCH_REVIEW_REQUIRED", 'This card differs from the Manual entry. Check the details before replacing them.', registration=ser_patient(target), card=card, diff=diff)
-        return await _overwrite_manual(db, target, body, person, age)
-    return None
+    if outcome.kind == "duplicate":
+        raise duplicate_in_camp(outcome.registration)
+    if outcome.kind in ("own", "scanned_elsewhere"):
+        raise duplicate_in_camp(next(c for c in candidates if lock_resolution.is_scanned(c)))
+    if outcome.kind == "ambiguous":
+        raise api_error(409, "AMBIGUOUS_MANUAL_ENTRY", 'Multiple Manual entries match this card', registrations=[ser_patient(h) for h in outcome.registrations])
+    target = outcome.registration
+    if is_self:
+        raise duplicate_in_camp(target)
+    if outcome.kind == "review" and body.review_confirmed_id != str(target["_id"]):
+        raise api_error(409, "MISMATCH_REVIEW_REQUIRED", 'This card differs from the Manual entry. Check the details before replacing them.', registration=ser_patient(target), card=card, diff=outcome.diff)
+    updated = await lock_resolution.overwrite(
+        db, target, card, person,
+        {"registration_request_id": body.registration_request_id} if body.registration_request_id else None,
+    )
+    return ser_patient(updated), False
 
 
 def _replay_registration(existing: dict, body: RegisterBody, camp_id: ObjectId | str) -> Tuple[Dict[str, Any], bool]:
@@ -372,7 +240,7 @@ async def _insert_patient_document(
             if person:
                 existing = await db.patients.find_one({"person_id": person["_id"], "camp_id": camp_id})
                 if existing:
-                    raise _dup_409(existing)
+                    raise duplicate_in_camp(existing)
             if (exc.details or {}).get("keyPattern") != {"patient_qr": 1} or not retries:
                 raise
             retries -= 1
@@ -408,17 +276,15 @@ async def _create_registration(
     ) >= HOUSEHOLD_LIMIT:
         raise api_error(409, "HOUSEHOLD_LIMIT", f'This mobile number already has {HOUSEHOLD_LIMIT} registrations for this camp. Ask at the camp desk.')
 
+    card = _registration_card(body)
     person = None
     if body.aadhaar_scanned and body.aadhaar_last4 and body.dob:
-        person, _ = await _resolve_person({
-            "aadhaar_last4": body.aadhaar_last4,
-            "full_name": body.full_name,
-            "dob": body.dob,
-            "gender": body.gender,
-        })
+        person, _ = await lock_resolution.resolve_person(db, card)
 
-    hits = await _duplicate_hits(db, camp["_id"], body, person)
-    conflict_result = await _resolve_registration_conflict(db, hits, body, person, is_self)
+    candidates = await lock_resolution.find_candidates(
+        db, camp["_id"], card, person, scanned=bool(body.aadhaar_scanned), phone=body.phone,
+    )
+    conflict_result = await _resolve_registration_conflict(db, candidates, card, body, person, is_self)
     if conflict_result is not None:
         return conflict_result
     lookalikes = [] if body.aadhaar_scanned else await _lookalikes(db, camp["_id"], body)
@@ -431,7 +297,7 @@ async def _create_registration(
     walk_in = not is_self and operating
     await _assert_capacity(db, day, enforce_limit=not walk_in)
     try:
-        age = body.age if body.age is not None else (age_from_dob(body.dob) if body.dob else None)
+        age = card["age"]
         reg_no = await next_seq("reg_no")
         team_lead_id = None
         if not is_self and actor_id:

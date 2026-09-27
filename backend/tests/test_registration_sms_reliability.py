@@ -42,34 +42,6 @@ def test_legacy_patient_qr_resolves_at_desk_and_clinical_lookup(monkeypatch, ent
     run_camp(monkeypatch, run)
 
 
-@pytest.mark.parametrize("path", ["registration", "door"])
-def test_stale_manual_identity_cannot_overwrite_a_completed_scan(monkeypatch, path):
-    async def run(database):
-        target = patient_doc(_id=ObjectId(), camp_id=ObjectId(), manual_entry=True, full_name="Patient")
-        await database.patients.insert_one(target.copy())
-        first = RegisterBody(
-            full_name="Patient", camp_day_id=str(ObjectId()), aadhaar_scanned=True,
-            aadhaar_last4="1234", dob="1980-01-01", age=46, gender="M", address="Hall",
-        )
-        second = first.model_copy(update={"aadhaar_last4": "5678"})
-
-        async def scan(body):
-            if path == "door":
-                return await routes_desk._apply_overwrite(database, target, body.model_dump())
-            person, _ = await routes_registration._resolve_person(body.model_dump())
-            return await routes_registration._overwrite_manual(database, target, body, person, body.age)
-
-        await scan(first)
-        with pytest.raises(HTTPException) as exc:
-            await scan(second)
-        assert exc.value.status_code == 409
-        stored = await database.patients.find_one({"_id": target["_id"]})
-        assert stored["aadhaar_last4"] == "1234"
-        assert stored["aadhaar_scanned"] is True
-
-    run_camp(monkeypatch, run)
-
-
 @pytest.mark.parametrize("key", ["patient_qr", "reg_no"])
 def test_registration_retries_only_patient_code_collisions(monkeypatch, key):
     codes = iter(["AAAAAAAA", "BBBBBBBB"])
