@@ -10,7 +10,7 @@ SmartPing rejected both spectacles SMS templates because variable content could 
 
 ## Decision
 
-Spectacles collection runs from 10:00 AM to 5:00 PM each day of its scheduled date range. The backend stores these as `10:00` and `17:00`, sets them for every new or updated collection day, and rejects requests with different hours. The admin form no longer edits hours. Patient and staff screens display AM/PM times. Both revised SMS copies state the hours as fixed text and use five variables. Days with older hours cannot receive new token assignments or appear as the next valid collection day. Spectacles SMS stays disabled until the revised copies receive new DLT approval and matching MSG91 flows.
+Spectacles collection runs from 10:00 AM to 5:00 PM each day of its scheduled date range. The backend stores these as `10:00` and `17:00`, sets them for every new or updated collection day, and rejects requests with different hours. The admin form no longer edits hours. Patient and staff screens display AM/PM times. Both revised SMS copies state the hours as fixed text and use five variables. ADR 0085 later drops the hours from the Specs Token and Specs Reminder SMS. Days with older hours cannot receive new token assignments or appear as the next valid collection day. Spectacles SMS stays disabled until the revised copies receive new DLT approval and matching MSG91 flows.
 
 ## Consequences
 

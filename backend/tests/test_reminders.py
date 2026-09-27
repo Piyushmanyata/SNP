@@ -102,8 +102,8 @@ class TestMessageCopy:
         assert CAMP_REMINDER == "कल ({date}) को Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपका नेत्र परीक्षण है। कृपया समय पर {venue} पहुँचें। यह टोकन शिविर स्थल पर दिखाएँ। क्रमांक: {reg_no}। कृपया शिविर के दिन अपना आधार कार्ड अवश्य साथ लाएँ।"
         assert OT_TOKEN == "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपका ऑपरेशन {date} को निर्धारित हुआ है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर अवश्य साथ लाएँ। स्थल: {venue}।"
         assert OT_REMINDER == "कल ({date}) को Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपका नेत्र ऑपरेशन निर्धारित है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ अवश्य लाएँ। स्थल: {venue}।"
-        assert SPECS_TOKEN == "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपको चश्मा {date} से {end_date} तक प्रतिदिन 10:00 AM से 5:00 PM तक {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर अवश्य आएँ।"
-        assert SPECS_REMINDER == "Sikar Zilla Welfare Trust के {camp_no} वे शिविर के चश्मे बनकर तैयार हैं। चश्मे {date} से {end_date} तक प्रतिदिन 10:00 AM से 5:00 PM तक {venue} आकर ले जाएँ। टोकन क्रमांक {reg_no} अवश्य साथ लाएँ।"
+        assert SPECS_TOKEN == "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में जाँच के बाद आपके लिए बनाया गया चश्मा {date} से {end_date} के बीच {venue} पर आपको दिया जाएगा। आपका चश्मा टोकन क्रमांक: {reg_no}।"
+        assert SPECS_REMINDER == "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में बना आपका चश्मा तैयार है। कृपया {date} से {end_date} के बीच {venue} पर आकर प्राप्त करें। टोकन क्रमांक {reg_no} अवश्य साथ लाएँ।"
 
     def test_the_dlt_reference_registers_exactly_the_code_copy(self):
         doc = json.loads((backend_dir / "docs" / "msg91-templates.json").read_text(encoding="utf-8"))
@@ -338,8 +338,8 @@ class TestReminderCronHttp:
             }]
             [row] = await _ledger(database)
             assert row["copy"] == (
-                "Sikar Zilla Welfare Trust के 162 वे शिविर के चश्मे बनकर तैयार हैं। चश्मे 06-10-2026 से 13-10-2026 तक "
-                "प्रतिदिन 10:00 AM से 5:00 PM तक Token Hall आकर ले जाएँ। टोकन क्रमांक 42 अवश्य साथ लाएँ।"
+                "Sikar Zilla Welfare Trust के 162 वें नेत्र शिविर में बना आपका चश्मा तैयार है। कृपया 06-10-2026 से 13-10-2026 के बीच "
+                "Token Hall पर आकर प्राप्त करें। टोकन क्रमांक 42 अवश्य साथ लाएँ।"
             )
 
         _run(monkeypatch, body)

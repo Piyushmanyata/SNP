@@ -78,10 +78,10 @@
     },
     {
       "key": "specs_token",
-      "dlt_template_id": "1777179015421050461",
+      "dlt_template_id": "1777179043925249659",
       "msg91_flow_id": "6ab3a55711b0c861c10e65e2",
       "rejected_dlt_template_id": "1777179007849908726",
-      "dlt_status": "Approved by SmartPing; Verified by DLT in MSG91",
+      "dlt_status": "Service Implicit, approved by SmartPing 26 September 2026 (ADR 0085); MSG91 version v1.1",
       "env_var": "MSG91_TEMPLATE_SPECS_TOKEN",
       "purpose": "Spectacle collection scheduled",
       "variables": [
@@ -91,16 +91,17 @@
         "venue",
         "reg_no"
       ],
-      "body": "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपको चश्मा {date} से {end_date} तक प्रतिदिन 10:00 AM से 5:00 PM तक {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर अवश्य आएँ।",
-      "dlt_body": "Sikar Zilla Welfare Trust के ##camp_no## वें नेत्र शिविर में आपको चश्मा ##date## से ##end_date## तक प्रतिदिन 10:00 AM से 5:00 PM तक ##venue## में दिया जाएगा। कृपया चश्मे का टोकन (##reg_no##) लेकर अवश्य आएँ।",
-      "dlt_portal_body": "Sikar Zilla Welfare Trust के {#var#} वें नेत्र शिविर में आपको चश्मा {#var#} से {#var#} तक प्रतिदिन 10:00 AM से 5:00 PM तक {#var#} में दिया जाएगा। कृपया चश्मे का टोकन ({#var#}) लेकर अवश्य आएँ।"
+      "body": "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में जाँच के बाद आपके लिए बनाया गया चश्मा {date} से {end_date} के बीच {venue} पर आपको दिया जाएगा। आपका चश्मा टोकन क्रमांक: {reg_no}।",
+      "dlt_body": "Sikar Zilla Welfare Trust के ##camp_no## वें नेत्र शिविर में जाँच के बाद आपके लिए बनाया गया चश्मा ##date## से ##end_date## के बीच ##venue## पर आपको दिया जाएगा। आपका चश्मा टोकन क्रमांक: ##reg_no##।",
+      "dlt_portal_body": "Sikar Zilla Welfare Trust के {#var#} वें नेत्र शिविर में जाँच के बाद आपके लिए बनाया गया चश्मा {#var#} से {#var#} के बीच {#var#} पर आपको दिया जाएगा। आपका चश्मा टोकन क्रमांक: {#var#}।",
+      "promotional_dlt_template_id": "1777179015421050461"
     },
     {
       "key": "specs",
-      "dlt_template_id": "1777179015427680603",
+      "dlt_template_id": "1777179043934974720",
       "msg91_flow_id": "6ab3a56d4313c436210f3de3",
       "rejected_dlt_template_id": "1777179007858053123",
-      "dlt_status": "Approved by SmartPing; Verified by DLT in MSG91",
+      "dlt_status": "Service Implicit, approved by SmartPing 26 September 2026 (ADR 0085); MSG91 version v1.1",
       "env_var": "MSG91_TEMPLATE_SPECS",
       "purpose": "Day-before spectacle collection reminder",
       "variables": [
@@ -110,9 +111,10 @@
         "venue",
         "reg_no"
       ],
-      "body": "Sikar Zilla Welfare Trust के {camp_no} वे शिविर के चश्मे बनकर तैयार हैं। चश्मे {date} से {end_date} तक प्रतिदिन 10:00 AM से 5:00 PM तक {venue} आकर ले जाएँ। टोकन क्रमांक {reg_no} अवश्य साथ लाएँ।",
-      "dlt_body": "Sikar Zilla Welfare Trust के ##camp_no## वे शिविर के चश्मे बनकर तैयार हैं। चश्मे ##date## से ##end_date## तक प्रतिदिन 10:00 AM से 5:00 PM तक ##venue## आकर ले जाएँ। टोकन क्रमांक ##reg_no## अवश्य साथ लाएँ।",
-      "dlt_portal_body": "Sikar Zilla Welfare Trust के {#var#} वे शिविर के चश्मे बनकर तैयार हैं। चश्मे {#var#} से {#var#} तक प्रतिदिन 10:00 AM से 5:00 PM तक {#var#} आकर ले जाएँ। टोकन क्रमांक {#var#} अवश्य साथ लाएँ।"
+      "body": "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में बना आपका चश्मा तैयार है। कृपया {date} से {end_date} के बीच {venue} पर आकर प्राप्त करें। टोकन क्रमांक {reg_no} अवश्य साथ लाएँ।",
+      "dlt_body": "Sikar Zilla Welfare Trust के ##camp_no## वें नेत्र शिविर में बना आपका चश्मा तैयार है। कृपया ##date## से ##end_date## के बीच ##venue## पर आकर प्राप्त करें। टोकन क्रमांक ##reg_no## अवश्य साथ लाएँ।",
+      "dlt_portal_body": "Sikar Zilla Welfare Trust के {#var#} वें नेत्र शिविर में बना आपका चश्मा तैयार है। कृपया {#var#} से {#var#} के बीच {#var#} पर आकर प्राप्त करें। टोकन क्रमांक {#var#} अवश्य साथ लाएँ।",
+      "promotional_dlt_template_id": "1777179015427680603"
     },
     {
       "key": "ot_change",
