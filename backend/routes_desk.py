@@ -2,20 +2,18 @@ import asyncio
 from typing import Any, Dict, Optional
 from fastapi import HTTPException, APIRouter, Depends
 from bson import ObjectId
-from pymongo.errors import DuplicateKeyError
 from pymongo.asynchronous.database import AsyncDatabase
 from db import get_db
-from models import NoCardBody, QrLookupBody, ScanBody, ScanConfirmBody, RegisterBody
-from helpers import OVERWRITTEN_FIELDS, now_utc, age_from_dob, material_diff, normalize_name, parse_patient_identifier, person_key, api_error
+from models import NoCardBody, QrLookupBody, ScanBody, ScanConfirmBody
+from helpers import now_utc, age_from_dob, parse_patient_identifier, api_error
 from serializers import ser_patient
 from security import require_staff
 from routes_camps import effective_printing
 import arrival
 from aadhaar import decode_aadhaar
-from routes_registration import (
-    _dup_409, _duplicate_hits, _is_manual, _is_scanned_row, _overwrite_refused, _resolve_person,
-    checked_manual_note,
-)
+import lock_resolution
+from lock_resolution import duplicate_in_camp, is_manual
+from routes_registration import checked_manual_note
 router = APIRouter(prefix="/api/desk", tags=["desk"])
 
 MAX_REG_NO_DIGITS = 12
@@ -64,27 +62,6 @@ async def _decode_card(payload: str) -> Dict[str, Any]:
     return _card_values(result["data"])
 
 
-def _card_as_register_body(card: dict) -> RegisterBody:
-    return RegisterBody(
-        full_name=card["full_name"] or "",
-        age=card["age"],
-        gender=card["gender"],
-        address=card["address"],
-        aadhaar_last4=card["aadhaar_last4"],
-        dob=card["dob"],
-        aadhaar_scanned=True,
-        camp_day_id="",
-    )
-
-
-async def _known_person(db: AsyncDatabase, card: dict) -> Optional[dict]:
-    """Look up the Person this card belongs to. A scan never creates one."""
-    if not (card["aadhaar_last4"] and card["full_name"]):
-        return None
-    key = person_key(card["aadhaar_last4"], card["full_name"], card["dob"] or "", card["gender"] or "")
-    return await db.persons.find_one({"aadhaar_key": key})
-
-
 async def _active_camp(db: AsyncDatabase) -> dict:
     camp = await db.camps.find_one({"is_active": True})
     if not camp:
@@ -109,38 +86,11 @@ def _require_in_camp(patient: dict, camp: dict) -> None:
         raise api_error(409, "WRONG_CAMP", 'That registration is not in this camp.')
 
 
-async def _apply_overwrite(db: AsyncDatabase, patient: dict, card: dict) -> dict:
+async def _overwrite(db: AsyncDatabase, patient: dict, card: dict) -> dict:
     person = None
     if card["aadhaar_last4"] and card["dob"]:
-        person, _ = await _resolve_person({
-            "aadhaar_last4": card["aadhaar_last4"],
-            "full_name": card["full_name"],
-            "dob": card["dob"],
-            "gender": card["gender"],
-        })
-    try:
-        updated = await db.patients.find_one_and_update(
-            {"_id": patient["_id"], "aadhaar_scanned": {"$ne": True}, "person_id": None,
-             "printed_at": None, "queue_status": {"$ne": "seen"}}, {"$set": {
-            **{field: card[field] for field in OVERWRITTEN_FIELDS},
-            "full_name_normalized": normalize_name(card["full_name"] or ""),
-            "aadhaar_scanned": True,
-            "person_id": person["_id"] if person else None,
-            "manual_entry": False,
-            "manual_exception": None,
-            "identity_recheck_required": False,
-        }}, return_document=True)
-    except DuplicateKeyError:
-        if person:
-            existing = await db.patients.find_one(
-                {"person_id": person["_id"], "camp_id": patient["camp_id"]}
-            )
-            if existing:
-                raise _dup_409(existing)
-        raise
-    if not updated:
-        raise await _overwrite_refused(db, patient["_id"])
-    return updated
+        person, _ = await lock_resolution.resolve_person(db, card)
+    return await lock_resolution.overwrite(db, patient, card, person)
 
 
 @router.post("/scan")
@@ -153,46 +103,29 @@ async def scan(
     camp = await _active_camp(db)
     state = await _require_door_open(db, camp)
     card = await _decode_card(body.payload)
-    person = await _known_person(db, card)
-    hits = await _duplicate_hits(db, camp["_id"], _card_as_register_body(card), person)
-
-    scanned_hits = [h for h in hits if _is_scanned_row(h)]
-    own = next((h for h in scanned_hits if person and h.get("person_id") == person["_id"]), None)
-    if own:
-        arrived = await arrival.stamp(db, own, str(actor["_id"]), state)
+    person = await lock_resolution.find_person(db, card)
+    candidates = await lock_resolution.find_candidates(db, camp["_id"], card, person, scanned=True)
+    outcome = lock_resolution.classify(card, candidates, person)
+    if outcome.kind in ("own", "overwrite"):
+        patient = outcome.registration
+        if outcome.kind == "overwrite":
+            patient = await _overwrite(db, patient, card)
+        arrived = await arrival.stamp(db, patient, str(actor["_id"]), state)
         return {
             "outcome": "arrived",
             "registration": ser_patient(arrived),
             "prescription": await _printable_prescription(db, arrived, camp, state),
+            **({"overwritten": True} if outcome.kind == "overwrite" else {}),
         }
-    if scanned_hits:
+    if outcome.kind in ("scanned_elsewhere", "review"):
         return {
             "outcome": "mismatch_review",
-            "registration": ser_patient(scanned_hits[0]),
+            "registration": ser_patient(outcome.registration),
             "card": card,
-            "diff": material_diff(card, scanned_hits[0]),
+            "diff": outcome.diff,
         }
-
-    manual_hits = [h for h in hits if _is_manual(h)]
-    if len(manual_hits) > 1:
-        return {"outcome": "ambiguous", "registrations": [ser_patient(h) for h in manual_hits]}
-    if len(manual_hits) == 1:
-        diff = material_diff(card, manual_hits[0])
-        if not diff:
-            patient = await _apply_overwrite(db, manual_hits[0], card)
-            arrived = await arrival.stamp(db, patient, str(actor["_id"]), state)
-            return {
-                "outcome": "arrived",
-                "registration": ser_patient(arrived),
-                "prescription": await _printable_prescription(db, arrived, camp, state),
-                "overwritten": True,
-            }
-        return {
-            "outcome": "mismatch_review",
-            "registration": ser_patient(manual_hits[0]),
-            "card": card,
-            "diff": diff,
-        }
+    if outcome.kind == "ambiguous":
+        return {"outcome": "ambiguous", "registrations": [ser_patient(h) for h in outcome.registrations]}
     return {"outcome": "no_match", "card": card}
 
 
@@ -210,15 +143,15 @@ async def scan_confirm(
     if not patient:
         raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
     _require_in_camp(patient, camp)
-    person = await _known_person(db, card)
-    hits = await _duplicate_hits(db, camp["_id"], _card_as_register_body(card), person)
-    if all(hit["_id"] != patient["_id"] for hit in hits):
-        holder = next((hit for hit in hits if person and hit.get("person_id") == person["_id"]), None)
+    person = await lock_resolution.find_person(db, card)
+    candidates = await lock_resolution.find_candidates(db, camp["_id"], card, person, scanned=True)
+    if all(candidate["_id"] != patient["_id"] for candidate in candidates):
+        holder = next((c for c in candidates if person and c.get("person_id") == person["_id"]), None)
         if holder:
-            raise _dup_409(holder)
+            raise duplicate_in_camp(holder)
         raise api_error(409, "STALE_CANDIDATE", 'That registration does not match this card.')
-    if _is_manual(patient):
-        patient = await _apply_overwrite(db, patient, card)
+    if is_manual(patient):
+        patient = await _overwrite(db, patient, card)
     arrived = await arrival.stamp(db, patient, str(actor["_id"]), state)
     return {
         "outcome": "arrived",

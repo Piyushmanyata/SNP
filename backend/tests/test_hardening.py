@@ -15,6 +15,7 @@ from fastapi import HTTPException
 
 import helpers
 import routes_camps
+import lock_resolution
 import routes_desk
 import routes_registration
 import server
@@ -133,7 +134,7 @@ class TestConflictsAreNotCrashes:
     def test_confirming_a_card_already_held_in_this_camp_is_a_409(self, monkeypatch):
         async def body(database):
             camp_id, _ = await seed_camp(database)
-            person, _ = await routes_registration._resolve_person(await routes_desk._decode_card(CARD))
+            person, _ = await lock_resolution.resolve_person(database, await routes_desk._decode_card(CARD))
             manual_id = ObjectId()
             await database.patients.insert_many([
                 patient_doc(
