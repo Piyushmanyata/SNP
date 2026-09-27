@@ -378,3 +378,23 @@ Live checks:
 - Every service is running, and backend, frontend and mongo report healthy.
 - The served bundle contains the Clinical find "More patients match" note and the "No connection to the server" message.
 - The backend log has no errors.
+
+## DND failures no longer pause an SMS type — 27 September 2026
+
+[PR 86](https://github.com/Piyushmanyata/SNP/pull/86) merged as `1cf1d3c4b74e5db2b649ff05eaa7d875d0fa07e9`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/1cf1d3c…`. CI run [36254561030](https://github.com/Piyushmanyata/SNP/actions/runs/36254561030) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify.
+
+Before the update, the running `f100841` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-f10084125265d5fd3df1d8c22b9678d192a9f8e0`, and the backup container was restarted to take a pre-deployment snapshot. Only backend, frontend and reminders were rebuilt; MongoDB stayed up. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/f100841…`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed. A delivery report whose reason starts with `DND` no longer counts as a DLT template failure, so one recipient's blocked category cannot pause an SMS type for every patient (ADR 0079).
+
+Live checks:
+
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Every service is running, and backend, frontend and mongo report healthy.
+- The deployed `sms.py` carries the `startswith("DND")` guard.
+- The backend log has no errors.
