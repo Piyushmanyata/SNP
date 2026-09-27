@@ -9,6 +9,8 @@ from bson import ObjectId
 from pymongo.asynchronous.collection import AsyncCollection
 
 import msg91
+import sms
+import sms_recorder
 import reminder_worker
 import routes_reminders
 from seed import TODAY, TOMORROW, patient_doc, recorder, seed_camp
@@ -60,6 +62,7 @@ def _provider(monkeypatch, body, requests=None, *, status=200, fail_connect=None
             pass
 
     monkeypatch.setattr(msg91.http.client, "HTTPSConnection", _Connection)
+    sms.use_provider(msg91)
 
 
 async def _later(database):
@@ -250,7 +253,7 @@ class TestProviderAcceptance:
 class TestBoundedDispatch:
     def test_repeated_cron_runs_are_idempotent_across_page_boundaries(self, monkeypatch):
         monkeypatch.setattr(routes_reminders, "PAGE_SIZE", 2)
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=9)
@@ -266,7 +269,7 @@ class TestBoundedDispatch:
     def test_a_run_is_bounded_and_reports_its_own_incompleteness(self, monkeypatch):
         monkeypatch.setattr(routes_reminders, "PAGE_SIZE", 2)
         monkeypatch.setattr(routes_reminders, "SEND_LIMIT", 2)
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=5)
@@ -283,7 +286,7 @@ class TestBoundedDispatch:
         _run(monkeypatch, body)
 
     def test_a_recipient_beyond_position_ten_thousand_is_processed(self, monkeypatch):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             camp_id, (day_id,) = await seed_camp(database, days=(TOMORROW,), name="Big Camp", venue="Hall A")
@@ -305,7 +308,7 @@ class TestBoundedDispatch:
 
     def test_the_send_budget_carries_across_message_types(self, monkeypatch):
         monkeypatch.setattr(routes_reminders, "SEND_LIMIT", 3)
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             _camp_id, _day_id, ids = await _seed_camp_household(database, n_patients=2)
@@ -329,7 +332,7 @@ class TestBoundedDispatch:
 
     def test_failed_sends_consume_the_budget_and_the_next_run_reaches_later_recipients(self, monkeypatch):
         monkeypatch.setattr(routes_reminders, "SEND_LIMIT", 2)
-        calls = _flaky_provider(monkeypatch, failures=2)
+        calls = _flaky_provider(failures=2)
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=4)
@@ -357,8 +360,10 @@ class TestBoundedDispatch:
         _run(monkeypatch, body, msg91_on=False)
 
 
-def _flaky_provider(monkeypatch, failures):
+def _flaky_provider(failures):
     calls = []
+    provider = sms_recorder.installed()
+    provider.switch_on()
 
     def fake_send(message_type, mobile, variables):
         calls.append({"type": message_type, **variables})
@@ -366,14 +371,13 @@ def _flaky_provider(monkeypatch, failures):
             raise msg91.Unsent("carrier down")
         return f"id-{len(calls)}"
 
-    monkeypatch.setattr(msg91, "send_dlt_sms", fake_send)
-    monkeypatch.setattr(msg91, "configured", lambda: True)
+    provider.outcome = fake_send
     return calls
 
 
 class TestFailedRemindersRetryOnALaterRun:
     def test_a_failure_is_retried_only_after_the_retry_interval(self, monkeypatch):
-        calls = _flaky_provider(monkeypatch, failures=1)
+        calls = _flaky_provider(failures=1)
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=1)
@@ -391,7 +395,7 @@ class TestFailedRemindersRetryOnALaterRun:
         _run(monkeypatch, body)
 
     def test_three_spaced_failures_are_abandoned_and_the_day_can_finish(self, monkeypatch):
-        calls = _flaky_provider(monkeypatch, failures=99)
+        calls = _flaky_provider(failures=99)
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=1)
@@ -408,7 +412,7 @@ class TestFailedRemindersRetryOnALaterRun:
         _run(monkeypatch, body)
 
     def test_a_retry_skips_a_surgery_cancelled_after_the_failure(self, monkeypatch):
-        calls = _flaky_provider(monkeypatch, failures=1)
+        calls = _flaky_provider(failures=1)
 
         async def body(database, client):
             pid = ObjectId()
@@ -431,7 +435,7 @@ class TestFailedRemindersRetryOnALaterRun:
         _run(monkeypatch, body)
 
     def test_a_specs_retry_keeps_its_collection_window(self, monkeypatch):
-        calls = _flaky_provider(monkeypatch, failures=1)
+        calls = _flaky_provider(failures=1)
 
         async def body(database, client):
             pid = ObjectId()

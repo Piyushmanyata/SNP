@@ -295,9 +295,8 @@ class TestRateLimitWindow:
 # --------------------------------------------------------------------------
 
 class TestSmsDoesNotBlockTheLoop:
-    def test_a_slow_provider_leaves_the_loop_free_for_other_work(self, monkeypatch):
-        monkeypatch.setattr(sms.msg91, "configured", lambda: True)
-        monkeypatch.setenv("MSG91_TEMPLATE_REGISTRATION", "test-flow")
+    def test_a_slow_provider_leaves_the_loop_free_for_other_work(self, monkeypatch, sms_provider):
+        sms_provider.switch_on()
 
         async def body(database):
             started = asyncio.Event()
@@ -309,7 +308,7 @@ class TestSmsDoesNotBlockTheLoop:
                 asyncio.run_coroutine_threadsafe(release.wait(), loop).result(5)
                 return "provider-1"
 
-            monkeypatch.setattr(sms.msg91, "send_dlt_sms", slow_send)
+            sms_provider.outcome = slow_send
             camp_id = ObjectId()
             await database.camps.insert_one({"_id": camp_id, "name": "Sikar", "venue": "Sikar", "camp_number": 162})
             patient = {"_id": ObjectId(), "camp_id": camp_id, "phone_normalized": "9876500001", "reg_no": 7}

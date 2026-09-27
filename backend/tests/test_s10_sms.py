@@ -19,11 +19,9 @@ def _disk(monkeypatch):
     monkeypatch.setattr("routes_reports.shutil.disk_usage", lambda path: Usage(100, 20, 80))
 
 
-def test_rejected_canary_pauses_after_one_send(monkeypatch):
-    def reject(*_args):
-        raise msg91.Rejected("low balance")
-
-    monkeypatch.setattr(msg91, "send_dlt_sms", reject)
+def test_rejected_canary_pauses_after_one_send(monkeypatch, sms_provider):
+    sms_provider.switch_on()
+    sms_provider.outcome = "rejected"
 
     async def body(database, client):
         await _seed_camp_household(database, n_patients=3)
@@ -38,9 +36,9 @@ def test_rejected_canary_pauses_after_one_send(monkeypatch):
     _run(monkeypatch, body, canary=True)
 
 
-def test_a_held_lease_does_not_start_another_sweep(monkeypatch):
-    monkeypatch.setattr(msg91, "configured", lambda: True)
-    monkeypatch.setattr(msg91, "send_dlt_sms", lambda *_args: pytest.fail("sent during a held lease"))
+def test_a_held_lease_does_not_start_another_sweep(monkeypatch, sms_provider):
+    sms_provider.switch_on()
+    sms_provider.outcome = lambda *_args: pytest.fail("sent during a held lease")
 
     async def body(database):
         camp_id, _day = await seed_camp(database, days=(TOMORROW,), venue="Hall A")
@@ -69,10 +67,9 @@ async def _gate_open(*_args):
     return "open"
 
 
-def test_sweep_does_not_reread_the_ledger_per_patient(monkeypatch):
+def test_sweep_does_not_reread_the_ledger_per_patient(monkeypatch, sms_provider):
     log = CommandLog()
-    monkeypatch.setattr(msg91, "configured", lambda: True)
-    monkeypatch.setattr(msg91, "send_dlt_sms", lambda *_args: "id")
+    sms_provider.switch_on()
     monkeypatch.setattr(routes_reminders, "_gate", _gate_open)
 
     async def body(database):
@@ -101,10 +98,10 @@ def test_sweep_does_not_reread_the_ledger_per_patient(monkeypatch):
     run_camp(monkeypatch, body, listener=log)
 
 
-def test_outbox_sends_old_queued_rows_and_retires_stale_pending(monkeypatch):
+def test_outbox_sends_old_queued_rows_and_retires_stale_pending(monkeypatch, sms_provider):
     calls = []
-    monkeypatch.setattr(msg91, "configured", lambda: True)
-    monkeypatch.setattr(msg91, "send_dlt_sms", lambda *_args: calls.append(1) or "id")
+    sms_provider.switch_on()
+    sms_provider.outcome = lambda *_args: calls.append(1) or "id"
 
     async def body(database):
         camp_id, _day = await seed_camp(database)
@@ -129,7 +126,7 @@ def test_outbox_sends_old_queued_rows_and_retires_stale_pending(monkeypatch):
     run_camp(monkeypatch, body)
 
 
-def test_http_429_and_503_are_failed_with_a_retry_delay(monkeypatch):
+def test_http_429_and_503_are_failed_with_a_retry_delay(monkeypatch, sms_provider):
     class Response:
         status = 503
 
@@ -153,10 +150,10 @@ def test_http_429_and_503_are_failed_with_a_retry_delay(monkeypatch):
     monkeypatch.setenv("MSG91_AUTH_KEY", "auth")
     monkeypatch.setenv("MSG91_TEMPLATE_CAMP", "tmpl")
     with pytest.raises(msg91.Throttled):
-        msg91.send_dlt_sms("camp", HOUSEHOLD, {"reg_no": "1"})
+        msg91.send("camp", HOUSEHOLD, {"reg_no": "1"})
     Response.status = 429
     with pytest.raises(msg91.Throttled):
-        msg91.send_dlt_sms("camp", HOUSEHOLD, {"reg_no": "1"})
+        msg91.send("camp", HOUSEHOLD, {"reg_no": "1"})
 
     async def body(database):
         camp_id, _day = await seed_camp(database, days=(TODAY,), venue="Hall A")
@@ -164,9 +161,8 @@ def test_http_429_and_503_are_failed_with_a_retry_delay(monkeypatch):
             camp_id=camp_id, phone=HOUSEHOLD, phone_normalized=HOUSEHOLD, reg_no=8,
         )
         await database.patients.insert_one(patient)
-        monkeypatch.setattr(msg91, "configured", lambda: True)
-        monkeypatch.setattr(msg91, "template_id", lambda _kind: "tmpl")
-        monkeypatch.setattr(msg91, "send_dlt_sms", lambda *_args: (_ for _ in ()).throw(msg91.Throttled("HTTP 503")))
+        sms_provider.switch_on()
+        sms_provider.outcome = "throttled"
         assert await sms.deliver_patient_sms(database, patient, "camp", TODAY, "Hall A") == "failed"
         row = await database.reminder_ledger.find_one({"patient_id": patient["_id"]})
         assert row["status"] == "failed"
@@ -203,20 +199,17 @@ def test_reminder_health_thresholds(monkeypatch, ist, done, level):
     assert aged == "red"
 
 
-def test_two_thousand_targets_finish_under_three_minutes(monkeypatch):
+def test_two_thousand_targets_finish_under_three_minutes(monkeypatch, sms_provider):
     import time
 
-    monkeypatch.setenv("MSG91_AUTH_KEY", "auth")
-    monkeypatch.setenv("MSG91_TEMPLATE_CAMP", "tmpl")
-    monkeypatch.setenv("MSG91_TEMPLATE_OT", "tmpl")
-    monkeypatch.setenv("MSG91_TEMPLATE_SPECS", "tmpl")
+    sms_provider.switch_on()
     monkeypatch.setattr(routes_reminders, "_gate", _gate_open)
 
     def slow(*_args):
         time.sleep(0.2)
         return "id"
 
-    monkeypatch.setattr(msg91, "send_dlt_sms", slow)
+    sms_provider.outcome = slow
 
     async def body(database):
         camp_id, (day_id,) = await seed_camp(database, days=(TOMORROW,), venue="Hall A")

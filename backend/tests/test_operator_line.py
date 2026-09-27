@@ -122,7 +122,7 @@ class TestOperatorLine:
 
 class TestFulfilmentMatrix:
     def test_each_item_type_accepts_only_its_matrix(self, monkeypatch):
-        recorder(monkeypatch)
+        recorder()
 
         async def body(database):
             seen = await seen_patient(database)
@@ -162,7 +162,7 @@ class TestFulfilmentMatrix:
         run_camp(monkeypatch, body)
 
     def test_the_two_specs_lines_do_not_delete_each_other_and_409_naming_the_other(self, monkeypatch):
-        recorder(monkeypatch)
+        recorder()
 
         async def body(database):
             seen = await seen_patient(database)
@@ -189,7 +189,7 @@ class TestFulfilmentMatrix:
         run_camp(monkeypatch, body)
 
     def test_only_specs_made_and_ot_consume_their_own_seats(self, monkeypatch):
-        recorder(monkeypatch)
+        recorder()
 
         async def body(database):
             seen = await seen_patient(database)
@@ -214,7 +214,7 @@ class TestFulfilmentMatrix:
         run_camp(monkeypatch, body)
 
     def test_missing_powers_refuse_both_specs_lines_and_allow_medicine_and_ot(self, monkeypatch):
-        recorder(monkeypatch)
+        recorder()
 
         async def body(database):
             seen = await seen_patient(database, measurements=None, fixed_power=None)
@@ -238,7 +238,7 @@ class TestFulfilmentMatrix:
         run_camp(monkeypatch, body)
 
     def test_a_fixed_power_correction_unblocks_specs(self, monkeypatch):
-        recorder(monkeypatch)
+        recorder()
 
         async def body(database):
             seen = await seen_patient(database, fixed_power=None)
@@ -265,7 +265,7 @@ class TestFulfilmentMatrix:
         run_camp(monkeypatch, body)
 
     def test_export_columns_for_the_two_specs_lines_are_independent(self, monkeypatch):
-        recorder(monkeypatch)
+        recorder()
 
         async def body(database):
             camp_id, _ = await seed_camp(database, days=())

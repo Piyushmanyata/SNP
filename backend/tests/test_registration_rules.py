@@ -142,7 +142,7 @@ def test_a_printed_manual_entry_is_never_overwritten(monkeypatch):
 
 
 def test_a_walk_in_after_midnight_on_a_late_camp_day_registers_without_sms(monkeypatch):
-    sent = recorder(monkeypatch)
+    sent = recorder()
 
     async def run(database):
         camp_id, (day_id,) = await seed_camp(database, days=(TODAY,))

@@ -4,7 +4,6 @@ import pytest
 from bson import ObjectId
 from fastapi import BackgroundTasks, HTTPException
 
-import msg91
 import routes_camps
 import routes_clinical
 from conftest import run_db
@@ -105,7 +104,7 @@ def test_camp_day_list_reports_bookings_above_reduced_seats(monkeypatch):
 
 
 def test_camp_day_move_keeps_bookings_and_sends_new_date(monkeypatch):
-    sent = recorder(monkeypatch)
+    sent = recorder()
 
     async def body(database):
         camp_id, (day_id,) = await seed_camp(database, days=(OTHER_DAY,))
@@ -186,7 +185,7 @@ def test_camp_day_edit_rejects_malformed_ids(monkeypatch):
 
 
 def test_an_error_during_a_camp_day_move_changes_nothing_and_the_retry_notifies_once(monkeypatch):
-    sent = recorder(monkeypatch)
+    sent = recorder()
 
     async def body(database):
         camp_id, (day_id,) = await seed_camp(database, days=(OTHER_DAY,))
@@ -208,7 +207,7 @@ def test_an_error_during_a_camp_day_move_changes_nothing_and_the_retry_notifies_
 
 
 def test_a_camp_day_move_queues_its_notices_before_sending(monkeypatch):
-    recorder(monkeypatch)
+    recorder()
 
     async def body(database):
         camp_id, (day_id,) = await seed_camp(database, days=(OTHER_DAY,))
@@ -227,7 +226,7 @@ def test_a_camp_day_move_queues_its_notices_before_sending(monkeypatch):
 
 
 def test_a_booking_after_a_move_gets_one_notice_and_a_seat_change_sends_nothing(monkeypatch):
-    sent = recorder(monkeypatch)
+    sent = recorder()
 
     async def body(database):
         camp_id, (day_id,) = await seed_camp(database, days=(OTHER_DAY,))
@@ -274,7 +273,7 @@ def test_specs_hours_are_fixed_and_not_stored(monkeypatch):
 
 
 def test_a_venue_change_supersedes_the_ot_token_and_queues_one_notice(monkeypatch):
-    sent = recorder(monkeypatch)
+    sent = recorder()
 
     async def body(database):
         camp_id, _ = await seed_camp(database)
@@ -301,7 +300,7 @@ def test_a_venue_change_supersedes_the_ot_token_and_queues_one_notice(monkeypatc
 
 
 def test_each_ot_date_move_supersedes_the_token_once(monkeypatch):
-    sent = recorder(monkeypatch)
+    sent = recorder()
 
     async def body(database):
         camp_id, _ = await seed_camp(database)
@@ -319,7 +318,7 @@ def test_each_ot_date_move_supersedes_the_token_once(monkeypatch):
 
 
 def test_a_specs_day_move_supersedes_the_token_and_queues_one_notice(monkeypatch):
-    sent = recorder(monkeypatch)
+    sent = recorder()
 
     async def body(database):
         camp_id, _ = await seed_camp(database)
@@ -338,7 +337,7 @@ def test_a_specs_day_move_supersedes_the_token_and_queues_one_notice(monkeypatch
 
 
 def test_an_error_during_a_schedule_edit_changes_nothing(monkeypatch):
-    recorder(monkeypatch)
+    recorder()
 
     async def body(database):
         camp_id, _ = await seed_camp(database)
@@ -356,14 +355,10 @@ def test_an_error_during_a_schedule_edit_changes_nothing(monkeypatch):
 
 
 @pytest.mark.parametrize("provider", ["unconfigured", "failed"])
-def test_a_notice_that_cannot_be_sent_puts_the_patient_on_the_contact_list(monkeypatch, provider):
+def test_a_notice_that_cannot_be_sent_puts_the_patient_on_the_contact_list(monkeypatch, provider, sms_provider):
     if provider == "failed":
-        recorder(monkeypatch)
-
-        def refuse(*_args):
-            raise msg91.Unsent("provider down")
-
-        monkeypatch.setattr(msg91, "send_dlt_sms", refuse)
+        sms_provider.switch_on()
+        sms_provider.outcome = "unsent"
 
     async def body(database):
         camp_id, _ = await seed_camp(database)
@@ -380,7 +375,7 @@ def test_a_notice_that_cannot_be_sent_puts_the_patient_on_the_contact_list(monke
 
 
 def test_a_sent_notice_needs_no_phone_call(monkeypatch):
-    recorder(monkeypatch)
+    recorder()
 
     async def body(database):
         camp_id, _ = await seed_camp(database)
@@ -392,7 +387,7 @@ def test_a_sent_notice_needs_no_phone_call(monkeypatch):
 
 
 def test_a_notice_still_queued_after_ten_minutes_puts_the_patient_on_the_contact_list(monkeypatch):
-    recorder(monkeypatch)
+    recorder()
 
     async def body(database):
         camp_id, _ = await seed_camp(database)
@@ -408,7 +403,7 @@ def test_a_notice_still_queued_after_ten_minutes_puts_the_patient_on_the_contact
 
 
 def test_a_token_issued_while_its_specs_day_moves_gets_the_new_venue(monkeypatch):
-    recorder(monkeypatch)
+    recorder()
 
     async def body(database):
         camp_id, _ = await seed_camp(database, days=())

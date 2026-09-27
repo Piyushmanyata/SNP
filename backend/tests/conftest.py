@@ -97,6 +97,18 @@ BASE_URL = _base.rstrip("/") if _base else ""
 API = f"{BASE_URL}/api" if BASE_URL else ""
 
 
+@pytest.fixture(autouse=True)
+def sms_provider():
+    """Every test gets a fresh in-memory SMS provider, switched off like a deployment without MSG91."""
+    import sms
+    import sms_recorder
+    recorder = sms_recorder.Recorder(enabled=False)
+    sms_recorder.install(recorder)
+    previous = sms.use_provider(recorder)
+    yield recorder
+    sms.use_provider(previous)
+
+
 def pytest_sessionfinish(session, exitstatus):
     if os.environ.get("SNP_REQUIRE_LIVE_TESTS") == "1":
         reporter = session.config.pluginmanager.get_plugin("terminalreporter")

@@ -7,6 +7,7 @@ from pymongo.errors import DuplicateKeyError
 import routes_clinical
 import routes_desk
 import routes_registration
+import msg91
 import sms
 from models import RegisterBody
 from seed import CLINICAL, TOMORROW, patient_doc, run_camp, seed_camp
@@ -123,18 +124,17 @@ async def _patient_of_a_numbered_camp(database):
 
 
 @pytest.mark.parametrize("provider_succeeds", [True, False])
-def test_sms_ledger_failure_does_not_escape_or_resend_an_accepted_message(monkeypatch, provider_succeeds):
-    monkeypatch.setattr(sms.msg91, "configured", lambda: True)
-    monkeypatch.setenv("MSG91_TEMPLATE_REGISTRATION", "test-flow")
+def test_sms_ledger_failure_does_not_escape_or_resend_an_accepted_message(monkeypatch, provider_succeeds, sms_provider):
+    sms_provider.switch_on()
     calls = []
 
     def send(*args):
         calls.append(args)
         if not provider_succeeds:
-            raise sms.msg91.Unsent("connection refused")
+            raise msg91.Unsent("connection refused")
         return "accepted"
 
-    monkeypatch.setattr(sms.msg91, "send_dlt_sms", send)
+    sms_provider.outcome = send
     _fail_ledger_updates(monkeypatch, lambda update: True)
 
     async def run(database):
@@ -147,11 +147,10 @@ def test_sms_ledger_failure_does_not_escape_or_resend_an_accepted_message(monkey
     run_camp(monkeypatch, run)
 
 
-def test_accepted_sms_is_not_marked_failed_when_receipt_persistence_fails(monkeypatch):
-    monkeypatch.setattr(sms.msg91, "configured", lambda: True)
-    monkeypatch.setenv("MSG91_TEMPLATE_REGISTRATION", "test-flow")
+def test_accepted_sms_is_not_marked_failed_when_receipt_persistence_fails(monkeypatch, sms_provider):
+    sms_provider.switch_on()
     calls = []
-    monkeypatch.setattr(sms.msg91, "send_dlt_sms", lambda *args: calls.append(args) or "accepted")
+    sms_provider.outcome = lambda *args: calls.append(args) or "accepted"
     _fail_ledger_updates(monkeypatch, lambda update: update["$set"]["status"] == "sent")
 
     async def run(database):

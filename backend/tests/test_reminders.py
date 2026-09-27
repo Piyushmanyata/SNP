@@ -7,7 +7,7 @@ from pathlib import Path
 import httpx
 from bson import ObjectId
 
-import msg91
+import sms_recorder
 import routes_reminders
 import server
 import sms
@@ -128,19 +128,15 @@ class TestMessageCopy:
 
 class TestReminderCronHttp:
     def test_failed_provider_call_is_reported_and_retried_without_duplicate_success(self, monkeypatch):
-        captured = recorder(monkeypatch)
-        provider = msg91.send_dlt_sms
-
-        def fail(*args, **kwargs):
-            raise msg91.Unsent("connection refused")
+        captured = recorder()
+        provider = sms_recorder.installed()
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=1)
-            monkeypatch.setattr(msg91, "send_dlt_sms", fail)
+            provider.script("unsent")
             first = (await _post(client)).json()
             assert first["ok"] is False
             assert first["failed"] == 1
-            monkeypatch.setattr(msg91, "send_dlt_sms", provider)
             await _age_ledger(database, sms.RETRY_AFTER)
             retry = (await _post(client)).json()
             assert retry["ok"] is True
@@ -173,14 +169,12 @@ class TestReminderCronHttp:
         _run(monkeypatch, body, msg91_on=False)
 
     def test_approved_reminder_sends_while_specs_template_is_unavailable(self, monkeypatch):
-        configured = msg91.configured
-        captured = recorder(monkeypatch)
-        monkeypatch.setattr(msg91, "configured", configured)
+        captured = recorder()
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=1)
-            monkeypatch.delenv("MSG91_TEMPLATE_SPECS_TOKEN")
-            monkeypatch.delenv("MSG91_TEMPLATE_SPECS")
+            sms_recorder.installed().templates.pop("specs_token")
+            sms_recorder.installed().templates.pop("specs")
 
             response = await _post(client)
 
@@ -196,7 +190,7 @@ class TestReminderCronHttp:
         _run(monkeypatch, body)
 
     def test_household_of_four_sends_four_camp_reminders(self, monkeypatch):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=4, phone=HOUSEHOLD, venue="Hall A")
@@ -212,7 +206,7 @@ class TestReminderCronHttp:
         _run(monkeypatch, body)
 
     def test_camp_reminder_ledger_row_carries_reg_no_copy(self, monkeypatch):
-        recorder(monkeypatch)
+        recorder()
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=1, phone=HOUSEHOLD, venue="Hall A")
@@ -228,7 +222,7 @@ class TestReminderCronHttp:
         _run(monkeypatch, body)
 
     def test_same_patient_camp_and_ot_sends_two(self, monkeypatch):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             camp_id, _day_id, ids = await _seed_camp_household(database, n_patients=1, phone=HOUSEHOLD, venue="Hall A")
@@ -250,7 +244,7 @@ class TestReminderCronHttp:
         _run(monkeypatch, body)
 
     def test_cancelled_token_excluded_from_ot_and_specs(self, monkeypatch):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             camp_id = await _numbered_camp(database)
@@ -278,7 +272,7 @@ class TestReminderCronHttp:
         _run(monkeypatch, body)
 
     def test_missing_and_invalid_numbers_skipped(self, monkeypatch):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             camp_id, (day_id,) = await seed_camp(database, days=(TOMORROW,), venue="Hall A")
@@ -294,7 +288,7 @@ class TestReminderCronHttp:
         _run(monkeypatch, body)
 
     def test_second_run_same_event_date_emits_nothing_extra(self, monkeypatch):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=4, phone=HOUSEHOLD, venue="Hall A")
@@ -308,7 +302,7 @@ class TestReminderCronHttp:
         _run(monkeypatch, body)
 
     def test_specs_reminder_states_the_token_window_range_and_hours(self, monkeypatch):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             pid = ObjectId()
@@ -345,7 +339,7 @@ class TestReminderCronHttp:
         _run(monkeypatch, body)
 
     def test_a_single_day_legacy_token_reads_as_a_one_day_range(self, monkeypatch):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             pid = ObjectId()
@@ -367,7 +361,7 @@ class TestReminderCronHttp:
         _run(monkeypatch, body)
 
     def test_camp_without_a_number_sends_nothing_until_the_admin_sets_it(self, monkeypatch):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             camp_id, _day, _ids = await _seed_camp_household(database, n_patients=1, camp_number=None)
@@ -381,7 +375,7 @@ class TestReminderCronHttp:
         _run(monkeypatch, body)
 
     def test_venue_over_dlt_variable_limit_is_not_submitted_or_charged(self, monkeypatch):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=1, venue="A" * 31)
@@ -395,7 +389,7 @@ class TestReminderCronHttp:
         _run(monkeypatch, body)
 
     def test_camp_reminder_uses_short_sms_venue(self, monkeypatch):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             camp_id, _day, _ids = await _seed_camp_household(database, n_patients=1, venue="A" * 64)
@@ -410,7 +404,7 @@ class TestReminderCronHttp:
 
     def test_ot_reminder_prefers_the_short_sms_venue(self, monkeypatch):
         long_venue = "Vimla Ramkrishna Bajaj Eye Hospital, Near Canara Bank, Bilasi Mod, Deoghar 814112 (Jharkhand)"
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             pid = ObjectId()
