@@ -12,6 +12,7 @@ from helpers import (
 from serializers import ser_patient
 from security import get_current_user, require_staff, require_any
 from routes_camps import effective_printing
+import arrival
 from aadhaar import decode_aadhaar
 from aadhaar_extract import extract_document
 import sms
@@ -283,9 +284,6 @@ def _build_patient_document(
         "aadhaar_scanned": body.aadhaar_scanned,
         "queue_status": "registered",
         "patient_qr": new_patient_code(),
-        "arrived_at": None,
-        "arrived_by": None,
-        "camp_day_changed_from": None,
         "printed_at": None,
         "seen_at": None,
         "seen_by": None,
@@ -302,9 +300,7 @@ def _build_patient_document(
         "manual_reason": body.manual_reason if is_manual else None,
         "manual_note": body.manual_note if is_manual else None,
         "manual_at_door": bool(body.at_door) if is_manual else False,
-        **({
-            "arrived_at": now_utc(), "arrived_by": str(actor_id), "queue_status": "arrived",
-        } if is_manual and body.at_door and actor_id else {}),
+        **arrival.fields_at_creation(str(actor_id) if is_manual and body.at_door and actor_id else None, now_utc()),
         **({"registration_request_id": body.registration_request_id} if body.registration_request_id else {}),
         "reminder_sms_sent_at": None,
         "created_at": now_utc(),

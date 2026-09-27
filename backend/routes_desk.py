@@ -10,6 +10,7 @@ from helpers import OVERWRITTEN_FIELDS, now_utc, age_from_dob, material_diff, no
 from serializers import ser_patient
 from security import require_staff
 from routes_camps import effective_printing
+import arrival
 from aadhaar import decode_aadhaar
 from routes_registration import (
     _dup_409, _duplicate_hits, _is_manual, _is_scanned_row, _overwrite_refused, _resolve_person,
@@ -108,38 +109,6 @@ def _require_in_camp(patient: dict, camp: dict) -> None:
         raise api_error(409, "WRONG_CAMP", 'That registration is not in this camp.')
 
 
-async def _stamp_arrival(
-    db: AsyncDatabase, patient: dict, actor_id: str,
-    camp: dict, state: Optional[dict] = None,
-) -> Dict[str, Any]:
-    """Arrival is a presence. It never consults camp-day capacity."""
-    if patient.get("arrived_at"):
-        return patient
-    if state is None:
-        state = await _require_door_open(db, camp)
-    updates: Dict[str, Any] = {
-        "arrived_at": now_utc(),
-        "arrived_by": actor_id,
-        "queue_status": "arrived" if patient.get("queue_status") == "registered"
-                        else patient.get("queue_status"),
-    }
-    operating = None
-    if state.get("operating_day_id"):
-        operating = await db.camp_days.find_one({"_id": ObjectId(state["operating_day_id"])})
-    if operating and operating["_id"] != patient.get("camp_day_id"):
-        booked = await db.camp_days.find_one({"_id": patient["camp_day_id"]})
-        updates["camp_day_id"] = operating["_id"]
-        updates["camp_day_changed_from"] = booked["day_date"] if booked else None
-    arrived = await db.patients.find_one_and_update(
-        {"_id": patient["_id"], "arrived_at": None}, {"$set": updates}, return_document=True,
-    )
-    if not arrived:
-        arrived = await db.patients.find_one({"_id": patient["_id"]})
-    if not arrived:
-        raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
-    return arrived
-
-
 async def _apply_overwrite(db: AsyncDatabase, patient: dict, card: dict) -> dict:
     person = None
     if card["aadhaar_last4"] and card["dob"]:
@@ -190,7 +159,7 @@ async def scan(
     scanned_hits = [h for h in hits if _is_scanned_row(h)]
     own = next((h for h in scanned_hits if person and h.get("person_id") == person["_id"]), None)
     if own:
-        arrived = await _stamp_arrival(db, own, str(actor["_id"]), camp, state)
+        arrived = await arrival.stamp(db, own, str(actor["_id"]), state)
         return {
             "outcome": "arrived",
             "registration": ser_patient(arrived),
@@ -211,7 +180,7 @@ async def scan(
         diff = material_diff(card, manual_hits[0])
         if not diff:
             patient = await _apply_overwrite(db, manual_hits[0], card)
-            arrived = await _stamp_arrival(db, patient, str(actor["_id"]), camp, state)
+            arrived = await arrival.stamp(db, patient, str(actor["_id"]), state)
             return {
                 "outcome": "arrived",
                 "registration": ser_patient(arrived),
@@ -250,7 +219,7 @@ async def scan_confirm(
         raise api_error(409, "STALE_CANDIDATE", 'That registration does not match this card.')
     if _is_manual(patient):
         patient = await _apply_overwrite(db, patient, card)
-    arrived = await _stamp_arrival(db, patient, str(actor["_id"]), camp, state)
+    arrived = await arrival.stamp(db, patient, str(actor["_id"]), state)
     return {
         "outcome": "arrived",
         "registration": ser_patient(arrived),
@@ -269,10 +238,9 @@ async def arrive(
     if not p:
         raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
     _require_in_camp(p, camp)
-    if not (p.get("aadhaar_scanned") or p.get("no_card_print") or p.get("arrived_at")):
-        raise api_error(409, "NEEDS_DOOR_SCAN", "Scan this patient's Aadhaar card at the door, or record a No-card print.")
-    state = await (_printing_state(db, camp) if p.get("arrived_at") else _require_door_open(db, camp))
-    arrived = await _stamp_arrival(db, p, str(actor["_id"]), camp, state)
+    arrival.require_arrivable(p)
+    state = await _printing_state(db, camp)
+    arrived = await arrival.stamp(db, p, str(actor["_id"]), state)
     return {"registration": ser_patient(arrived), "prescription": await _printable_prescription(db, arrived, camp, state)}
 
 

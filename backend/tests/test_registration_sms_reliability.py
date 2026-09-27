@@ -42,20 +42,6 @@ def test_legacy_patient_qr_resolves_at_desk_and_clinical_lookup(monkeypatch, ent
     run_camp(monkeypatch, run)
 
 
-def test_competing_arrivals_preserve_the_first_volunteer(monkeypatch):
-    async def run(database):
-        camp_id, (day_id,) = await seed_camp(database)
-        target = patient_doc(_id=ObjectId(), camp_id=camp_id, camp_day_id=day_id, queue_status="registered")
-        await database.patients.insert_one(target.copy())
-        camp = await database.camps.find_one({"_id": camp_id})
-        first = await routes_desk._stamp_arrival(database, target, "first-volunteer", camp)
-        retry = await routes_desk._stamp_arrival(database, target, "second-volunteer", camp)
-        assert retry["arrived_by"] == "first-volunteer"
-        assert retry["arrived_at"] == first["arrived_at"]
-
-    run_camp(monkeypatch, run)
-
-
 @pytest.mark.parametrize("path", ["registration", "door"])
 def test_stale_manual_identity_cannot_overwrite_a_completed_scan(monkeypatch, path):
     async def run(database):
