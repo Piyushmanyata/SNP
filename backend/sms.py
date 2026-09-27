@@ -21,8 +21,8 @@ OT_TOKEN = "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र
 OT_REMINDER = "कल ({date}) को Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपका नेत्र ऑपरेशन निर्धारित है। पर्चा, टोकन ({reg_no}), आधार कार्ड, राशन कार्ड और मोबाइल नंबर साथ अवश्य लाएँ। स्थल: {venue}।"
 SPECS_PICKUP_START_TIME = "10:00"
 SPECS_PICKUP_END_TIME = "17:00"
-SPECS_TOKEN = "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपको चश्मा {date} से {end_date} तक प्रतिदिन 10:00 AM से 5:00 PM तक {venue} में दिया जाएगा। कृपया चश्मे का टोकन ({reg_no}) लेकर अवश्य आएँ।"
-SPECS_REMINDER = "Sikar Zilla Welfare Trust के {camp_no} वे शिविर के चश्मे बनकर तैयार हैं। चश्मे {date} से {end_date} तक प्रतिदिन 10:00 AM से 5:00 PM तक {venue} आकर ले जाएँ। टोकन क्रमांक {reg_no} अवश्य साथ लाएँ।"
+SPECS_TOKEN = "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में जाँच के बाद आपके लिए बनाया गया चश्मा {date} से {end_date} के बीच {venue} पर आपको दिया जाएगा। आपका चश्मा टोकन क्रमांक: {reg_no}।"
+SPECS_REMINDER = "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में बना आपका चश्मा तैयार है। कृपया {date} से {end_date} के बीच {venue} पर आकर प्राप्त करें। टोकन क्रमांक {reg_no} अवश्य साथ लाएँ।"
 OT_CHANGE = "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपके ऑपरेशन की तारीख या स्थान बदल गया है। नई तारीख: {date}। स्थल: {venue}। पुराने टोकन पर लिखी तारीख और स्थान अब मान्य नहीं हैं। क्रमांक: {reg_no}।"
 SPECS_CHANGE = "Sikar Zilla Welfare Trust के {camp_no} वें नेत्र शिविर में आपके चश्मे लेने की तारीख या स्थान बदल गया है। चश्मा {date} से {end_date} तक प्रतिदिन 10:00 AM से 5:00 PM तक {venue} में मिलेगा। पुराने टोकन पर लिखी तारीख और स्थान अब मान्य नहीं हैं। क्रमांक: {reg_no}।"
 

@@ -414,7 +414,7 @@ class TestDisplayedDates:
             if message_type.startswith("specs"):
                 assert sent[0]["end_date"] == _dmy(end)
             ledger = await db.reminder_ledger.find_one({"patient_id": patient["_id"]})
-            if message_type.startswith("specs"):
+            if message_type == "specs_change":
                 assert "10:00 AM से 5:00 PM" in ledger["copy"]
             assert ledger["event_date"] == start
             assert _dmy(start) in ledger["copy"]
