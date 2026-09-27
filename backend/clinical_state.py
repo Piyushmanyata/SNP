@@ -153,22 +153,86 @@ def conflict(code: str, message: str, **extra: Any) -> HTTPException:
     return api_error(409, code.upper(), message, **extra)
 
 
-async def recover_operation(db, operation_id: str, kind: str, digest: str, session=None) -> Optional[dict]:
-    if not operation_id:
-        raise api_error(400, "OPERATION_ID_IS_REQUIRED", 'operation_id is required')
-    existing = await db.clinical_operations.find_one({"operation_id": operation_id}, session=session)
-    if existing is None:
-        return None
-    if existing.get("kind") != kind or existing.get("payload_hash") != digest:
-        raise conflict("operation_conflict", "This operation id was used for a different request.")
-    return existing
+SPECS_EXCLUSION = {
+    "specs_fixed": ("specs_made", "Spectacles to be made"),
+    "specs_made": ("specs_fixed", "Fixed-power specs"),
+}
 
 
-async def record_operation(db, operation_id: str, kind: str, digest: str, patient_id, result: dict, session) -> None:
-    await db.clinical_operations.insert_one({
-        "operation_id": operation_id, "kind": kind, "payload_hash": digest, "patient_id": patient_id,
-        "result": result, "created_at": now_utc(),
-    }, session=session)
+def require_printed(patient: dict) -> None:
+    gate = arrival_ready(patient)
+    if gate == "not_arrived":
+        raise conflict("not_arrived", "This patient has not arrived at the door yet.")
+    if gate == "never_printed":
+        raise conflict("never_printed", "This patient's prescription was never printed.")
+
+
+def require_not_completed(patient: dict) -> None:
+    if patient.get("committed_revision_id"):
+        raise conflict("already_completed", "This patient already has a completed prescription.")
+
+
+def require_generation(patient: dict, expected: int) -> None:
+    if generation_of(patient) != expected:
+        raise conflict("stale_generation", "The prescription changed; reload and retry.")
+
+
+def require_unchanged(patient: dict, expected: int, revision_id: Any) -> None:
+    if generation_of(patient) != expected or patient.get("committed_revision_id") != revision_id:
+        raise conflict("stale_generation", "The prescription changed; reload and retry.")
+
+
+def draft_conflict() -> HTTPException:
+    return conflict("draft_version_conflict", "Another operator saved this prescription; reload before saving.")
+
+
+def require_draft_version(transcription: Optional[dict], expected: Optional[int]) -> None:
+    if transcription and expected is not None and (transcription.get("draft_version") or 0) != max(expected, 0):
+        raise draft_conflict()
+
+
+def require_undoable(patient: dict, issued: bool) -> None:
+    if issued:
+        raise conflict("undo_after_issue", "Completion cannot be undone after an issue or pending issue.")
+    if not patient.get("committed_revision_id"):
+        raise conflict("not_completed", "There is no current completion to undo.")
+
+
+def require_fresh_review(
+    patient: dict, revision: Optional[dict], paper_reviewed: bool, revision_id: Optional[str], generation: Optional[int],
+) -> dict:
+    """The operator compared the paper with the prescription that is still committed."""
+    if not patient.get("committed_revision_id") or patient.get("queue_status") != "seen":
+        raise conflict("not_completed", "Issue requires a completed prescription.")
+    if not paper_reviewed or not revision_id or generation is None:
+        raise conflict("review_required", "Confirm the paper against the saved prescription before issuing.")
+    stale = conflict("stale_review", "The reviewed prescription is no longer current. Review the paper again.")
+    if str(patient["committed_revision_id"]) != revision_id or generation_of(patient) != generation:
+        raise stale
+    if not revision:
+        raise conflict("not_completed", "Issue requires a completed prescription.")
+    if str(revision.get("patient_id")) != str(patient["_id"]):
+        raise stale
+    return revision
+
+
+def require_line_prescribed(revision: dict, item_type: str) -> None:
+    if revision.get("none_prescribed") or item_type not in (revision.get("prescribed_lines") or []):
+        raise conflict("line_not_prescribed", "This line is not prescribed on the completed prescription.")
+    if item_type == "ot" and revision.get("ot_outcome") != "iol_surgery":
+        raise conflict("hospital_referral", "A Hospital referral is complete once the prescription is saved; nothing is recorded at the Hospital station.")
+
+
+def require_specs_exclusive(item_type: str, other_record: Optional[dict]) -> None:
+    if other_record:
+        raise api_error(409, "SPECS_LINE_EXCLUSIVE", f'This patient already has a {SPECS_EXCLUSION[item_type][1]} record.')
+
+
+def require_correction_allowed(surgery_scheduled: bool, specs_scheduled: bool) -> None:
+    if surgery_scheduled:
+        raise conflict("surgery_scheduled", "Record Surgery declined at the Hospital station before changing a scheduled IOL surgery.")
+    if specs_scheduled:
+        raise conflict("SPECS_SCHEDULED", "Cancel the Spectacles to be made order at the Spectacles station before changing it.")
 
 
 async def insert_revision(
@@ -202,35 +266,14 @@ async def insert_revision(
     return doc
 
 
-async def _commit(db, patient: dict, fields: dict, session) -> dict:
+async def commit(db, patient: dict, fields: dict, session) -> dict:
+    """Writes the patient's clinical fields and moves its generation on by one."""
     return await db.patients.find_one_and_update(
         {"_id": patient["_id"]},
         {"$set": {**fields, "clinical_generation": generation_of(patient) + 1}},
         return_document=True,
         session=session,
     )
-
-
-async def commit_completion(db, patient: dict, revision: dict, actor: dict, session) -> dict:
-    return await _commit(db, patient, {
-        "committed_revision_id": revision["_id"],
-        "queue_status": "seen",
-        "seen_at": now_utc(),
-        "seen_by": str(actor["_id"]),
-    }, session)
-
-
-async def commit_correction(db, patient: dict, revision: dict, session) -> dict:
-    return await _commit(db, patient, {"committed_revision_id": revision["_id"]}, session)
-
-
-async def commit_undo(db, patient: dict, session) -> dict:
-    return await _commit(db, patient, {
-        "committed_revision_id": None,
-        "queue_status": "arrived",
-        "seen_at": None,
-        "seen_by": None,
-    }, session)
 
 
 async def has_issue_history(db, patient: dict, session) -> bool:
