@@ -398,3 +398,24 @@ Live checks:
 - Every service is running, and backend, frontend and mongo report healthy.
 - The deployed `sms.py` carries the `startswith("DND")` guard.
 - The backend log has no errors.
+
+## Specs SMS switch to Service Implicit templates — 27 September 2026
+
+[PR 87](https://github.com/Piyushmanyata/SNP/pull/87) merged as `583f3d8515a646817f887c26378eef28adbaa056`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/583f3d8…`. CI run [36303903782](https://github.com/Piyushmanyata/SNP/actions/runs/36303903782) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify.
+
+Before the update, the running `1cf1d3c` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-1cf1d3c4b74e5db2b649ff05eaa7d875d0fa07e9`, and the backup container was restarted to take a pre-deployment snapshot. Only backend, frontend and reminders were rebuilt; MongoDB stayed up. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/1cf1d3c…`.
+3. Run `up -d --no-build` from that directory.
+4. In MSG91, mark v1.0 of `SNP_Specs_Token` and `SNP_Specs_Reminder` active again.
+
+No data migration was needed. The Specs Token and Specs Reminder SMS now use the Service Implicit DLT templates `1777179043925249659` and `1777179043934974720` (ADR 0085). In MSG91 each is version v1.1 of the existing template, verified by DLT and marked active, so `MSG91_TEMPLATE_SPECS_TOKEN` and `MSG91_TEMPLATE_SPECS` in `/opt/snp/.env.production` were left unchanged.
+
+Live checks:
+
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Every service is running, and backend, frontend and mongo report healthy.
+- The backend and reminders containers both carry the new specs copy.
+- The backend and reminders logs have no errors.
