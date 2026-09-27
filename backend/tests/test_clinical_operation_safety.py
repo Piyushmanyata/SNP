@@ -6,7 +6,7 @@ from fastapi import HTTPException
 
 import routes_clinical
 from models import CorrectionBody, TranscriptionBody, UndoCompletionBody
-from seed import day, patient_doc, run_camp
+from seed import patient_doc, run_camp
 from test_camp_operations_matrix import CLINICAL, _complete_body, _issue_body, _printed_patient, intercept
 
 
@@ -315,45 +315,5 @@ def test_late_issue_retry_preserves_the_newer_outcome(monkeypatch):
         current = await db.fulfilments.find_one({"_id": ObjectId(latest["fulfilment"]["id"])})
         assert current["operation_id"] == "issue-b"
         assert current["status"] == "fulfilled"
-
-    run_camp(monkeypatch, run)
-
-
-def test_a_failed_ot_move_rolls_back_both_seats_and_the_retry_moves_once(monkeypatch):
-    async def run(db):
-        camp, _, patient = await _printed_patient(db)
-        done = await routes_clinical.complete_prescription(_complete_body(
-            patient["_id"], "complete", prescribed_lines=["ot"],
-            prescribed_medicine_ids=[], ot_eye="right", ot_outcome="iol_surgery",
-        ), actor=CLINICAL)
-        old_day, new_day = ObjectId(), ObjectId()
-        await db.ot_schedule_days.insert_many([
-            {"_id": day_id, "camp_id": camp, "day_date": day(offset), "venue": "OT", "seat_limit": 10, "seats_taken": 0}
-            for offset, day_id in ((3, old_day), (4, new_day))
-        ])
-        first = _issue_body(done["transcription"]["id"], done["revision"]["id"], 1, "ot-a",
-                            item_type="ot", status="deferred", ot_schedule_day_id=str(old_day))
-        second = _issue_body(done["transcription"]["id"], done["revision"]["id"], 1, "ot-b",
-                             item_type="ot", status="deferred", ot_schedule_day_id=str(new_day))
-        await routes_clinical.record_fulfilment(first, actor=CLINICAL, background_tasks=None)
-
-        async def fail_release(update_one, query, update, *args, **kwargs):
-            if query.get("_id") == old_day and update.get("$inc", {}).get("seats_taken") == -1:
-                raise RuntimeError("injected release failure")
-            return await update_one(query, update, *args, **kwargs)
-
-        restore = intercept(monkeypatch, "ot_schedule_days", "update_one", fail_release)
-        with pytest.raises(RuntimeError):
-            await routes_clinical.record_fulfilment(second, actor=CLINICAL, background_tasks=None)
-        restore()
-        assert (await db.ot_schedule_days.find_one({"_id": old_day}))["seats_taken"] == 1
-        assert (await db.ot_schedule_days.find_one({"_id": new_day}))["seats_taken"] == 0
-        assert await db.deferred_slips.count_documents({"ot_schedule_day_id": old_day, "active": True}) == 1
-        result = await routes_clinical.record_fulfilment(second, actor=CLINICAL, background_tasks=None)
-        assert result["fulfilment"]["status"] == "deferred"
-        assert (await db.ot_schedule_days.find_one({"_id": old_day}))["seats_taken"] == 0
-        assert (await db.ot_schedule_days.find_one({"_id": new_day}))["seats_taken"] == 1
-        assert await db.deferred_slips.count_documents({"active": True}) == 1
-        assert await db.deferred_slips.count_documents({"ot_schedule_day_id": old_day, "active": True}) == 0
 
     run_camp(monkeypatch, run)

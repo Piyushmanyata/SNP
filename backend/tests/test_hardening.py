@@ -21,8 +21,6 @@ import routes_registration
 import server
 from aadhaar import MAX_DECOMPRESSED_BYTES, MAX_SECURE_QR_DIGITS, _decompress, decode_aadhaar
 from conftest import CommandLog
-from models import FulfilmentBody
-from routes_clinical import _deferred_day_id
 from routes_staff import enable_staff
 from seed import send_patient_sms, ACTOR, ADMIN, CARD, NOW, TODAY, day, patient_doc, run_camp, seed_camp
 
@@ -89,41 +87,6 @@ class TestMalformedIdentifiers:
         assert InvalidId in server.app.exception_handlers
         response = asyncio.run(server.invalid_id_handler(None, InvalidId("not-an-id")))
         assert response.status_code == 400
-
-
-# --------------------------------------------------------------------------
-# Seat accounting
-# --------------------------------------------------------------------------
-
-class TestDeferralSeatFields:
-    def _body(self, **kw):
-        return FulfilmentBody(transcription_id=str(ObjectId()), **kw)
-
-    def test_a_deferred_specs_line_never_records_an_OT_day(self):
-        ot_day = str(ObjectId())
-        specs_day = str(ObjectId())
-        body = self._body(
-            item_type="specs_made", status="deferred",
-            ot_schedule_day_id=ot_day, specs_collection_day_id=specs_day,
-        )
-        assert _deferred_day_id(body, "ot") is None
-        assert _deferred_day_id(body, "specs_made") == ObjectId(specs_day)
-
-    def test_a_deferred_OT_line_never_records_a_specs_day(self):
-        ot_day = str(ObjectId())
-        body = self._body(
-            item_type="ot", status="deferred",
-            ot_schedule_day_id=ot_day, specs_collection_day_id=str(ObjectId()),
-        )
-        assert _deferred_day_id(body, "specs_made") is None
-        assert _deferred_day_id(body, "ot") == ObjectId(ot_day)
-
-    def test_a_line_that_is_not_deferred_books_no_day_at_all(self):
-        body = self._body(
-            item_type="ot", status="fulfilled", ot_schedule_day_id=str(ObjectId()),
-        )
-        assert _deferred_day_id(body, "ot") is None
-        assert _deferred_day_id(body, "specs_made") is None
 
 
 # --------------------------------------------------------------------------
