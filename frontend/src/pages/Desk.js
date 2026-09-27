@@ -9,7 +9,9 @@ import { ScanOutcome, MismatchReview } from "../components/desk/ScanOutcome";
 import { PaperCheck } from "../components/desk/PaperCheck";
 import { PendingStat } from "../components/desk/Pending";
 import { Lookalikes } from "../components/desk/Lookalikes";
-import { EMPTY_REASON, ManualReason, cardInHand, reasonBody, reasonReady } from "../components/desk/ManualReason";
+import { EMPTY_REASON, ManualReason, cardInHand, reasonReady } from "../components/desk/ManualReason";
+import { REQUEST_CONFLICT, hasAge, registerPatient, registrationError } from "../components/desk/register";
+import { useDeskSession } from "../components/desk/useDeskSession";
 import { alreadyPrintedLine, printedLine } from "../components/desk/printed";
 import { PrescriptionSheet } from "../components/print/PrescriptionSheet";
 import { printDocument, IMAGE_WAIT_MS } from "../lib/printJob";
@@ -35,29 +37,10 @@ const EMPTY_REG_FORM = Object.freeze({
   dob: "",
 });
 
-const AADHAAR_PAYLOAD = /^(\d{100,}|<.*>)$/s;
 const REFRESH_MS = 30000;
-const REQUEST_CONFLICT = "REGISTRATION_REQUEST_CONFLICT";
 
 function digitsOnly(value, max) {
   return value.replace(/\D/g, "").slice(0, max);
-}
-
-function hasAge(age) {
-  return String(age ?? "") !== "";
-}
-
-function registrationError(err) {
-  const payload = errorPayload(err);
-  if (payload?.code === "DUPLICATE_IN_CAMP") {
-    return `Already registered as #${payload.registration.reg_no}. Find them below and print.`;
-  }
-  if (payload?.code === "AMBIGUOUS_MANUAL_ENTRY") {
-    const nos = (payload.registrations || []).map((r) => `#${r.reg_no}`).join(", ");
-    return `Multiple Manual entries match (${nos}). Scan the card at the door to pick one.`;
-  }
-  if (payload?.code === REQUEST_CONFLICT) return "Saved earlier. Search for the patient.";
-  return formatApiError(err);
 }
 
 function logosWithin(campId) {
@@ -73,56 +56,14 @@ async function printPrescription(rx) {
   await printDocument(<PrescriptionSheet rx={rx} logos={logos} />, { pageSize: "A4" });
 }
 
-async function registerPatient({ form, qrPayload, dayId, reqId, reason, atDoor, reviewConfirmedId, differentPerson }) {
-  const scanned = Boolean(qrPayload);
-  const manual = scanned ? { code: null, note: null } : reasonBody(reason);
-  const { data } = await api.post("/register", {
-    full_name: form.full_name,
-    age: hasAge(form.age) ? Number(form.age) : null,
-    phone: normalizePhone(form.phone),
-    gender: form.gender || null,
-    address: form.address || null,
-    aadhaar_last4: form.aadhaar_last4 || null,
-    dob: form.dob || null,
-    aadhaar_scanned: scanned,
-    qr_payload: qrPayload || null,
-    camp_day_id: dayId,
-    registration_request_id: reqId,
-    manual_reason: manual.code,
-    manual_note: manual.note,
-    at_door: Boolean(atDoor) && !scanned,
-    review_confirmed_id: reviewConfirmedId || null,
-    different_person: Boolean(differentPerson),
-  });
-  return data;
-}
-
 export default function Desk() {
   const { user } = useAuth();
   const [kpi, setKpi] = useState(null);
   const [loadErr, setLoadErr] = useState("");
   const [days, setDays] = useState([]);
   const [camp, setCamp] = useState(null);
-  const [regMode, setRegMode] = useState("");
-  const [scanResult, setScanResult] = useState(null);
-  const [scanPayload, setScanPayload] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [found, setFound] = useState(null);
-  const [findVal, setFindVal] = useState("");
-  const [searchResults, setSearchResults] = useState(null);
-  const [banner, setBanner] = useState("");
-  const [error, setError] = useState("");
-  const [doorPhone, setDoorPhone] = useState("");
-  const walkAttempt = useRef({ key: "", reqId: "", patientId: "" });
-  const [scanning, setScanning] = useState(false);
-  const findSequence = useRef(0);
   const loadSequence = useRef(0);
-  const [preRegPayload, setPreRegPayload] = useState("");
-  const [paperCheck, setPaperCheck] = useState(null);
-  const [printNote, setPrintNote] = useState("");
   const [logoState, setLogoState] = useState("loading");
-  const printing = useRef(false);
-  const focusUsbBox = useRef(false);
   const [printingOpen, setPrintingOpen] = useState(false);
   const [operatingDayId, setOperatingDayId] = useState("");
   const noCamp = !camp;
@@ -163,263 +104,20 @@ export default function Desk() {
       document.removeEventListener("visibilitychange", refresh);
     };
   }, [load]);
-  useEffect(() => () => { findSequence.current += 1; }, []);
 
   const countRegistration = useCallback((data) => {
     if (data.created) setKpi((k) => k && { ...k, registered: k.registered + 1 });
   }, []);
 
-  const clearScan = useCallback(() => { setScanResult(null); setScanPayload(""); }, []);
-  const abandonScan = useCallback(() => {
-    findSequence.current += 1;
-    clearScan();
-    setDoorPhone("");
-    setScanning(false);
-  }, [clearScan]);
-
-  const resolveDoorScan = useCallback(async (payload) => {
-    const request = ++findSequence.current;
-    setBanner(""); setError(""); setSearchResults(null); setFound(null); setPaperCheck(null);
-    setRegMode((mode) => (mode === "door" ? "" : mode));
-    clearScan();
-    setDoorPhone("");
-    setScanPayload(payload);
-    setScanning(true);
-    try {
-      const { data } = await api.post("/desk/scan", { payload });
-      if (request !== findSequence.current) return { outcome: "card", quiet: true, superseded: true };
-      setScanResult(data);
-      if (data.outcome === "arrived") {
-        const extra = data.overwritten ? " (card details updated)" : "";
-        setBanner(`Arrived: #${data.registration.reg_no} — ${data.registration.full_name}${extra}`);
-      }
-      return { outcome: "card", source: "desk_scan" };
-    } catch (err) {
-      if (request !== findSequence.current) return { outcome: "card", quiet: true, superseded: true };
-      clearScan();
-      const detail = errorPayload(err);
-      if (detail?.code === "NOT_A_CARD") return { outcome: "garbage", message: detail.message };
-      throw err;
-    } finally {
-      if (request === findSequence.current) setScanning(false);
-    }
-  }, [clearScan]);
-
-  const confirmPatient = useCallback(async (patientId) => {
-    if (!patientId || busy || scanning) return;
-    const request = ++findSequence.current;
-    setBusy(true); setError("");
-    try {
-      const { data } = await api.post("/desk/scan/confirm", {
-        patient_id: patientId,
-        payload: scanPayload,
-      });
-      if (request !== findSequence.current) return;
-      setScanResult(data);
-      setBanner(`Arrived: #${data.registration.reg_no} — ${data.registration.full_name}`);
-    } catch (err) {
-      if (request === findSequence.current) setError(formatApiError(err));
-    } finally {
-      setBusy(false);
-    }
-  }, [scanPayload, busy, scanning]);
-
-  const confirmMismatch = useCallback(() => {
-    confirmPatient(scanResult?.registration?.id);
-  }, [confirmPatient, scanResult]);
-
-  const lookupValue = useCallback(async (value, reprint = false) => {
-    const request = ++findSequence.current;
-    setScanning(false);
-    setBanner(""); setError(""); setSearchResults(null); setFound(null); setPaperCheck(null);
-    clearScan();
-    try {
-      const { data } = await api.post("/desk/lookup", { value });
-      if (request !== findSequence.current) return false;
-      setFound({ reg: data.registration, reprint });
-      return true;
-    } catch (err) {
-      if (request !== findSequence.current) return false;
-      setFound(null);
-      setError(formatApiError(err));
-      return false;
-    }
-  }, [clearScan]);
-
-  const lookupCode = useCallback((value) => lookupValue(value, false), [lookupValue]);
-
-  const doFind = useCallback(async (e) => {
-    e?.preventDefault();
-    const value = findVal.trim();
-    if (!value) { setSearchResults(null); return; }
-    if (AADHAAR_PAYLOAD.test(value)) {
-      setFindVal("");
-      if (!printingOpen) {
-        setError("That is an Aadhaar QR. Use New Registration to register this patient.");
-        return;
-      }
-      try {
-        const result = await resolveDoorScan(value);
-        if (result && result.outcome !== "card") setError(result.message);
-      } catch (err) {
-        setError(formatApiError(err));
-      }
-      return;
-    }
-    if (/^\d+$/.test(value) || /^snp:/i.test(value)) {
-      if (await lookupValue(value, /^\d+$/.test(value))) setFindVal("");
-      return;
-    }
-    const request = ++findSequence.current;
-    setBanner(""); setError(""); setFound(null); setSearchResults(null);
-    clearScan();
-    setScanning(false);
-    try {
-      const { data } = await api.get(`/patients/search?q=${encodeURIComponent(value)}`);
-      if (request !== findSequence.current) return;
-      setSearchResults(data.results);
-    } catch (err) {
-      if (request !== findSequence.current) return;
-      setError(formatApiError(err));
-    }
-  }, [findVal, lookupValue, clearScan, printingOpen, resolveDoorScan]);
-
-  const print = useCallback(async (reg, known) => {
-    if (printing.current) return;
-    printing.current = true;
-    const request = findSequence.current;
-    setError(""); setPrintNote("");
-    try {
-      let rx = known;
-      if (!reg.arrived_at) rx = (await api.post(`/desk/arrive/${reg.id}`)).data.prescription;
-      if (!rx) rx = (await api.get(`/desk/print/${reg.id}`)).data.prescription;
-      if (request !== findSequence.current) return;
-      await printPrescription(rx);
-      if (request === findSequence.current) setPaperCheck({ reg, rx, request, busy: false, error: "" });
-    } catch (err) {
-      if (request === findSequence.current) setError(formatApiError(err));
-    } finally {
-      printing.current = false;
-    }
-  }, []);
-
-  const printScanned = useCallback((reg) => print(reg, scanResult?.prescription), [print, scanResult]);
-
-  const confirmPaper = useCallback(async () => {
-    const check = paperCheck;
-    if (check.request !== findSequence.current) {
-      setPaperCheck(null);
-      return;
-    }
-    setPaperCheck({ ...check, busy: true, error: "" });
-    try {
-      const { data } = await api.post(`/desk/print/${check.reg.id}`);
-      setPaperCheck(null);
-      if (check.request !== findSequence.current) return;
-      findSequence.current += 1;
-      clearScan();
-      setFound(null);
-      setBanner(`Printed #${data.registration.reg_no} — ${data.registration.full_name}. Next patient.`);
-      focusUsbBox.current = true;
-    } catch (err) {
-      setPaperCheck({ ...check, busy: false, error: formatApiError(err) });
-    }
-  }, [paperCheck, clearScan]);
-
-  const dismissPaper = useCallback((note) => {
-    setPaperCheck(null);
-    setScanResult((result) => result && { ...result, prescription: null });
-    setPrintNote(note);
-  }, []);
-
-  const printAgain = useCallback(() => {
-    const check = paperCheck;
-    dismissPaper("");
-    print(check.reg);
-  }, [paperCheck, dismissPaper, print]);
-
-  useEffect(() => {
-    if (paperCheck || !focusUsbBox.current) return;
-    focusUsbBox.current = false;
-    document.querySelector("[data-usb-box]")?.focus();
-  }, [paperCheck]);
-
-  const noCardPrint = useCallback(async (reg, reason) => {
-    setError("");
-    try {
-      const { data } = await api.post("/desk/no-card", { patient_id: reg.id, reason: reason.code, note: reasonBody(reason).note });
-      const released = data.registration;
-      setFound((current) => (current?.reg.id === released.id ? { ...current, reg: released } : current));
-      setSearchResults((current) => current && current.map((row) => (row.id === released.id ? released : row)));
-      await print(released);
-      return true;
-    } catch (err) {
-      setError(formatApiError(err));
-      return false;
-    }
-  }, [print]);
-
-  const openPreReg = useCallback(() => { setRegMode("prereg"); }, []);
-  const openDoorManual = useCallback(() => { setRegMode("door"); }, []);
-  const closeRegistration = useCallback(() => { setRegMode(""); setPreRegPayload(""); }, []);
-  const showRegistered = useCallback((reg) => { setFound({ reg, reprint: true }); }, []);
+  const [state, actions] = useDeskSession({
+    printPrescription, onCreated: countRegistration, printingOpen, operatingDayId,
+  });
+  const { regMode, found, findVal, searchResults, banner, error, printNote } = state;
 
   useWedgeBurst({
     enabled: !printingOpen && !regMode && !noCamp,
-    onBurst: (payload) => {
-      setPreRegPayload(payload);
-      setRegMode("prereg");
-    },
+    onBurst: actions.preRegBurst,
   });
-
-  const submitDoorWalkIn = useCallback(async () => {
-    if (!scanResult?.card) return;
-    if (!operatingDayId) {
-      setError("No operating camp day. Use Pre-registration.");
-      return;
-    }
-    const request = ++findSequence.current;
-    setBusy(true); setError("");
-    const key = scanPayload || "";
-    if (walkAttempt.current.key !== key) {
-      walkAttempt.current = { key, reqId: v4(), patientId: "" };
-    }
-    try {
-      const card = scanResult.card;
-      let patientId = walkAttempt.current.patientId;
-      if (!patientId) {
-        const created = await registerPatient({
-          form: {
-            full_name: card.full_name,
-            age: card.age ?? "",
-            phone: doorPhone,
-            gender: card.gender,
-            address: card.address,
-            aadhaar_last4: card.aadhaar_last4,
-            dob: card.dob,
-          },
-          qrPayload: scanPayload,
-          dayId: operatingDayId,
-          reqId: walkAttempt.current.reqId,
-        });
-        countRegistration(created);
-        patientId = created.registration.id;
-        walkAttempt.current.patientId = patientId;
-      }
-      const arrived = await api.post(`/desk/arrive/${patientId}`);
-      walkAttempt.current = { key: "", reqId: "", patientId: "" };
-      if (request !== findSequence.current) return;
-      const reg = arrived.data.registration;
-      setScanResult({ outcome: "arrived", registration: reg, prescription: arrived.data.prescription });
-      setScanPayload("");
-      setBanner(`Registered and arrived: #${reg.reg_no} — ${reg.full_name}`);
-      setDoorPhone("");
-    } catch (err) {
-      if (request !== findSequence.current) return;
-      if (errorPayload(err)?.code === REQUEST_CONFLICT) walkAttempt.current = { key, reqId: v4(), patientId: "" };
-      setError(registrationError(err));
-    } finally { setBusy(false); }
-  }, [scanResult, scanPayload, operatingDayId, doorPhone, countRegistration]);
 
   if (loadErr && !kpi) return <Layout title="Desk"><ErrorCard message={loadErr} onRetry={load} /></Layout>;
 
@@ -452,7 +150,7 @@ export default function Desk() {
             <p className="text-sm text-slate-500 mb-3">
               Books a seat and sends the patient their registration number. Nothing prints.
             </p>
-            <Button size="lg" onClick={openPreReg} disabled={noCamp} data-testid="new-registration-button">
+            <Button size="lg" onClick={actions.openPreReg} disabled={noCamp} data-testid="new-registration-button">
               <UserPlus className="w-5 h-5" /> New Registration
             </Button>
           </Card>
@@ -461,24 +159,7 @@ export default function Desk() {
         </>
       )}
 
-      {printingOpen && <DoorScanCard
-        noCamp={noCamp}
-        resolveDoorScan={resolveDoorScan}
-        onPatientCode={lookupCode}
-        onManual={openDoorManual}
-        error={error}
-        banner={banner}
-        scanResult={scanResult}
-        busy={busy}
-        print={printScanned}
-        confirmMismatch={confirmMismatch}
-        confirmPatient={confirmPatient}
-        doorPhone={doorPhone}
-        setDoorPhone={setDoorPhone}
-        submitDoorWalkIn={submitDoorWalkIn}
-        scanning={scanning}
-        clearScan={abandonScan}
-      />}
+      {printingOpen && <DoorScanCard noCamp={noCamp} state={state} actions={actions} />}
 
       {printNote && <Alert tone="amber" className="mb-5">{printNote}</Alert>}
       {camp && logoState !== "ready" && (
@@ -491,8 +172,8 @@ export default function Desk() {
 
       <Card className="mb-5" data-desk-card="find" data-testid="desk-card-find">
         <h3 className="font-display font-bold text-slate-900 mb-3">Find one patient</h3>
-        <form onSubmit={doFind} className="flex gap-2">
-          <Input value={findVal} onChange={(e) => setFindVal(e.target.value)}
+        <form onSubmit={actions.find} className="flex gap-2">
+          <Input value={findVal} onChange={(e) => actions.setFindVal(e.target.value)}
             aria-label="Registration number or name" autoComplete="off" enterKeyHint="search"
             placeholder="Registration number or name" data-testid="desk-find-input" />
           <Button type="submit" variant="secondary" aria-label="Find patient" data-testid="desk-find-button"><Search className="w-5 h-5" /></Button>
@@ -500,7 +181,7 @@ export default function Desk() {
 
         {found && (
           <div className="mt-4" data-testid="desk-found-patient">
-            <PatientRow p={found.reg} onPrint={print} printingOpen={printingOpen} reprint={found.reprint} onNoCard={noCardPrint} />
+            <PatientRow p={found.reg} onPrint={actions.print} printingOpen={printingOpen} reprint={found.reprint} onNoCard={actions.noCardPrint} />
           </div>
         )}
 
@@ -508,11 +189,11 @@ export default function Desk() {
           <div className="mt-4">
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm font-semibold text-slate-700">Search results ({searchResults.length})</p>
-              <Button variant="ghost" size="sm" onClick={() => { setSearchResults(null); setFindVal(""); }}>Clear</Button>
+              <Button variant="ghost" size="sm" onClick={actions.clearSearch}>Clear</Button>
             </div>
             <div className="space-y-2" data-testid="desk-search-results">
               {searchResults.map((p) => (
-                <PatientRow key={p.id} p={p} onPrint={print} printingOpen={printingOpen} reprint onNoCard={noCardPrint} />
+                <PatientRow key={p.id} p={p} onPrint={actions.print} printingOpen={printingOpen} reprint onNoCard={actions.noCardPrint} />
               ))}
             </div>
           </div>
@@ -520,32 +201,29 @@ export default function Desk() {
       </Card>
 
       <PaperCheck
-        check={paperCheck}
-        onConfirm={confirmPaper}
-        onPrintAgain={printAgain}
-        onProblem={() => dismissPaper("Printer problem. Nothing was recorded. Fix the printer, then press Print again.")}
-        onClose={() => dismissPaper("Not recorded as printed. Press Print again when the paper is ready.")}
+        check={state.paperCheck}
+        onConfirm={actions.confirmPaper}
+        onPrintAgain={actions.printAgain}
+        onProblem={actions.printerProblem}
+        onClose={actions.closePaper}
       />
 
       <RegisterModal
         open={Boolean(regMode)}
         atDoor={regMode === "door"}
         doorDayId={operatingDayId}
-        onClose={closeRegistration}
-        initialPayload={preRegPayload}
+        onClose={actions.closeRegistration}
+        initialPayload={state.preRegPayload}
         days={days}
         onDone={countRegistration}
-        setBanner={setBanner}
-        onRegistered={showRegistered}
+        setBanner={actions.showBanner}
+        onRegistered={actions.showRegistered}
       />
     </Layout>
   );
 }
 
-function DoorScanCard({
-  noCamp, resolveDoorScan, onPatientCode, onManual, error, banner, scanResult, busy,
-  print, confirmMismatch, confirmPatient, doorPhone, setDoorPhone, submitDoorWalkIn, scanning, clearScan,
-}) {
+function DoorScanCard({ noCamp, state, actions }) {
   return (
     <Card className="mb-5" data-desk-card="scan" data-testid="desk-card-scan">
       <div className="flex items-center gap-2 mb-3">
@@ -553,33 +231,33 @@ function DoorScanCard({
         <h3 className="font-display font-bold text-slate-900">Scan at the door</h3>
       </div>
       <AadhaarScanner
-        resolvePayload={resolveDoorScan}
-        onPatientCode={onPatientCode}
+        resolvePayload={actions.resolveDoorScan}
+        onPatientCode={actions.lookupCode}
         usbFirst
         disabled={noCamp}
-        onCaptureStart={clearScan}
+        onCaptureStart={actions.abandonScan}
       />
-      <Button variant="outline" className="mt-3" onClick={onManual} disabled={noCamp} data-testid="door-manual-button">
+      <Button variant="outline" className="mt-3" onClick={actions.openDoorManual} disabled={noCamp} data-testid="door-manual-button">
         <UserPlus className="w-4 h-4" /> Manual entry
       </Button>
-      {scanning && (
+      {state.scanning && (
         <div data-testid="door-scan-status" role="status" aria-live="polite" aria-atomic="true" className="flex items-center gap-2 mt-3 min-h-[44px] text-slate-900 font-semibold">
           <Spinner className="w-5 h-5 text-emerald-700" />
           <span>Reading the QR and finding the patient…</span>
         </div>
       )}
-      {error && <Alert className="mt-3">{error}</Alert>}
-      {banner && <Alert tone="emerald" className="mt-3">{banner}</Alert>}
+      {state.error && <Alert className="mt-3">{state.error}</Alert>}
+      {state.banner && <Alert tone="emerald" className="mt-3">{state.banner}</Alert>}
       <div className="mt-3" aria-live="polite" data-testid="door-scan-outcome">
         <ScanOutcome
-          result={scanResult}
-          busy={busy || scanning}
-          onPrint={print}
-          onConfirm={confirmMismatch}
-          phone={doorPhone}
-          setPhone={setDoorPhone}
-          onWalkIn={submitDoorWalkIn}
-          onChoose={confirmPatient}
+          result={state.scanResult}
+          busy={state.busy || state.scanning}
+          onPrint={actions.printScanned}
+          onConfirm={actions.confirmMismatch}
+          phone={state.doorPhone}
+          setPhone={actions.setDoorPhone}
+          onWalkIn={actions.submitDoorWalkIn}
+          onChoose={actions.confirmPatient}
         />
       </div>
     </Card>

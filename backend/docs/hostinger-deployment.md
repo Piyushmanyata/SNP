@@ -444,3 +444,43 @@ Live checks:
 - Every service is running, and backend, frontend, mongo and reminders report healthy.
 - The production index list includes `camp_id_1_arrived_at_-1_reg_no_-1`.
 - The backend log has no tracebacks and no 5xx.
+
+## Desk session — 27 September 2026
+
+[PR 91](https://github.com/Piyushmanyata/SNP/pull/91) (#88 slice 8) merged as `da7c78894ff450f67442406c0b4fe482e79007e8`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/da7c788…`. CI run [36326429287](https://github.com/Piyushmanyata/SNP/actions/runs/36326429287) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify.
+
+Before the update, the running `986fe54` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-986fe54b1097f6d771f5b21185e2e900862889f1`. The backup container was restarted and took snapshot `ad538cf9` at 18:10 UTC. Only backend, frontend and reminders were rebuilt; MongoDB stayed up. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/986fe54…`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed. The Desk page's patient card now lives in one Desk session reducer. The one visible change: a typed-name search closes an open Paper check without recording, as every other find already did.
+
+Live checks:
+
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Every service is running, and backend, frontend, mongo and reminders report healthy.
+- The served bundle contains the Desk session reducer.
+- The backend log has no tracebacks and no 5xx.
+
+## SMS provider port — 27 September 2026
+
+[PR 92](https://github.com/Piyushmanyata/SNP/pull/92) (#88 slice 1, ADR 0086) merged as `609a8c6e4c49ab30364116d98af7e1071eb9a438`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/609a8c6…`. CI run [36326951623](https://github.com/Piyushmanyata/SNP/actions/runs/36326951623) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify.
+
+Before the update, the running `da7c788` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-da7c78894ff450f67442406c0b4fe482e79007e8`. The backup container was restarted and took snapshot `db21887c` at 18:12 UTC. Only backend, frontend and reminders were rebuilt; MongoDB stayed up. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/da7c788…`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed, and SMS behaviour is unchanged. The SMS module now reaches MSG91 through a provider port, and tests install an in-memory recorder instead of patching modules.
+
+Live checks:
+
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Every service is running, and backend, frontend, mongo and reminders report healthy.
+- Inside the backend, the installed provider is `msg91`, `sms.configured()` is true, and the registration, camp, OT Token and Specs Token templates resolve.
+- The backend and reminders logs have no tracebacks and no 5xx.
