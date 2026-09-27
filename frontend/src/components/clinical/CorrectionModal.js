@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import api, { formatApiError } from "../../lib/api";
-import { v4 } from "../../lib/uuid";
+import { useClinicalCommand } from "./useClinicalCommand";
 import { Modal, Field, Input, Alert, Button } from "../ui";
 import { SpecsMeasurementsGrid } from "./SpecsMeasurementsGrid";
 import { MedicinePicker } from "./MedicinePicker";
@@ -37,8 +36,8 @@ export function CorrectionForm({
   medicines = [],
   powers = [],
   onDone,
-  expectedGeneration = 0,
-  patientId,
+  onStale,
+  patient,
   prescribedLines = [],
 }) {
   const [initial] = useState(() => {
@@ -54,7 +53,7 @@ export function CorrectionForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const firstFieldRef = useRef(null);
-  const opRef = useRef(null);
+  const command = useClinicalCommand("correct", patient);
   const changes = Object.fromEntries(PRESCRIPTION_FIELDS
     .filter((field) => JSON.stringify(rx[field]) !== JSON.stringify(initial[field]))
     .map((field) => [field, rx[field]]));
@@ -72,23 +71,17 @@ export function CorrectionForm({
     setBusy(true);
     setError("");
     try {
-      const request = {
+      await command.send({
         transcription_id: transcription.id,
-        patient_id: patientId,
+        patient_id: patient?.registration?.id,
         reason: reason.trim(),
         changes,
-        expected_generation: expectedGeneration,
         prescribed_lines: rx.prescribed_lines,
-      };
-      const key = JSON.stringify(request);
-      if (opRef.current?.key !== key) {
-        opRef.current = { key, id: v4() };
-      }
-      await api.post("/clinical/correction", { ...request, operation_id: opRef.current.id });
-      opRef.current = null;
+      });
       onDone();
-    } catch (err) {
-      setError(formatApiError(err));
+    } catch (failure) {
+      if (failure.kind === "reload") onStale();
+      else setError(failure.message);
     } finally {
       setBusy(false);
     }
@@ -174,7 +167,7 @@ export function CorrectionForm({
 
 export function CorrectionModal({
   open, onClose, transcription, line, diagOpts, medicines, powers,
-  onDone, expectedGeneration, patientId, prescribedLines,
+  onDone, onStale, patient, prescribedLines,
 }) {
   return (
     <Modal open={open} onClose={onClose} title="Complete or correct prescription" size="lg">
@@ -186,8 +179,8 @@ export function CorrectionModal({
         medicines={medicines}
         powers={powers}
         onDone={onDone}
-        expectedGeneration={expectedGeneration}
-        patientId={patientId}
+        onStale={onStale}
+        patient={patient}
         prescribedLines={prescribedLines}
       />
     </Modal>

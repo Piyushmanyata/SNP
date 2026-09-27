@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import api, { formatApiError } from "../../lib/api";
-import { v4 } from "../../lib/uuid";
+import { useClinicalCommand } from "./useClinicalCommand";
 import { Alert, Button, Badge } from "../ui";
 import { Pill, Glasses, Scissors, Printer } from "lucide-react";
 import { FixedPowerPicker, formatPower } from "./FixedPowerPicker";
@@ -200,6 +200,7 @@ export function FulfilmentStation({
   onDone,
   setBanner,
   onBusyChange,
+  onStale,
 }) {
   const line = FULFILMENT_LINES[lineKey];
   const Icon = line.icon;
@@ -213,7 +214,7 @@ export function FulfilmentStation({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [paperReviewed, setPaperReviewed] = useState(false);
-  const issueOpRef = useRef(null);
+  const command = useClinicalCommand("issue", data);
   const prescribedMedicines = useMemo(
     () => data?.transcription?.prescribed_medicines || [],
     [data?.transcription?.prescribed_medicines],
@@ -223,7 +224,6 @@ export function FulfilmentStation({
 
   useEffect(() => {
     setPaperReviewed(false);
-    issueOpRef.current = null;
   }, [existing?.status, line, data?.registration?.id, data?.committed_revision?.id]);
 
   useEffect(() => {
@@ -257,7 +257,7 @@ export function FulfilmentStation({
     onBusyChange?.(true);
     setError("");
     try {
-      const { data: res } = await api.post("/clinical/fulfilment", {
+      const res = await command.send({
         transcription_id: data.transcription.id,
         item_type: line.itemType,
         status: nextStatus,
@@ -270,10 +270,7 @@ export function FulfilmentStation({
         specs_collection_day_id: line.dayField === "specs_collection_day_id" ? day : null,
         paper_reviewed: paperReviewed,
         reviewed_revision_id: data.committed_revision?.id,
-        reviewed_generation: data.clinical_generation ?? data.registration?.clinical_generation,
-        operation_id: issueOpRef.current || (issueOpRef.current = v4()),
       });
-      issueOpRef.current = null;
       setBanner(`${line.label}: ${statusLabel(line, res.fulfilment?.status || nextStatus)}`);
       if (res.slip) {
         await printToken(res.slip.id).catch((err) => {
@@ -281,13 +278,14 @@ export function FulfilmentStation({
         });
       }
       onDone();
-    } catch (err) {
-      setError(formatApiError(err));
+    } catch (failure) {
+      if (failure.kind === "reload") onStale();
+      else setError(failure.message);
     } finally {
       setBusy(false);
       onBusyChange?.(false);
     }
-  }, [data?.transcription?.id, data?.committed_revision?.id, data?.clinical_generation, data?.registration?.clinical_generation, line, dayId, paperReviewed, outcomes, issued, onDone, setBanner, onBusyChange]);
+  }, [data?.transcription?.id, data?.committed_revision?.id, command, line, dayId, paperReviewed, outcomes, issued, onDone, onStale, setBanner, onBusyChange]);
 
   const header = (
     <div className="flex items-center gap-2 mb-3">

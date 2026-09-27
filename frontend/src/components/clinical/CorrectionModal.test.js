@@ -11,6 +11,7 @@ jest.mock("../../lib/api", () => {
     __esModule: true,
     default: { post: jest.fn(), get: jest.fn() },
     formatApiError: actual.formatApiError,
+    errorPayload: actual.errorPayload,
   };
 });
 
@@ -43,8 +44,7 @@ test("a surgery operator completes a locked prescription after medicine was issu
       transcription={{ id: "tx-1", locked: true, diagnosis_options: ["Cataract"], remarks: "Medicine issued", ot_eye: "", ot_notes: "" }}
       line="ot"
       diagOpts={["Cataract", "Glaucoma"]}
-      expectedGeneration={1}
-      patientId="reg-1"
+      patient={{ registration: { id: "reg-1" }, clinical_generation: 1 }}
       prescribedLines={["medicine"]}
       onDone={onDone}
     />);
@@ -76,7 +76,6 @@ test("a surgery operator completes a locked prescription after medicine was issu
     expected_generation: 1,
     prescribed_lines: ["medicine", "ot"],
   }));
-  expect(api.post.mock.calls[0][1].operation_id).toEqual(expect.any(String));
   expect(onDone).toHaveBeenCalledTimes(1);
 });
 
@@ -177,22 +176,19 @@ test("corrections preserve existing powers and diagnosis when changing other fie
   expect(body.changes).not.toHaveProperty("remarks");
 });
 
-test("a failed correction is retried under the same operation id only while the request is unchanged", async () => {
-  await act(async () => root.render(<CorrectionForm transcription={{ id: "tx-8" }} onDone={jest.fn()} />));
+test("a superseded correction asks for a reload instead of showing the refusal", async () => {
+  const onStale = jest.fn();
+  await act(async () => root.render(<CorrectionForm transcription={{ id: "tx-8" }} onDone={jest.fn()} onStale={onStale} />));
   act(() => {
     setInput(container.querySelector('[data-testid="remarks-input"]'), "Changed");
     setInput(container.querySelector('[data-testid="correction-reason-input"]'), "From paper");
   });
-  const save = () => act(async () => container.querySelector('[data-testid="save-transcription-button"]').click());
-  api.post.mockRejectedValueOnce(new Error("Network Error"));
-  await save();
-  api.post.mockRejectedValueOnce(new Error("Network Error"));
-  await save();
-  act(() => setInput(container.querySelector('[data-testid="correction-reason-input"]'), "From the doctor's paper"));
-  await save();
-  const ids = api.post.mock.calls.map(([, body]) => body.operation_id);
-  expect(ids[1]).toBe(ids[0]);
-  expect(ids[2]).not.toBe(ids[0]);
+  api.post.mockRejectedValueOnce({ response: { status: 409, data: { detail: {
+    code: "OPERATION_SUPERSEDED", message: "This operation was superseded.",
+  } } } });
+  await act(async () => container.querySelector('[data-testid="save-transcription-button"]').click());
+  expect(onStale).toHaveBeenCalledTimes(1);
+  expect(container.querySelector('[role="alert"]')).toBeNull();
 });
 
 test("unchanged prescriptions and blank audit reasons cannot be submitted", async () => {
@@ -215,8 +211,7 @@ test("a tap on the Medicines or Fixed power label selects nothing", async () => 
       diagOpts={["Cataract"]}
       medicines={[{ id: "med-1", name: "Moxifloxacin", active: true }]}
       powers={[{ id: "p1", value: -1.5, label: "-1.50", active: true }]}
-      expectedGeneration={1}
-      patientId="reg-1"
+      patient={{ registration: { id: "reg-1" }, clinical_generation: 1 }}
       prescribedLines={["medicine", "specs_fixed"]}
       onDone={jest.fn()}
     />);

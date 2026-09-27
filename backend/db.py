@@ -1,6 +1,6 @@
 import os
 from typing import Any, Awaitable, Callable, TypeVar, cast
-from pymongo import ASCENDING, AsyncMongoClient, ReturnDocument
+from pymongo import ASCENDING, DESCENDING, AsyncMongoClient, ReturnDocument
 from pymongo.asynchronous.client_session import AsyncClientSession
 from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.asynchronous.database import AsyncDatabase
@@ -76,6 +76,7 @@ async def init_indexes() -> None:
         ("camp_id", ASCENDING), ("arrived_at", ASCENDING), ("arrived_by", ASCENDING),
         ("printed_at", ASCENDING), ("seen_at", ASCENDING), ("committed_revision_id", ASCENDING),
     ])
+    await db.patients.create_index([("camp_id", ASCENDING), ("arrived_at", DESCENDING), ("reg_no", DESCENDING)])
     await db.patients.create_index([("camp_id", ASCENDING), ("seen_at", ASCENDING)])
     await db.patients.create_index([("camp_id", ASCENDING), ("aadhaar_last4", ASCENDING)])
     await db.patients.create_index([("camp_id", ASCENDING), ("phone_normalized", ASCENDING)])
