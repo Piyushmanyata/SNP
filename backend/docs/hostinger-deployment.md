@@ -484,3 +484,23 @@ Live checks:
 - Every service is running, and backend, frontend, mongo and reminders report healthy.
 - Inside the backend, the installed provider is `msg91`, `sms.configured()` is true, and the registration, camp, OT Token and Specs Token templates resolve.
 - The backend and reminders logs have no tracebacks and no 5xx.
+
+## SMS intent ledger — 28 September 2026
+
+[PR 93](https://github.com/Piyushmanyata/SNP/pull/93) (#88 slice 2, ADR 0087) merged as `457b54325bd60e12594f771447043789fadbde60`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/457b543…`. CI run [36340246735](https://github.com/Piyushmanyata/SNP/actions/runs/36340246735) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify.
+
+Before the update, the running `609a8c6` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-609a8c6e4c49ab30364116d98af7e1071eb9a438`. The backup container was restarted and took snapshot `d9ae5609` at 18:33 UTC on 27 September. Only backend, frontend and reminders were rebuilt; MongoDB stayed up. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/609a8c6…`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed, and ledger rows, statuses and indexes are unchanged. `sms.py` is now the only writer of SMS intents, and every time-dependent verb is given `now`.
+
+Live checks:
+
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Every service is running, and backend, frontend, mongo and reminders report healthy.
+- The reminder worker's `/api/cron/outbox` and `/api/cron/heartbeat` calls answer 200 through the new sweep.
+- The backend and reminders logs have no tracebacks and no 5xx.
