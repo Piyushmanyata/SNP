@@ -171,7 +171,8 @@ def _build_patient_document(
 
 def _registration_card(body: RegisterBody) -> Dict[str, Any]:
     card = {name: getattr(body, name) for name in OVERWRITTEN_FIELDS}
-    card["age"] = lock_resolution.card_age(card)
+    if card["age"] is None and body.dob:
+        card["age"] = age_from_dob(body.dob)
     return card
 
 
@@ -296,7 +297,7 @@ async def _create_registration(
     walk_in = not is_self and operating
     await _assert_capacity(db, day, enforce_limit=not walk_in)
     try:
-        age = body.age if body.age is not None else (age_from_dob(body.dob) if body.dob else None)
+        age = card["age"]
         reg_no = await next_seq("reg_no")
         team_lead_id = None
         if not is_self and actor_id:

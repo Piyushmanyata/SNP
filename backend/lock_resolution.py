@@ -8,9 +8,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.errors import DuplicateKeyError
 
 from db import next_seq
-from helpers import (
-    OVERWRITTEN_FIELDS, age_from_dob, api_error, material_diff, normalize_name, normalize_phone, now_utc, person_key,
-)
+from helpers import OVERWRITTEN_FIELDS, api_error, material_diff, normalize_name, normalize_phone, now_utc, person_key
 from serializers import ser_patient
 
 
@@ -38,29 +36,26 @@ def duplicate_in_camp(row: dict) -> HTTPException:
     return api_error(409, "DUPLICATE_IN_CAMP", 'Already registered in this camp', registration=ser_patient(row))
 
 
-def card_age(card: dict) -> Optional[int]:
-    if card.get("age") is not None:
-        return card["age"]
-    return age_from_dob(card["dob"]) if card.get("dob") else None
-
-
 def _born_apart(a: Optional[str], b: Optional[str]) -> bool:
     if not a or not b or a == b:
         return False
     return a[:4] != b[:4] or not (a.endswith("-01-01") or b.endswith("-01-01"))
 
 
+def _key(card: dict) -> str:
+    return person_key(card["aadhaar_last4"], card["full_name"], card.get("dob") or "", card.get("gender") or "")
+
+
 async def find_person(db: AsyncDatabase, card: dict) -> Optional[dict]:
     """The Person this card belongs to, if one exists. Looking never creates one."""
     if not (card.get("aadhaar_last4") and card.get("full_name")):
         return None
-    key = person_key(card["aadhaar_last4"], card["full_name"], card.get("dob") or "", card.get("gender") or "")
-    return await db.persons.find_one({"aadhaar_key": key})
+    return await db.persons.find_one({"aadhaar_key": _key(card)})
 
 
 async def resolve_person(db: AsyncDatabase, card: dict) -> tuple[Dict[str, Any], bool]:
     """Finds or creates the Person for a card with its last-4 and DOB. Returns (person, created)."""
-    key = person_key(card["aadhaar_last4"], card["full_name"], card.get("dob", ""), card.get("gender", ""))
+    key = _key(card)
     person = await db.persons.find_one({"aadhaar_key": key})
     if person:
         return person, False
@@ -94,9 +89,8 @@ async def find_candidates(
         queries.append({"person_id": person["_id"]})
     norm = normalize_name(card.get("full_name") or "")
     phone = normalize_phone(phone)
-    age = card_age(card)
-    if norm and age is not None and phone:
-        queries.append({"full_name_normalized": norm, "age": age, "phone_normalized": phone})
+    if norm and card.get("age") is not None and phone:
+        queries.append({"full_name_normalized": norm, "age": card["age"], "phone_normalized": phone})
     candidates: List[dict] = []
     for query in queries:
         candidates += await db.patients.find({"camp_id": camp_id, **query}).to_list(20)
@@ -125,7 +119,7 @@ def classify(card: dict, candidates: List[dict], person: Optional[dict], *, scan
     scanned_rows = [c for c in candidates if is_scanned(c)]
     own = next((c for c in scanned_rows if person and c.get("person_id") == person["_id"]), None)
     if own:
-        return Outcome("own", [own, *[c for c in scanned_rows if c is not own]])
+        return Outcome("own", [own])
     if scanned_rows:
         return Outcome("scanned_elsewhere", scanned_rows, material_diff(card, scanned_rows[0]))
     manual = [c for c in candidates if is_manual(c)]
