@@ -1,7 +1,6 @@
 import json
 import re
 import string
-from datetime import timedelta
 from pathlib import Path
 
 import httpx
@@ -11,7 +10,8 @@ import sms_recorder
 import routes_reminders
 import server
 import sms
-from seed import TOMORROW, day, patient_doc, recorder, run_camp, seed_camp
+from conftest import advance_clock
+from seed import record_and_send, TOMORROW, day, patient_doc, recorder, run_camp, seed_camp
 from sms import (
     CAMP_REMINDER,
     OT_REMINDER,
@@ -36,13 +36,13 @@ TEMPLATE_ENV = {
 }
 
 
-async def _open_canary(*_args):
-    return "open"
+async def _open_gate(db, message_type, *_args):
+    return "paused" if await sms.paused(db, message_type) else "open"
 
 
 def _run(monkeypatch, body, *, canary=False):
     if not canary:
-        monkeypatch.setattr(routes_reminders, "_canary", _open_canary)
+        monkeypatch.setattr(routes_reminders, "_gate", _open_gate)
     monkeypatch.setenv("CRON_SECRET", SECRET)
     monkeypatch.setenv("MSG91_AUTH_KEY", "auth")
     for name, value in TEMPLATE_ENV.items():
@@ -83,12 +83,6 @@ async def _post(client, secret=SECRET):
 
 async def _ledger(database):
     return await database.reminder_ledger.find().sort("_id", 1).to_list(None)
-
-
-async def _age_ledger(database, by):
-    await database.reminder_ledger.update_many(
-        {}, [{"$set": {"created_at": {"$subtract": ["$created_at", by // timedelta(milliseconds=1)]}}}],
-    )
 
 
 class TestMessageCopy:
@@ -132,7 +126,7 @@ class TestReminderCronHttp:
             first = (await _post(client)).json()
             assert first["ok"] is False
             assert first["failed"] == 1
-            await _age_ledger(database, sms.RETRY_AFTER)
+            advance_clock(sms.RETRY_AFTER)
             retry = (await _post(client)).json()
             assert retry["ok"] is True
             assert retry["sent"] == 1
@@ -177,8 +171,8 @@ class TestReminderCronHttp:
             assert response.json()["sent"] == 1
             assert [call["type"] for call in captured] == ["camp"]
             patient = await database.patients.find_one()
-            assert await sms.deliver_patient_sms(
-                database, patient, "specs", TOMORROW, "Hall A", "10:00", "17:00",
+            assert await record_and_send(
+                database, patient, "specs", TOMORROW, "Hall A",
             ) == "skipped"
             assert [row["message_type"] for row in await _ledger(database)] == ["camp"]
 

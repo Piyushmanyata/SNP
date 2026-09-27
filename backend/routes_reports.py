@@ -333,7 +333,7 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
             {"delivery": "failed"},
         ],
     }
-    day, volunteer_rows, seen_today, fulfilments, sms_groups, (paused_rows, ot_day, specs_day) = await asyncio.gather(
+    day, volunteer_rows, seen_today, fulfilments, sms_groups, (sms_paused, ot_day, specs_day) = await asyncio.gather(
         db.camp_days.find_one({"camp_id": camp_id, "day_date": today}),
         aggregate_list(db.patients, [
             {"$match": arrival_filter},
@@ -362,7 +362,7 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
         ]),
         sms.ledger_groups(db, sms_match, by_camp=True),
         asyncio.gather(
-            db.sms_controls.find({"paused": True}, {"_id": 1}).to_list(None),
+            sms.paused_types(db),
             db.ot_schedule_days.find_one(
                 {"camp_id": camp_id, "day_date": {"$gte": today}},
                 sort=[("day_date", 1)],
@@ -418,7 +418,6 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
             sms_not_sent += count
         else:
             sms_failures += group["dlt_failed"] + group["other_failed"]
-    sms_paused = [c["_id"] for c in paused_rows]
 
     next_ot = None
     if ot_day:

@@ -21,7 +21,6 @@ PAGE_SIZE = 200
 SEND_LIMIT = 200
 SWEEP_SECONDS = 60
 LEASE_SECONDS = 90
-CANARY_WAIT = timedelta(minutes=10)
 REMINDER_TYPES = (("ot", "ot"), ("specs", "specs_made"), ("camp", None))
 
 def _require_cron_secret(request: Request) -> None:
@@ -31,28 +30,8 @@ def _require_cron_secret(request: Request) -> None:
         raise api_error(401, "UNAUTHORIZED", 'Unauthorized')
 
 
-async def _gate(db: AsyncDatabase, message_type: str, event_date: str) -> str:
-    control = await db.sms_controls.find_one({"_id": message_type}) or {}
-    if control.get("paused"):
-        return "paused"
-    return await _canary(db, message_type, event_date, control.get("resumed_at"))
-
-
-async def _canary(db: AsyncDatabase, message_type: str, event_date: str, resumed_at: Any) -> str:
-    query: Dict[str, Any] = {
-        "message_type": message_type, "event_date": event_date,
-        "status": {"$in": ["sent", "uncertain", "rejected"]},
-    }
-    if resumed_at:
-        query["created_at"] = {"$gte": resumed_at}
-    first = await db.reminder_ledger.find(query).sort("created_at", 1).limit(1).to_list(1)
-    if not first:
-        return "canary"
-    row = first[0]
-    settled = row["status"] == "rejected" or row.get("delivery")
-    if settled or helpers.as_utc(row["created_at"]) <= helpers.now_utc() - CANARY_WAIT:
-        return "open"
-    return "waiting"
+async def _gate(db: AsyncDatabase, message_type: str, event_date: str, now: Any) -> str:
+    return await sms.canary(db, message_type, event_date, now)
 
 
 async def _acquire_lease(db: AsyncDatabase) -> Optional[str]:
@@ -90,14 +69,8 @@ async def _release_lease(db: AsyncDatabase, holder: str, cursor: Any) -> None:
 
 async def _write_ops(db: AsyncDatabase, *, complete: bool, error: Optional[str] = None) -> None:
     now = helpers.now_utc()
-    counts = {
-        status: await db.reminder_ledger.count_documents({"status": status})
-        for status in ("queued", "failed", "uncertain")
-    }
-    paused = [
-        row["_id"] for row in await db.sms_controls.find({"paused": True}).to_list(None)
-        if row["_id"] != "reminder_lease"
-    ]
+    counts = await sms.status_counts(db)
+    paused = await sms.paused_types(db)
     fields: Dict[str, Any] = {
         "last_call_at": now, "last_error": error,
         "queued": counts["queued"], "failed": counts["failed"], "uncertain": counts["uncertain"],
@@ -130,32 +103,6 @@ async def _context(db: AsyncDatabase) -> Tuple[Dict[Any, dict], Dict[str, Option
     }
     days = {row["_id"]: row for row in await db.ot_schedule_days.find({}).to_list(None)}
     return camps, staff, days
-
-
-async def _due_failures(db: AsyncDatabase, message_type: str, event_date: str) -> List[dict]:
-    return await db.reminder_ledger.find({
-        "message_type": message_type, "event_date": event_date, "status": "failed",
-        "created_at": {"$lte": helpers.now_utc() - sms.RETRY_AFTER},
-    }).to_list(SEND_LIMIT)
-
-
-async def _abandon_if_gone(db: AsyncDatabase, row: dict) -> bool:
-    patient = await db.patients.find_one({"_id": row.get("patient_id")})
-    message_type = row.get("message_type")
-    live = False
-    if patient is not None and message_type in ("ot", "specs"):
-        item = "ot" if message_type == "ot" else "specs_made"
-        slip = await db.deferred_slips.find_one({
-            "patient_id": patient["_id"], "item_type": item, "active": True,
-            "collection_date": row.get("event_date"),
-        })
-        live = bool(slip)
-    elif patient is not None:
-        live = True
-    if live:
-        return False
-    await db.reminder_ledger.update_one({"_id": row["_id"], "status": "failed"}, {"$set": {"status": "abandoned"}})
-    return True
 
 
 async def _camp_page(db: AsyncDatabase, event_date: str, last_id: Any, camps: Dict[Any, dict]) -> List[tuple]:
@@ -197,15 +144,15 @@ async def _slip_page(
 
 async def _send_fresh(
     db: AsyncDatabase, message_type: str, event_date: str, chosen: List[tuple],
-    camps: Dict[Any, dict], staff: Dict[str, Optional[str]], gate: str,
+    camps: Dict[Any, dict], staff: Dict[str, Optional[str]], gate: str, now: Any,
 ) -> Tuple[int, int, int, bool]:
     sem = asyncio.Semaphore(4)
 
     async def one(patient: dict, venue: str, end_date: Optional[str]) -> str:
         async with sem:
-            return await sms.deliver_patient_sms(
+            return await sms.record_and_send(
                 db, patient, message_type, event_date, venue, end_date,
-                retry_after=sms.RETRY_AFTER, camps=camps, staff_phones=staff, fresh=True,
+                now=now, camps=camps, staff_phones=staff, fresh=True,
             )
 
     first = await one(*chosen[0][:3])
@@ -228,11 +175,7 @@ async def _send_fresh(
         elif outcome == "rejected" and gate == "canary":
             rejected = True
     if rejected:
-        row = await db.reminder_ledger.find({
-            "message_type": message_type, "event_date": event_date, "status": "rejected",
-        }).sort("created_at", -1).limit(1).to_list(1)
-        if row:
-            await sms._pause(db, row[0], row[0].get("error") or "Rejected")
+        await sms.pause_after_rejection(db, message_type, event_date, now)
     return sent, failed, used, rejected
 
 
@@ -240,6 +183,7 @@ async def send_d1_reminders() -> Dict[str, Any]:
     if not sms.configured():
         return {"ok": True, "sent": 0, "complete": True, "reason": "msg91_unconfigured"}
     db = get_db()
+    now = helpers.now_utc()
     holder = await _acquire_lease(db)
     if holder is None:
         await _write_ops(db, complete=False)
@@ -259,32 +203,29 @@ async def send_d1_reminders() -> Dict[str, Any]:
             if time.monotonic() - started >= SWEEP_SECONDS or used >= SEND_LIMIT:
                 complete = False
                 break
-            gate = await _gate(db, message_type, tomorrow)
+            gate = await _gate(db, message_type, tomorrow, now)
             if gate == "paused":
                 waiting = True
                 complete = False
                 paused_hit = True
-                paused_used += await db.reminder_ledger.count_documents({
-                    "message_type": message_type, "event_date": tomorrow,
-                    "status": {"$in": ["sent", "rejected", "uncertain", "failed"]},
-                })
+                paused_used += await sms.used(db, message_type, tomorrow)
                 continue
             if gate == "waiting":
                 waiting = True
                 complete = False
                 continue
-            for row in await _due_failures(db, message_type, tomorrow):
+            for row in await sms.due_retries(db, message_type, tomorrow, now, SEND_LIMIT):
                 if used >= SEND_LIMIT or time.monotonic() - started >= SWEEP_SECONDS:
                     complete = False
                     break
-                if await _abandon_if_gone(db, row):
+                if await sms.abandon_if_gone(db, row):
                     continue
                 patient = await db.patients.find_one({"_id": row["patient_id"]})
                 if not patient:
                     continue
-                outcome = await sms.deliver_patient_sms(
+                outcome = await sms.record_and_send(
                     db, patient, message_type, tomorrow, row.get("venue") or "",
-                    retry_after=sms.RETRY_AFTER, event_key=row.get("event_key"),
+                    now=now, retry_after=sms.RETRY_AFTER, event_key=row.get("event_key"),
                     camps=camps, staff_phones=staff,
                 )
                 if outcome == "skipped":
@@ -310,10 +251,7 @@ async def send_d1_reminders() -> Dict[str, Any]:
                     cursor[message_type] = "done"
                     break
                 ids = [patient["_id"] for patient, _venue, _end, _cursor in page if patient]
-                known = await db.reminder_ledger.find({
-                    "patient_id": {"$in": ids}, "message_type": message_type, "event_date": tomorrow,
-                }).to_list(max(len(ids), 1)) if ids else []
-                have = {row["patient_id"] for row in known}
+                have = await sms.recorded(db, ids, message_type, tomorrow)
                 chosen = []
                 for patient, venue, end_date, cursor_id in page:
                     last_id = cursor_id
@@ -327,7 +265,7 @@ async def send_d1_reminders() -> Dict[str, Any]:
                 if chosen:
                     resume_at = cursor.get(message_type)
                     page_sent, page_failed, page_used, rejected = await _send_fresh(
-                        db, message_type, tomorrow, chosen, camps, staff, gate,
+                        db, message_type, tomorrow, chosen, camps, staff, gate, now,
                     )
                     if page_used == 0:
                         cursor[message_type] = resume_at
@@ -384,35 +322,9 @@ async def send_d1_reminders() -> Dict[str, Any]:
 
 async def drain_outbox() -> Dict[str, Any]:
     db = get_db()
-    now = helpers.now_utc()
-    await db.reminder_ledger.update_many(
-        {"status": "pending", "created_at": {"$lte": now - timedelta(minutes=5)}},
-        {"$set": {"status": "uncertain"}},
-    )
-    queued = await db.reminder_ledger.find({
-        "status": "queued", "created_at": {"$lte": now - timedelta(seconds=30)},
-    }).limit(PAGE_SIZE).to_list(PAGE_SIZE)
-    failed_rows = await db.reminder_ledger.find({
-        "status": "failed", "retry_after": {"$lte": now},
-    }).limit(PAGE_SIZE).to_list(PAGE_SIZE)
-    sem = asyncio.Semaphore(4)
-
-    async def send_one(row_id: Any) -> None:
-        async with sem:
-            await sms.send_queued(db, row_id)
-
-    await asyncio.gather(*(send_one(row["_id"]) for row in queued))
-    retried = 0
-    for row in failed_rows:
-        if await _abandon_if_gone(db, row):
-            continue
-        await db.reminder_ledger.update_one(
-            {"_id": row["_id"], "status": "failed"}, {"$set": {"status": "queued"}},
-        )
-        await send_one(row["_id"])
-        retried += 1
+    queued, retried = await sms.sweep(db, helpers.now_utc(), PAGE_SIZE)
     await _write_ops(db, complete=False)
-    return {"ok": True, "queued": len(queued), "retried": retried}
+    return {"ok": True, "queued": queued, "retried": retried}
 
 
 @router.post("/cron/reminders")

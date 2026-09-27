@@ -315,9 +315,9 @@ async def update_camp_day(day_id: str, body: CampDayBody, background_tasks: Back
         if not date_changed:
             return changed, days, []
         booked = await db.patients.find(booked_here, NOTICE_FIELDS, session=session).to_list(None)
-        queued = await sms.queue_sms(
+        queued = await sms.record(
             db, booked, "registration", body.day_date, camp.get("venue_sms") or camp["venue"],
-            event_key=f"edit:{updates['edit_revision']}", session=session,
+            event_key=sms.edit_key(updates["edit_revision"]), session=session, now=now_utc(),
         )
         return changed, days, queued
 
@@ -325,7 +325,7 @@ async def update_camp_day(day_id: str, body: CampDayBody, background_tasks: Back
         changed, days, queued = await in_transaction(write)
     except DuplicateKeyError:
         raise api_error(409, "ANOTHER_CAMP_DAY_ALREADY_USES_THAT_DATE", 'Another camp day already uses that date')
-    await sms.dispatch(background_tasks, db, queued)
+    await sms.dispatch(background_tasks, db, queued, now_utc())
     state = effective_printing(camp, days)
     return {"day": ser_day(changed, printing_open=bool(
         state["printing_open"] and state["operating_day_id"] == str(changed["_id"])

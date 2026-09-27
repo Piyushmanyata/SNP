@@ -8,13 +8,13 @@ from pydantic import ValidationError
 
 import helpers
 import routes_clinical
-import routes_reminders
 import routes_sms
 import sms
+from conftest import advance_clock
 import sms_recorder
 from models import OtScheduleBody, SpecsScheduleBody
-from seed import ADMIN, TODAY, TOMORROW, day, patient_doc, recorder, seed_camp, user_doc
-from test_reminders import HOUSEHOLD, _age_ledger, _ledger, _post, _run, _seed_camp_household
+from seed import send_patient_sms, record_and_send, ADMIN, TODAY, TOMORROW, day, patient_doc, recorder, seed_camp, user_doc
+from test_reminders import HOUSEHOLD, _ledger, _post, _run, _seed_camp_household
 
 SECRET = "report-secret"
 
@@ -139,13 +139,13 @@ class TestSmsPause:
             patient = await _registration_patient(database)
             await database.sms_controls.insert_one({"_id": "registration", "paused": True})
 
-            assert not await sms.send_patient_sms(database, patient, "registration", TOMORROW, "Hall A")
+            assert not await send_patient_sms(database, patient, "registration", TOMORROW, "Hall A")
             assert captured == []
             [row] = await _ledger(database)
             assert row["status"] == "paused"
 
-            await sms.resume(database, "registration", "admin")
-            assert await sms.deliver_patient_sms(database, patient, "ot_token", TOMORROW, "Hall A") == "sent"
+            await sms.resume(database, "registration", "admin", helpers.now_utc())
+            assert await record_and_send(database, patient, "ot_token", TOMORROW, "Hall A") == "sent"
             assert [c["type"] for c in captured] == ["ot_token"]
 
         _run(monkeypatch, body)
@@ -158,7 +158,7 @@ class TestSmsPause:
             await database.sms_controls.insert_one({"_id": "camp", "paused": True})
 
             held = (await _post(client)).json()
-            await sms.resume(database, "camp", "admin")
+            await sms.resume(database, "camp", "admin", helpers.now_utc())
             released = (await _post(client)).json()
 
             assert (held["sent"], held["complete"], held["waiting"], held["ok"]) == (0, False, True, True)
@@ -185,7 +185,7 @@ class TestSmsPause:
             sms_recorder.installed().outcome = send_then_pause
 
             held = (await _post(client)).json()
-            await sms.resume(database, "camp", "admin")
+            await sms.resume(database, "camp", "admin", helpers.now_utc())
             sms_recorder.installed().outcome = lambda *args: captured.append(args[2]["reg_no"]) or "id-x"
             released = (await _post(client)).json()
 
@@ -201,9 +201,9 @@ class TestSmsPause:
         async def body(database, client):
             await _seed_camp_household(database, n_patients=1)
             await _post(client)
-            await _age_ledger(database, timedelta(minutes=5))
+            advance_clock(timedelta(minutes=5))
             await _report(client, "id-1", status="2", reason="DLT failure")
-            await sms.resume(database, "camp", "admin")
+            await sms.resume(database, "camp", "admin", helpers.now_utc())
 
             await _report(client, "id-1", status="2", reason="DLT failure")
 
@@ -237,7 +237,7 @@ class TestCanary:
         async def body(database, client):
             await _seed_camp_household(database, n_patients=3)
             await _post(client)
-            await _age_ledger(database, routes_reminders.CANARY_WAIT)
+            advance_clock(sms.CANARY_WAIT)
 
             assert (await _post(client)).json()["sent"] == 2
 
@@ -252,8 +252,8 @@ class TestCanary:
             await _report(client, "id-1", status="2", reason="DLT Template variable exceeded max length")
 
             paused = (await _post(client)).json()
-            await _age_ledger(database, timedelta(minutes=1))
-            await sms.resume(database, "camp", "admin")
+            advance_clock(timedelta(minutes=1))
+            await sms.resume(database, "camp", "admin", helpers.now_utc())
             canary = (await _post(client)).json()
 
             assert (paused["sent"], paused["waiting"]) == (0, True)
@@ -359,7 +359,7 @@ class TestSendTimeGuard:
         async def body(database, client):
             patient = await _registration_patient(database)
 
-            outcomes = [await sms.deliver_patient_sms(
+            outcomes = [await record_and_send(
                 database, patient, "registration", TOMORROW, "Hansa Garden, Jasidih, Deoghar",
                 event_key=revision,
             ) for revision in ("day-edit-1", "day-edit-2", "day-edit-2")]
@@ -382,7 +382,7 @@ class TestSendTimeGuard:
             patient["created_by"] = str(registrar_id)
             await database.users.insert_one(user_doc("Registrar", _id=registrar_id, phone="+91 98765 00001"))
 
-            outcome = await sms.deliver_patient_sms(
+            outcome = await record_and_send(
                 database, patient, message_type, TOMORROW, "Hansa Garden, Jasidih, Deoghar",
             )
 
@@ -398,7 +398,7 @@ class TestSendTimeGuard:
         async def body(database, client):
             patient = await _registration_patient(database)
 
-            outcome = await sms.deliver_patient_sms(
+            outcome = await record_and_send(
                 database, patient, "registration", TOMORROW, "  Hansa Garden,  Jasidih, Deoghar ",
             )
 
@@ -416,7 +416,7 @@ class TestSendTimeGuard:
         async def body(database, client):
             patient = await _registration_patient(database)
 
-            assert await sms.deliver_patient_sms(database, patient, "registration", TOMORROW, venue) == "skipped"
+            assert await record_and_send(database, patient, "registration", TOMORROW, venue) == "skipped"
             assert captured == []
             assert await _ledger(database) == []
 

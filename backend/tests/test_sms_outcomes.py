@@ -10,6 +10,7 @@ from pymongo.asynchronous.collection import AsyncCollection
 
 import msg91
 import sms
+from conftest import advance_clock
 import sms_recorder
 import reminder_worker
 import routes_reminders
@@ -18,7 +19,6 @@ from test_reminder_worker import IST, Clock
 from test_reminders import (
     HOUSEHOLD,
     TOMORROW_SHOWN,
-    _age_ledger,
     _ledger,
     _numbered_camp,
     _post,
@@ -66,7 +66,7 @@ def _provider(monkeypatch, body, requests=None, *, status=200, fail_connect=None
 
 
 async def _later(database):
-    await _age_ledger(database, routes_reminders.sms.RETRY_AFTER + timedelta(minutes=1))
+    advance_clock(routes_reminders.sms.RETRY_AFTER + timedelta(minutes=1))
 
 
 class TestProviderAcceptance:
@@ -78,7 +78,7 @@ class TestProviderAcceptance:
             await _seed_camp_household(database, n_patients=1)
 
             first = (await _post(client)).json()
-            await _age_ledger(database, routes_reminders.sms.RETRY_AFTER * 2)
+            advance_clock(routes_reminders.sms.RETRY_AFTER * 2)
             again = (await _post(client)).json()
 
             assert (first["sent"], first["failed"], first["ok"]) == (0, 0, True)

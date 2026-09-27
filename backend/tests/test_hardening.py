@@ -18,13 +18,12 @@ import routes_camps
 import routes_desk
 import routes_registration
 import server
-import sms
 from aadhaar import MAX_DECOMPRESSED_BYTES, MAX_SECURE_QR_DIGITS, _decompress, decode_aadhaar
 from conftest import CommandLog
 from models import FulfilmentBody
 from routes_clinical import _deferred_day_id
 from routes_staff import enable_staff
-from seed import ACTOR, ADMIN, CARD, NOW, TODAY, day, patient_doc, run_camp, seed_camp
+from seed import send_patient_sms, ACTOR, ADMIN, CARD, NOW, TODAY, day, patient_doc, run_camp, seed_camp
 
 
 def _digits_for(raw: bytes) -> str:
@@ -312,7 +311,7 @@ class TestSmsDoesNotBlockTheLoop:
             camp_id = ObjectId()
             await database.camps.insert_one({"_id": camp_id, "name": "Sikar", "venue": "Sikar", "camp_number": 162})
             patient = {"_id": ObjectId(), "camp_id": camp_id, "phone_normalized": "9876500001", "reg_no": 7}
-            task = asyncio.create_task(sms.send_patient_sms(database, patient, "registration", TODAY, "Sikar"))
+            task = asyncio.create_task(send_patient_sms(database, patient, "registration", TODAY, "Sikar"))
             await asyncio.wait_for(started.wait(), timeout=5)
             await asyncio.sleep(0)
             release.set()

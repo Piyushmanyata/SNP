@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Request
 
 import sms
 from db import get_db
-from helpers import ist_day_bounds, iso, today_ist_str, api_error
+from helpers import ist_day_bounds, iso, now_utc, today_ist_str, api_error
 from security import require_admin
 
 router = APIRouter(prefix="/api", tags=["sms"])
@@ -50,7 +50,7 @@ async def msg91_delivery_report(request: Request) -> Dict[str, Any]:
     db = get_db()
     recorded = 0
     for report in reports:
-        if isinstance(report, dict) and await sms.record_delivery_report(db, report):
+        if isinstance(report, dict) and await sms.record_delivery_report(db, report, now_utc()):
             recorded += 1
     return {"ok": True, "recorded": recorded}
 
@@ -58,7 +58,7 @@ async def msg91_delivery_report(request: Request) -> Dict[str, Any]:
 @router.get("/sms/status")
 async def sms_status(actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
-    controls = {c["_id"]: c for c in await db.sms_controls.find({}).to_list(None)}
+    controls = await sms.controls(db)
     start, end = ist_day_bounds(today_ist_str())
     groups = await sms.ledger_groups(db, {"created_at": {"$gte": start, "$lt": end}}, by_camp=False)
     ready = sms.configured()
@@ -85,5 +85,5 @@ async def sms_status(actor: dict = Depends(require_admin)) -> Dict[str, Any]:
 async def resume_sms(message_type: str, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     if message_type not in sms.MESSAGE_COPY:
         raise api_error(404, "UNKNOWN_MESSAGE_TYPE", 'Unknown message type')
-    await sms.resume(get_db(), message_type, str(actor["_id"]))
+    await sms.resume(get_db(), message_type, str(actor["_id"]), now_utc())
     return await sms_status(actor)

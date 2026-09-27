@@ -10,7 +10,7 @@ import sms
 from conftest import CommandLog
 from routes_reminders import drain_outbox, send_d1_reminders
 from routes_reports import system_status
-from seed import ADMIN, NOW, TODAY, TOMORROW, patient_doc, run_camp, seed_camp
+from seed import record_and_send, ADMIN, NOW, TODAY, TOMORROW, patient_doc, run_camp, seed_camp
 from test_reminders import HOUSEHOLD, _post, _run, _seed_camp_household
 from test_system_status import Usage, _backup
 
@@ -163,7 +163,7 @@ def test_http_429_and_503_are_failed_with_a_retry_delay(monkeypatch, sms_provide
         await database.patients.insert_one(patient)
         sms_provider.switch_on()
         sms_provider.outcome = "throttled"
-        assert await sms.deliver_patient_sms(database, patient, "camp", TODAY, "Hall A") == "failed"
+        assert await record_and_send(database, patient, "camp", TODAY, "Hall A") == "failed"
         row = await database.reminder_ledger.find_one({"patient_id": patient["_id"]})
         assert row["status"] == "failed"
         assert helpers.as_utc(row["retry_after"]) - helpers.now_utc() >= timedelta(minutes=4, seconds=50)

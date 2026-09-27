@@ -6,7 +6,7 @@ from fastapi import BackgroundTasks, HTTPException
 
 import routes_camps
 import routes_clinical
-from conftest import run_db
+from conftest import advance_clock, run_db
 from models import CampDayBody, OtScheduleBody, SpecsScheduleBody
 from routes_clinical import record_fulfilment
 from seed import (
@@ -395,7 +395,7 @@ def test_a_notice_still_queued_after_ten_minutes_puts_the_patient_on_the_contact
         await routes_clinical.update_ot_day(str(day_id), _ot(camp_id, venue="New Hospital"), actor={},
                                             background_tasks=BackgroundTasks())
         assert (await routes_clinical.list_schedule_notices(actor=ADMIN))["notices"] == []
-        await database.reminder_ledger.update_many({}, {"$set": {"created_at": NOW - timedelta(minutes=11)}})
+        advance_clock(timedelta(minutes=11))
         listed = (await routes_clinical.list_schedule_notices(actor=ADMIN))["notices"]
         assert [(n["reg_no"], n["sms_status"]) for n in listed] == [(501, "not_sent")]
 
