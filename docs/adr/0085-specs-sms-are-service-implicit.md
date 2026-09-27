@@ -18,7 +18,7 @@
 
 - DND patients receive the spectacles token and reminder.
 - The SMS no longer tells the patient the hours; the printed token does.
-- Until MSG91 verifies v1.1 and it is marked active, MSG91 sends the v1.0 text while the ledger stores the new copy.
+- MSG91 verified both v1.1 versions, and they were marked active on 27 September 2026.
 
 ## Rejected alternatives
 
