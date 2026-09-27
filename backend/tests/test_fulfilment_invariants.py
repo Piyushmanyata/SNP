@@ -5,7 +5,7 @@ import pytest
 from bson import ObjectId
 from fastapi import HTTPException
 
-import routes_clinical
+from test_camp_operations_matrix import intercept
 from models import CorrectionBody
 from routes_clinical import add_correction, record_fulfilment
 from seed import CLINICAL, NOW, day, fulfil, patient_doc, recorder, run_camp, seen_patient
@@ -42,7 +42,7 @@ def test_failed_ot_replace_leaves_prior_fulfilment_and_seat(monkeypatch):
         async def boom(*_a, **_k):
             raise RuntimeError("injected write failure")
 
-        monkeypatch.setattr(routes_clinical, "persist_fulfilment", boom)
+        intercept(monkeypatch, "fulfilments", "update_one", boom)
         with pytest.raises(RuntimeError):
             await _issue(seen, item_type="ot", status="deferred", ot_schedule_day_id=str(day_b), operation_id="op-replace")
         still = await database.fulfilments.find_one({"_id": ObjectId(prior_id)})
@@ -63,13 +63,11 @@ def test_overlapping_ot_assignments_never_consume_two_seats(monkeypatch):
         day_id = await _ot_day(database, seen["camp_id"], 1, seat_limit=10, venue="Hospital")
         request = fulfil(seen["trans_id"], seen["rev_id"], item_type="ot", status="deferred",
                          ot_schedule_day_id=str(day_id), operation_id="op-overlap")
-        original = routes_clinical._process_deferral
-
-        async def delayed(*args, **kwargs):
+        async def delayed(find_one, *args, **kwargs):
             await asyncio.sleep(0.02)
-            return await original(*args, **kwargs)
+            return await find_one(*args, **kwargs)
 
-        monkeypatch.setattr(routes_clinical, "_process_deferral", delayed)
+        intercept(monkeypatch, "ot_schedule_days", "find_one", delayed)
         results = await asyncio.gather(
             record_fulfilment(request, actor=CLINICAL, background_tasks=None),
             record_fulfilment(request, actor=CLINICAL, background_tasks=None),
