@@ -17,7 +17,7 @@ const RELOAD_CODES = new Set([
   "OPERATION_CONFLICT",
 ]);
 
-export function clinicalGeneration(patient) {
+function clinicalGeneration(patient) {
   return patient?.clinical_generation ?? patient?.registration?.clinical_generation ?? 0;
 }
 

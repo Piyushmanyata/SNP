@@ -1,6 +1,6 @@
 import React, { act } from "react";
 import ReactDOM from "react-dom/client";
-import { useClinicalCommand, clinicalGeneration } from "./useClinicalCommand";
+import { useClinicalCommand } from "./useClinicalCommand";
 import api from "../../lib/api";
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
@@ -123,11 +123,11 @@ test("any other refusal is an error that keeps the id", async () => {
   expect(ids()[1]).toBe(ids()[0]);
 });
 
-test("the generation falls back from the lookup to the registration to 0", () => {
-  expect(clinicalGeneration({ clinical_generation: 4, registration: { clinical_generation: 3 } })).toBe(4);
-  expect(clinicalGeneration({ registration: { clinical_generation: 3 } })).toBe(3);
-  expect(clinicalGeneration({ registration: {} })).toBe(0);
-  expect(clinicalGeneration(null)).toBe(0);
+test("the lookup's generation wins over the registration's", async () => {
+  api.post.mockResolvedValueOnce({ data: {} });
+  await render("complete", { clinical_generation: 4, registration: { id: "reg-1", clinical_generation: 3 } });
+  await send({ answer: "a" });
+  expect(api.post.mock.calls[0][1].expected_generation).toBe(4);
 });
 
 test("a patient without a generation sends 0", async () => {

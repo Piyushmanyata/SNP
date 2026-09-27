@@ -80,7 +80,7 @@ export function CorrectionForm({
       });
       onDone();
     } catch (failure) {
-      if (failure.kind === "reload") onStale?.();
+      if (failure.kind === "reload") onStale();
       else setError(failure.message);
     } finally {
       setBusy(false);
