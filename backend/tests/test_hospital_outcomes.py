@@ -8,7 +8,7 @@ import pytest
 from bson import ObjectId
 from fastapi import HTTPException
 
-import routes_clinical
+import clinical_operation
 from models import CorrectionBody
 from routes_clinical import (
     add_correction, clinical_lookup, clinical_search, complete_prescription, get_slip, record_fulfilment,
@@ -282,14 +282,14 @@ class TestHospitalStation:
             camp_id, _day, patient = await _printed_patient(db)
             done = await _complete(patient, **_lines(["ot"]))
             day_id = await _ot_day(db, camp_id)
-            original = routes_clinical.in_transaction
+            original = clinical_operation.in_transaction
 
             async def schedule_first(write):
-                monkeypatch.setattr(routes_clinical, "in_transaction", original)
+                monkeypatch.setattr(clinical_operation, "in_transaction", original)
                 await _record(done, "schedule", "deferred", day_id)
                 return await original(write)
 
-            monkeypatch.setattr(routes_clinical, "in_transaction", schedule_first)
+            monkeypatch.setattr(clinical_operation, "in_transaction", schedule_first)
             body = CorrectionBody(
                 patient_id=str(patient["_id"]), reason="Doctor wrote referral", expected_generation=1,
                 operation_id="corr-race", full_transcription_confirmed=True,

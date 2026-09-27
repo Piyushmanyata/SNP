@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Awaitable, Callable, Dict, List, NoReturn, Optional, Tuple
+from typing import Any, Dict, List, NoReturn, Optional
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks
 from pymongo import UpdateOne
 from pymongo.errors import DuplicateKeyError
@@ -13,12 +13,14 @@ from models import (
     CompletePrescriptionBody, UndoCompletionBody,
 )
 from catalogue import resolve_medicines, stocked_power
+import clinical_operation
+from clinical_operation import Operation
 from clinical_state import (
-    CONTENT_FIELDS,
-    PRESCRIBED_LINE_KEYS, arrival_ready, commit_completion,
-    commit_correction, commit_undo, conflict, extract_content, normalize_ot_eye,
-    generation_of, has_issue_history, insert_revision, payload_hash, record_operation, recover_operation,
-    serialize_revision, validate_completion,
+    CONTENT_FIELDS, PRESCRIBED_LINE_KEYS, SPECS_EXCLUSION, commit, conflict, draft_conflict,
+    extract_content, generation_of, has_issue_history, insert_revision, normalize_ot_eye,
+    require_correction_allowed, require_draft_version, require_fresh_review, require_generation,
+    require_line_prescribed, require_not_completed, require_printed, require_specs_exclusive,
+    require_unchanged, require_undoable, serialize_revision, validate_completion,
 )
 from helpers import (
     api_error,    now_utc, iso, DIAGNOSIS_OPTIONS, now_ist, ist_local_instant,
@@ -30,29 +32,6 @@ from security import require_clinical, require_admin, require_any
 import sms
 
 router = APIRouter(prefix="/api/clinical", tags=["clinical"])
-
-
-Write = Callable[[Any], Awaitable[Tuple[Dict[str, Any], List[ObjectId]]]]
-
-
-async def _claim_patient(db: AsyncDatabase, patient_id: ObjectId, session) -> dict:
-    """Every clinical write bumps the patient's clinical_seq first, so two writers on one patient conflict and retry."""
-    patient = await db.patients.find_one_and_update(
-        {"_id": patient_id}, {"$inc": {"clinical_seq": 1}}, return_document=True, session=session,
-    )
-    if not patient:
-        raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
-    return patient
-
-
-async def _run_operation(db: AsyncDatabase, operation_id: str, kind: str, digest: str, write: Write) -> Tuple[Dict[str, Any], List[ObjectId]]:
-    try:
-        return await in_transaction(write)
-    except DuplicateKeyError:
-        done = await recover_operation(db, operation_id, kind, digest)
-        if not done:
-            raise
-        return done["result"], []
 
 
 def ser_trans(t: dict) -> Dict[str, Any]:
@@ -169,11 +148,7 @@ async def clinical_lookup(body: dict, actor: dict = Depends(require_clinical)) -
             p = await db.patients.find_one({"camp_id": camp["_id"], "reg_no": int(value)})
     if not p:
         raise api_error(404, "NO_MATCHING_REGISTRATION_FOUND", 'No matching registration found')
-    gate = arrival_ready(p)
-    if gate == "not_arrived":
-        raise api_error(409, "NOT_ARRIVED", 'This patient has not arrived at the door yet.')
-    if gate == "never_printed":
-        raise api_error(409, "NEVER_PRINTED", "This patient's prescription was never printed.")
+    require_printed(p)
     bundle = await _fetch_clinical_bundle(db, p)
     rev = None
     if p.get("committed_revision_id"):
@@ -219,31 +194,16 @@ async def _apply_catalogue(db, body, active_only: bool = True) -> None:
     body.fixed_power_l = await stocked_power(db, body.fixed_power_l, active_only=active_only)
 
 
-def _require_printed(p: dict) -> dict:
-    gate = arrival_ready(p)
-    if gate == "not_arrived":
-        raise conflict("not_arrived", "This patient has not arrived at the door yet.")
-    if gate == "never_printed":
-        raise conflict("never_printed", "This patient's prescription was never printed.")
-    return p
-
-
 async def _require_printed_patient(db, patient_id: str) -> dict:
     p = await db.patients.find_one({"_id": ObjectId(patient_id)})
     if not p:
         raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
-    return _require_printed(p)
+    require_printed(p)
+    return p
 
 
 def _draft_version_match(version: int) -> Any:
     return {"$in": [None, 0]} if version <= 0 else version
-
-
-def _draft_conflict() -> HTTPException:
-    return conflict(
-        "draft_version_conflict",
-        "Another operator saved this prescription; reload before saving.",
-    )
 
 
 async def _upsert_transcription(
@@ -271,7 +231,7 @@ async def _upsert_transcription(
             doc["_id"] = res.inserted_id
             return doc
         except DuplicateKeyError:
-            raise _draft_conflict()
+            raise draft_conflict()
     query: Dict[str, Any] = {"_id": existing["_id"]}
     if not locked:
         query["locked"] = {"$ne": True}
@@ -281,7 +241,7 @@ async def _upsert_transcription(
         query, {"$set": fields, "$inc": {"draft_version": 1}}, return_document=True, session=session,
     )
     if not t:
-        raise _draft_conflict()
+        raise draft_conflict()
     return t
 
 
@@ -316,46 +276,36 @@ async def complete_prescription(
     actor: dict = Depends(require_clinical),
 ) -> Dict[str, Any]:
     db = get_db()
-    replaying = await db.clinical_operations.find_one({"operation_id": body.operation_id}, {"_id": 1})
-    await _apply_catalogue(db, body, active_only=not replaying)
+    await _apply_catalogue(db, body, active_only=not await clinical_operation.is_replay(db, body.operation_id))
     content, lines, none = validate_completion(body)
     p = await _require_printed_patient(db, body.patient_id)
-    digest = payload_hash("complete", {
-        "patient_id": str(p["_id"]), "content": content, "lines": lines, "none": none,
-    })
-    done = await recover_operation(db, body.operation_id, "complete", digest)
-    if done:
-        if str(p.get("committed_revision_id")) != done["result"]["revision"]["id"]:
-            raise conflict("OPERATION_SUPERSEDED", "This completion was undone or replaced and cannot be replayed.")
-        return done["result"]
 
-    async def write(session):
-        patient = await _claim_patient(db, p["_id"], session)
-        replay = await recover_operation(db, body.operation_id, "complete", digest, session)
-        if replay:
-            return replay["result"], []
-        _require_printed(patient)
-        if patient.get("committed_revision_id"):
-            raise conflict("already_completed", "This patient already has a completed prescription.")
-        if generation_of(patient) != body.expected_generation:
-            raise conflict("stale_generation", "The prescription changed; reload and retry.")
+    async def apply(patient, session):
+        require_printed(patient)
+        require_not_completed(patient)
+        require_generation(patient, body.expected_generation)
         transcription = await db.transcriptions.find_one({"patient_id": patient["_id"]}, session=session)
-        if (
-            transcription and body.expected_draft_version is not None
-            and (transcription.get("draft_version") or 0) != max(body.expected_draft_version, 0)
-        ):
-            raise _draft_conflict()
+        require_draft_version(transcription, body.expected_draft_version)
         revision = await insert_revision(
             db, patient, actor, content, lines, none, body.operation_id, "complete", None, None, session,
         )
-        committed = await commit_completion(db, patient, revision, actor, session)
+        committed = await commit(db, patient, {
+            "committed_revision_id": revision["_id"], "queue_status": "seen",
+            "seen_at": now_utc(), "seen_by": str(actor["_id"]),
+        }, session)
         transcription = await _upsert_transcription(db, committed, actor, content, locked=True, session=session)
-        result = _clinical_result(committed, revision, transcription)
-        await record_operation(db, body.operation_id, "complete", digest, patient["_id"], result, session)
-        return result, []
+        return _clinical_result(committed, revision, transcription), []
 
-    result, _ = await _run_operation(db, body.operation_id, "complete", digest, write)
-    return result
+    def superseded(patient: dict, result: dict) -> Optional[str]:
+        if str(patient.get("committed_revision_id")) != result["revision"]["id"]:
+            return "This completion was undone or replaced and cannot be replayed."
+        return None
+
+    return await clinical_operation.run(db, Operation(
+        "complete", body.operation_id, p["_id"],
+        {"patient_id": str(p["_id"]), "content": content, "lines": lines, "none": none},
+        apply, superseded,
+    ))
 
 
 @router.post("/transcription/undo")
@@ -370,37 +320,29 @@ async def undo_completion(
     p = await db.patients.find_one({"_id": ObjectId(body.patient_id)})
     if not p:
         raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
-    digest = payload_hash("undo", {"patient_id": str(p["_id"]), "reason": reason})
-    done = await recover_operation(db, body.operation_id, "undo", digest)
-    if done:
-        if generation_of(p) != done["result"]["registration"]["clinical_generation"]:
-            raise conflict("OPERATION_SUPERSEDED", "The prescription changed after this undo, which cannot be replayed.")
-        return done["result"]
 
-    async def write(session):
-        patient = await _claim_patient(db, p["_id"], session)
-        replay = await recover_operation(db, body.operation_id, "undo", digest, session)
-        if replay:
-            return replay["result"], []
-        if await has_issue_history(db, patient, session):
-            raise conflict("undo_after_issue", "Completion cannot be undone after an issue or pending issue.")
-        if not patient.get("committed_revision_id"):
-            raise conflict("not_completed", "There is no current completion to undo.")
-        if generation_of(patient) != body.expected_generation:
-            raise conflict("stale_generation", "The prescription changed; reload and retry.")
-        updated = await commit_undo(db, patient, session)
+    async def apply(patient, session):
+        require_undoable(patient, await has_issue_history(db, patient, session))
+        require_generation(patient, body.expected_generation)
+        updated = await commit(db, patient, {
+            "committed_revision_id": None, "queue_status": "arrived", "seen_at": None, "seen_by": None,
+        }, session)
         trans = await db.transcriptions.find_one_and_update(
             {"patient_id": patient["_id"]}, {"$set": {"locked": False}}, return_document=True, session=session,
         )
-        result = {
+        return {
             "registration": ser_patient(updated),
             "transcription": ser_trans(trans) if trans else None,
-        }
-        await record_operation(db, body.operation_id, "undo", digest, patient["_id"], result, session)
-        return result, []
+        }, []
 
-    result, _ = await _run_operation(db, body.operation_id, "undo", digest, write)
-    return result
+    def superseded(patient: dict, result: dict) -> Optional[str]:
+        if generation_of(patient) != result["registration"]["clinical_generation"]:
+            return "The prescription changed after this undo, which cannot be replayed."
+        return None
+
+    return await clinical_operation.run(db, Operation(
+        "undo", body.operation_id, p["_id"], {"patient_id": str(p["_id"]), "reason": reason}, apply, superseded,
+    ))
 
 
 def _validate_fulfilment_matrix(item_type: str, status: str) -> None:
@@ -450,11 +392,6 @@ async def _consume_seat(collection: AsyncCollection, day_id: ObjectId, session) 
         session=session,
     )
 
-
-SPECS_EXCLUSION = {
-    "specs_fixed": ("specs_made", "Spectacles to be made"),
-    "specs_made": ("specs_fixed", "Fixed-power specs"),
-}
 
 DEFERRAL_CONFIG = {
     "specs_made": {
@@ -619,23 +556,14 @@ async def record_fulfilment(
     patient = await db.patients.find_one({"_id": t["patient_id"]}) if t.get("patient_id") else None
     if not patient:
         raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
-    if not patient.get("committed_revision_id") or patient.get("queue_status") != "seen":
-        raise conflict("not_completed", "Issue requires a completed prescription.")
-    if not body.paper_reviewed or not body.reviewed_revision_id or body.reviewed_generation is None:
-        raise conflict("review_required", "Confirm the paper against the saved prescription before issuing.")
-    if str(patient["committed_revision_id"]) != body.reviewed_revision_id or generation_of(patient) != body.reviewed_generation:
-        raise conflict("stale_review", "The reviewed prescription is no longer current. Review the paper again.")
-    revision = await db.prescription_revisions.find_one({"_id": patient["committed_revision_id"]})
-    if not revision:
-        raise conflict("not_completed", "Issue requires a completed prescription.")
-    if str(revision.get("patient_id")) != str(patient["_id"]):
-        raise conflict("stale_review", "The reviewed prescription is no longer current. Review the paper again.")
+    committed_id = patient.get("committed_revision_id")
+    revision = await db.prescription_revisions.find_one({"_id": committed_id}) if committed_id else None
+    revision = require_fresh_review(
+        patient, revision, body.paper_reviewed, body.reviewed_revision_id, body.reviewed_generation,
+    )
     if body.item_type not in PRESCRIBED_LINE_KEYS:
         raise api_error(400, "INVALID_FULFILMENT_ITEM_STATUS", 'Invalid fulfilment item/status')
-    if revision.get("none_prescribed") or body.item_type not in (revision.get("prescribed_lines") or []):
-        raise conflict("line_not_prescribed", "This line is not prescribed on the completed prescription.")
-    if body.item_type == "ot" and revision.get("ot_outcome") != "iol_surgery":
-        raise conflict("hospital_referral", "A Hospital referral is complete once the prescription is saved; nothing is recorded at the Hospital station.")
+    require_line_prescribed(revision, body.item_type)
     medicine_outcomes = None
     issued_powers = None
     if body.item_type == "medicine":
@@ -644,35 +572,27 @@ async def record_fulfilment(
     elif body.item_type == "specs_fixed":
         issued_powers = await resolve_issued_powers(db, revision, body)
     _validate_fulfilment_matrix(body.item_type, body.status)
-    digest = payload_hash("issue", body.model_dump(exclude={"operation_id"}))
-    op_id = body.operation_id or str(ObjectId())
-    done = await recover_operation(db, op_id, "issue", digest)
-    if done:
-        return done["result"]
 
-    async def write(session):
-        current = await _claim_patient(db, patient["_id"], session)
-        replay = await recover_operation(db, op_id, "issue", digest, session)
-        if replay:
-            return replay["result"], []
-        if not current.get("committed_revision_id") or current.get("queue_status") != "seen":
-            raise conflict("not_completed", "Issue requires a completed prescription.")
-        if str(current["committed_revision_id"]) != body.reviewed_revision_id or generation_of(current) != body.reviewed_generation:
-            raise conflict("stale_review", "The reviewed prescription is no longer current. Review the paper again.")
+    async def apply(current, session):
+        committed = current.get("committed_revision_id")
+        claimed = await db.prescription_revisions.find_one({"_id": committed}, session=session) if committed else None
+        require_line_prescribed(require_fresh_review(
+            current, claimed, body.paper_reviewed, body.reviewed_revision_id, body.reviewed_generation,
+        ), body.item_type)
         trans = await db.transcriptions.find_one({"_id": t["_id"]}, session=session)
         if not trans:
             raise api_error(404, "TRANSCRIPTION_NOT_FOUND", 'Transcription not found')
-        other = SPECS_EXCLUSION.get(body.item_type)
-        if other and await db.fulfilments.find_one(
-            {"transcription_id": t["_id"], "item_type": other[0], "status": {"$ne": "cancelled"}}, session=session,
-        ):
-            raise api_error(409, "SPECS_LINE_EXCLUSIVE", f'This patient already has a {other[1]} record.')
+        if body.item_type in SPECS_EXCLUSION:
+            require_specs_exclusive(body.item_type, await db.fulfilments.find_one({
+                "transcription_id": t["_id"], "item_type": SPECS_EXCLUSION[body.item_type][0],
+                "status": {"$ne": "cancelled"},
+            }, session=session))
         _assert_specs_prescription(body.item_type, trans)
         prior = await db.fulfilments.find_one({"transcription_id": t["_id"], "item_type": body.item_type}, session=session)
         slip = await _process_deferral(db, current, trans, body, prior, session)
         doc = _build_fulfilment_doc(body, t["_id"], slip, str(actor["_id"]), medicine_outcomes, issued_powers)
         doc.update({
-            "operation_id": op_id,
+            "operation_id": body.operation_id,
             "reviewed_revision_id": current["committed_revision_id"],
             "reviewed_generation": generation_of(current),
             "slip_id": slip["_id"] if slip else None,
@@ -696,13 +616,11 @@ async def record_fulfilment(
             slip["collection_date"], slip.get("collection_venue_sms") or slip["collection_venue"],
             slip.get("collection_end_date"), event_key=sms.token_key(slip), session=session, now=now_utc(),
         ) if slip else []
-        result = {"fulfilment": ser_fulfil(doc), "slip": ser_slip(slip) if slip else None}
-        await record_operation(db, op_id, "issue", digest, patient["_id"], result, session)
-        return result, queued
+        return {"fulfilment": ser_fulfil(doc), "slip": ser_slip(slip) if slip else None}, queued
 
-    result, queued = await _run_operation(db, op_id, "issue", digest, write)
-    await sms.dispatch(background_tasks, db, queued, now_utc())
-    return result
+    return await clinical_operation.run(db, Operation(
+        "issue", body.operation_id, patient["_id"], body.model_dump(exclude={"operation_id"}), apply,
+    ), background_tasks)
 
 
 async def _make_slip(
@@ -786,7 +704,6 @@ async def add_correction(
         raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
     if t and t.get("patient_id") != p["_id"]:
         raise api_error(404, "TRANSCRIPTION_NOT_FOUND", 'Transcription not found')
-    op_id = body.operation_id or str(ObjectId())
     base_id = p.get("committed_revision_id")
     if not base_id:
         raise conflict("not_completed", "There is no current completion to correct.")
@@ -808,7 +725,7 @@ async def add_correction(
     confirmed = body.full_transcription_confirmed or bool(body.changes)
     try:
         view = CompletePrescriptionBody.model_validate({
-            **merged, "patient_id": str(p["_id"]), "operation_id": op_id,
+            **merged, "patient_id": str(p["_id"]), "operation_id": body.operation_id or "",
             "full_transcription_confirmed": confirmed, "prescribed_lines": lines, "none_prescribed": none,
         })
     except ValidationError:
@@ -819,41 +736,32 @@ async def add_correction(
     view.fixed_power_r = await stocked_power(db, view.fixed_power_r, active_only=False)
     view.fixed_power_l = await stocked_power(db, view.fixed_power_l, active_only=False)
     content, lines, none = validate_completion(view)
-    digest = payload_hash("correct", {
-        "patient_id": str(p["_id"]), "content": content, "reason": body.reason,
-        "lines": lines, "none": none,
-    })
-    done = await recover_operation(db, op_id, "correct", digest)
-    if done:
-        return done["result"]
     still_iol = "ot" in lines and content.get("ot_outcome") == "iol_surgery"
     same_specs = "specs_made" in lines and content.get("specs_measurements") == current.get("specs_measurements")
 
-    async def write(session):
-        patient = await _claim_patient(db, p["_id"], session)
-        replay = await recover_operation(db, op_id, "correct", digest, session)
-        if replay:
-            return replay["result"], []
-        if generation_of(patient) != body.expected_generation or patient.get("committed_revision_id") != base_id:
-            raise conflict("stale_generation", "The prescription changed; reload and retry.")
+    async def apply(patient, session):
+        require_unchanged(patient, body.expected_generation, base_id)
         trans = await db.transcriptions.find_one({"patient_id": patient["_id"]}, session=session)
-        if trans and not still_iol and await db.fulfilments.find_one(
-            {"transcription_id": trans["_id"], "item_type": "ot", "status": "deferred"}, session=session,
-        ):
-            raise conflict("surgery_scheduled", "Record Surgery declined at the Hospital station before changing a scheduled IOL surgery.")
-        if trans and not same_specs and await db.deferred_slips.find_one(
-            {"transcription_id": trans["_id"], "item_type": "specs_made", "active": True}, session=session,
-        ):
-            raise conflict("SPECS_SCHEDULED", "Cancel the Spectacles to be made order at the Spectacles station before changing it.")
-        revision = await insert_revision(db, patient, actor, content, lines, none, op_id, "correct", reason, base_id, session)
-        committed = await commit_correction(db, patient, revision, session)
+        require_correction_allowed(
+            bool(trans and not still_iol and await db.fulfilments.find_one(
+                {"transcription_id": trans["_id"], "item_type": "ot", "status": "deferred"}, session=session,
+            )),
+            bool(trans and not same_specs and await db.deferred_slips.find_one(
+                {"transcription_id": trans["_id"], "item_type": "specs_made", "active": True}, session=session,
+            )),
+        )
+        revision = await insert_revision(
+            db, patient, actor, content, lines, none, body.operation_id or "", "correct", reason, base_id, session,
+        )
+        committed = await commit(db, patient, {"committed_revision_id": revision["_id"]}, session)
         trans = await _upsert_transcription(db, committed, actor, content, locked=True, session=session)
-        result = _clinical_result(committed, revision, trans)
-        await record_operation(db, op_id, "correct", digest, patient["_id"], result, session)
-        return result, []
+        return _clinical_result(committed, revision, trans), []
 
-    result, _ = await _run_operation(db, op_id, "correct", digest, write)
-    return result
+    return await clinical_operation.run(db, Operation(
+        "correct", body.operation_id, p["_id"],
+        {"patient_id": str(p["_id"]), "content": content, "reason": body.reason, "lines": lines, "none": none},
+        apply,
+    ))
 
 
 @router.get("/history/{person_id}")

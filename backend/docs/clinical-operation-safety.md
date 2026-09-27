@@ -4,11 +4,11 @@ Date: 2026-09-24 (ADR 0065). Replaces the claim and compensation design of 2026-
 
 ## Writes
 
-`complete`, `undo`, `correction` and `fulfilment` each run in one MongoDB transaction through `db.in_transaction`. The callback:
+`complete`, `undo`, `correction` and `fulfilment` each run through `clinical_operation.run` (ADR 0088), in one MongoDB transaction via `db.in_transaction`. Each handler supplies its payload, supersede rule and apply step. An operation id is required for all four. The runner:
 
 1. `$inc`s `patients.clinical_seq`, so a second writer on the same patient conflicts and the driver retries it on fresh state;
 2. replays a committed operation with the same id, if one exists;
-3. re-checks every gate (printed, completed, generation, draft version, review, seats);
+3. calls the apply step, which re-checks every gate with the pure guards in `clinical_state.py` (printed, completed, generation, draft version, review, seats);
 4. writes the seat, Token, fulfilment, revision and patient changes;
 5. inserts the `clinical_operations` row with the result.
 
