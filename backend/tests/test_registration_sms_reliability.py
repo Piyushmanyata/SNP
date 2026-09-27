@@ -5,6 +5,7 @@ from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.errors import DuplicateKeyError
 
 import routes_clinical
+import arrival
 import routes_desk
 import routes_registration
 import msg91
@@ -47,9 +48,9 @@ def test_competing_arrivals_preserve_the_first_volunteer(monkeypatch):
         camp_id, (day_id,) = await seed_camp(database)
         target = patient_doc(_id=ObjectId(), camp_id=camp_id, camp_day_id=day_id, queue_status="registered")
         await database.patients.insert_one(target.copy())
-        camp = await database.camps.find_one({"_id": camp_id})
-        first = await routes_desk._stamp_arrival(database, target, "first-volunteer", camp)
-        retry = await routes_desk._stamp_arrival(database, target, "second-volunteer", camp)
+        open_door = {"printing_open": True}
+        first = await arrival.stamp(database, target, "first-volunteer", open_door)
+        retry = await arrival.stamp(database, target, "second-volunteer", open_door)
         assert retry["arrived_by"] == "first-volunteer"
         assert retry["arrived_at"] == first["arrived_at"]
 
