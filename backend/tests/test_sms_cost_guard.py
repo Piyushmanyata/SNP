@@ -86,14 +86,18 @@ class TestDeliveryReports:
 
         _reporting(monkeypatch, body)
 
-    def test_a_switched_off_phone_does_not_pause_sending(self, monkeypatch):
+    @pytest.mark.parametrize("reason", [
+        "Absent Subscriber",
+        "DND: Failed due to Preference Category on DLT",
+    ])
+    def test_a_number_level_failure_does_not_pause_sending(self, monkeypatch, reason):
         recorder(monkeypatch)
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=1)
             await _post(client)
 
-            await _report(client, "id-1", status="2", reason="Absent Subscriber")
+            await _report(client, "id-1", status="2", reason=reason)
 
             [row] = await _ledger(database)
             assert (row["delivery"], row["dlt_failure"]) == ("failed", False)
