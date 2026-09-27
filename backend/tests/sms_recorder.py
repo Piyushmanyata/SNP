@@ -1,5 +1,6 @@
 """The in-memory SMS provider adapter: records accepted sends and plays scripted outcomes."""
 
+import threading
 from typing import Any, Callable, Dict, List, Union
 
 import msg91
@@ -14,6 +15,7 @@ class Recorder:
         self.enabled = enabled
         self.outcome: Outcome = "accept"
         self.scripted: List[Outcome] = []
+        self._lock = threading.Lock()
 
     def configured(self) -> bool:
         return self.enabled and any(self.templates.values())
@@ -25,7 +27,8 @@ class Recorder:
         self.scripted.extend(outcomes)
 
     def send(self, message_type: str, mobile: str, variables: Dict[str, Any]) -> str:
-        outcome = self.scripted.pop(0) if self.scripted else self.outcome
+        with self._lock:
+            outcome = self.scripted.pop(0) if self.scripted else self.outcome
         if callable(outcome):
             return outcome(message_type, mobile, variables)
         if outcome == "unsent":

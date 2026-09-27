@@ -351,13 +351,26 @@ class TestBoundedDispatch:
     def test_provider_unconfigured_stays_visibly_skipped(self, monkeypatch):
         async def body(database, client):
             await _seed_camp_household(database, n_patients=2)
+            sms.use_provider(msg91)
+            monkeypatch.delenv("MSG91_AUTH_KEY")
 
             assert (await _post(client)).json() == {
                 "ok": True, "sent": 0, "complete": True, "reason": "msg91_unconfigured",
             }
             assert await _ledger(database) == []
 
-        _run(monkeypatch, body, msg91_on=False)
+        _run(monkeypatch, body)
+
+
+def test_msg91_is_configured_only_with_a_key_and_a_template(monkeypatch):
+    for name in msg91.TEMPLATE_ENV.values():
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("MSG91_AUTH_KEY", "auth")
+    assert not msg91.configured()
+    monkeypatch.setenv("MSG91_TEMPLATE_CAMP", "tmpl")
+    assert msg91.configured()
+    monkeypatch.delenv("MSG91_AUTH_KEY")
+    assert not msg91.configured()
 
 
 def _flaky_provider(failures):

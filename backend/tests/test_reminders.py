@@ -40,18 +40,13 @@ async def _open_canary(*_args):
     return "open"
 
 
-def _run(monkeypatch, body, *, msg91_on=True, canary=False):
+def _run(monkeypatch, body, *, canary=False):
     if not canary:
         monkeypatch.setattr(routes_reminders, "_canary", _open_canary)
     monkeypatch.setenv("CRON_SECRET", SECRET)
-    if msg91_on:
-        monkeypatch.setenv("MSG91_AUTH_KEY", "auth")
-        for name, value in TEMPLATE_ENV.items():
-            monkeypatch.setenv(name, value)
-    else:
-        monkeypatch.delenv("MSG91_AUTH_KEY", raising=False)
-        for name in TEMPLATE_ENV:
-            monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("MSG91_AUTH_KEY", "auth")
+    for name, value in TEMPLATE_ENV.items():
+        monkeypatch.setenv(name, value)
 
     async def with_client(database):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url="http://test") as client:
@@ -166,7 +161,7 @@ class TestReminderCronHttp:
             assert r.json()["ok"] is True
             assert r.json()["sent"] == 0
 
-        _run(monkeypatch, body, msg91_on=False)
+        _run(monkeypatch, body)
 
     def test_approved_reminder_sends_while_specs_template_is_unavailable(self, monkeypatch):
         captured = recorder()
