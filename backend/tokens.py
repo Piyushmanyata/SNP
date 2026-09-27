@@ -18,10 +18,6 @@ NOTICE_FIELDS = {"phone": 1, "phone_normalized": 1, "reg_no": 1, "created_by": 1
 SENT_OR_SENDING = {"queued", "pending", "sent", "uncertain"}
 OT_INSTRUCTIONS = "पर्चा, यह टोकन, आधार कार्ड, राशन कार्ड और मोबाइल फ़ोन साथ लाएँ। सहायता: 9835317006"
 SPECS_INSTRUCTIONS = "Collect spectacles on the scheduled date."
-DAY_KINDS = {
-    "ot": ("ot_schedule_days", "ot_schedule_day_id", "ot_change"),
-    "specs": ("specs_collection_days", "specs_collection_day_id", "specs_change"),
-}
 
 
 def oid_or_400(raw: Any) -> ObjectId:
@@ -39,8 +35,8 @@ def specs_window_open(day: dict) -> bool:
     return ist_local_instant(day.get("end_date") or day["day_date"], sms.SPECS_PICKUP_END_TIME) > now_ist()
 
 
-def _deferred_to(prior: Optional[dict], field: str) -> Optional[ObjectId]:
-    return prior.get(field) if prior and prior.get("status") == "deferred" else None
+def _deferred_ot_day(prior: Optional[dict]) -> Optional[ObjectId]:
+    return prior.get("ot_schedule_day_id") if prior and prior.get("status") == "deferred" else None
 
 
 async def _release_seat(db: AsyncDatabase, day_id: ObjectId, session) -> None:
@@ -61,7 +57,7 @@ async def _book_ot_day(db: AsyncDatabase, patient: dict, raw_day_id: Optional[st
         raise api_error(400, "SURGERY_DATE_HAS_PASSED_CHOOSE_TODAY_OR_A_LATER_DAY", 'Surgery date has passed; choose today or a later day')
     if target.get("camp_id") != patient.get("camp_id"):
         raise api_error(400, "SCHEDULE_DAY_BELONGS_TO_ANOTHER_CAMP", 'Schedule day belongs to another camp')
-    previous = _deferred_to(prior, "ot_schedule_day_id")
+    previous = _deferred_ot_day(prior)
     if previous == day_id:
         return target
     day = await db.ot_schedule_days.find_one_and_update(
@@ -156,7 +152,7 @@ async def close(db: AsyncDatabase, line: str, transcription_id: ObjectId, prior:
         {"$set": {"active": False, "cancelled": True, "cancelled_at": now_utc()}},
         session=session,
     )
-    previous = _deferred_to(prior, "ot_schedule_day_id")
+    previous = _deferred_ot_day(prior)
     if line == "ot" and previous:
         await _release_seat(db, previous, session)
 
@@ -194,14 +190,14 @@ async def _replace_tokens(db: AsyncDatabase, day_field: str, day: dict, message_
 
 async def edit_day(db: AsyncDatabase, kind: str, day: dict, changes: dict, background_tasks: Any) -> dict:
     """The Schedule edit of an OT Schedule Day or Specs collection day, against the day the admin loaded."""
-    collection_name, day_field, message_type = DAY_KINDS[kind]
-    collection = db[collection_name]
     extra_filter: Dict[str, Any] = {}
     if kind == "ot":
         if changes["seat_limit"] < day.get("seats_taken", 0):
             raise api_error(409, "SEAT_LIMIT_BELOW_ASSIGNED", f"Cannot set below {day.get('seats_taken', 0)} already-assigned seats")
+        collection, day_field, message_type = db.ot_schedule_days, "ot_schedule_day_id", "ot_change"
         extra_filter = {"seats_taken": {"$lte": changes["seat_limit"]}}
     else:
+        collection, day_field, message_type = db.specs_collection_days, "specs_collection_day_id", "specs_change"
         day = {**day, "end_date": day.get("end_date") or day["day_date"]}
     material = any(changes[key] != day.get(key) for key in ("day_date", "venue", "end_date") if key in changes)
     if material:

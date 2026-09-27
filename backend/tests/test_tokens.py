@@ -35,8 +35,8 @@ async def _defer(db, patient, transcription, day_id, prior=None, line="ot"):
     return await in_transaction(lambda session: tokens.defer(db, line, patient, transcription, prior, str(day_id), session))
 
 
-async def _close(db, transcription, prior, line="ot"):
-    await in_transaction(lambda session: tokens.close(db, line, transcription["_id"], prior, session))
+async def _close(db, transcription, prior):
+    await in_transaction(lambda session: tokens.close(db, "ot", transcription["_id"], prior, session))
 
 
 async def _seats(db, day_id):
@@ -111,7 +111,7 @@ def test_spectacles_to_be_made_takes_no_seat_and_a_new_version_closes_the_previo
         patient, transcription = await _patient(db, camp_id)
         first, _ = await _defer(db, patient, transcription, specs_day, line="specs_made")
         second, _ = await _defer(db, patient, transcription, specs_day, line="specs_made")
-        assert (first["collection_end_date"], second["version"]) == (day(5), 2)
+        assert (first["collection_end_date"], first["ot_schedule_day_id"], second["version"]) == (day(5), None, 2)
         assert [t["version"] for t in await db.deferred_slips.find({"active": True}).to_list(None)] == [2]
         assert (await db.specs_collection_days.find_one({"_id": specs_day}))["booking_seq"] == 2
 

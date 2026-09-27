@@ -406,14 +406,6 @@ def _day_requested(body: FulfilmentBody) -> Optional[str]:
     return body.ot_schedule_day_id if body.item_type == "ot" else body.specs_collection_day_id
 
 
-def _deferred_day_id(body: FulfilmentBody, item_type: str) -> Optional[ObjectId]:
-    """A day is only booked for the line that owns it: a specs_made line never holds an OT seat."""
-    if body.status != "deferred" or body.item_type != item_type:
-        return None
-    raw = _day_requested(body)
-    return ObjectId(raw) if raw else None
-
-
 def _build_fulfilment_doc(
     body: FulfilmentBody,
     transcription_id: ObjectId | str,
@@ -431,8 +423,8 @@ def _build_fulfilment_doc(
         "issued_power_l": issued_powers[1] if issued_powers else None,
         "collection_date": (slip or {}).get("collection_date"),
         "collection_venue": (slip or {}).get("collection_venue"),
-        "ot_schedule_day_id": _deferred_day_id(body, "ot"),
-        "specs_collection_day_id": _deferred_day_id(body, "specs_made"),
+        "ot_schedule_day_id": (slip or {}).get("ot_schedule_day_id"),
+        "specs_collection_day_id": (slip or {}).get("specs_collection_day_id"),
         "created_by": actor_id,
         "created_at": now_utc(),
     }
