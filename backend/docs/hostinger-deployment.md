@@ -564,3 +564,23 @@ Live checks:
 - Every service is running, and backend, frontend, mongo and reminders report healthy.
 - The backend loads `arrival.stamp`.
 - The backend and reminders logs have no tracebacks and no 5xx.
+
+## Lock resolution — 28 September 2026
+
+[PR 97](https://github.com/Piyushmanyata/SNP/pull/97) (#88 slice 6, ADR 0091) merged as `9cea96621e9d82e46c060d0c6acf92399fd0021b`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/9cea966…`. CI run [36345227884](https://github.com/Piyushmanyata/SNP/actions/runs/36345227884) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify.
+
+Before the update, the running `e0ddb1d` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-e0ddb1dfdf4df9692e8a27936cd07ae010dfa301`. The backup container was restarted and took snapshot `218afd50` at 19:53 UTC on 27 September. Only backend, frontend and reminders were rebuilt; MongoDB stayed up. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/e0ddb1d…`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed, and door and registration responses are unchanged. `lock_resolution.py` now owns the Lock decision tree and the single Aadhaar overwrite writer. This completes #88.
+
+Live checks:
+
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Every service is running, and backend, frontend, mongo and reminders report healthy.
+- The backend loads `lock_resolution.classify`.
+- The backend and reminders logs have no tracebacks and no 5xx.
