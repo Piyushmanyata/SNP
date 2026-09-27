@@ -18,7 +18,7 @@
   - `record_delivery_report`, `paused`, `resume`, `controls` and `paused_types`
   - `recorded`, `used`, `status_counts`, `ledger_groups` and `notice_states`
   - `token_key` and `edit_key`
-- Every verb that depends on time takes `now`. Route handlers and the reminder worker pass `now_utc()` at the edge. One sweep uses the `now` it was given for every row it writes.
+- Every verb that depends on time takes `now`. Route handlers and the reminder worker pass `now_utc()` at the edge, read at each call. The D-1 sweep reads the clock per call, not once at its start. A single timestamp for the whole sweep would let a Resume that lands mid-sweep miss the Canary it sends, and a second Canary would go out.
 - The time rules are named once in the ledger:
   - `QUEUED_RESEND_AFTER` 30 s
   - `PENDING_UNCERTAIN_AFTER` 5 min
@@ -35,7 +35,6 @@
 - One search finds every SMS intent transition.
 - Ledger tests (`test_sms_ledger.py`) pass `now` directly: resend after 30 s, uncertain after 5 min, retry after 10 min, throttle backoff after 5 min, three attempts, Canary states.
 - Route tests advance the frozen clock with `advance_clock` instead of rewriting rows.
-- A long reminder sweep stamps its rows with the time the sweep started, not the time each row was written. The sweep is bounded to 60 s, so the Canary wait and retry gap shift by at most that much.
 
 ## Rejected alternatives
 

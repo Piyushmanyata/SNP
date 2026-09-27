@@ -3,7 +3,7 @@ import asyncio
 import hmac
 import os
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
@@ -30,7 +30,7 @@ def _require_cron_secret(request: Request) -> None:
         raise api_error(401, "UNAUTHORIZED", 'Unauthorized')
 
 
-async def _gate(db: AsyncDatabase, message_type: str, event_date: str, now: Any) -> str:
+async def _gate(db: AsyncDatabase, message_type: str, event_date: str, now: datetime) -> str:
     return await sms.canary(db, message_type, event_date, now)
 
 
@@ -144,7 +144,7 @@ async def _slip_page(
 
 async def _send_fresh(
     db: AsyncDatabase, message_type: str, event_date: str, chosen: List[tuple],
-    camps: Dict[Any, dict], staff: Dict[str, Optional[str]], gate: str, now: Any,
+    camps: Dict[Any, dict], staff: Dict[str, Optional[str]], gate: str,
 ) -> Tuple[int, int, int, bool]:
     sem = asyncio.Semaphore(4)
 
@@ -152,7 +152,7 @@ async def _send_fresh(
         async with sem:
             return await sms.record_and_send(
                 db, patient, message_type, event_date, venue, end_date,
-                now=now, camps=camps, staff_phones=staff, fresh=True,
+                now=helpers.now_utc(), camps=camps, staff_phones=staff, fresh=True,
             )
 
     first = await one(*chosen[0][:3])
@@ -175,7 +175,7 @@ async def _send_fresh(
         elif outcome == "rejected" and gate == "canary":
             rejected = True
     if rejected:
-        await sms.pause_after_rejection(db, message_type, event_date, now)
+        await sms.pause_after_rejection(db, message_type, event_date, helpers.now_utc())
     return sent, failed, used, rejected
 
 
@@ -183,7 +183,6 @@ async def send_d1_reminders() -> Dict[str, Any]:
     if not sms.configured():
         return {"ok": True, "sent": 0, "complete": True, "reason": "msg91_unconfigured"}
     db = get_db()
-    now = helpers.now_utc()
     holder = await _acquire_lease(db)
     if holder is None:
         await _write_ops(db, complete=False)
@@ -203,7 +202,7 @@ async def send_d1_reminders() -> Dict[str, Any]:
             if time.monotonic() - started >= SWEEP_SECONDS or used >= SEND_LIMIT:
                 complete = False
                 break
-            gate = await _gate(db, message_type, tomorrow, now)
+            gate = await _gate(db, message_type, tomorrow, helpers.now_utc())
             if gate == "paused":
                 waiting = True
                 complete = False
@@ -214,7 +213,7 @@ async def send_d1_reminders() -> Dict[str, Any]:
                 waiting = True
                 complete = False
                 continue
-            for row in await sms.due_retries(db, message_type, tomorrow, now, SEND_LIMIT):
+            for row in await sms.due_retries(db, message_type, tomorrow, helpers.now_utc(), SEND_LIMIT):
                 if used >= SEND_LIMIT or time.monotonic() - started >= SWEEP_SECONDS:
                     complete = False
                     break
@@ -225,7 +224,7 @@ async def send_d1_reminders() -> Dict[str, Any]:
                     continue
                 outcome = await sms.record_and_send(
                     db, patient, message_type, tomorrow, row.get("venue") or "",
-                    now=now, retry_after=sms.RETRY_AFTER, event_key=row.get("event_key"),
+                    now=helpers.now_utc(), retry_after=sms.RETRY_AFTER, event_key=row.get("event_key"),
                     camps=camps, staff_phones=staff,
                 )
                 if outcome == "skipped":
@@ -265,7 +264,7 @@ async def send_d1_reminders() -> Dict[str, Any]:
                 if chosen:
                     resume_at = cursor.get(message_type)
                     page_sent, page_failed, page_used, rejected = await _send_fresh(
-                        db, message_type, tomorrow, chosen, camps, staff, gate, now,
+                        db, message_type, tomorrow, chosen, camps, staff, gate,
                     )
                     if page_used == 0:
                         cursor[message_type] = resume_at
