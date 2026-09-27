@@ -1,4 +1,4 @@
-export const NO_WALK_IN = Object.freeze({ key: "", reqId: "", patientId: "" });
+const NO_WALK_IN = Object.freeze({ key: "", reqId: "", patientId: "" });
 
 export const initialDeskSession = Object.freeze({
   seq: 0,
@@ -69,8 +69,7 @@ export function deskSession(state, event) {
     case "confirmResolved":
       if (!current) return state;
       return { ...state, scanResult: event.result, banner: arrivedBanner(event.result.registration) };
-    case "codeLookupStarted":
-    case "nameSearchStarted":
+    case "findStarted":
       return { ...newFind(state), scanning: false };
     case "lookupResolved":
       if (!current) return state;
@@ -94,9 +93,12 @@ export function deskSession(state, event) {
       if (!current) return state;
       return { ...state, paperCheck: { reg: event.reg, rx: event.rx, request: event.seq, busy: false, error: "" } };
     case "paperConfirmStarted":
-      return { ...state, paperCheck: state.paperCheck && { ...state.paperCheck, busy: true, error: "" } };
+      if (state.paperCheck?.request !== event.request) return state;
+      return { ...state, paperCheck: { ...state.paperCheck, busy: true, error: "" } };
     case "paperConfirmed":
-      if (event.request !== state.seq) return { ...state, paperCheck: null };
+      if (event.request !== state.seq) {
+        return state.paperCheck?.request === event.request ? { ...state, paperCheck: null } : state;
+      }
       return {
         ...state,
         seq: state.seq + 1,
@@ -108,7 +110,8 @@ export function deskSession(state, event) {
         focusUsbBox: true,
       };
     case "paperConfirmFailed":
-      return { ...state, paperCheck: state.paperCheck && { ...state.paperCheck, busy: false, error: event.message } };
+      if (state.paperCheck?.request !== event.request) return state;
+      return { ...state, paperCheck: { ...state.paperCheck, busy: false, error: event.message } };
     case "paperDismissed":
       return {
         ...state,
@@ -158,15 +161,13 @@ export function deskSession(state, event) {
     case "phoneChanged":
       return { ...state, doorPhone: event.phone };
     case "modalOpened":
-      return { ...state, regMode: event.mode, preRegPayload: event.payload ?? state.preRegPayload };
+      return { ...state, regMode: event.mode, preRegPayload: event.payload ?? "" };
     case "modalClosed":
       return { ...state, regMode: "", preRegPayload: "" };
     case "registered":
       return { ...state, found: { reg: event.registration, reprint: true } };
     case "bannerShown":
       return { ...state, banner: event.message };
-    case "errorShown":
-      return { ...state, error: event.message };
     case "unmounted":
       return { ...state, seq: state.seq + 1 };
     default:

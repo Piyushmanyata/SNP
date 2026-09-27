@@ -17,8 +17,7 @@ const withPaperCheck = run([{ type: "printReady", seq: 1, reg: REG, rx: RX }], o
 
 const FIND_STARTS = [
   { type: "scanStarted", payload: "next card" },
-  { type: "codeLookupStarted" },
-  { type: "nameSearchStarted" },
+  { type: "findStarted" },
 ];
 
 test.each(FIND_STARTS)("$type moves to a new seq and clears the previous patient", (event) => {
@@ -35,9 +34,9 @@ test.each(FIND_STARTS)("$type moves to a new seq and clears the previous patient
   if (event.type !== "scanStarted") expect(next.scanResult).toBeNull();
 });
 
-test("a name search closes an open Paper check without recording", () => {
+test("a typed find closes an open Paper check without recording", () => {
   expect(withPaperCheck.paperCheck).not.toBeNull();
-  expect(deskSession(withPaperCheck, { type: "nameSearchStarted" }).paperCheck).toBeNull();
+  expect(deskSession(withPaperCheck, { type: "findStarted" }).paperCheck).toBeNull();
 });
 
 test.each([
@@ -47,7 +46,7 @@ test.each([
   { type: "failed", message: "Late failure" },
   { type: "printReady", reg: NEXT, rx: RX },
 ])("a stale $type reply is ignored", (reply) => {
-  const state = run([{ type: "codeLookupStarted" }], onCard);
+  const state = run([{ type: "findStarted" }], onCard);
   expect(deskSession(state, { ...reply, seq: state.seq - 1 })).toBe(state);
 });
 
@@ -74,7 +73,7 @@ test("Printed — next patient clears the card, shows the next-patient banner an
 });
 
 test("a Paper check confirmation for an older request closes it without moving on", () => {
-  const moved = run([{ type: "codeLookupStarted" }], withPaperCheck);
+  const moved = run([{ type: "findStarted" }], withPaperCheck);
   const stale = { ...moved, paperCheck: withPaperCheck.paperCheck };
   const next = deskSession(stale, { type: "paperConfirmed", request: 1 });
   expect(next.paperCheck).toBeNull();
@@ -85,10 +84,19 @@ test("a Paper check confirmation for an older request closes it without moving o
 
 test("a failed stamp keeps the Paper check open with the error", () => {
   const next = run([
-    { type: "paperConfirmStarted" },
-    { type: "paperConfirmFailed", message: "Network Error" },
+    { type: "paperConfirmStarted", request: 1 },
+    { type: "paperConfirmFailed", request: 1, message: "Network Error" },
   ], withPaperCheck);
   expect(next.paperCheck).toEqual(expect.objectContaining({ busy: false, error: "Network Error" }));
+});
+
+test("a late reply for an older Paper check never touches the newer one", () => {
+  const newer = run([
+    { type: "findStarted" },
+    { type: "printReady", seq: 2, reg: { id: "p-2" }, rx: RX },
+  ], withPaperCheck);
+  expect(deskSession(newer, { type: "paperConfirmFailed", request: 1, message: "Network Error" })).toBe(newer);
+  expect(deskSession(newer, { type: "paperConfirmed", request: 1, registration: REG })).toBe(newer);
 });
 
 test("dismissing the Paper check records nothing, drops the scanned sheet and leaves a note", () => {
@@ -100,8 +108,8 @@ test("dismissing the Paper check records nothing, drops the scanned sheet and le
 });
 
 test("Reprint follows the lookup that found the row", () => {
-  const typed = run([{ type: "codeLookupStarted" }, { type: "lookupResolved", seq: 1, registration: REG, reprint: true }]);
-  const code = run([{ type: "codeLookupStarted" }, { type: "lookupResolved", seq: 1, registration: REG, reprint: false }]);
+  const typed = run([{ type: "findStarted" }, { type: "lookupResolved", seq: 1, registration: REG, reprint: true }]);
+  const code = run([{ type: "findStarted" }, { type: "lookupResolved", seq: 1, registration: REG, reprint: false }]);
   expect(typed.found.reprint).toBe(true);
   expect(code.found.reprint).toBe(false);
 });

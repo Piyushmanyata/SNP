@@ -64,7 +64,7 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
     };
 
     const lookup = async (value, reprint) => {
-      const { seq } = dispatch({ type: "codeLookupStarted" });
+      const { seq } = dispatch({ type: "findStarted" });
       try {
         const { data } = await api.post("/desk/lookup", { value });
         const current = isCurrent(seq);
@@ -86,14 +86,14 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
       if (AADHAAR_PAYLOAD.test(value)) {
         dispatch({ type: "findChanged", value: "" });
         if (!printingOpen) {
-          dispatch({ type: "errorShown", message: "That is an Aadhaar QR. Use New Registration to register this patient." });
+          dispatch({ type: "failed", message: "That is an Aadhaar QR. Use New Registration to register this patient." });
           return;
         }
         try {
           const result = await resolveDoorScan(value);
-          if (result.outcome !== "card") dispatch({ type: "errorShown", message: result.message });
+          if (result.outcome !== "card") dispatch({ type: "failed", message: result.message });
         } catch (err) {
-          dispatch({ type: "errorShown", message: formatApiError(err) });
+          dispatch({ type: "failed", message: formatApiError(err) });
         }
         return;
       }
@@ -101,7 +101,7 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
         if (await lookup(value, /^\d+$/.test(value))) dispatch({ type: "findChanged", value: "" });
         return;
       }
-      const { seq } = dispatch({ type: "nameSearchStarted" });
+      const { seq } = dispatch({ type: "findStarted" });
       try {
         const { data } = await api.get(`/patients/search?q=${encodeURIComponent(value)}`);
         dispatch({ type: "searchResolved", seq, results: data.results });
@@ -136,26 +136,26 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
         dispatch({ type: "paperConfirmed", request: check.request });
         return;
       }
-      dispatch({ type: "paperConfirmStarted" });
+      dispatch({ type: "paperConfirmStarted", request: check.request });
       try {
         const { data } = await api.post(`/desk/print/${check.reg.id}`);
         dispatch({ type: "paperConfirmed", request: check.request, registration: data.registration });
       } catch (err) {
-        dispatch({ type: "paperConfirmFailed", message: formatApiError(err) });
+        dispatch({ type: "paperConfirmFailed", request: check.request, message: formatApiError(err) });
       }
     };
 
     const dismissPaper = (note) => dispatch({ type: "paperDismissed", note });
 
     const noCardPrint = async (reg, reason) => {
-      dispatch({ type: "errorShown", message: "" });
+      dispatch({ type: "failed", message: "" });
       try {
         const { data } = await api.post("/desk/no-card", { patient_id: reg.id, reason: reason.code, note: reasonBody(reason).note });
         dispatch({ type: "released", registration: data.registration });
         await print(data.registration);
         return true;
       } catch (err) {
-        dispatch({ type: "errorShown", message: formatApiError(err) });
+        dispatch({ type: "failed", message: formatApiError(err) });
         return false;
       }
     };
@@ -164,7 +164,7 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
       const { scanResult, scanPayload, doorPhone } = latest.current;
       if (!scanResult?.card) return;
       if (!operatingDayId) {
-        dispatch({ type: "errorShown", message: "No operating camp day. Use Pre-registration." });
+        dispatch({ type: "failed", message: "No operating camp day. Use Pre-registration." });
         return;
       }
       const { seq, walkIn } = dispatch({ type: "walkInStarted", key: scanPayload || "", reqId: v4() });
