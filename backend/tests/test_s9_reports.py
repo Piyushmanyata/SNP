@@ -95,9 +95,8 @@ def test_export_streams_every_patient(monkeypatch):
     run_camp(monkeypatch, body)
 
 
-def test_new_ledger_rows_store_camp_id(monkeypatch):
-    monkeypatch.setattr(sms.msg91, "configured", lambda: True)
-    monkeypatch.setattr(sms.msg91, "template_id", lambda _message_type: "flow")
+def test_new_ledger_rows_store_camp_id(monkeypatch, sms_provider):
+    sms_provider.switch_on()
 
     async def body(database):
         camp_id, _ = await seed_camp(database)

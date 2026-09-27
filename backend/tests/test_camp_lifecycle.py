@@ -280,7 +280,7 @@ class TestScanResolution:
 
 class TestRegistrationConfirmationSms:
     def test_each_registration_gets_its_own_reg_no_message(self, monkeypatch):
-        sent = recorder(monkeypatch)
+        sent = recorder()
 
         async def body(database):
             _camp_id, (day_id,) = await seed_camp(database, days=(OTHER_DAY,), venue_sms="Short Camp Venue")
@@ -318,13 +318,9 @@ class TestRegistrationConfirmationSms:
         with pytest.raises(ValidationError):
             CampBody(name="Camp", venue="Sikar Bhawan, call 9876543210", camp_date=OTHER_DAY)
 
-    def test_a_send_failure_does_not_fail_the_registration(self, monkeypatch):
-        recorder(monkeypatch)
-
-        def boom(*_a, **_k):
-            raise sms.msg91.Unsent("gateway down")
-
-        monkeypatch.setattr(sms.msg91, "send_dlt_sms", boom)
+    def test_a_send_failure_does_not_fail_the_registration(self, monkeypatch, sms_provider):
+        sms_provider.switch_on()
+        sms_provider.outcome = "unsent"
 
         async def body(database):
             _camp_id, (day_id,) = await seed_camp(database, days=(OTHER_DAY,))
@@ -336,7 +332,7 @@ class TestRegistrationConfirmationSms:
         run_camp(monkeypatch, body)
 
     def test_a_walk_in_registered_on_the_camp_day_gets_no_sms(self, monkeypatch):
-        sent = recorder(monkeypatch)
+        sent = recorder()
 
         async def body(database):
             _camp_id, (today_id, later_id) = await seed_camp(database, days=(TODAY, OTHER_DAY))
@@ -349,7 +345,7 @@ class TestRegistrationConfirmationSms:
         run_camp(monkeypatch, body)
 
     def test_a_patient_with_no_usable_number_is_skipped(self, monkeypatch):
-        sent = recorder(monkeypatch)
+        sent = recorder()
 
         async def body(database):
             _camp_id, (day_id,) = await seed_camp(database)
@@ -382,7 +378,7 @@ class TestFulfilmentLines:
         run_camp(monkeypatch, body)
 
     def test_fixed_power_specs_records_without_token_or_sms(self, monkeypatch):
-        sent = recorder(monkeypatch)
+        sent = recorder()
 
         async def body(database):
             seen = await seen_patient(database)
@@ -471,7 +467,7 @@ class TestFulfilmentLines:
         run_camp(monkeypatch, body)
 
     def test_deferring_specs_prints_a_token_and_sends_one_sms(self, monkeypatch):
-        sent = recorder(monkeypatch)
+        sent = recorder()
 
         async def body(database):
             camp_id, _ = await seed_camp(database)
@@ -491,7 +487,7 @@ class TestFulfilmentLines:
         run_camp(monkeypatch, body)
 
     def test_deferring_ot_sends_the_ot_token_sms(self, monkeypatch):
-        sent = recorder(monkeypatch)
+        sent = recorder()
 
         async def body(database):
             camp_id, _ = await seed_camp(database)

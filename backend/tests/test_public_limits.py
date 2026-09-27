@@ -97,7 +97,7 @@ def test_staff_decode_is_never_limited_but_anonymous_decode_is(monkeypatch):
 
 
 def test_self_register_limits_one_network_and_one_household(monkeypatch):
-    sent = recorder(monkeypatch)
+    sent = recorder()
     routes_registration._rl.clear()
 
     async def body(database, client):
@@ -123,7 +123,7 @@ def test_self_register_limits_one_network_and_one_household(monkeypatch):
 
 
 def test_a_number_gets_at_most_six_registration_sms_a_day(monkeypatch):
-    sent = recorder(monkeypatch)
+    sent = recorder()
 
     async def run(database):
         _camp_id, (day_id,) = await seed_camp(database, days=(day(1),))

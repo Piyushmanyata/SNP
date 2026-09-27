@@ -205,7 +205,7 @@ class TestHospitalStation:
     def test_scheduling_takes_a_seat_prints_a_token_and_sends_the_ot_token_sms(self, monkeypatch):
         async def run(db):
             camp_id, _day, patient = await _printed_patient(db)
-            sent = recorder(monkeypatch)
+            sent = recorder()
             done = await _complete(patient, **_lines(["ot"], eye="L"), bp="130/85", blood_sugar="140")
             day_id = await _ot_day(db, camp_id)
             out = await _record(done, "schedule", "deferred", day_id)
@@ -223,7 +223,7 @@ class TestHospitalStation:
     def test_declined_takes_nothing_and_sends_nothing(self, monkeypatch):
         async def run(db):
             camp_id, _day, patient = await _printed_patient(db)
-            sent = recorder(monkeypatch)
+            sent = recorder()
             done = await _complete(patient, **_lines(["ot"]))
             day_id = await _ot_day(db, camp_id)
             out = await _record(done, "decline", "declined")
@@ -238,7 +238,7 @@ class TestHospitalStation:
     def test_declined_after_scheduling_releases_the_seat_once_and_cancels_the_token(self, monkeypatch):
         async def run(db):
             camp_id, _day, patient = await _printed_patient(db)
-            sent = recorder(monkeypatch)
+            sent = recorder()
             done = await _complete(patient, **_lines(["ot"]))
             day_id = await _ot_day(db, camp_id)
             await _record(done, "schedule", "deferred", day_id)
@@ -307,7 +307,7 @@ class TestHospitalStation:
     def test_a_referral_cannot_be_recorded_at_the_station(self, monkeypatch, status):
         async def run(db):
             camp_id, _day, patient = await _printed_patient(db)
-            sent = recorder(monkeypatch)
+            sent = recorder()
             done = await _complete(patient, **_lines(["ot"], outcome="referral"))
             day_id = await _ot_day(db, camp_id)
             with pytest.raises(HTTPException) as exc:
@@ -404,7 +404,7 @@ class TestDisplayedDates:
                                               "ot_change", "specs_change"])
     def test_every_sms_states_its_date_as_dd_mm_yyyy(self, monkeypatch, message_type):
         async def run(db):
-            sent = recorder(monkeypatch)
+            sent = recorder()
             camp_id = ObjectId()
             await db.camps.insert_one({"_id": camp_id, "name": "C", "venue": "Hall", "camp_number": 162})
             patient = {"_id": ObjectId(), "camp_id": camp_id, "phone": "9876500001", "reg_no": 7}
@@ -423,7 +423,7 @@ class TestDisplayedDates:
 
     def test_export_writes_hospital_outcomes_and_dd_mm_yyyy_dates(self, monkeypatch):
         async def run(db):
-            recorder(monkeypatch)
+            recorder()
             camp_id, day_id, scheduled = await _printed_patient(db, full_name="Sunita Devi")
             camp_day = await db.camp_days.find_one({"_id": day_id})
             declined_id = await _register_printed(day_id, full_name="Ram Prasad", age=40, phone="9876500002")
@@ -453,7 +453,7 @@ class TestDisplayedDates:
 
     def test_export_writes_the_specs_day_as_dd_mm_yyyy(self, monkeypatch):
         async def run(db):
-            recorder(monkeypatch)
+            recorder()
             camp_id, _day, patient = await _printed_patient(db)
             done = await _complete(patient, **_lines(["specs_made"]))
             specs_day = ObjectId()

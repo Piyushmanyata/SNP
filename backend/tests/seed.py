@@ -5,10 +5,9 @@ from xml.etree.ElementTree import Element, tostring
 import httpx
 from bson import ObjectId
 
-import msg91
 import security
 import server
-import sms
+import sms_recorder
 from conftest import FROZEN_IST, freeze_clock, run_db
 from helpers import IST
 from models import FulfilmentBody, RegisterBody
@@ -114,19 +113,8 @@ async def register(day_id, actor=ACTOR, background_tasks=None, **fields):
     return result["registration"]
 
 
-def recorder(monkeypatch):
-    sent = []
-    for name in msg91.TEMPLATE_ENV.values():
-        monkeypatch.setenv(name, "test-flow")
-
-    def fake_send(message_type, mobile, variables):
-        sent.append({"type": message_type, "mobile": mobile, **variables})
-        return f"id-{len(sent)}"
-
-    monkeypatch.setattr(msg91, "send_dlt_sms", fake_send)
-    monkeypatch.setattr(sms.msg91, "send_dlt_sms", fake_send)
-    monkeypatch.setattr(sms.msg91, "configured", lambda: True)
-    return sent
+def recorder():
+    return sms_recorder.installed().switch_on()
 
 
 def fulfil(trans_id, rev_id, **kw):

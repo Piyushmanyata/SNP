@@ -59,7 +59,7 @@ def test_an_error_after_the_seat_is_taken_leaves_no_seat_slip_fulfilment_or_oper
 def test_a_token_and_its_sms_intent_commit_together(monkeypatch):
     async def run(db):
         camp_id, _day, patient = await _printed_patient(db)
-        sent = recorder(monkeypatch)
+        sent = recorder()
         done = await _complete(patient, **_lines(["ot"]))
         day_id = await _ot_day(db, camp_id)
         restore = intercept(monkeypatch, "reminder_ledger", "insert_many", _failing("ledger"))

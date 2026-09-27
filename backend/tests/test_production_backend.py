@@ -70,7 +70,7 @@ def test_patient_history_uses_three_queries_for_twenty_visits(monkeypatch):
 
 
 def test_hospital_token_response_does_not_wait_for_sms(monkeypatch):
-    recorder(monkeypatch)
+    recorder()
 
     async def body(database):
         camp_id, _days = await seed_camp(database)

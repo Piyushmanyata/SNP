@@ -11,6 +11,7 @@ import routes_clinical
 import routes_reminders
 import routes_sms
 import sms
+import sms_recorder
 from models import OtScheduleBody, SpecsScheduleBody
 from seed import ADMIN, TODAY, TOMORROW, day, patient_doc, recorder, seed_camp, user_doc
 from test_reminders import HOUSEHOLD, _age_ledger, _ledger, _post, _run, _seed_camp_household
@@ -47,7 +48,7 @@ class TestDeliveryReports:
         _reporting(monkeypatch, body)
 
     def test_a_delivered_report_records_delivery_and_credit(self, monkeypatch):
-        recorder(monkeypatch)
+        recorder()
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=1)
@@ -68,7 +69,7 @@ class TestDeliveryReports:
         {"tel": "919000000000"},
     ])
     def test_unknown_pending_or_mismatched_reports_change_nothing(self, monkeypatch, report):
-        recorder(monkeypatch)
+        recorder()
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=1)
@@ -91,7 +92,7 @@ class TestDeliveryReports:
         "DND: Failed due to Preference Category on DLT",
     ])
     def test_a_number_level_failure_does_not_pause_sending(self, monkeypatch, reason):
-        recorder(monkeypatch)
+        recorder()
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=1)
@@ -111,7 +112,7 @@ class TestDeliveryReports:
         ("16", ""),
     ])
     def test_a_dlt_failure_pauses_only_that_message_type(self, monkeypatch, status, reason):
-        recorder(monkeypatch)
+        recorder()
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=1)
@@ -132,7 +133,7 @@ class TestDeliveryReports:
 
 class TestSmsPause:
     def test_a_paused_type_holds_back_event_sends_and_does_not_send_them_later(self, monkeypatch):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             patient = await _registration_patient(database)
@@ -150,7 +151,7 @@ class TestSmsPause:
         _run(monkeypatch, body)
 
     def test_a_paused_reminder_batch_waits_and_goes_out_after_resume(self, monkeypatch):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=2)
@@ -167,7 +168,7 @@ class TestSmsPause:
         _run(monkeypatch, body)
 
     def test_a_pause_during_an_open_batch_holds_the_rest_until_resume(self, monkeypatch):
-        recorder(monkeypatch)
+        recorder()
         captured = []
 
         async def body(database, client):
@@ -181,11 +182,11 @@ class TestSmsPause:
                 ), loop).result(5)
                 return f"id-{len(captured)}"
 
-            monkeypatch.setattr(sms.msg91, "send_dlt_sms", send_then_pause)
+            sms_recorder.installed().outcome = send_then_pause
 
             held = (await _post(client)).json()
             await sms.resume(database, "camp", "admin")
-            monkeypatch.setattr(sms.msg91, "send_dlt_sms", lambda *args: captured.append(args[2]["reg_no"]) or "id-x")
+            sms_recorder.installed().outcome = lambda *args: captured.append(args[2]["reg_no"]) or "id-x"
             released = (await _post(client)).json()
 
             assert (held["sent"], held["complete"], held["waiting"]) == (1, False, True)
@@ -195,7 +196,7 @@ class TestSmsPause:
         _run(monkeypatch, body)
 
     def test_a_report_for_a_message_sent_before_resume_does_not_pause_again(self, monkeypatch):
-        recorder(monkeypatch)
+        recorder()
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=1)
@@ -213,7 +214,7 @@ class TestSmsPause:
 
 class TestCanary:
     def test_one_reminder_goes_first_and_the_rest_wait_for_its_report(self, monkeypatch):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=3)
@@ -231,7 +232,7 @@ class TestCanary:
         _reporting(monkeypatch, body, canary=True)
 
     def test_a_canary_without_a_report_releases_the_batch_after_ten_minutes(self, monkeypatch):
-        recorder(monkeypatch)
+        recorder()
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=3)
@@ -243,7 +244,7 @@ class TestCanary:
         _run(monkeypatch, body, canary=True)
 
     def test_a_dlt_failed_canary_costs_one_message_and_resume_sends_a_new_canary(self, monkeypatch):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=4)
@@ -262,7 +263,7 @@ class TestCanary:
         _reporting(monkeypatch, body, canary=True)
 
     def test_a_waiting_camp_canary_does_not_hold_up_surgery_reminders(self, monkeypatch):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             _camp, _day, ids = await _seed_camp_household(database, n_patients=2)
@@ -280,11 +281,11 @@ class TestCanary:
 
 class TestSmsStatus:
     def test_admin_sees_each_type_and_todays_totals(self, monkeypatch):
-        recorder(monkeypatch)
+        recorder()
 
         async def body(database, client):
             await _seed_camp_household(database, n_patients=2)
-            monkeypatch.delenv("MSG91_TEMPLATE_SPECS")
+            sms_recorder.installed().templates.pop("specs")
             await _post(client)
             await _report(client, "id-1", credit="0.5")
             await _report(client, "id-2", status="2", reason="DLT Template variable exceeded max length", credit="0.5")
@@ -323,7 +324,7 @@ class TestSpecsSmsVenue:
             OtScheduleBody(camp_id=base["camp_id"], day_date=TODAY, venue="Hospital", venue_sms="https://x.in", seat_limit=5)
 
     def test_the_specs_day_sms_venue_reaches_the_slip_and_the_reminder(self, monkeypatch):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             camp_id, _ = await seed_camp(database, days=(), name="C", venue="Hall A")
@@ -353,7 +354,7 @@ class TestSpecsSmsVenue:
 
 class TestSendTimeGuard:
     def test_schedule_edits_on_the_same_date_each_send_once(self, monkeypatch):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             patient = await _registration_patient(database)
@@ -373,7 +374,7 @@ class TestSendTimeGuard:
 
     @pytest.mark.parametrize("message_type", ["registration", "camp", "ot_token"])
     def test_registrar_phone_never_receives_patient_sms(self, monkeypatch, message_type):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             patient = await _registration_patient(database)
@@ -392,7 +393,7 @@ class TestSendTimeGuard:
         _run(monkeypatch, body)
 
     def test_a_venue_is_sent_with_its_spacing_tidied(self, monkeypatch):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             patient = await _registration_patient(database)
@@ -410,7 +411,7 @@ class TestSendTimeGuard:
 
     @pytest.mark.parametrize("venue", ["NA", "Hall 9876543210", "www.hall.in", "A" * 31])
     def test_a_venue_breaking_the_rule_is_never_submitted(self, monkeypatch, venue):
-        captured = recorder(monkeypatch)
+        captured = recorder()
 
         async def body(database, client):
             patient = await _registration_patient(database)

@@ -72,6 +72,23 @@ def valid_phone(raw: Optional[str]) -> Optional[str]:
 
 REGISTRATION_DAILY_CAP = 6
 
+_provider: Any = msg91
+
+
+def use_provider(adapter: Any) -> Any:
+    """Installs the SMS provider adapter and returns the one it replaced."""
+    global _provider
+    previous, _provider = _provider, adapter
+    return previous
+
+
+def configured() -> bool:
+    return bool(_provider.configured())
+
+
+def template_id(message_type: str) -> str:
+    return _provider.template_id(message_type)
+
 
 async def _over_daily_cap(db: AsyncDatabase, number: str) -> bool:
     start, end = helpers.ist_day_bounds(helpers.today_ist_str())
@@ -202,7 +219,7 @@ def _compose(
     staff_phones: Dict[str, Optional[str]],
 ) -> Optional[Tuple[str, Dict[str, Any], str]]:
     """The number, DLT variables and copy of a patient SMS, or None when it must not be sent."""
-    if not msg91.configured() or not msg91.template_id(message_type):
+    if not configured() or not template_id(message_type):
         return None
     number = valid_phone(patient.get("phone_normalized") or patient.get("phone"))
     reg_no = patient.get("reg_no")
@@ -237,7 +254,7 @@ def _compose(
 async def _submit(db: AsyncDatabase, row: Dict[str, Any], variables: Dict[str, Any]) -> str:
     update: Dict[str, Any]
     try:
-        provider_id = await asyncio.to_thread(msg91.send_dlt_sms, row["message_type"], row["number"], variables)
+        provider_id = await asyncio.to_thread(_provider.send, row["message_type"], row["number"], variables)
     except msg91.Throttled as exc:
         update = {
             "status": "failed", "error": str(exc)[:200],

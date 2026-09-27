@@ -13,7 +13,6 @@ from pymongo.errors import DuplicateKeyError
 
 from db import get_db
 import helpers
-import msg91
 import sms
 
 router = APIRouter(prefix="/api", tags=["cron"])
@@ -238,7 +237,7 @@ async def _send_fresh(
 
 
 async def send_d1_reminders() -> Dict[str, Any]:
-    if not msg91.configured():
+    if not sms.configured():
         return {"ok": True, "sent": 0, "complete": True, "reason": "msg91_unconfigured"}
     db = get_db()
     holder = await _acquire_lease(db)

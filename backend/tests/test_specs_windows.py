@@ -161,7 +161,7 @@ def test_specs_window_spans_days_from_a_morning_start_to_an_evening_end(monkeypa
 
 
 def test_started_window_stays_selectable_and_token_sms_states_the_range(monkeypatch):
-    sent = recorder(monkeypatch)
+    sent = recorder()
 
     async def body(database):
         camp_id, _ = await seed_camp(database, days=())

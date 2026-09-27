@@ -4,7 +4,6 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, Request
 
-import msg91
 import sms
 from db import get_db
 from helpers import ist_day_bounds, iso, today_ist_str, api_error
@@ -62,13 +61,13 @@ async def sms_status(actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     controls = {c["_id"]: c for c in await db.sms_controls.find({}).to_list(None)}
     start, end = ist_day_bounds(today_ist_str())
     groups = await sms.ledger_groups(db, {"created_at": {"$gte": start, "$lt": end}}, by_camp=False)
-    has_key = bool(os.environ.get("MSG91_AUTH_KEY"))
+    ready = sms.configured()
     types = []
     for message_type in sms.MESSAGE_COPY:
         control = controls.get(message_type) or {}
         types.append({
             "message_type": message_type,
-            "configured": has_key and bool(msg91.template_id(message_type)),
+            "configured": ready and bool(sms.template_id(message_type)),
             "paused": bool(control.get("paused")),
             "paused_at": iso(control.get("paused_at")) if control.get("paused") else None,
             "paused_reason": control.get("paused_reason") if control.get("paused") else None,

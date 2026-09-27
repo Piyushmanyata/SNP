@@ -207,7 +207,7 @@ def test_fifty_concurrent_specs_deferrals_all_succeed_without_seats(monkeypatch)
 def test_each_token_gets_its_own_sms_so_a_to_b_to_a_sends_three(monkeypatch):
     from test_hospital_outcomes import _complete, _lines, _record
     from test_camp_operations_matrix import _printed_patient
-    sent = recorder(monkeypatch)
+    sent = recorder()
 
     async def body(database):
         camp_id, _day, patient = await _printed_patient(database)
