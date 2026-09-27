@@ -10,26 +10,31 @@ from seed import day, patient_doc, run_camp
 from test_camp_operations_matrix import CLINICAL, _complete_body, _issue_body, _printed_patient, intercept
 
 
-def _fail(monkeypatch, name, predicate=lambda *a, **k: True):
-    real = getattr(routes_clinical, name)
-
-    async def failing(*args, **kwargs):
+def _fail(monkeypatch, collection, method, predicate=lambda *a, **k: True):
+    async def failing(real, *args, **kwargs):
         if predicate(*args, **kwargs):
             raise RuntimeError("injected failure")
         return await real(*args, **kwargs)
 
-    monkeypatch.setattr(routes_clinical, name, failing)
-    return lambda: monkeypatch.setattr(routes_clinical, name, real)
+    return intercept(monkeypatch, collection, method, failing)
 
 
-async def _boom(real, *args, **kwargs):
-    raise RuntimeError("injected failure")
+def _fail_locking(monkeypatch):
+    inserted = _fail(monkeypatch, "transcriptions", "insert_one", lambda doc, *a, **k: doc.get("locked") is True)
+    updated = _fail(monkeypatch, "transcriptions", "find_one_and_update",
+                    lambda query, update, *a, **k: (update.get("$set") or {}).get("locked") is True)
+    return lambda: (inserted(), updated())
+
+
+def _recording(kind):
+    return lambda doc, *args, **kwargs: doc.get("kind") == kind
 
 
 def test_a_failed_completion_leaves_no_revision_or_operation(monkeypatch):
     async def run(db):
         _, _, patient = await _printed_patient(db)
-        restore = _fail(monkeypatch, "commit_completion")
+        restore = _fail(monkeypatch, "patients", "find_one_and_update",
+                        lambda query, update, *a, **k: "committed_revision_id" in (update.get("$set") or {}))
         with pytest.raises(RuntimeError):
             await routes_clinical.complete_prescription(_complete_body(patient["_id"], "complete"), actor=CLINICAL)
         restore()
@@ -184,9 +189,9 @@ def test_a_failed_completion_write_rolls_back_and_the_retry_applies_once(monkeyp
         _, _, patient = await _printed_patient(db)
         body = _complete_body(patient["_id"], "complete")
         if failure_stage == "transcription":
-            restore = _fail(monkeypatch, "_upsert_transcription", lambda *a, **k: k.get("locked"))
+            restore = _fail_locking(monkeypatch)
         else:
-            restore = _fail(monkeypatch, "record_operation")
+            restore = _fail(monkeypatch, "clinical_operations", "insert_one", _recording("complete"))
         with pytest.raises(RuntimeError):
             await routes_clinical.complete_prescription(body, actor=CLINICAL)
         restore()
@@ -212,9 +217,9 @@ def test_a_failed_correction_rolls_back_and_the_retry_applies_one_generation(mon
             full_transcription_confirmed=True, bp="130/85",
         )
         if failure_stage == "transcription":
-            restore = _fail(monkeypatch, "_upsert_transcription", lambda *a, **k: k.get("locked"))
+            restore = _fail_locking(monkeypatch)
         else:
-            restore = _fail(monkeypatch, "record_operation", lambda *a, **k: a[2] == "correct")
+            restore = _fail(monkeypatch, "clinical_operations", "insert_one", _recording("correct"))
         with pytest.raises(RuntimeError):
             await routes_clinical.add_correction(body, actor=CLINICAL)
         restore()
@@ -265,7 +270,7 @@ def test_a_failed_undo_rolls_back_and_the_retry_clears_one_completion(monkeypatc
             expected_generation=done["registration"]["clinical_generation"],
             reason="Wrong patient", operation_id="undo-1",
         )
-        restore = _fail(monkeypatch, "record_operation", lambda *a, **k: a[2] == "undo")
+        restore = _fail(monkeypatch, "clinical_operations", "insert_one", _recording("undo"))
         with pytest.raises(RuntimeError):
             await routes_clinical.undo_completion(body, actor=CLINICAL)
         restore()
