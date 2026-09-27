@@ -544,3 +544,23 @@ Live checks:
 - Every service is running, and backend, frontend, mongo and reminders report healthy.
 - The backend loads `tokens.defer`.
 - The backend and reminders logs have no tracebacks and no 5xx.
+
+## Arrival module — 28 September 2026
+
+[PR 96](https://github.com/Piyushmanyata/SNP/pull/96) (#88 slice 5, ADR 0090) merged as `e0ddb1dfdf4df9692e8a27936cd07ae010dfa301`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/e0ddb1d…`. CI run [36344075092](https://github.com/Piyushmanyata/SNP/actions/runs/36344075092) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify.
+
+Before the update, the running `b4247b6` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-b4247b6978928d4e0fddebaf11bfc61b812e831c`. The backup container was restarted and took snapshot `548f3f3c` at 19:34 UTC on 27 September. Only backend, frontend and reminders were rebuilt; MongoDB stayed up. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/b4247b6…`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed, and responses and stored fields are unchanged. `arrival.py` is now the only code that writes the Arrival fields.
+
+Live checks:
+
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Every service is running, and backend, frontend, mongo and reminders report healthy.
+- The backend loads `arrival.stamp`.
+- The backend and reminders logs have no tracebacks and no 5xx.
