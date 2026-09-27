@@ -524,3 +524,23 @@ Live checks:
 - Every service is running, and backend, frontend, mongo and reminders report healthy.
 - The backend loads `clinical_operation.run`.
 - The backend and reminders logs have no tracebacks and no 5xx.
+
+## Token module — 28 September 2026
+
+[PR 95](https://github.com/Piyushmanyata/SNP/pull/95) (#88 slice 4, ADR 0089) merged as `b4247b6978928d4e0fddebaf11bfc61b812e831c`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/b4247b6…`. CI run [36343223619](https://github.com/Piyushmanyata/SNP/actions/runs/36343223619) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify.
+
+Before the update, the running `77eeb54` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-77eeb54f727b99563160d0d9e6902c4662cea2b3`. The backup container was restarted and took snapshot `99c252fe` at 19:22 UTC on 27 September. Only backend, frontend and reminders were rebuilt; MongoDB stayed up. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/77eeb54…`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed, and codes, responses and stored Tokens are unchanged. `tokens.py` now owns the OT seat rule, Token versions, Schedule edits and the Patients to phone list.
+
+Live checks:
+
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Every service is running, and backend, frontend, mongo and reminders report healthy.
+- The backend loads `tokens.defer`.
+- The backend and reminders logs have no tracebacks and no 5xx.
