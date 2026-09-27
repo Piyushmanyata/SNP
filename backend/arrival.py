@@ -11,9 +11,10 @@ from helpers import api_error, now_utc
 
 def fields_at_creation(arrived_by: Optional[str], now: datetime) -> Dict[str, Any]:
     """The Arrival fields of a new registration; a Manual entry typed at the door is created already arrived."""
-    if not arrived_by:
-        return {"arrived_at": None, "arrived_by": None, "camp_day_changed_from": None}
-    return {"arrived_at": now, "arrived_by": arrived_by, "camp_day_changed_from": None, "queue_status": "arrived"}
+    fields: Dict[str, Any] = {"arrived_at": None, "arrived_by": None, "camp_day_changed_from": None}
+    if arrived_by:
+        fields.update(arrived_at=now, arrived_by=arrived_by, queue_status="arrived")
+    return fields
 
 
 def require_arrivable(patient: dict) -> None:
