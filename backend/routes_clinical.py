@@ -16,7 +16,7 @@ from catalogue import resolve_medicines, stocked_power
 import clinical_operation
 from clinical_operation import Operation
 from clinical_state import (
-    CONTENT_FIELDS, PRESCRIBED_LINE_KEYS, SPECS_EXCLUSION, arrival_ready, commit, conflict, draft_conflict,
+    CONTENT_FIELDS, PRESCRIBED_LINE_KEYS, SPECS_EXCLUSION, commit, conflict, draft_conflict,
     extract_content, generation_of, has_issue_history, insert_revision, normalize_ot_eye,
     require_correction_allowed, require_draft_version, require_fresh_review, require_generation,
     require_line_prescribed, require_not_completed, require_printed, require_specs_exclusive,
@@ -148,11 +148,7 @@ async def clinical_lookup(body: dict, actor: dict = Depends(require_clinical)) -
             p = await db.patients.find_one({"camp_id": camp["_id"], "reg_no": int(value)})
     if not p:
         raise api_error(404, "NO_MATCHING_REGISTRATION_FOUND", 'No matching registration found')
-    gate = arrival_ready(p)
-    if gate == "not_arrived":
-        raise api_error(409, "NOT_ARRIVED", 'This patient has not arrived at the door yet.')
-    if gate == "never_printed":
-        raise api_error(409, "NEVER_PRINTED", "This patient's prescription was never printed.")
+    require_printed(p)
     bundle = await _fetch_clinical_bundle(db, p)
     rev = None
     if p.get("committed_revision_id"):
