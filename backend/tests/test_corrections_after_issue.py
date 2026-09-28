@@ -92,6 +92,21 @@ def test_a_fixed_power_changed_after_issue_keeps_the_issued_power_and_is_marked_
     run_camp(monkeypatch, run)
 
 
+def test_a_reissue_after_a_correction_keeps_the_settled_issued_power(monkeypatch):
+    async def run(database):
+        ids = await _issued(database)
+        result = await _correct(ids, fixed_power_r=2.25, fixed_power_l=2.25)
+        await record_fulfilment(fulfil(
+            ids["trans_id"], result["revision"]["id"], item_type="specs_fixed", status="fulfilled",
+            reviewed_generation=result["registration"]["clinical_generation"],
+        ), actor=CLINICAL, background_tasks=None)
+        specs = await _line(database, ids, "specs_fixed")
+        assert (specs["issued_power_r"], specs["issued_power_l"]) == (2.0, 2.0)
+        assert specs["corrected_after_issue"]
+
+    run_camp(monkeypatch, run)
+
+
 def test_a_correction_that_leaves_the_issued_lines_alone_marks_nothing(monkeypatch):
     async def run(database):
         ids = await _issued(database)

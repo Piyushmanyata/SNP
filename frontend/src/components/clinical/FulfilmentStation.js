@@ -236,8 +236,8 @@ export function FulfilmentStation({
   }, [prescribedMedicines, existing]);
 
   useEffect(() => {
-    setOutcomes(prescribedMedicines.map((m) => ({ ...m, given: settled.has(m.medicine_id) ? settled.get(m.medicine_id) : true })));
-  }, [prescribedMedicines, settled]);
+    setOutcomes(prescribedMedicines.map((m) => ({ ...m, given: settled.has(m.medicine_id) ? settled.get(m.medicine_id) : (reopened ? null : true) })));
+  }, [prescribedMedicines, settled, reopened]);
 
   useEffect(() => {
     setIssued({
@@ -258,6 +258,7 @@ export function FulfilmentStation({
   const measurementsMissing =
     (line.needsMeasurements && !hasMeasurements(data?.transcription))
     || (line.needsFixedPower && !hasFixedPower(data?.transcription));
+  const medicineOutcomeMissing = line.perMedicine && outcomes.some((o) => o.given === null);
 
   const save = useCallback(async (nextStatus) => {
     if (!data?.transcription?.id) return;
@@ -419,7 +420,7 @@ export function FulfilmentStation({
           variant={i ? "outline" : "primary"}
           className="w-full mt-2"
           onClick={() => save(a.status)}
-          disabled={!paperReviewed || busy || measurementsMissing || (a.status === "deferred" && Boolean(line.dayField) && !dayId)}
+          disabled={!paperReviewed || busy || measurementsMissing || medicineOutcomeMissing || (a.status === "deferred" && Boolean(line.dayField) && !dayId)}
           data-testid={`station-${lineKey}-${i ? a.status : "save"}`}
         >
           {a.label}

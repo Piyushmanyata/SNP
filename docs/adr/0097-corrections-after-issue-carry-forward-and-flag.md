@@ -17,9 +17,9 @@ On a correction commit, inside the correction's `apply` step and its one transac
 - one the correction adds is open (`given: null`);
 - one it removes after it was given stays recorded as given, with `prescribed: false`.
 
-The status is derived as before: a line with open medicines is Partially fulfilled when at least one medicine was given, and Not available when none was; a line where nothing was handed over is never Fulfilled. The line is reopened at the Fulfilment station for the open medicines only: every settled outcome, given or not available, stays as recorded.
+The status is derived as before: a line with open medicines is Partially fulfilled only when at least one medicine was given, and stays Not available when none was given, including when a correction adds the first open medicine to a line where nothing was handed over; a line where nothing was handed over is never Fulfilled. The line is reopened at the Fulfilment station for the open medicines only: every settled outcome, given or not available, stays as recorded.
 
-**Fixed-power specs:** if the correction moved the prescribed power away from the Issued power, the Issued power stays, and nothing reopens. A desk substitution without a correction is not marked.
+**Fixed-power specs:** if the correction moved the prescribed power away from the Issued power, the Issued power stays, and nothing reopens. A later re-issue of the line keeps the settled Issued power. A desk substitution without a correction is not marked.
 
 **The mark:** any line the correction changed gets `corrected_after_issue: {revision_id, at, by}`. A reopened line is issued again only after a fresh Paper review against the corrected revision and generation (`STALE_REVIEW` until then), The station re-offers only the open medicines and locks every settled outcome. The API keeps its rule that the latest issue wins (`test_late_issue_retry_preserves_the_newer_outcome`), and a re-issue never drops a medicine the correction removed after it was given (`keep_removed`). The mark is never cleared: it records that the line changed after goods left, which stays true.
 

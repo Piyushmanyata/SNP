@@ -528,7 +528,12 @@ describe("Corrected after issue", () => {
     expect(q("station-medicine-corrected").textContent).toContain("Corrected after issue");
     expect(q("medicine-med-1-missing").disabled).toBe(true);
     expect(q("medicine-med-2-missing").disabled).toBe(false);
+    expect(q("medicine-med-2-given").getAttribute("aria-pressed")).toBe("false");
+    expect(q("medicine-med-2-missing").getAttribute("aria-pressed")).toBe("false");
     act(() => { q("station-medicine-paper-review").click(); });
+    expect(q("station-medicine-save").disabled).toBe(true);
+    act(() => { q("medicine-med-2-given").click(); });
+    expect(q("station-medicine-save").disabled).toBe(false);
     await act(async () => { q("station-medicine-save").click(); });
     expect(api.post.mock.calls[0][1].medicine_outcomes).toEqual([
       { medicine_id: "med-1", given: true }, { medicine_id: "med-2", given: true },
@@ -553,6 +558,8 @@ describe("Corrected after issue", () => {
     expect(q("medicine-med-1-given").disabled).toBe(true);
     expect(q("medicine-med-1-missing").getAttribute("aria-pressed")).toBe("true");
     act(() => { q("station-medicine-paper-review").click(); });
+    expect(q("station-medicine-save").disabled).toBe(true);
+    act(() => { q("medicine-med-2-given").click(); });
     await act(async () => { q("station-medicine-save").click(); });
     expect(api.post.mock.calls[0][1].medicine_outcomes).toEqual([
       { medicine_id: "med-1", given: false }, { medicine_id: "med-2", given: true },
