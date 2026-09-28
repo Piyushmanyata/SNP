@@ -2,6 +2,8 @@ import asyncio
 import logging
 import re
 import string
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -79,6 +81,8 @@ REGISTRATION_DAILY_CAP = 6
 NOTICE_TYPES = ("ot_change", "specs_change")
 
 _provider: Any = msg91
+SEND_SECONDS = 10
+_sends = ThreadPoolExecutor(max_workers=8, thread_name_prefix="sms-send")
 
 
 def use_provider(adapter: Any) -> Any:
@@ -274,11 +278,39 @@ def _compose(
     return number, variables, template.format(**variables)
 
 
+async def _submit(message_type: str, number: str, variables: Dict[str, Any]) -> str:
+    """Calls the provider on the SMS threads, for at most SEND_SECONDS (ADR 0096).
+
+    A call still queued when time runs out is withdrawn and raises Unsent, so it can be tried again. A call
+    already handed to the provider raises TimeoutError and is settled uncertain, never sent twice.
+    """
+    lock = threading.Lock()
+    state = ["queued"]
+
+    def call() -> str:
+        with lock:
+            if state[0] == "withdrawn":
+                raise msg91.Unsent("withdrawn before it reached the provider")
+            state[0] = "handed"
+        return _provider.send(message_type, number, variables)
+
+    try:
+        return await asyncio.wait_for(asyncio.get_running_loop().run_in_executor(_sends, call), SEND_SECONDS)
+    except TimeoutError:
+        with lock:
+            handed = state[0] == "handed"
+            if not handed:
+                state[0] = "withdrawn"
+        if not handed:
+            raise msg91.Unsent(f"no free sender within {SEND_SECONDS} s")
+        raise TimeoutError(f"MSG91 did not answer within {SEND_SECONDS} s")
+
+
 async def _settle(db: AsyncDatabase, row: Dict[str, Any], variables: Dict[str, Any], now: datetime) -> str:
     """Submits one pending intent and records the provider's outcome as its status."""
     update: Dict[str, Any]
     try:
-        provider_id = await asyncio.to_thread(_provider.send, row["message_type"], row["number"], variables)
+        provider_id = await _submit(row["message_type"], row["number"], variables)
     except msg91.Throttled as exc:
         update = {"status": "failed", "error": str(exc)[:200], "retry_after": now + THROTTLE_BACKOFF}
     except msg91.Unsent as exc:

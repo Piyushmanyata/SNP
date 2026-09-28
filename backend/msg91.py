@@ -5,6 +5,7 @@ from typing import Any, Dict
 
 MSG91_HOST = "control.msg91.com"
 MSG91_FLOW_PATH = "/api/v5/flow"
+TIMEOUT_SECONDS = 8
 
 TEMPLATE_ENV = {
     "registration": "MSG91_TEMPLATE_REGISTRATION",
@@ -49,7 +50,7 @@ def send(message_type: str, mobile: str, variables: Dict[str, Any]) -> str:
             **{name: str(value) for name, value in variables.items()},
         }],
     }
-    conn = http.client.HTTPSConnection(MSG91_HOST, timeout=20)
+    conn = http.client.HTTPSConnection(MSG91_HOST, timeout=TIMEOUT_SECONDS)
     try:
         try:
             conn.connect()

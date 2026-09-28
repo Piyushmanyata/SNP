@@ -144,12 +144,14 @@ async def _slip_page(
 
 async def _send_fresh(
     db: AsyncDatabase, message_type: str, event_date: str, chosen: List[tuple],
-    camps: Dict[Any, dict], staff: Dict[str, Optional[str]], gate: str,
-) -> Tuple[int, int, int, bool]:
+    camps: Dict[Any, dict], staff: Dict[str, Optional[str]], gate: str, deadline: float,
+) -> Tuple[int, int, int, bool, bool]:
     sem = asyncio.Semaphore(4)
 
     async def one(patient: dict, venue: str, end_date: Optional[str]) -> str:
         async with sem:
+            if time.monotonic() >= deadline:
+                return "deferred"
             return await sms.record_and_send(
                 db, patient, message_type, event_date, venue, end_date,
                 now=helpers.now_utc(), camps=camps, staff_phones=staff, fresh=True,
@@ -165,7 +167,7 @@ async def _send_fresh(
     sent = failed = used = 0
     rejected = False
     for outcome in outcomes:
-        if outcome == "skipped":
+        if outcome in ("skipped", "deferred"):
             continue
         used += 1
         if outcome == "failed":
@@ -176,7 +178,7 @@ async def _send_fresh(
             rejected = True
     if rejected:
         await sms.pause_after_rejection(db, message_type, event_date, helpers.now_utc())
-    return sent, failed, used, rejected
+    return sent, failed, used, rejected, "deferred" in outcomes
 
 
 async def send_d1_reminders() -> Dict[str, Any]:
@@ -263,8 +265,8 @@ async def send_d1_reminders() -> Dict[str, Any]:
                         break
                 if chosen:
                     resume_at = cursor.get(message_type)
-                    page_sent, page_failed, page_used, rejected = await _send_fresh(
-                        db, message_type, tomorrow, chosen, camps, staff, gate,
+                    page_sent, page_failed, page_used, rejected, deferred = await _send_fresh(
+                        db, message_type, tomorrow, chosen, camps, staff, gate, started + SWEEP_SECONDS,
                     )
                     if page_used == 0:
                         cursor[message_type] = resume_at
@@ -276,6 +278,8 @@ async def send_d1_reminders() -> Dict[str, Any]:
                     budget -= page_used
                     last_id = chosen[min(page_used, len(chosen)) - 1][3]
                     cursor[message_type] = last_id
+                    if deferred:
+                        break
                     if rejected or await sms.paused(db, message_type):
                         waiting = True
                         complete = False
@@ -307,8 +311,7 @@ async def send_d1_reminders() -> Dict[str, Any]:
                     break
             if gate == "open" and cursor.get(message_type) != "done" and used >= SEND_LIMIT:
                 break
-        if all(cursor.get(message_type) == "done" for message_type, _item in REMINDER_TYPES) and not waiting:
-            complete = True
+        complete = not waiting and all(cursor.get(message_type) == "done" for message_type, _item in REMINDER_TYPES)
     finally:
         await _release_lease(db, holder, cursor)
     await _write_ops(db, complete=complete and not waiting)
