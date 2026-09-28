@@ -483,10 +483,15 @@ async def record_fulfilment(
         ) if body.status == "deferred" else (None, [])
         doc = _build_fulfilment_doc(body, t["_id"], slip, str(actor["_id"]), medicine_outcomes, issued_powers)
         if medicine_outcomes and prior:
-            doc["medicine_outcomes"] = keep_removed(prior.get("medicine_outcomes") or [], medicine_outcomes)
+            corrected = bool(prior.get("corrected_after_issue"))
+            doc["medicine_outcomes"] = keep_removed(
+                prior.get("medicine_outcomes") or [], medicine_outcomes, corrected=corrected,
+            )
             doc["status"] = derive_medicine_status(doc["medicine_outcomes"])
-        if body.item_type == "specs_fixed" and prior and prior.get("issued_power_r") is not None:
-            doc["issued_power_r"], doc["issued_power_l"] = prior["issued_power_r"], prior["issued_power_l"]
+        if prior and prior.get("corrected_after_issue"):
+            doc["corrected_after_issue"] = prior["corrected_after_issue"]
+            if body.item_type == "specs_fixed" and prior.get("issued_power_r") is not None:
+                doc["issued_power_r"], doc["issued_power_l"] = prior["issued_power_r"], prior["issued_power_l"]
         doc.update({
             "operation_id": body.operation_id,
             "reviewed_revision_id": current["committed_revision_id"],

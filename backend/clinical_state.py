@@ -262,10 +262,21 @@ def fixed_power_corrected(issued: dict, before: dict, after: dict) -> bool:
     return was != now and now != (issued.get("issued_power_r"), issued.get("issued_power_l"))
 
 
-def keep_removed(prior: List[dict], outcomes: List[dict]) -> List[dict]:
-    """A re-issue records the prescribed medicines; one a correction removed after it was given stays recorded."""
-    ids = {o["medicine_id"] for o in outcomes}
-    return outcomes + [o for o in prior if o.get("prescribed") is False and o["medicine_id"] not in ids]
+def keep_removed(prior: List[dict], outcomes: List[dict], corrected: bool = False) -> List[dict]:
+    """A re-issue records the prescribed medicines; one a correction removed after it was given stays recorded.
+
+    When the line was corrected after issue, settled outcomes cannot be altered at the persistence boundary.
+    """
+    prior_by_id = {o["medicine_id"]: o for o in prior}
+    resolved = []
+    for o in outcomes:
+        p = prior_by_id.get(o["medicine_id"])
+        if corrected and p and p.get("given") is not None:
+            resolved.append({**o, "given": p["given"]})
+        else:
+            resolved.append(o)
+    ids = {o["medicine_id"] for o in resolved}
+    return resolved + [o for o in prior if o.get("prescribed") is False and o["medicine_id"] not in ids]
 
 
 async def insert_revision(
