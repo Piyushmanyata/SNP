@@ -123,6 +123,18 @@ describe("the connection state", () => {
     expect(isOffline()).toBe(false);
   });
 
+  test("a request sent before the latest answer cannot bring the banner back", async () => {
+    let failOld;
+    api.defaults.adapter = (config) => (config.url === "/old"
+      ? new Promise((_resolve, reject) => { failOld = () => reject(new AxiosError("timeout", "ECONNABORTED", config)); })
+      : answer(200)(config));
+    const old = api.get("/old").catch(() => {});
+    await api.get("/new");
+    failOld();
+    await old;
+    expect(isOffline()).toBe(false);
+  });
+
   test("a request the page cancelled says nothing about the connection", async () => {
     const controller = new AbortController();
     controller.abort();
