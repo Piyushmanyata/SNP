@@ -624,3 +624,23 @@ Live checks:
 - Every service is running, and backend, frontend, mongo and reminders report healthy.
 - The deployed `routes_desk.py` signs `sheet-stamp`.
 - The backend and reminders logs have no tracebacks and no 5xx.
+
+## The board counts carry-over patients — 28 September 2026
+
+[PR 100](https://github.com/Piyushmanyata/SNP/pull/100) (#89 slice 4) merged as `ee877a47c8e9f679b2700f5b61b8c697c7bc069c`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/ee877a4…`. CI run [36391458608](https://github.com/Piyushmanyata/SNP/actions/runs/36391458608) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify. The first run's `perf` job caught a real regression: the camp-wide Pending count used `printed_at: {$ne: null}`, which fetched every patient and doubled `/kpis` (p50 64 → 125 ms at concurrency 8). It now uses `{$type: "date"}` and is answered from the index alone.
+
+Before the update, the running `aa9118b` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-aa9118b9435f0da317bf5d0b9d3c183a16aeb088`. The backup container was restarted and took snapshot `6e6817a9` at 09:25 UTC. Only backend, frontend and reminders were rebuilt; MongoDB stayed up. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/aa9118b…`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed. `init_indexes()` created `(camp_id, queue_status, printed_at, arrived_at)` on startup. The replaced `(camp_id, queue_status)` and `(camp_day_id, queue_status, printed_at)` indexes are still on the production database: unused and harmless, and dropping them is optional.
+
+Live checks:
+
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Every service is running, and backend, frontend, mongo and reminders report healthy.
+- The deployed `routes_reports.py` returns `earlier_days`.
+- The backend and reminders logs have no tracebacks and no 5xx.
