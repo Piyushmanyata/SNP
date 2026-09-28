@@ -604,3 +604,23 @@ Live checks:
 - Every service is running, and backend, frontend, mongo and reminders report healthy.
 - The deployed `routes_desk.py` carries `NO_CARD_LAST4_MISMATCH`.
 - The backend and reminders logs have no tracebacks and no 5xx.
+
+## Paper check after the Print window closes — 28 September 2026
+
+[PR 99](https://github.com/Piyushmanyata/SNP/pull/99) (#89 slice 2, ADR 0093) merged as `aa9118b9435f0da317bf5d0b9d3c183a16aeb088`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/aa9118b…`. CI run [36390523890](https://github.com/Piyushmanyata/SNP/actions/runs/36390523890) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify. Its `perf` job passed on the third attempt: the first two missed on the board (360 ms against 300 ms) and on `desk_scan_arrived` (p95 150.8 ms against 150 ms, p50 unchanged at 105 ms), neither of which slice 2 touches.
+
+Before the update, the running `7a35ac2` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-7a35ac2ee02625a824d599ed50ecbb633c4f7fcf`. The backup container was restarted and took snapshot `7691e0b1` at 09:22 UTC. Only backend, frontend and reminders were rebuilt; MongoDB stayed up. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/7a35ac2…`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed; the Sheet stamp is not stored. The first-print sheet now carries a `sheet_stamp`, and "Printed — next patient" with that stamp is recorded after the Print window closes, the same IST day, until Doctor seen.
+
+Live checks:
+
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Every service is running, and backend, frontend, mongo and reminders report healthy.
+- The deployed `routes_desk.py` signs `sheet-stamp`.
+- The backend and reminders logs have no tracebacks and no 5xx.
