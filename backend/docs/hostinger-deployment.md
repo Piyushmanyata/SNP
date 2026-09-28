@@ -719,3 +719,27 @@ Live checks:
 Owner steps still open: register the `ot_change` and `specs_change` DLT templates and MSG91 flows, set `MSG91_TEMPLATE_OT_CHANGE` and `MSG91_TEMPLATE_SPECS_CHANGE` in `/opt/snp/.env.production`, send one consented test of each, and buy the 9 hotspots.
 
 Live checks: `/api/health/ready` returned ready, the homepage returned 200, HTTP redirected with 308, and every service is healthy. This completes #89.
+
+
+## Corrections after issue & perf p95 budget — 28 September 2026
+
+[PR 105](https://github.com/Piyushmanyata/SNP/pull/105) (read perf p95 measured over 200 requests, ADR 0097) and [PR 106](https://github.com/Piyushmanyata/SNP/pull/106) (#89 slice 3, corrections after issue carry forward and flag) merged to `main` as `a3d2d0cd24cb4981faa383ed663f3128f11fe5f7`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/a3d2d0cd24cb4981faa383ed663f3128f11fe5f7`. CI run [36416670236](https://github.com/Piyushmanyata/SNP/actions/runs/36416670236) on `main` passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify.
+
+Before the update, the running `4c477c6` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-4c477c670ab926665e2f315960fd5ec58200f5fb`. The backup container was restarted and took snapshot `e3bdb554` at 12:43 UTC. Backend, frontend and reminders were rebuilt; MongoDB and Caddy stayed up. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/4c477c670ab926665e2f315960fd5ec58200f5fb`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed. When a prescription is corrected after issue:
+- Given medicines stay marked given and locked on the station; medicines added by the correction are opened for issue; medicines removed after issue stay recorded with `prescribed: False`.
+- Fixed-power spectacles whose power was changed away from what was handed over are flagged `corrected_after_issue`.
+- The fulfilment station and export reports display the `corrected_after_issue` flag.
+
+Live checks:
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Every service is running, and backend, frontend, mongo and reminders report healthy.
+- The deployed backend carries `carry_medicine_outcomes` and `fixed_power_corrected`.
+- The deployed frontend bundle carries the `Corrected after issue` alert.
+- The backend and reminders logs have no tracebacks and no 5xx.
