@@ -7,6 +7,11 @@ import { SMS_LABELS } from "../lib/sms";
 
 const POLL_MS = 15000;
 
+function earlierNote(count) {
+  if (!count) return null;
+  return count === 1 ? "1 from an earlier day" : `${count} from earlier days`;
+}
+
 export default function Board() {
   const [data, setData] = useState(null);
   const [status, setStatus] = useState("loading");
@@ -49,6 +54,7 @@ export default function Board() {
   }, []);
 
   const stages = data?.stages || {};
+  const earlier = stages.earlier_days || {};
   const fulfilment = data?.fulfilment || {};
   const stale = status === "stale";
 
@@ -98,12 +104,13 @@ export default function Board() {
             )}
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3" data-testid="board-kpis">
               <Stat label="Arrived" value={stages.arrived ?? 0} testid="board-arrived" />
-              <Stat label="Awaiting Print" value={stages.awaiting_print ?? 0} testid="board-awaiting-print" />
-              <Stat label="Awaiting Seen" value={stages.awaiting_seen ?? 0} testid="board-awaiting-seen" />
+              <Stat label="Awaiting Print" value={stages.awaiting_print ?? 0} note={earlierNote(earlier.awaiting_print)} testid="board-awaiting-print" />
+              <Stat label="Awaiting Seen" value={stages.awaiting_seen ?? 0} note={earlierNote(earlier.awaiting_seen)} testid="board-awaiting-seen" />
               <Stat label="Seen" value={stages.seen ?? 0} testid="board-seen" />
               <Stat
                 label="Transcription backlog"
                 value={stages.transcription_backlog ?? 0}
+                note={earlierNote(earlier.transcription_backlog)}
                 tone={(stages.transcription_backlog ?? 0) > 0 ? "amber" : "slate"}
                 testid="board-backlog"
               />

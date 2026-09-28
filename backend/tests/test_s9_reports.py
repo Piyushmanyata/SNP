@@ -21,23 +21,23 @@ def test_kpis_without_a_camp_use_the_same_keys(monkeypatch):
     run_camp(monkeypatch, body)
 
 
-def test_backlog_is_printed_arrivals_without_a_completed_prescription(monkeypatch):
+def test_backlog_is_printed_arrivals_without_a_completed_prescription_on_any_camp_day(monkeypatch):
     async def body(database):
         camp_id, _ = await seed_camp(database)
+        yesterday = NOW - timedelta(days=1)
         await database.patients.insert_many([
-            patient_doc(camp_id=camp_id, arrived_at=NOW),
-            patient_doc(camp_id=camp_id, arrived_at=NOW, printed_at=NOW),
-            patient_doc(camp_id=camp_id, arrived_at=NOW, printed_at=NOW, seen_at=NOW),
+            patient_doc(camp_id=camp_id, queue_status="arrived", arrived_at=NOW),
+            patient_doc(camp_id=camp_id, queue_status="arrived", arrived_at=NOW, printed_at=NOW),
             patient_doc(
-                camp_id=camp_id, arrived_at=NOW, printed_at=NOW, committed_revision_id=ObjectId(),
+                camp_id=camp_id, queue_status="seen", arrived_at=NOW, printed_at=NOW, seen_at=NOW,
+                committed_revision_id=ObjectId(),
             ),
-            patient_doc(
-                camp_id=camp_id, arrived_at=NOW - timedelta(days=1), printed_at=NOW - timedelta(days=1),
-            ),
+            patient_doc(camp_id=camp_id, queue_status="arrived", arrived_at=yesterday, printed_at=yesterday),
         ])
         stages = (await camp_day_board(actor=ADMIN))["stages"]
         assert stages["transcription_backlog"] == 2
-        assert stages["arrived"] == 4
+        assert stages["earlier_days"]["transcription_backlog"] == 1
+        assert stages["arrived"] == 3
 
     run_camp(monkeypatch, body)
 

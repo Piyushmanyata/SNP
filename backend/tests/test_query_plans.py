@@ -88,8 +88,12 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
             ]}, "limit": 1},
             "revision by id": {"find": "prescription_revisions", "filter": {"_id": revision_id}, "limit": 1},
             "pending": {"find": "patients", "filter": {
-                "camp_day_id": day_id, "queue_status": "arrived", "printed_at": {"$ne": None},
+                "camp_id": camp, "queue_status": "arrived", "printed_at": {"$ne": None},
             }, "sort": {"printed_at": 1}},
+            "board carry-over": {"aggregate": "patients", "pipeline": [
+                {"$match": {"camp_id": camp, "queue_status": "arrived"}},
+                {"$group": {"_id": None, "n": {"$sum": 1}}},
+            ], "cursor": {}},
             "lookalikes": {"find": "patients", "filter": {
                 "camp_id": camp, "full_name_normalized": {"$in": [patient["full_name_normalized"]]},
                 "age": {"$gte": 40, "$lte": 50},

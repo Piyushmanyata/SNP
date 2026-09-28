@@ -198,7 +198,7 @@ export function Modal({ open, onClose, title, children, size = "md", dirty = fal
   );
 }
 
-export function Stat({ label, value, tone = "slate", testid, onClick }) {
+export function Stat({ label, value, tone = "slate", testid, onClick, note }) {
   const tones = {
     slate: "text-slate-900",
     emerald: "text-emerald-700",
@@ -208,6 +208,7 @@ export function Stat({ label, value, tone = "slate", testid, onClick }) {
     <>
       <p className="truncate text-[11px] sm:text-xs font-mono uppercase tracking-normal sm:tracking-widest text-slate-600">{label}</p>
       <p className={`mt-1 sm:mt-2 text-2xl sm:text-3xl font-display font-extrabold tabular-nums ${tones[tone]}`} data-testid={testid}>{value}</p>
+      {note && <p className="mt-1 text-xs font-semibold text-amber-800" data-testid={testid && `${testid}-note`}>{note}</p>}
     </>
   );
   if (!onClick) return <Card className="min-w-0 !p-3 sm:!p-5">{body}</Card>;

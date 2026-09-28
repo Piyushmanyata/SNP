@@ -2039,6 +2039,21 @@ describe("Manual entry, Pending and Reprint (ADR 0084)", () => {
     expect(row.querySelector("button")).toBeNull();
   });
 
+  test("Pending marks a patient who arrived on an earlier camp day", async () => {
+    const base = api.get.getMockImplementation();
+    const today = new Date().toISOString();
+    api.get.mockImplementation((url) => (url === "/pending"
+      ? Promise.resolve({ data: { patients: [
+        { ...PRINTED, arrived_at: "2026-09-01T04:00:00Z" },
+        { ...PRINTED, id: "p-2", reg_no: "102", arrived_at: today, printed_at: today },
+      ] } })
+      : base(url)));
+    await renderDesk();
+    await act(async () => { q("kpi-pending-count-button").click(); });
+    expect(q("pending-earlier-101").textContent).toBe("Arrived 01-09-2026");
+    expect(q("pending-earlier-102")).toBeNull();
+  });
+
   test("a volunteer opens Manual entry under the door scanner, picks a reason and it prints at once", async () => {
     mockAuth.user = { id: "u2", name: "Vol", role: "volunteer" };
     api.post.mockImplementation((url, sent) => (url === "/register"
