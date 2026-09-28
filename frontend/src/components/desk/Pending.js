@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import api, { formatApiError } from "../../lib/api";
 import { Alert, Modal, Spinner, Stat } from "../ui";
 import { printedLine } from "./printed";
+import { displayDate, istDate } from "../../lib/dates";
 
 function sincePrint(printedAt) {
   const minutes = Math.max(0, Math.floor((Date.now() - new Date(printedAt).getTime()) / 60000));
@@ -20,6 +21,7 @@ export function PendingStat({ value }) {
 
 function PendingList({ open, onClose }) {
   const [rows, setRows] = useState(null);
+  const [today, setToday] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -28,7 +30,7 @@ function PendingList({ open, onClose }) {
     setRows(null);
     setError("");
     api.get("/pending").then(
-      ({ data }) => { if (current) setRows(data.patients); },
+      ({ data }) => { if (current) { setRows(data.patients); setToday(data.today); } },
       (err) => { if (current) setError(formatApiError(err)); },
     );
     return () => { current = false; };
@@ -36,10 +38,10 @@ function PendingList({ open, onClose }) {
 
   return (
     <Modal open={open} onClose={onClose} title="Pending" size="lg">
-      <p className="text-sm text-slate-600 mb-3">Printed today and not yet seen by the doctor. Longest since print first.</p>
+      <p className="text-sm text-slate-600 mb-3">Printed and not yet seen by the doctor, on any camp day. Longest since print first.</p>
       <Alert>{error}</Alert>
       {!rows && !error && <Spinner className="w-6 h-6 text-emerald-700" />}
-      {rows?.length === 0 && <p className="text-slate-700" data-testid="pending-empty">No one is pending. Everyone printed today has seen the doctor.</p>}
+      {rows?.length === 0 && <p className="text-slate-700" data-testid="pending-empty">No one is pending. Everyone printed has seen the doctor.</p>}
       {rows?.length > 0 && (
         <ul className="space-y-2" data-testid="pending-list">
           {rows.map((p) => (
@@ -56,6 +58,11 @@ function PendingList({ open, onClose }) {
                   </a>
                 )}
                 <span>{printedLine(p)} · {sincePrint(p.printed_at)}</span>
+                {istDate(p.arrived_at) < today && (
+                  <span className="font-semibold text-amber-800" data-testid={`pending-earlier-${p.reg_no}`}>
+                    Arrived {displayDate(istDate(p.arrived_at))}
+                  </span>
+                )}
               </div>
             </li>
           ))}

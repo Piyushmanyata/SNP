@@ -281,15 +281,15 @@ Every camp day has a seat limit greater than zero. The limit blocks self-registr
 _Avoid_: seats_taken (that counter is OT and Spectacles to be made only), unlimited day, turning away a walk-in
 
 **Camp-day board**:
-The read-only page a team lead watches during a camp day. Per Registration desk, Arrivals in the last fifteen minutes and the last hour, with a desk that has gone quiet highlighted; the transcription backlog; each Fulfilment line's count today; seats left on the next OT Schedule Day; the next Specs collection day with no seat count; SMS failures; one banner when backups are red. Counts only, refreshes on its own, no actions and no patient names. The clock on the page is the server's.
+The read-only page a team lead watches during a camp day. Per Registration desk, Arrivals in the last fifteen minutes and the last hour, with a desk that has gone quiet highlighted; awaiting print, awaiting seen and the transcription backlog across every camp day of the active camp, each with how many arrived on an earlier camp day; each Fulfilment line's count today; seats left on the next OT Schedule Day; the next Specs collection day with no seat count; SMS failures; one banner when backups are red. Counts only, refreshes on its own, no actions and no patient names. The clock on the page is the server's.
 _Avoid_: dashboard (that is the admin area), live feed, monitor, alerts (the board pushes nothing)
 
 **Transcription backlog**:
-Arrived and printed patients who do not yet have a completed prescription. Doctor seen is committed with completion, not before it.
+Arrived and printed patients in the active camp who do not yet have a completed prescription, whichever camp day they arrived on. The board shows how many arrived on an earlier camp day. Doctor seen is committed with completion, not before it.
 _Avoid_: pending Rx after seen, queue at Doctor's Rx (a physical queue is not the backlog)
 
 **Pending**:
-Patients in the active camp who arrived on the Operating day and have Print Prescription but are not yet Doctor seen: the people the camp still owes a consultation today. The same patients the Camp-day board counts as the Transcription backlog. Patients who booked but have not arrived, or arrived but have not printed, are not Pending. The count opens the whole list, longest since print first, with each household phone so a lost patient can be found and called. The list is for finding people and offers no reprint; the clinical desk operator does not see it.
+Patients in the active camp who have Print Prescription but are not yet Doctor seen, on any camp day: the people the camp still owes a consultation. A patient who arrived on an earlier camp day is marked with that day. The same patients the Camp-day board counts as the Transcription backlog. Patients who booked but have not arrived, or arrived but have not printed, are not Pending. The count opens the whole list, longest since print first, with each household phone so a lost patient can be found and called. The list is for finding people and offers no reprint; the clinical desk operator does not see it.
 _Avoid_: registered minus seen, waiting (ambiguous with the physical queue)
 
 **Doctor seen**:

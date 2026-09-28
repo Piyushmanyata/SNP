@@ -2,6 +2,8 @@
 
 from datetime import timedelta
 
+from bson.codec_options import CodecOptions, DatetimeConversion
+
 from helpers import ist_day_bounds, now_utc, today_ist_str
 from conftest import run_db
 from benchmark_dataset import seed
@@ -88,8 +90,9 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
             ]}, "limit": 1},
             "revision by id": {"find": "prescription_revisions", "filter": {"_id": revision_id}, "limit": 1},
             "pending": {"find": "patients", "filter": {
-                "camp_day_id": day_id, "queue_status": "arrived", "printed_at": {"$ne": None},
+                "camp_id": camp, "queue_status": "arrived", "printed_at": {"$type": "date"},
             }, "sort": {"printed_at": 1}},
+
             "lookalikes": {"find": "patients", "filter": {
                 "camp_id": camp, "full_name_normalized": {"$in": [patient["full_name_normalized"]]},
                 "age": {"$gte": 40, "$lte": 50},
@@ -99,6 +102,10 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
             stages = _stages(await _winning(db, command))
             assert "COLLSCAN" not in stages, (name, stages)
         assert "SORT" not in _stages(await _winning(db, plans["pending"]))
+        pending_count = await db.command({
+            "explain": {"count": "patients", "query": plans["pending"]["filter"]}, "verbosity": "executionStats",
+        }, codec_options=CodecOptions(datetime_conversion=DatetimeConversion.DATETIME_AUTO))
+        assert pending_count["executionStats"]["totalDocsExamined"] == 0
         assert "SORT" not in _stages(await _winning(db, plans["clinical name search"]))
         quiet = now_utc() - timedelta(minutes=15)
         group_plans = {
@@ -119,6 +126,16 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
                     "patient_seen_at": {"$gte": start, "$lt": end},
                 }},
                 {"$group": {"_id": 1, "n": {"$sum": 1}}},
+            ], "cursor": {}},
+            "board carry-over": {"aggregate": "patients", "pipeline": [
+                {"$match": {"camp_id": camp, "queue_status": "arrived"}},
+                {"$group": {
+                    "_id": None,
+                    "unprinted": {"$sum": {"$cond": [{"$lte": ["$printed_at", None]}, 1, 0]}},
+                    "printed_earlier": {"$sum": {"$cond": [
+                        {"$and": [{"$gt": ["$printed_at", None]}, {"$lt": ["$arrived_at", start]}]}, 1, 0,
+                    ]}},
+                }},
             ], "cursor": {}},
             "board activity": {"aggregate": "patients", "pipeline": [
                 {"$match": {"camp_id": camp, "arrived_at": {"$gte": start, "$lt": end}}},

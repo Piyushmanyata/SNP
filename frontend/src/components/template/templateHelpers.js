@@ -1,3 +1,4 @@
+import { istDate } from "../../lib/dates";
 export const MAX_LOGOS = 6;
 
 let unsavedLogos = false;
@@ -35,19 +36,11 @@ export function validateLogoFile(file) {
   return { valid: true, error: "" };
 }
 
-function todayIst(now = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit",
-  }).formatToParts(now);
-  const part = Object.fromEntries(parts.map((item) => [item.type, item.value]));
-  return `${part.year}-${part.month}-${part.day}`;
-}
-
 export function buildSampleRx(camp) {
   return {
     reg_no: 101,
     full_name: "Sample Patient",
-    date: todayIst(),
+    date: istDate(Date.now()),
     age: 52,
     gender: "M",
     phone: "9876543210",

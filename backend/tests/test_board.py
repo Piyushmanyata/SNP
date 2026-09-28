@@ -43,7 +43,9 @@ class TestCampDayBoard:
     def test_counts_do_not_truncate_after_twenty_thousand_arrivals(self, monkeypatch):
         async def body(database):
             camp_id, _ = await seed_camp(database)
-            await database.patients.insert_many([patient_doc(camp_id=camp_id, arrived_at=NOW) for _ in range(20001)])
+            await database.patients.insert_many([
+                patient_doc(camp_id=camp_id, queue_status="arrived", arrived_at=NOW) for _ in range(20001)
+            ])
             result = await camp_day_board(actor=ADMIN)
             assert result["stages"]["arrived"] == 20001
             assert result["stages"]["awaiting_print"] == 20001
@@ -55,14 +57,36 @@ class TestCampDayBoard:
             camp_id, _ = await seed_camp(database)
             arrived = NOW - timedelta(minutes=30)
             await database.patients.insert_many([
-                patient_doc(camp_id=camp_id, arrived_at=arrived),
-                patient_doc(camp_id=camp_id, arrived_at=arrived, printed_at=arrived),
-                patient_doc(camp_id=camp_id, arrived_at=arrived, printed_at=arrived, seen_at=arrived),
+                patient_doc(camp_id=camp_id, queue_status="arrived", arrived_at=arrived),
+                patient_doc(camp_id=camp_id, queue_status="arrived", arrived_at=arrived, printed_at=arrived),
+                patient_doc(camp_id=camp_id, queue_status="seen", arrived_at=arrived, printed_at=arrived, seen_at=arrived),
             ])
             return (await camp_day_board(actor=ADMIN))["stages"]
 
         stages = run_camp(monkeypatch, body)
         assert (stages["arrived"], stages["awaiting_print"], stages["awaiting_seen"], stages["seen"]) == (3, 1, 1, 1)
+
+    def test_patients_still_owed_from_an_earlier_camp_day_are_counted_and_marked(self, monkeypatch):
+        async def body(database):
+            camp_id, _ = await seed_camp(database)
+            yesterday = NOW - timedelta(days=1)
+            await database.patients.insert_many([
+                patient_doc(camp_id=camp_id, queue_status="arrived", arrived_at=yesterday),
+                patient_doc(camp_id=camp_id, queue_status="arrived", arrived_at=yesterday, printed_at=yesterday),
+                patient_doc(
+                    camp_id=camp_id, queue_status="seen", arrived_at=yesterday, printed_at=yesterday,
+                    seen_at=yesterday, committed_revision_id=ObjectId(),
+                ),
+                patient_doc(camp_id=camp_id, queue_status="arrived", arrived_at=NOW),
+                patient_doc(camp_id=ObjectId(), queue_status="arrived", arrived_at=yesterday),
+            ])
+            return (await camp_day_board(actor=ADMIN))["stages"]
+
+        stages = run_camp(monkeypatch, body)
+        assert stages["arrived"] == 1
+        assert stages["seen"] == 0
+        assert (stages["awaiting_print"], stages["awaiting_seen"], stages["transcription_backlog"]) == (2, 1, 1)
+        assert stages["earlier_days"] == {"awaiting_print": 1, "awaiting_seen": 1, "transcription_backlog": 1}
 
     def test_scoped_kpis_quiet_activity_and_no_patient_names(self, monkeypatch):
         async def body(database):
@@ -76,12 +100,12 @@ class TestCampDayBoard:
             p_seen, p_tx = ObjectId(), ObjectId()
             await database.patients.insert_many([
                 patient_doc(
-                    _id=p_seen, camp_id=camp_id, full_name="Sunita Devi", arrived_by=str(desk_busy),
+                    _id=p_seen, camp_id=camp_id, full_name="Sunita Devi", arrived_by=str(desk_busy), queue_status="seen",
                     arrived_at=NOW - timedelta(minutes=10), printed_at=NOW - timedelta(minutes=8),
                     seen_at=NOW - timedelta(minutes=5),
                 ),
                 patient_doc(
-                    _id=p_tx, camp_id=camp_id, full_name="Ramesh Kumar", arrived_by=str(desk_quiet),
+                    _id=p_tx, camp_id=camp_id, full_name="Ramesh Kumar", arrived_by=str(desk_quiet), queue_status="seen",
                     arrived_at=NOW - timedelta(minutes=40), printed_at=NOW - timedelta(minutes=35),
                     seen_at=NOW - timedelta(minutes=30), committed_revision_id=ObjectId(),
                 ),
@@ -130,7 +154,7 @@ class TestCampDayBoard:
             assert out["day"]["day_date"] == TODAY
             assert out["stages"]["arrived"] == 2
             assert out["stages"]["seen"] == 2
-            assert out["stages"]["transcription_backlog"] == 1
+            assert out["stages"]["transcription_backlog"] == 0
             by_name = {d["name"]: d for d in out["activity"]}
             assert set(by_name) == {"Vol 1", "Vol 2"}
             assert by_name["Vol 1"]["quiet"] is False

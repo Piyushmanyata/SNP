@@ -38,6 +38,13 @@ export function displayTime(value) {
   return displayClock(value).slice(0, 5);
 }
 
+export function istDate(value) {
+  const instant = new Date(value || "");
+  if (Number.isNaN(instant.getTime())) return "";
+  const part = Object.fromEntries(IST_PARTS.formatToParts(instant).map((p) => [p.type, p.value]));
+  return `${part.year}-${part.month}-${part.day}`;
+}
+
 export function displayTimestamp(value) {
   const instant = new Date(value || "");
   if (Number.isNaN(instant.getTime())) return value || "";

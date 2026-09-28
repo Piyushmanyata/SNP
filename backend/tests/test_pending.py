@@ -5,7 +5,7 @@ from bson import ObjectId
 from seed import NOW, TODAY, TOMORROW, asgi_client, bearer, patient_doc, run_camp, seed_camp, user_doc
 
 
-def test_pending_is_printed_but_not_seen_on_the_operating_day_oldest_print_first(monkeypatch):
+def test_pending_is_every_printed_patient_not_yet_seen_in_the_active_camp_oldest_print_first(monkeypatch):
     async def run(database):
         camp_id, (today_id, tomorrow_id) = await seed_camp(database, days=(TODAY, TOMORROW))
         user_id = ObjectId()
@@ -16,11 +16,13 @@ def test_pending_is_printed_but_not_seen_on_the_operating_day_oldest_print_first
             return patient_doc(**{"camp_id": camp_id, "camp_day_id": today_id, "full_name": name,
                                   "queue_status": "arrived", "arrived_at": NOW, "printed_at": NOW, **fields})
 
+        yesterday = NOW - timedelta(days=1)
         await database.patients.insert_many([
+            row("From Yesterday", camp_day_id=tomorrow_id, arrived_at=yesterday, printed_at=yesterday),
             row("Waiting Longest", printed_at=NOW - timedelta(minutes=40)),
             row("Already Seen", queue_status="seen", seen_at=NOW),
             row("Not Printed", printed_at=None),
-            row("Other Day", camp_day_id=tomorrow_id),
+            row("Other Camp", camp_id=ObjectId()),
             row("Not Arrived", queue_status="registered", arrived_at=None, printed_at=None),
         ])
         async with asgi_client() as client:
@@ -31,12 +33,14 @@ def test_pending_is_printed_but_not_seen_on_the_operating_day_oldest_print_first
 
             kpis = (await client.get("/api/kpis", headers=headers)).json()
             listed = await client.get("/api/pending", headers=headers)
-        assert kpis["pending"] == 2
+        assert kpis["pending"] == 3
         assert listed.status_code == 200, listed.text
+        assert listed.json()["today"] == TODAY
         rows = listed.json()["patients"]
-        assert [p["full_name"] for p in rows] == ["Waiting Longest", "Kamla Bai"]
-        assert rows[1]["printed_by_name"] == "Ramesh"
-        assert rows[1]["phone"] == "9876500011"
+        assert [p["full_name"] for p in rows] == ["From Yesterday", "Waiting Longest", "Kamla Bai"]
+        assert rows[0]["arrived_at"].startswith(yesterday.date().isoformat())
+        assert rows[2]["printed_by_name"] == "Ramesh"
+        assert rows[2]["phone"] == "9876500011"
 
     run_camp(monkeypatch, run)
 

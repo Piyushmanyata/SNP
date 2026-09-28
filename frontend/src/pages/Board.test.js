@@ -79,6 +79,18 @@ describe("Camp-day board", () => {
     expect(container.querySelector('[data-testid="board-kpis"]')).not.toBeNull();
   });
 
+  test("shows how many owed patients arrived on an earlier camp day", async () => {
+    api.get.mockResolvedValue({ data: {
+      ...PAYLOAD,
+      stages: { ...PAYLOAD.stages, earlier_days: { awaiting_print: 2, awaiting_seen: 0, transcription_backlog: 1 } },
+    } });
+    await act(async () => { root.render(<MemoryRouter><Board /></MemoryRouter>); });
+    const note = (id) => container.querySelector(`[data-testid="${id}-note"]`);
+    expect(note("board-awaiting-print").textContent).toBe("2 from earlier days");
+    expect(note("board-backlog").textContent).toBe("1 from an earlier day");
+    expect(note("board-awaiting-seen")).toBeNull();
+  });
+
   test("renders KPIs before the activity table with camp day and quiet text", async () => {
     await act(async () => {
       root.render(
