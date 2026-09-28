@@ -128,6 +128,10 @@ _Avoid_: partial, incomplete, half fulfilled
 The one of four Fulfilment lines the operator chooses for their current session. It selects which fulfilment station opens once a prescription is committed, not permissions and not the transcription sequence — every operator walks the same wizard. Admin assignment is unnecessary.
 _Avoid_: role, station, desk assignment
 
+**Corrected after issue**:
+The mark on a medicine or Fixed-power specs line that a correction changed after goods were handed over. It records the correction's revision, when and by whom. The issued outcome is carried forward, never rewritten: medicines given stay given, one the correction removes stays recorded as given, and an Issued power stays. A medicine the correction adds opens on the line, which then needs a fresh Paper review against the corrected prescription; a changed fixed power does not reopen anything. Shown at the Fulfilment station and in the Camp records export.
+_Avoid_: stale line, amended outcome, re-issue (nothing already given is issued again)
+
 **Fulfilment line**:
 One of the four things a patient can be sent to after Seen: medicine, Fixed-power specs, Spectacles to be made, or Hospital. Each has its own item type and record. The Hospital line carries the Hospital outcome; operations do not occur at camp. A prescription names at most one of Fixed-power specs, Spectacles to be made, or IOL surgery; medicine goes with any of them, and a Hospital referral goes with either specs line. A patient who declines IOL surgery and then wants spectacles needs a correction to the prescription. An absent record means not needed.
 _Avoid_: station, queue, counter, three lines, Hospital surgery (the line also holds referrals), not required (never a recorded outcome)
