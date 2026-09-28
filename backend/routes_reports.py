@@ -20,7 +20,7 @@ router = APIRouter(prefix="/api", tags=["reports"])
 
 def _pending_query(camp: dict) -> Dict[str, Any]:
     """The Transcription backlog: printed and not yet seen, on any camp day of the active camp."""
-    return {"camp_id": camp["_id"], "queue_status": "arrived", "printed_at": {"$ne": None}}
+    return {"camp_id": camp["_id"], "queue_status": "arrived", "printed_at": {"$type": "date"}}
 
 
 @router.get("/kpis")
