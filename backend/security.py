@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import os
 import secrets
 import jwt
@@ -26,6 +28,12 @@ def verify_pin(plain: str, hashed: str) -> bool:
 
 def _secret() -> str:
     return os.environ["JWT_SECRET"]
+
+
+def sign(purpose: str, message: str) -> str:
+    """An HMAC of message under a key derived from the JWT secret for this one purpose."""
+    key = hmac.new(_secret().encode(), purpose.encode(), hashlib.sha256).digest()
+    return hmac.new(key, message.encode(), hashlib.sha256).hexdigest()
 
 
 def create_access_token(user_id: str, name: str = "", role: str = "", session_version: int = 0) -> str:

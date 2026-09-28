@@ -193,8 +193,12 @@ An image of the camp's sponsor, printed in the prescription footer under "Sponso
 _Avoid_: logo (the trust's own emblems are fixed masthead artwork, not sponsor logos), header image
 
 **Paper check**:
-The dialog that follows every prescription print at the desk. "Printed — next patient" records Print Prescription (`printed_at`), clears the card and returns the cursor to the USB box. "Print again" asks the server for the sheet again and prints it; it is not a Reprint, because nothing reached the patient yet. "Printer problem" and Escape record nothing and keep the patient on the card. A new scan closes the Paper check without recording anything. The browser's print event alone never records a print, because it fires for a cancelled dialog too.
+The dialog that follows every prescription print at the desk. "Printed — next patient" records Print Prescription (`printed_at`), clears the card and returns the cursor to the USB box. "Print again" asks the server for the sheet again and prints it; it is not a Reprint, because nothing reached the patient yet. "Printer problem" and Escape record nothing and keep the patient on the card. A new scan closes the Paper check without recording anything. The browser's print event alone never records a print, because it fires for a cancelled dialog too. Paper that already exists always gets its record: a first-print sheet carries a Sheet stamp, and "Printed — next patient" with that stamp is recorded even after the Print window has closed, the same IST day and until Doctor seen (ADR 0093).
 _Avoid_: print confirmation, printed flag, auto-stamp
+
+**Sheet stamp**:
+The server's signature on a first-print sheet: this registration, fetched at this moment while the Print window was open. It is not stored. The Paper check sends it back so a sheet fetched while the window was open can be recorded after it closes, on the same IST calendar date, while the patient is arrived, not printed, not Doctor seen and not held for identity. "Print again" fetches a new sheet and so a new stamp. A missing, altered or another patient's stamp changes nothing: the window refuses as before.
+_Avoid_: print token (Token is the Fulfilment slip), receipt
 
 **Print Prescription**:
 The paper in the patient's hand, recorded by the Paper check as `printed_at`. The desk prints in the page, with no navigation. An attempted print that is not confirmed is not Print Prescription. Refused after Doctor seen, and for any booking that has not arrived — scanned or typed — until its door Lock or a No-card print (see Arrival).

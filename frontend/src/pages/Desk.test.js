@@ -1846,7 +1846,7 @@ describe("Desk page", () => {
     await renderDesk();
     await printFromDoor();
     await act(async () => { paperButton("confirm").click(); });
-    expect(stampCalls()).toEqual([["/desk/print/p-1"]]);
+    expect(stampCalls()).toEqual([["/desk/print/p-1", { sheet_stamp: null }]]);
     expect(paperCheck()).toBeNull();
     expect(container.querySelector('[data-testid="scan-arrived"]')).toBeNull();
     expect(container.textContent).toContain("Printed #101");
