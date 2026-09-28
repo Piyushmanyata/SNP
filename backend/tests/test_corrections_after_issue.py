@@ -102,12 +102,12 @@ def test_a_correction_that_leaves_the_issued_lines_alone_marks_nothing(monkeypat
     run_camp(monkeypatch, run)
 
 
-def test_a_reopened_line_needs_a_fresh_paper_review_and_never_ungives_a_medicine(monkeypatch):
+def test_a_reopened_line_needs_a_fresh_paper_review(monkeypatch):
     async def run(database):
         ids = await _issued(database)
         old_revision = (await database.patients.find_one({"_id": ids["patient_id"]}))["committed_revision_id"]
         result = await _correct(ids, prescribed_medicine_ids=[A, B])
-        outcomes = [{"medicine_id": A, "given": False}, {"medicine_id": B, "given": True}]
+        outcomes = [{"medicine_id": A, "given": True}, {"medicine_id": B, "given": True}]
         with pytest.raises(HTTPException) as exc:
             await record_fulfilment(fulfil(ids["trans_id"], old_revision, item_type="medicine", status="fulfilled",
                                            medicine_outcomes=outcomes), actor=CLINICAL, background_tasks=None)
@@ -139,24 +139,20 @@ def test_the_export_shows_the_mark_the_open_medicine_and_the_fixed_power_trio(mo
     run_camp(monkeypatch, run)
 
 
-def test_a_reissue_fills_only_the_open_medicines(monkeypatch):
+def test_a_reissue_keeps_a_medicine_the_correction_removed_after_it_was_given(monkeypatch):
     async def run(database):
         ids = await _issued(database)
-        await database.fulfilments.update_one(
-            {"transcription_id": ids["trans_id"], "item_type": "medicine"},
-            {"$set": {"medicine_outcomes": [{**MEDICINE, "given": False}], "status": "not_available"}},
-        )
-        result = await _correct(ids, prescribed_medicine_ids=[A, B])
+        result = await _correct(ids, prescribed_medicine_ids=[B])
         await record_fulfilment(fulfil(
             ids["trans_id"], result["revision"]["id"], item_type="medicine", status="fulfilled",
-            medicine_outcomes=[{"medicine_id": A, "given": True}, {"medicine_id": B, "given": True}],
+            medicine_outcomes=[{"medicine_id": B, "given": True}],
             reviewed_generation=result["registration"]["clinical_generation"],
         ), actor=CLINICAL, background_tasks=None)
         medicine = await _line(database, ids, "medicine")
-        assert [(o["name"], o["given"]) for o in medicine["medicine_outcomes"]] == [
-            (MEDICINE["name"], False), (MEDICINE_ALT["name"], True),
+        assert [(o["name"], o["given"], o.get("prescribed", True)) for o in medicine["medicine_outcomes"]] == [
+            (MEDICINE_ALT["name"], True, True), (MEDICINE["name"], True, False),
         ]
-        assert medicine["status"] == "partially_fulfilled"
+        assert medicine["status"] == "fulfilled"
 
     run_camp(monkeypatch, run)
 
@@ -187,17 +183,3 @@ def test_a_catalogue_rename_does_not_reopen_a_medicine_already_given(monkeypatch
 
     run_camp(monkeypatch, run)
 
-
-def test_a_second_fixed_power_issue_keeps_the_power_already_handed_over(monkeypatch):
-    async def run(database):
-        ids = await _issued(database)
-        result = await _correct(ids, fixed_power_r=2.25, fixed_power_l=2.25)
-        await record_fulfilment(fulfil(
-            ids["trans_id"], result["revision"]["id"], item_type="specs_fixed", status="fulfilled",
-            issued_power_r=2.25, issued_power_l=2.25,
-            reviewed_generation=result["registration"]["clinical_generation"],
-        ), actor=CLINICAL, background_tasks=None)
-        specs = await _line(database, ids, "specs_fixed")
-        assert (specs["issued_power_r"], specs["issued_power_l"]) == (2.0, 2.0)
-
-    run_camp(monkeypatch, run)

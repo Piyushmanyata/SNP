@@ -19,9 +19,9 @@ On a correction commit, inside the correction's `apply` step and its one transac
 
 The status is derived as before: a line with open medicines is Partially fulfilled when at least one medicine was given, and Not available when none was; a line where nothing was handed over is never Fulfilled. The line is reopened at the Fulfilment station for the open medicines only: every settled outcome, given or not available, stays as recorded.
 
-**Fixed-power specs:** if the correction moved the prescribed power away from the Issued power, the Issued power stays, and nothing reopens. A desk substitution without a correction is not marked. A second issue of the line keeps the Issued power already recorded: those spectacles left the camp.
+**Fixed-power specs:** if the correction moved the prescribed power away from the Issued power, the Issued power stays, and nothing reopens. A desk substitution without a correction is not marked.
 
-**The mark:** any line the correction changed gets `corrected_after_issue: {revision_id, at, by}`. A reopened line is issued again only after a fresh Paper review against the corrected revision and generation (`STALE_REVIEW` until then), and a re-issue records only the open medicines (`settle_open`). The mark is never cleared: it records that the line changed after goods left, which stays true.
+**The mark:** any line the correction changed gets `corrected_after_issue: {revision_id, at, by}`. A reopened line is issued again only after a fresh Paper review against the corrected revision and generation (`STALE_REVIEW` until then), The station re-offers only the open medicines and locks every settled outcome. The API keeps its rule that the latest issue wins (`test_late_issue_retry_preserves_the_newer_outcome`), and a re-issue never drops a medicine the correction removed after it was given (`keep_removed`). The mark is never cleared: it records that the line changed after goods left, which stays true.
 
 **Export:** the Camp records export gains a `corrected_after_issue` column naming the marked lines. Medicines prescribed come from the current revision, and open medicines count as not given until issued. The fixed power columns already show the current prescribed power and the actual Issued power.
 

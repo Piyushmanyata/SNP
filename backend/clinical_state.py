@@ -262,14 +262,10 @@ def fixed_power_corrected(issued: dict, before: dict, after: dict) -> bool:
     return was != now and now != (issued.get("issued_power_r"), issued.get("issued_power_l"))
 
 
-def settle_open(prior: List[dict], outcomes: List[dict]) -> List[dict]:
-    """A re-issue records only the medicines still open; every settled outcome stays as it was recorded."""
-    carried, _changed = carry_medicine_outcomes(prior, outcomes)
-    supplied = {o["medicine_id"]: o["given"] for o in outcomes}
-    return [
-        {**o, "given": supplied[o["medicine_id"]]} if o["given"] is None and o.get("prescribed") is not False else o
-        for o in carried
-    ]
+def keep_removed(prior: List[dict], outcomes: List[dict]) -> List[dict]:
+    """A re-issue records the prescribed medicines; one a correction removed after it was given stays recorded."""
+    ids = {o["medicine_id"] for o in outcomes}
+    return outcomes + [o for o in prior if o.get("prescribed") is False and o["medicine_id"] not in ids]
 
 
 async def insert_revision(
