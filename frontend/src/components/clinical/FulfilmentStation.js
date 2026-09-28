@@ -209,9 +209,6 @@ export function FulfilmentStation({
   const existing = useMemo(() => {
     return data?.fulfilments?.find((f) => f.item_type === line.itemType) || null;
   }, [data, line]);
-  const alreadyGiven = useMemo(() => new Set(
-    (existing?.medicine_outcomes || []).filter((o) => o.given).map((o) => o.name),
-  ), [existing]);
   const reopened = Boolean(line.perMedicine && existing?.medicine_outcomes?.some((o) => o.given === null));
   const slip = data?.slips?.find((s) => s.item_type === line.itemType && s.active);
   const [dayId, setDayId] = useState("");
@@ -230,14 +227,17 @@ export function FulfilmentStation({
     setPaperReviewed(false);
   }, [existing?.status, line, data?.registration?.id, data?.committed_revision?.id]);
 
-  useEffect(() => {
-    setOutcomes(prescribedMedicines.map((m) => ({ ...m, given: true })));
-  }, [prescribedMedicines]);
+  const settled = useMemo(() => {
+    const earlier = existing?.medicine_outcomes || [];
+    return new Map(prescribedMedicines.flatMap((m) => {
+      const o = earlier.find((e) => e.medicine_id === m.medicine_id) || earlier.find((e) => e.name === m.name);
+      return o && o.given !== null ? [[m.medicine_id, o.given]] : [];
+    }));
+  }, [prescribedMedicines, existing]);
 
-  const locked = useMemo(
-    () => new Set(prescribedMedicines.filter((m) => alreadyGiven.has(m.name)).map((m) => m.medicine_id)),
-    [prescribedMedicines, alreadyGiven],
-  );
+  useEffect(() => {
+    setOutcomes(prescribedMedicines.map((m) => ({ ...m, given: settled.has(m.medicine_id) ? settled.get(m.medicine_id) : true })));
+  }, [prescribedMedicines, settled]);
 
   useEffect(() => {
     setIssued({
@@ -388,7 +388,7 @@ export function FulfilmentStation({
       {line.perMedicine && (
         <MedicineChecklist
           outcomes={outcomes}
-          locked={locked}
+          locked={settled}
           disabled={busy}
           onToggle={(id, given) =>
             setOutcomes((cur) =>

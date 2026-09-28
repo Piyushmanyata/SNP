@@ -236,36 +236,39 @@ def require_correction_allowed(surgery_scheduled: bool, specs_scheduled: bool) -
 
 
 def carry_medicine_outcomes(outcomes: List[dict], prescribed: List[dict]) -> Tuple[List[dict], bool]:
-    """Issued medicine outcomes against a corrected prescription, by catalogue name (ADR 0097).
+    """Issued medicine outcomes against a corrected prescription, matched by catalogue id, then name (ADR 0097).
 
     Given stays given and not available stays not available while still prescribed. A medicine the correction adds
     is open (given None). One it removes after it was given stays, marked prescribed False. Returns the outcomes and
     whether the correction changed the line.
     """
+    by_id = {o["medicine_id"]: o for o in outcomes}
     by_name = {o["name"]: o for o in outcomes}
-    carried = [
-        {"medicine_id": m["medicine_id"], "name": m["name"], "given": by_name[m["name"]]["given"] if m["name"] in by_name else None}
-        for m in prescribed
-    ]
-    names = {m["name"] for m in prescribed}
-    carried += [{**o, "prescribed": False} for o in outcomes if o["given"] and o["name"] not in names]
-    return carried, names != {o["name"] for o in outcomes if o.get("prescribed") is not False}
+    carried, matched = [], []
+    for m in prescribed:
+        earlier = by_id.get(m["medicine_id"]) or by_name.get(m["name"])
+        if earlier:
+            matched.append(earlier)
+        carried.append({"medicine_id": m["medicine_id"], "name": m["name"], "given": earlier["given"] if earlier else None})
+    unmatched = [o for o in outcomes if not any(o is m for m in matched)]
+    carried += [{**o, "prescribed": False} for o in unmatched if o["given"]]
+    return carried, len(matched) < len(prescribed) or any(o.get("prescribed") is not False for o in unmatched)
 
 
 def fixed_power_corrected(issued: dict, before: dict, after: dict) -> bool:
     """The correction moved the prescribed fixed power away from the power already handed over."""
-    def prescribed(revision: dict) -> tuple:
-        return revision.get("fixed_power_r"), revision.get("fixed_power_l")
-    handed_over = (issued.get("issued_power_r"), issued.get("issued_power_l"))
-    return prescribed(before) != prescribed(after) and prescribed(after) != handed_over
+    was = (before.get("fixed_power_r"), before.get("fixed_power_l"))
+    now = (after.get("fixed_power_r"), after.get("fixed_power_l"))
+    return was != now and now != (issued.get("issued_power_r"), issued.get("issued_power_l"))
 
 
-def keep_given(prior: List[dict], outcomes: List[dict]) -> List[dict]:
-    """A re-issue records what was still open; a medicine that already left the camp stays given."""
-    given = {o["name"] for o in prior if o["given"]}
-    names = {o["name"] for o in outcomes}
-    return [{**o, "given": bool(o["given"]) or o["name"] in given} for o in outcomes] + [
-        o for o in prior if o.get("prescribed") is False and o["name"] not in names
+def settle_open(prior: List[dict], outcomes: List[dict]) -> List[dict]:
+    """A re-issue records only the medicines still open; every settled outcome stays as it was recorded."""
+    carried, _changed = carry_medicine_outcomes(prior, outcomes)
+    supplied = {o["medicine_id"]: o["given"] for o in outcomes}
+    return [
+        {**o, "given": supplied[o["medicine_id"]]} if o["given"] is None and o.get("prescribed") is not False else o
+        for o in carried
     ]
 
 

@@ -536,6 +536,29 @@ describe("Corrected after issue", () => {
     expect(api.post.mock.calls[0][1].reviewed_revision_id).toBe("rev-2");
   });
 
+  test("a medicine recorded not available stays not available when the line reopens", async () => {
+    await renderStation({
+      line: "medicine",
+      data: {
+        transcription: { id: "tx-1", prescribed_medicines: [MEDICINE, ADDED] },
+        registration: { id: "reg-1" },
+        committed_revision: { id: "rev-2" },
+        fulfilments: [{
+          item_type: "medicine", status: "not_available", corrected_after_issue: true,
+          medicine_outcomes: [{ ...MEDICINE, given: false }, { ...ADDED, given: null }],
+        }],
+      },
+    });
+    const q = (id) => container.querySelector(`[data-testid="${id}"]`);
+    expect(q("medicine-med-1-given").disabled).toBe(true);
+    expect(q("medicine-med-1-missing").getAttribute("aria-pressed")).toBe("true");
+    act(() => { q("station-medicine-paper-review").click(); });
+    await act(async () => { q("station-medicine-save").click(); });
+    expect(api.post.mock.calls[0][1].medicine_outcomes).toEqual([
+      { medicine_id: "med-1", given: false }, { medicine_id: "med-2", given: true },
+    ]);
+  });
+
   test("a line marked corrected after issue with nothing open shows the mark and no form", async () => {
     await renderStation({
       line: "specs_fixed",

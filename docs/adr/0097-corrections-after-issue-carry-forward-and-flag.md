@@ -11,17 +11,17 @@
 
 On a correction commit, inside the correction's `apply` step and its one transaction, each issued medicine and Fixed-power specs line is re-derived against the new revision (`routes_clinical._carry_forward`, rules in `clinical_state`).
 
-**Medicine line (by catalogue name):**
+**Medicine line (matched by catalogue id, then by name, so a catalogue rename never reopens a medicine):**
 - a medicine given stays given;
 - one recorded not available stays not available while still prescribed;
 - one the correction adds is open (`given: null`);
 - one it removes after it was given stays recorded as given, with `prescribed: false`.
 
-The status is derived as before, so a line with open medicines is Partially fulfilled. The line is reopened at the Fulfilment station for the open medicines only.
+The status is derived as before, so a line with open medicines is Partially fulfilled, and a line where nothing was handed over is Not available, never Fulfilled. The line is reopened at the Fulfilment station for the open medicines only: every settled outcome, given or not available, stays as recorded.
 
 **Fixed-power specs:** if the correction moved the prescribed power away from the Issued power, the Issued power stays, and nothing reopens. A desk substitution without a correction is not marked.
 
-**The mark:** any line the correction changed gets `corrected_after_issue: {revision_id, at, by}`. A reopened line is issued again only after a fresh Paper review against the corrected revision and generation (`STALE_REVIEW` until then), and a re-issue never turns a given medicine back.
+**The mark:** any line the correction changed gets `corrected_after_issue: {revision_id, at, by}`. A reopened line is issued again only after a fresh Paper review against the corrected revision and generation (`STALE_REVIEW` until then), and a re-issue records only the open medicines (`settle_open`). The mark is never cleared: it records that the line changed after goods left, which stays true.
 
 **Export:** the Camp records export gains a `corrected_after_issue` column naming the marked lines. Medicines prescribed come from the current revision, and open medicines count as not given until issued. The fixed power columns already show the current prescribed power and the actual Issued power.
 

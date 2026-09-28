@@ -15,7 +15,8 @@ import clinical_operation
 from clinical_operation import Operation
 from clinical_state import (
     CONTENT_FIELDS, PRESCRIBED_LINE_KEYS, SPECS_EXCLUSION, carry_medicine_outcomes, commit, conflict, draft_conflict,
-    extract_content, fixed_power_corrected, generation_of, has_issue_history, insert_revision, keep_given, normalize_ot_eye,
+    extract_content, fixed_power_corrected, generation_of, has_issue_history, insert_revision, normalize_ot_eye,
+    settle_open,
     require_correction_allowed, require_draft_version, require_fresh_review, require_generation,
     require_line_prescribed, require_not_completed, require_printed, require_specs_exclusive,
     require_unchanged, require_undoable, serialize_revision, validate_completion,
@@ -366,10 +367,10 @@ def match_medicine_outcomes(revision: dict, outcomes) -> list[dict]:
 
 def derive_medicine_status(outcomes: list[dict]) -> str:
     given = sum(1 for o in outcomes if o["given"])
-    if given == len(outcomes):
-        return "fulfilled"
     if given == 0:
         return "not_available"
+    if given == len(outcomes):
+        return "fulfilled"
     return "partially_fulfilled"
 
 
@@ -482,7 +483,7 @@ async def record_fulfilment(
         ) if body.status == "deferred" else (None, [])
         doc = _build_fulfilment_doc(body, t["_id"], slip, str(actor["_id"]), medicine_outcomes, issued_powers)
         if medicine_outcomes and prior:
-            doc["medicine_outcomes"] = keep_given(prior.get("medicine_outcomes") or [], medicine_outcomes)
+            doc["medicine_outcomes"] = settle_open(prior.get("medicine_outcomes") or [], medicine_outcomes)
             doc["status"] = derive_medicine_status(doc["medicine_outcomes"])
         doc.update({
             "operation_id": body.operation_id,
