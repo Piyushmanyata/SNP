@@ -29,5 +29,5 @@
 
 - Each self-registration costs three small counter writes and one read.
 - The phone counter is charged once the card decodes, before the registration is checked. Someone who knows a Household's number and can make readable cards can hold that number off self-registration for up to an hour; the desk still registers them. A replayed request also spends the address and phone counters; twelve an hour leaves room for one retry per patient.
-- The daily ceiling is a soft cap: it is read before a registration and counted after it, so requests in flight at the same moment can pass it by a few.
+- The daily ceiling is a soft cap: it is read before a registration and counted after it, so requests in flight at the same moment can pass it by a few. A counter write that fails is logged and the registration still succeeds with its receipt and SMS: the ceiling can miss one registration, but a patient never loses theirs.
 - A camp whose honest demand passes 6,000 self-registrations a day needs the constant raised.

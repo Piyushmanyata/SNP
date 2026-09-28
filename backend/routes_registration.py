@@ -22,9 +22,11 @@ from lock_resolution import duplicate_in_camp
 from datetime import date, timedelta
 from itertools import permutations
 import asyncio
+import logging
 import re
 
 router = APIRouter(prefix="/api", tags=["registration"])
+logger = logging.getLogger(__name__)
 
 NETWORK_WINDOW = timedelta(minutes=10)
 SELF_REGISTER_PER_NETWORK = 120
@@ -453,11 +455,14 @@ async def self_register(body: RegisterBody, request: Request, background_tasks: 
             ) from exc
         raise
     if created:
-        await limits.add(db, ceiling)
         if background_tasks is not None:
             background_tasks.add_task(_confirm_registration, patient)
         else:
             await _confirm_registration(patient)
+        try:
+            await limits.add(db, ceiling)
+        except Exception:
+            logger.exception("Could not count a self-registration against the camp's daily ceiling")
     day = await db.camp_days.find_one({"_id": ObjectId(body.camp_day_id)})
     return {
         "registration": patient,

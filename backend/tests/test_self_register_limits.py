@@ -89,3 +89,22 @@ def test_the_camp_takes_a_ceiling_of_self_registrations_a_day(monkeypatch):
         assert await database.patients.count_documents({}) == 3
 
     run_camp(monkeypatch, run)
+
+
+def test_the_confirmation_sms_is_not_lost_when_the_ceiling_count_cannot_be_written(monkeypatch):
+    sent = recorder()
+
+    async def broken_add(*_args):
+        raise RuntimeError("counter write failed")
+
+    monkeypatch.setattr(limits, "add", broken_add)
+
+    async def run(database):
+        _camp_id, (day_id,) = await seed_camp(database, days=(day(1),))
+        async with _client("10.0.0.1") as client:
+            r = await client.post("/api/self-register", json=_body(day_id, 0))
+            assert r.status_code == 200, r.text
+        assert await database.patients.count_documents({}) == 1
+
+    run_camp(monkeypatch, run)
+    assert [message["type"] for message in sent] == ["registration"]
