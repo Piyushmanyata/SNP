@@ -138,7 +138,7 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
       }
       dispatch({ type: "paperConfirmStarted", request: check.request });
       try {
-        const { data } = await api.post(`/desk/print/${check.reg.id}`);
+        const { data } = await api.post(`/desk/print/${check.reg.id}`, { sheet_stamp: check.rx?.sheet_stamp ?? null });
         dispatch({ type: "paperConfirmed", request: check.request, registration: data.registration });
       } catch (err) {
         dispatch({ type: "paperConfirmFailed", request: check.request, message: formatApiError(err) });

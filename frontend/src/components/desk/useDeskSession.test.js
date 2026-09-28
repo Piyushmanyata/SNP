@@ -106,13 +106,26 @@ test("Printed — next patient stamps once and moves the cursor to the USB box",
   const box = document.createElement("textarea");
   box.setAttribute("data-usb-box", "");
   document.body.appendChild(box);
-  api.get.mockResolvedValue({ data: { prescription: { reg_no: "101" } } });
+  api.get.mockResolvedValue({ data: { prescription: { reg_no: "101", sheet_stamp: "s-1" } } });
   api.post.mockResolvedValueOnce({ data: { registration: REG } });
   await mount();
   await act(async () => { await actions().print(REG); });
   await act(async () => { await actions().confirmPaper(); });
-  expect(api.post).toHaveBeenCalledWith("/desk/print/p-1");
+  expect(api.post).toHaveBeenCalledWith("/desk/print/p-1", { sheet_stamp: "s-1" });
   expect(state().banner).toBe("Printed #101 — Asha Devi. Next patient.");
   expect(document.activeElement).toBe(box);
   box.remove();
+});
+
+test("Print again fetches a fresh sheet, and the Paper check sends that sheet's stamp", async () => {
+  api.get
+    .mockResolvedValueOnce({ data: { prescription: { reg_no: "101", sheet_stamp: "s-1" } } })
+    .mockResolvedValueOnce({ data: { prescription: { reg_no: "101", sheet_stamp: "s-2" } } });
+  api.post.mockResolvedValueOnce({ data: { registration: REG } });
+  await mount();
+  await act(async () => { await actions().print(REG); });
+  await act(async () => { await actions().printAgain(); });
+  await act(async () => { await actions().confirmPaper(); });
+  expect(api.get).toHaveBeenCalledTimes(2);
+  expect(api.post).toHaveBeenCalledWith("/desk/print/p-1", { sheet_stamp: "s-2" });
 });

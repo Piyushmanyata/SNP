@@ -219,6 +219,10 @@ class CorrectionBody(BaseModel):
     ot_notes: Optional[str] = None
 
 
+class PaperCheckBody(BaseModel):
+    sheet_stamp: Optional[str] = Field(default=None, max_length=200)
+
+
 class NoCardBody(BaseModel):
     patient_id: str = Field(max_length=24)
     reason: ManualReason
