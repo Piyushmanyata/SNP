@@ -584,3 +584,23 @@ Live checks:
 - Every service is running, and backend, frontend, mongo and reminders report healthy.
 - The backend loads `lock_resolution.classify`.
 - The backend and reminders logs have no tracebacks and no 5xx.
+
+## Card Lock before the first print — 28 September 2026
+
+[PR 98](https://github.com/Piyushmanyata/SNP/pull/98) (#89 slice 1, ADR 0092) merged as `7a35ac2ee02625a824d599ed50ecbb633c4f7fcf`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/7a35ac2…`. CI run [36388777840](https://github.com/Piyushmanyata/SNP/actions/runs/36388777840) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify. The first run's `perf` job failed on the board p95 (311 ms against 300 ms at concurrency 8), which slice 1 does not touch; the same job had failed on `main` the day before on a different endpoint, and it passed on the re-run.
+
+Before the update, the running `9cea966` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-9cea96621e9d82e46c060d0c6acf92399fd0021b`. The backup container was restarted and took snapshot `e39abf00` at 07:09 UTC. Only backend, frontend and reminders were rebuilt; MongoDB stayed up. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/9cea966…`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed. A booked registration now arrives only by a door Lock or a No-card print; a scanned Door walk-in arrives in its registration request; No-card print covers scanned bookings with the last-4 rule (`NO_CARD_LAST4_MISMATCH`).
+
+Live checks:
+
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Every service is running, and backend, frontend, mongo and reminders report healthy.
+- The deployed `routes_desk.py` carries `NO_CARD_LAST4_MISMATCH`.
+- The backend and reminders logs have no tracebacks and no 5xx.
