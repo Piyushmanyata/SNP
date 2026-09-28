@@ -25,5 +25,5 @@
 
 ## Consequences
 
-- A sheet in a patient's hand always has its record once the link returns, until Doctor seen or IST midnight.
+- A sheet in a patient's hand always has its record once the link returns, until Doctor seen or IST midnight, as long as the Paper check stays open: a failed "Printed — next patient" keeps the sheet and its stamp for the retry. "Print again", "Printer problem" and Close say the paper is not in the patient's hand; they drop the stamp, and after close a fresh fetch is refused as before.
 - Rotating `JWT_SECRET` invalidates outstanding stamps as well as sessions. That only matters for a sheet whose record is retried across the rotation, after the window closed.

@@ -19,7 +19,6 @@ from routes_registration import CARD_IN_HAND, checked_manual_note
 router = APIRouter(prefix="/api/desk", tags=["desk"])
 
 MAX_REG_NO_DIGITS = 12
-SHEET_STAMP = "sheet-stamp"
 
 
 async def _resolve(value: str) -> Optional[Dict[str, Any]]:
@@ -195,7 +194,7 @@ def _print_refusal(p: dict, state: dict, fetched_while_open: bool = False) -> Op
 
 
 def _sheet_signature(p: dict, fetched_ms: str) -> str:
-    return sign(SHEET_STAMP, "|".join((str(p["_id"]), fetched_ms)))
+    return sign("sheet-stamp", "|".join((str(p["_id"]), fetched_ms)))
 
 
 def _sheet_stamp(p: dict) -> str:
@@ -209,20 +208,20 @@ def _fetched_while_open(p: dict, stamp: Optional[str]) -> bool:
     if not fetched_ms.isdecimal() or not hmac.compare_digest(signature, _sheet_signature(p, fetched_ms)):
         return False
     fetched = datetime.fromtimestamp(int(fetched_ms) / 1000, timezone.utc)
-    return fetched <= now_utc() and fetched.astimezone(IST).date() == now_ist().date()
+    return fetched.astimezone(IST).date() == now_ist().date()
 
 
 async def _prescription_payload(
-    db, p: dict, actor: dict, stamp: bool, camp: dict, sheet_stamp: Optional[str] = None,
+    db, p: dict, actor: dict, record: bool, camp: dict, sheet_stamp: Optional[str] = None,
 ) -> Dict[str, Any]:
     state = await _printing_state(db, camp)
-    refusal = _print_refusal(p, state, stamp and _fetched_while_open(p, sheet_stamp))
+    refusal = _print_refusal(p, state, record and _fetched_while_open(p, sheet_stamp))
     if refusal:
         raise refusal
     day = await db.camp_days.find_one({"_id": p["camp_day_id"]})
     if not day:
         raise api_error(404, "CAMP_DAY_NOT_FOUND", 'Camp day not found')
-    if stamp and not p.get("printed_at"):
+    if record and not p.get("printed_at"):
         stamped = await db.patients.find_one_and_update(
             {
                 "_id": p["_id"], "printed_at": None,

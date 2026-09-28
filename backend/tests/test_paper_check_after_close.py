@@ -119,6 +119,28 @@ def test_a_good_stamp_still_obeys_the_other_refusals(monkeypatch, change, code):
     run_camp(monkeypatch, run)
 
 
+def test_the_sheet_that_came_with_an_arrival_is_recorded_after_close(monkeypatch):
+    async def run(database):
+        async with asgi_client() as client:
+            headers, _patients, close_window = await _desk(database, client)
+            day_id = (await database.camp_days.find_one({}))["_id"]
+            booked = (await client.post("/api/register", json={
+                "full_name": "Sita Ram", "age": 50, "gender": "M", "phone": "9876500013", "camp_day_id": str(day_id),
+                "manual_reason": "no_card",
+            }, headers=headers)).json()["registration"]
+            await client.post("/api/desk/no-card", json={"patient_id": booked["id"], "reason": "no_card"}, headers=headers)
+            arrived = await client.post(f"/api/desk/arrive/{booked['id']}", headers=headers)
+            stamp = arrived.json()["prescription"]["sheet_stamp"]
+            await close_window()
+            again = await client.post(f"/api/desk/arrive/{booked['id']}", headers=headers)
+            assert again.json()["prescription"] is None
+            r = await _record(client, headers, booked, stamp)
+        assert r.status_code == 200, r.text
+        assert r.json()["registration"]["printed_at"]
+
+    run_camp(monkeypatch, run)
+
+
 def test_a_printed_sheet_carries_no_stamp(monkeypatch):
     async def run(database):
         async with asgi_client() as client:
