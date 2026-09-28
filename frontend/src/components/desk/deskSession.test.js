@@ -114,24 +114,23 @@ test("Reprint follows the lookup that found the row", () => {
   expect(code.found.reprint).toBe(false);
 });
 
-test("a walk-in keeps its attempt for the same card and renews it after a request conflict", () => {
+test("a walk-in keeps its request id for the same card and renews it after a request conflict", () => {
   const scanned = { ...initialDeskSession, scanPayload: "card-A" };
   const first = deskSession(scanned, { type: "walkInStarted", key: "card-A", reqId: "req-1" });
-  const registered = deskSession(first, { type: "walkInRegistered", patientId: "p-9" });
-  const retry = deskSession({ ...registered, busy: false }, { type: "walkInStarted", key: "card-A", reqId: "req-2" });
-  expect(retry.walkIn).toEqual({ key: "card-A", reqId: "req-1", patientId: "p-9" });
+  const retry = deskSession({ ...first, busy: false }, { type: "walkInStarted", key: "card-A", reqId: "req-2" });
+  expect(retry.walkIn).toEqual({ key: "card-A", reqId: "req-1" });
   const conflict = deskSession(retry, { type: "walkInFailed", seq: retry.seq, reqId: "req-3", message: "Saved earlier." });
-  expect(conflict.walkIn).toEqual({ key: "card-A", reqId: "req-3", patientId: "" });
+  expect(conflict.walkIn).toEqual({ key: "card-A", reqId: "req-3" });
   expect(conflict.error).toBe("Saved earlier.");
 });
 
 test("a walk-in that arrives clears its attempt and puts the arrived patient on the card", () => {
   const started = deskSession({ ...initialDeskSession, scanPayload: "card-A", doorPhone: "98765" }, { type: "walkInStarted", key: "card-A", reqId: "req-1" });
-  const next = deskSession(started, { type: "walkInResolved", seq: started.seq, registration: REG, prescription: RX });
+  const next = deskSession(started, { type: "walkInResolved", seq: started.seq, registration: REG });
   expect(next).toEqual(expect.objectContaining({
     scanPayload: "", doorPhone: "", banner: "Registered and arrived: #101 — Asha Devi",
   }));
-  expect(next.scanResult).toEqual({ outcome: "arrived", registration: REG, prescription: RX });
+  expect(next.scanResult).toEqual({ outcome: "arrived", registration: REG, prescription: null });
   expect(next.walkIn.key).toBe("");
 });
 

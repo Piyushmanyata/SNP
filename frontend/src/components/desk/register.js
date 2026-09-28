@@ -38,7 +38,7 @@ export async function registerPatient({ form, qrPayload, dayId, reqId, reason, a
     registration_request_id: reqId,
     manual_reason: manual.code,
     manual_note: manual.note,
-    at_door: Boolean(atDoor) && !scanned,
+    at_door: Boolean(atDoor),
     review_confirmed_id: reviewConfirmedId || null,
     different_person: Boolean(differentPerson),
   });

@@ -1,4 +1,4 @@
-const NO_WALK_IN = Object.freeze({ key: "", reqId: "", patientId: "" });
+const NO_WALK_IN = Object.freeze({ key: "", reqId: "" });
 
 export const initialDeskSession = Object.freeze({
   seq: 0,
@@ -135,16 +135,14 @@ export function deskSession(state, event) {
         seq: state.seq + 1,
         busy: true,
         error: "",
-        walkIn: state.walkIn.key === event.key ? state.walkIn : { key: event.key, reqId: event.reqId, patientId: "" },
+        walkIn: state.walkIn.key === event.key ? state.walkIn : { key: event.key, reqId: event.reqId },
       };
-    case "walkInRegistered":
-      return { ...state, walkIn: { ...state.walkIn, patientId: event.patientId } };
     case "walkInResolved":
       if (!current) return { ...state, walkIn: NO_WALK_IN };
       return {
         ...state,
         walkIn: NO_WALK_IN,
-        scanResult: { outcome: "arrived", registration: event.registration, prescription: event.prescription },
+        scanResult: { outcome: "arrived", registration: event.registration, prescription: null },
         scanPayload: "",
         banner: `Registered and arrived: #${event.registration.reg_no} — ${event.registration.full_name}`,
         doorPhone: "",
@@ -153,7 +151,7 @@ export function deskSession(state, event) {
       if (!current) return state;
       return {
         ...state,
-        walkIn: event.reqId ? { key: state.walkIn.key, reqId: event.reqId, patientId: "" } : state.walkIn,
+        walkIn: event.reqId ? { key: state.walkIn.key, reqId: event.reqId } : state.walkIn,
         error: event.message,
       };
     case "settled":

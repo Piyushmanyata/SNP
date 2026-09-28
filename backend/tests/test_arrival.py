@@ -86,9 +86,9 @@ def test_a_vanished_registration_is_not_found(monkeypatch):
 
 
 @pytest.mark.parametrize("patient,ok", [
-    ({}, False), ({"aadhaar_scanned": True}, True), ({"no_card_print": True}, True), ({"arrived_at": "x"}, True),
+    ({}, False), ({"aadhaar_scanned": True}, False), ({"no_card_print": True}, True), ({"arrived_at": "x"}, True),
 ])
-def test_only_a_lock_a_no_card_print_or_an_arrival_is_arrivable(patient, ok):
+def test_only_a_no_card_print_or_an_arrival_is_arrivable(patient, ok):
     if ok:
         arrival.require_arrivable(patient)
     else:

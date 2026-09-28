@@ -269,9 +269,11 @@ export function PatientRow({ p, onPrint, printingOpen, reprint = false, onNoCard
   const [sending, setSending] = useState(false);
   const seen = p.queue_status === "seen";
   const printed = Boolean(p.printed_at) && !seen;
-  const needsDoorScan = !p.arrived_at && !p.aadhaar_scanned && !p.no_card_print;
+  const needsDoorScan = !p.arrived_at && !p.no_card_print;
   const windowShut = !printingOpen && !p.printed_at;
   const canPrint = !seen && !needsDoorScan && !windowShut && (!printed || reprint);
+  const askLast4 = Boolean(noCard) && p.aadhaar_scanned && cardInHand(noCard);
+  const noCardReady = Boolean(noCard) && reasonReady(noCard) && (!askLast4 || String(noCard.last4 ?? "").length === 4);
   const submitNoCard = async (e) => {
     e.preventDefault();
     setSending(true);
@@ -295,7 +297,7 @@ export function PatientRow({ p, onPrint, printingOpen, reprint = false, onNoCard
       {p.printed_at && <Badge tone="indigo">Printed</Badge>}
       {needsDoorScan && (
         <span className="text-xs text-slate-600" data-testid={`awaiting-scan-${p.reg_no}`}>
-          Scan their Aadhaar at the door to print
+          Scan their Aadhaar card, or record a No-card print
         </span>
       )}
       {!needsDoorScan && !seen && windowShut && (
@@ -323,16 +325,31 @@ export function PatientRow({ p, onPrint, printingOpen, reprint = false, onNoCard
           </Button>
         )}
         {needsDoorScan && printingOpen && !noCard && (
-          <Button size="sm" variant="outline" onClick={() => setNoCard(EMPTY_REASON)} data-testid={`no-card-${p.reg_no}`}>
-            No-card print
-          </Button>
+          <>
+            <Button size="sm" variant="outline" onClick={() => document.querySelector("[data-usb-box]")?.focus()} data-testid={`scan-card-${p.reg_no}`}>
+              <ScanLine className="w-4 h-4" /> Scan the card
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setNoCard(EMPTY_REASON)} data-testid={`no-card-${p.reg_no}`}>
+              No-card print
+            </Button>
+          </>
         )}
       </div>
       {noCard && (
         <form onSubmit={submitNoCard} className="w-full space-y-2">
           <ManualReason reason={noCard} onChange={setNoCard} testid={`no-card-reason-${p.reg_no}`} />
+          {askLast4 && (
+            <Field label="Last 4 digits on the card" required>
+              <Input
+                inputMode="numeric"
+                value={noCard.last4 ?? ""}
+                onChange={(e) => setNoCard({ ...noCard, last4: digitsOnly(e.target.value, 4) })}
+                data-testid={`no-card-last4-${p.reg_no}`}
+              />
+            </Field>
+          )}
           <div className="flex gap-2">
-            <Button size="sm" type="submit" disabled={sending || !reasonReady(noCard)} data-testid={`no-card-submit-${p.reg_no}`}>
+            <Button size="sm" type="submit" disabled={sending || !noCardReady} data-testid={`no-card-submit-${p.reg_no}`}>
               <Printer className="w-4 h-4" /> Print
             </Button>
             <Button size="sm" variant="ghost" type="button" onClick={() => setNoCard(null)}>Cancel</Button>

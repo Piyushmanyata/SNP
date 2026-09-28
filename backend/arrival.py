@@ -10,7 +10,7 @@ from helpers import api_error, now_utc
 
 
 def fields_at_creation(arrived_by: Optional[str], now: datetime) -> Dict[str, Any]:
-    """The Arrival fields of a new registration; a Manual entry typed at the door is created already arrived."""
+    """The Arrival fields of a new registration; a Door walk-in, scanned or typed, is created already arrived."""
     fields: Dict[str, Any] = {"arrived_at": None, "arrived_by": None, "camp_day_changed_from": None}
     if arrived_by:
         fields.update(arrived_at=now, arrived_by=arrived_by, queue_status="arrived")
@@ -18,7 +18,7 @@ def fields_at_creation(arrived_by: Optional[str], now: datetime) -> Dict[str, An
 
 
 def require_arrivable(patient: dict) -> None:
-    if not (patient.get("aadhaar_scanned") or patient.get("no_card_print") or patient.get("arrived_at")):
+    if not (patient.get("no_card_print") or patient.get("arrived_at")):
         raise api_error(409, "NEEDS_DOOR_SCAN", "Scan this patient's Aadhaar card at the door, or record a No-card print.")
 
 

@@ -197,7 +197,7 @@ The dialog that follows every prescription print at the desk. "Printed — next 
 _Avoid_: print confirmation, printed flag, auto-stamp
 
 **Print Prescription**:
-The paper in the patient's hand, recorded by the Paper check as `printed_at`. The desk prints in the page, with no navigation. An attempted print that is not confirmed is not Print Prescription. Refused after Doctor seen, and for a Manual entry from Pre-registration until its door Lock or a No-card print.
+The paper in the patient's hand, recorded by the Paper check as `printed_at`. The desk prints in the page, with no navigation. An attempted print that is not confirmed is not Print Prescription. Refused after Doctor seen, and for any booking that has not arrived — scanned or typed — until its door Lock or a No-card print (see Arrival).
 _Avoid_: print attempt, printed (for a dialog that was cancelled)
 
 **Reprint**:
@@ -221,7 +221,7 @@ A desk registration typed instead of scanned, for a patient with no Aadhaar card
 _Avoid_: permission fallback, failure unlock, door manual gate and identity hold (both retired), public reviewed details
 
 **No-card print**:
-The desk's recorded decision, with a reason, to print a Manual entry from Pre-registration whose patient has come to the door with no readable Aadhaar. Any desk role takes it. It stands in for the door Lock and stamps Arrival like any print. It never marks the Aadhaar as verified.
+The desk's recorded decision, with a reason, to print a booking whose patient has come to the door with no readable Aadhaar: a Manual entry from Pre-registration, or a scanned booking whose card stayed at home. Any desk role takes it while the Print window is open, for a registration that has not arrived and is not Doctor seen (`ALREADY_SEEN`). It stands in for the door Lock and stamps Arrival like any print. The reasons are the Manual entry list. For a scanned booking whose reason means the card is in hand (Card won't scan, Scanner not working), the card's typed last-4 must equal the booking's, or it is refused with `NO_CARD_LAST4_MISMATCH`. It records reason, note, actor and time, and never marks the Aadhaar as scanned or verified.
 _Avoid_: identity check (the retired admin step), override, print anyway
 
 **Patient code**:
@@ -233,7 +233,7 @@ Twenty seconds of live scan with no Detect. Does not count as a Failure.
 _Avoid_: scan timeout, camera failure, give up
 
 **Arrival**:
-The patient is physically at the camp on a camp day. Stamped by a desk Lock that matches their registration in this camp, by the registration that creates a walk-in, or by Print Prescription on a registration whose Lock was already taken at registration. Registration is a booking; Arrival is presence. Stamped once: a second Lock does not re-stamp it or move the patient again. Arrival is never a step the desk performs on its own — it has no button and no screen of its own. Print Prescription is gated on Arrival, not on Registration, and closes at Doctor seen — reprints included, until a clinical undo. Doctor seen is gated on clinical completion after print, not on Arrival alone. A Manual entry from Pre-registration has no Lock and still needs one at the door, or a No-card print; one typed at the door is arrived when saved, with exactly the Arrival fields a door Lock stamps. Arrival moves the patient onto the Operating day and records the day they had booked. A door Lock stamps Arrival only on the same Person's registration.
+The patient is physically at the camp on a camp day. Stamped by a desk Lock that matches their registration in this camp, by the registration request that creates a Door walk-in, or by the first print after a No-card print. A booking arrives only by a door Lock or a No-card print, even when its card was scanned at registration: a typed registration number or Patient code finds the row but never prints a patient who has not arrived, because a typo is another real patient (ADR 0092). Registration is a booking; Arrival is presence. Stamped once: a second Lock does not re-stamp it or move the patient again. Arrival is never a step the desk performs on its own — it has no button and no screen of its own. Print Prescription is gated on Arrival, not on Registration, and closes at Doctor seen — reprints included, until a clinical undo. Doctor seen is gated on clinical completion after print, not on Arrival alone. A Manual entry from Pre-registration has no Lock and still needs one at the door, or a No-card print; one typed at the door is arrived when saved, with exactly the Arrival fields a door Lock stamps. Arrival moves the patient onto the Operating day and records the day they had booked. A door Lock stamps Arrival only on the same Person's registration.
 _Avoid_: check-in, checking in, presence, attendance, walk-in (a walk-in registers and arrives in one action), door re-scan (a Lock is taken once)
 
 **Household phone**:
@@ -241,7 +241,7 @@ The one mobile number stored for a registration and used for its SMS. Ten local 
 _Avoid_: contact, mobile of the patient (it is the household's)
 
 **Door walk-in**:
-A registration created at the door from the card a Scan at the door has already decoded, needing only the household phone typed. The phone field starts empty for every card. Registers and stamps Arrival in one action, and is a scanned registration, not a Manual entry. Walk-in means a staff registration for the Operating day, not for the IST calendar date.
+A registration created at the door from the card a Scan at the door has already decoded, needing only the household phone typed. The phone field starts empty for every card. Registers and stamps Arrival in the one registration request (`at_door`), so a lost reply cannot leave it registered but not arrived; it is a scanned registration, not a Manual entry. Walk-in means a staff registration for the Operating day, not for the IST calendar date.
 _Avoid_: rescan, second scan, walk-in registration (also used for the typed path)
 
 **Aadhaar overwrite**:

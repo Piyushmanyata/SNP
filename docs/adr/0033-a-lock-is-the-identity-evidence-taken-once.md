@@ -1,6 +1,6 @@
 # ADR 0033: A Lock is the identity evidence, and it is taken once
 
-**Amends ADR 0012.**
+**Amends ADR 0012. Amended by ADR 0092:** a booking scanned at registration still needs its card at the door, or a No-card print, before its first print.
 
 ## Context
 

@@ -40,7 +40,7 @@ class TestArrival:
         async def body(database):
             _camp_id, (booked_day, operating_day) = await seed_camp(database, days=(OTHER_DAY, TODAY))
             reg = await register(booked_day, aadhaar_scanned=True, qr_payload=CARD)
-            await arrive(reg["id"], actor=ACTOR)
+            await scan(ScanBody(payload=CARD), actor=ACTOR)
             stored = await database.patients.find_one({"_id": ObjectId(reg["id"])})
             assert stored["camp_day_id"] == operating_day
             with pytest.raises(HTTPException) as exc:
@@ -53,7 +53,7 @@ class TestArrival:
         async def body(database):
             _camp_id, (day_id,) = await seed_camp(database)
             reg = await register(day_id, aadhaar_scanned=True, qr_payload=CARD)
-            arrived = (await arrive(reg["id"], actor=ACTOR))["registration"]
+            arrived = (await scan(ScanBody(payload=CARD), actor=ACTOR))["registration"]
             assert arrived["queue_status"] == "arrived"
             assert arrived["arrived_at"]
             await print_prescription(reg["id"], actor=ACTOR)
@@ -74,7 +74,7 @@ class TestArrival:
         async def body(database):
             _camp_id, (day_id,) = await seed_camp(database)
             reg = await register(day_id, aadhaar_scanned=True, qr_payload=CARD)
-            first = (await arrive(reg["id"], actor=ACTOR))["registration"]["arrived_at"]
+            first = (await scan(ScanBody(payload=CARD), actor=ACTOR))["registration"]["arrived_at"]
             second = (await arrive(reg["id"], actor=ACTOR))["registration"]["arrived_at"]
             assert first == second
         run_camp(monkeypatch, body)

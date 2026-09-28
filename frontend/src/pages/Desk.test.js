@@ -531,10 +531,7 @@ describe("Desk page", () => {
         });
       }
       if (url === "/register") {
-        return Promise.resolve({ data: { registration: { id: "p-9", reg_no: "109", full_name: body.full_name } } });
-      }
-      if (url === "/desk/arrive/p-9") {
-        return Promise.resolve({ data: { registration: { ...ARRIVED, id: "p-9", reg_no: "109" } } });
+        return Promise.resolve({ data: { registration: { ...ARRIVED, id: "p-9", reg_no: "109", full_name: body.full_name } } });
       }
       return Promise.resolve({ data: {} });
     });
@@ -558,8 +555,9 @@ describe("Desk page", () => {
       aadhaar_scanned: true,
       qr_payload: CARD_PAYLOAD,
       camp_day_id: "day-1",
+      at_door: true,
     }));
-    expect(api.post).toHaveBeenCalledWith("/desk/arrive/p-9");
+    expect(api.post).not.toHaveBeenCalledWith("/desk/arrive/p-9");
     expect(container.textContent).toContain("Registered and arrived: #109");
     expect(container.querySelector('[data-testid="scan-arrived"]').textContent).toContain("#109");
     expect(container.querySelector('[data-testid="scan-print-button"]')).not.toBeNull();
@@ -836,14 +834,48 @@ describe("Desk page", () => {
     });
   }
 
-  test("a QR-locked booking checks in and prints without a door re-scan", async () => {
+  test("a scanned booking that has not arrived offers the card scan or a No-card print, never Print", async () => {
     await lookup({ ...ARRIVED, queue_status: "registered", arrived_at: null, aadhaar_scanned: true });
 
-    expect(container.querySelector('[data-testid="awaiting-scan-101"]')).toBeNull();
-    await act(async () => {
-      container.querySelector('[data-testid="print-button-101"]').click();
+    expect(container.querySelector('[data-testid="awaiting-scan-101"]').textContent)
+      .toBe("Scan their Aadhaar card, or record a No-card print");
+    expect(container.querySelector('[data-testid="print-button-101"]')).toBeNull();
+    expect(container.querySelector('[data-testid="no-card-101"]')).not.toBeNull();
+    act(() => { container.querySelector('[data-testid="scan-card-101"]').click(); });
+    expect(document.activeElement).toBe(container.querySelector("[data-usb-box]"));
+    expect(api.post).not.toHaveBeenCalledWith("/desk/arrive/p-1");
+  });
+
+  test("a No-card print for a scanned booking with the card in hand asks for its last 4 digits", async () => {
+    const booked = { ...ARRIVED, queue_status: "registered", arrived_at: null, aadhaar_scanned: true };
+    await lookup(booked);
+    api.post.mockImplementation((url) => {
+      if (url === "/desk/no-card") return Promise.resolve({ data: { registration: { ...booked, no_card_print: true } } });
+      if (url.startsWith("/desk/arrive/")) return Promise.resolve({ data: { registration: { ...booked, arrived_at: "2026-09-01T04:00:00Z" }, prescription: RX } });
+      return Promise.resolve({ data: {} });
+    });
+    const q = (id) => container.querySelector(`[data-testid="${id}"]`);
+    act(() => { q("no-card-101").click(); });
+    act(() => { q("no-card-reason-101-card_unreadable").click(); });
+    expect(q("no-card-submit-101").disabled).toBe(true);
+    act(() => { setInput(q("no-card-last4-101"), "12a34"); });
+    expect(q("no-card-last4-101").value).toBe("1234");
+    await act(async () => { q("no-card-submit-101").click(); });
+
+    expect(api.post).toHaveBeenCalledWith("/desk/no-card", {
+      patient_id: "p-1", reason: "card_unreadable", note: null, aadhaar_last4: "1234",
     });
     expect(api.post).toHaveBeenCalledWith("/desk/arrive/p-1");
+  });
+
+  test("a Patient code read of a patient who has not arrived is only a lookup", async () => {
+    api.post.mockResolvedValue({ data: { registration: { ...ARRIVED, queue_status: "registered", arrived_at: null, aadhaar_scanned: true } } });
+    await renderDesk();
+    await act(async () => {
+      deskScanner().parentNode.querySelector('[data-testid="mock-patient-code-trigger"]').click();
+    });
+    expect(container.querySelector('[data-testid="print-button-101"]')).toBeNull();
+    expect(container.querySelector('[data-testid="awaiting-scan-101"]')).not.toBeNull();
   });
 
   test("a closed print window withdraws print and says so instead", async () => {
@@ -1167,10 +1199,7 @@ describe("Desk page", () => {
         });
       }
       if (url === "/register") {
-        return Promise.resolve({ data: { registration: { id: "p-9", reg_no: "109", full_name: body.full_name } } });
-      }
-      if (url === "/desk/arrive/p-9") {
-        return Promise.resolve({ data: { registration: { ...ARRIVED, id: "p-9", reg_no: "109" } } });
+        return Promise.resolve({ data: { registration: { ...ARRIVED, id: "p-9", reg_no: "109", full_name: body.full_name } } });
       }
       return Promise.resolve({ data: {} });
     });
@@ -1185,8 +1214,9 @@ describe("Desk page", () => {
     expect(api.post).toHaveBeenCalledWith("/register", expect.objectContaining({
       camp_day_id: "day-2",
       aadhaar_scanned: true,
+      at_door: true,
     }));
-    expect(api.post).toHaveBeenCalledWith("/desk/arrive/p-9");
+    expect(api.post.mock.calls.filter(([url]) => url.startsWith("/desk/arrive"))).toHaveLength(0);
   });
 
   test("door manual books the operating day and arrives them when printing is open", async () => {
@@ -1650,11 +1680,10 @@ describe("Desk page", () => {
   });
 
   test("a walk-in reply that lands after the next scan is dropped", async () => {
-    let finishArrive;
-    api.post.mockImplementation((url, body) => {
+    let finishRegister;
+    api.post.mockImplementation((url) => {
       if (url === "/desk/scan") return Promise.resolve(noMatch("Patient A"));
-      if (url === "/register") return Promise.resolve({ data: { registration: { id: "p-9", reg_no: "109", full_name: body.full_name } } });
-      return new Promise((done) => { finishArrive = done; });
+      return new Promise((done) => { finishRegister = done; });
     });
     await renderDesk();
     await scanAtDoor();
@@ -1662,7 +1691,7 @@ describe("Desk page", () => {
     await act(async () => { container.querySelector('[data-testid="door-register-button"]').click(); });
     api.post.mockImplementation(() => Promise.resolve(noMatch("Patient B")));
     await scanAtDoor();
-    await act(async () => finishArrive({ data: { registration: { ...ARRIVED, id: "p-9", reg_no: "109" } } }));
+    await act(async () => finishRegister({ data: { registration: { ...ARRIVED, id: "p-9", reg_no: "109" }, created: true } }));
     expect(container.querySelector('[data-testid="door-card-name"]').textContent).toContain("Patient B");
     expect(container.querySelector('[data-testid="scan-arrived"]')).toBeNull();
   });
@@ -1670,8 +1699,8 @@ describe("Desk page", () => {
   test("an arrival does not refetch the desk, and a walk-in adds one to the counts", async () => {
     api.post.mockImplementation((url, body) => {
       if (url === "/desk/scan") return Promise.resolve(noMatch("Patient A"));
-      if (url === "/register") return Promise.resolve({ data: { registration: { id: "p-9", reg_no: "109", full_name: body.full_name }, created: true } });
-      return Promise.resolve({ data: { registration: { ...ARRIVED, id: "p-9", reg_no: "109" } } });
+      if (url === "/register") return Promise.resolve({ data: { registration: { ...ARRIVED, id: "p-9", reg_no: "109", full_name: body.full_name }, created: true } });
+      return Promise.resolve({ data: {} });
     });
     await renderDesk();
     const fetches = () => api.get.mock.calls.filter(([url]) => url === "/kpis" || url === "/camps/active").length;

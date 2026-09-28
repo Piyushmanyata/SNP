@@ -1,6 +1,6 @@
 # ADR 0034: The door is one scan and a print, and Arrival is not a step
 
-**Amends ADR 0033 and ADR 0023.**
+**Amends ADR 0033 and ADR 0023. Amended by ADR 0092:** a typed lookup of a booking that has not arrived offers "Scan the card" and "No-card print", never Print; a Door walk-in arrives in its registration request.
 
 ## Context
 

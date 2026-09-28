@@ -56,7 +56,8 @@ def test_confirm_and_arrive_carry_the_prescription_only_when_it_can_print(monkey
         assert (await arrive(seen["id"], actor=ACTOR))["prescription"] is None
 
         walk_in = await register(day_id, full_name="Walk In", age=33, phone="9876500043", aadhaar_scanned=True,
-                                 aadhaar_last4="4343", dob="1993-01-01")
+                                 aadhaar_last4="4343", dob="1993-01-01", at_door=True)
+        assert walk_in["arrived_at"]
         assert (await arrive(walk_in["id"], actor=ACTOR))["prescription"]["full_name"] == "Walk In"
 
     run_camp(monkeypatch, run)
