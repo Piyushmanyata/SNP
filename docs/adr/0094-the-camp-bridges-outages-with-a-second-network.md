@@ -12,7 +12,7 @@
 
 - **Connectivity, not an offline mode.** Each group of six desks has a 4G/5G hotspot on a carrier different from the venue link, plus two spares, and laptops fail over to it automatically. Failover is tested before the doors open.
 - **If every link is down, the queue waits.** The door holds the queue, clinical desks pause, and nothing is written on paper for later entry.
-- **One offline banner on every staff screen** (Desk, Clinical, Board, Admin, Team), in `Layout`: "No connection to the server. Hold the queue — nothing is lost. This clears by itself when the connection returns." It appears when the browser reports offline or a request fails with no response, and clears on the next request that gets any answer. It sits beside the per-action errors and blocks nothing.
+- **One offline banner on every staff screen** (Desk, Clinical, Board, Admin, Team), in `Layout`: "No connection to the server. Hold the queue — nothing is lost. This clears by itself when the connection returns." It appears when the browser reports offline, a request fails with no response, or the proxy answers 502–504 without an API body (the app is down). It clears on the next answer from the API; while it shows, the page asks `/api/health` every 10 seconds so a screen that does not poll recovers too. It sits beside the per-action errors and blocks nothing.
 - **No silent stale reads.** The sign-in occupancy says "Not updated since HH:MM" after a failed refresh.
 - **Neutral conflict wording.** `DRAFT_VERSION_CONFLICT` keeps its code; its message is "This prescription changed since you opened it. Reload to see the saved version."
 

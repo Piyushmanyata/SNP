@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import Layout from "./Layout";
 import { setOffline } from "../lib/connection";
+import api from "../lib/api";
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -96,7 +97,18 @@ describe("Layout header chrome", () => {
 });
 
 describe("the offline banner", () => {
-  afterEach(() => { act(() => setOffline(false)); });
+  afterEach(() => { act(() => setOffline(false)); jest.useRealTimers(); });
+
+  test("asks the server every 10 seconds while offline, so a screen that does not poll recovers", async () => {
+    jest.useFakeTimers();
+    const get = jest.spyOn(api, "get").mockImplementation(async () => { setOffline(false); return { data: {} }; });
+    await renderLayout();
+    act(() => setOffline(true));
+    await act(async () => { jest.advanceTimersByTime(10000); });
+    expect(get).toHaveBeenCalledWith("/health");
+    expect(container.querySelector('[data-testid="offline-banner"]')).toBeNull();
+    get.mockRestore();
+  });
 
   test("appears when the server cannot be reached and clears when it answers again", async () => {
     await renderLayout();

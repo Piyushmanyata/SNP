@@ -104,6 +104,25 @@ describe("the connection state", () => {
     expect(isOffline()).toBe(false);
   });
 
+  test("a gateway error from the proxy, with no answer from the API, counts as unreachable", async () => {
+    api.defaults.adapter = async (config) => {
+      throw new AxiosError("Bad Gateway", "ERR_BAD_RESPONSE", config, null, { status: 502, data: "<html>", headers: {}, config });
+    };
+    await api.get("/kpis").catch(() => {});
+    expect(isOffline()).toBe(true);
+  });
+
+  test("a 503 the API itself sends is an answer", async () => {
+    setOffline(true);
+    api.defaults.adapter = async (config) => {
+      throw new AxiosError("Unavailable", "ERR_BAD_RESPONSE", config, null, {
+        status: 503, data: { detail: { code: "QR_UNAVAILABLE" } }, headers: {}, config,
+      });
+    };
+    await api.get("/aadhaar/extract").catch(() => {});
+    expect(isOffline()).toBe(false);
+  });
+
   test("a request the page cancelled says nothing about the connection", async () => {
     const controller = new AbortController();
     controller.abort();

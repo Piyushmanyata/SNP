@@ -1,9 +1,9 @@
-import React, { useState, useSyncExternalStore } from "react";
+import React, { useEffect, useState, useSyncExternalStore } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { LogOut, Stethoscope } from "lucide-react";
 import { Alert, Badge } from "./ui";
-import { formatApiError } from "../lib/api";
+import api, { formatApiError } from "../lib/api";
 import { isOffline, subscribeConnection } from "../lib/connection";
 import PinChangeModal from "./PinChangeModal";
 
@@ -21,6 +21,12 @@ export default function Layout({ children, title }) {
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState("");
   const offline = useSyncExternalStore(subscribeConnection, isOffline);
+
+  useEffect(() => {
+    if (!offline) return undefined;
+    const ping = setInterval(() => { api.get("/health").catch(() => {}); }, 10000);
+    return () => clearInterval(ping);
+  }, [offline]);
 
   return (
     <div className="min-h-screen">

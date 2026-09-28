@@ -154,7 +154,7 @@ function Occupancy({ occupancy, stale, compact }) {
       </p>
       {stale && (
         <p className={`mt-2 text-sm font-semibold ${compact ? "text-amber-800" : "text-amber-300"}`} data-testid="occupancy-stale">
-          Not updated since {displayTime(occupancy.loadedAt)}. Check the connection.
+          Not updated since {displayTime(occupancy.loadedAt)}.
         </p>
       )}
     </div>

@@ -148,7 +148,7 @@ describe("Login page occupancy", () => {
 
     api.get.mockRejectedValueOnce(new Error("Network Error"));
     await act(async () => { jest.advanceTimersByTime(30000); });
-    expect(stale().textContent).toBe("Not updated since 09:30. Check the connection.");
+    expect(stale().textContent).toBe("Not updated since 09:30.");
     expect(container.querySelector('[data-testid="occupancy-headline"]').textContent).toBe("15 / 80");
 
     await act(async () => { jest.advanceTimersByTime(30000); });

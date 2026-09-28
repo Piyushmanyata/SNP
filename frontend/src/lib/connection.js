@@ -1,4 +1,4 @@
-let offline = typeof navigator !== "undefined" && navigator.onLine === false;
+let offline = !navigator.onLine;
 const listeners = new Set();
 
 export function setOffline(next) {

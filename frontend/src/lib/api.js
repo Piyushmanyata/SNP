@@ -29,11 +29,15 @@ const api = axios.create({
   timeout: 30000,
 });
 
+function answeredByApi(response) {
+  return Boolean(response) && !(response.status >= 502 && response.status <= 504 && !response.data?.detail);
+}
+
 api.interceptors.response.use((response) => {
   setOffline(false);
   return response;
 }, (err) => {
-  if (err?.response) setOffline(false);
+  if (answeredByApi(err?.response)) setOffline(false);
   else if (!axios.isCancel(err)) setOffline(true);
   if (err?.response?.status === 401 && err.config?.url !== "/auth/login") {
     window.dispatchEvent(new Event("snp:unauthorized"));
