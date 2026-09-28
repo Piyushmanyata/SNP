@@ -272,7 +272,7 @@ export function PatientRow({ p, onPrint, printingOpen, reprint = false, onNoCard
   const needsDoorScan = !p.arrived_at && !p.no_card_print;
   const windowShut = !printingOpen && !p.printed_at;
   const canPrint = !seen && !needsDoorScan && !windowShut && (!printed || reprint);
-  const askLast4 = Boolean(noCard) && p.aadhaar_scanned && cardInHand(noCard);
+  const askLast4 = Boolean(noCard) && Boolean(p.aadhaar_scanned || p.person_id) && cardInHand(noCard);
   const noCardReady = Boolean(noCard) && reasonReady(noCard) && (!askLast4 || String(noCard.last4 ?? "").length === 4);
   const submitNoCard = async (e) => {
     e.preventDefault();

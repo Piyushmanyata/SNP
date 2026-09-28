@@ -139,6 +139,16 @@ export function deskSession(state, event) {
       };
     case "walkInResolved":
       if (!current) return { ...state, walkIn: NO_WALK_IN };
+      if (!event.registration.arrived_at) {
+        return {
+          ...state,
+          walkIn: NO_WALK_IN,
+          scanResult: null,
+          scanPayload: "",
+          doorPhone: "",
+          found: { reg: event.registration, reprint: true },
+        };
+      }
       return {
         ...state,
         walkIn: NO_WALK_IN,

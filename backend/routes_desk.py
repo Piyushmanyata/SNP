@@ -300,4 +300,7 @@ async def record_no_card_print(
         }},
         return_document=True,
     )
-    return {"registration": ser_patient(recorded or await db.patients.find_one({"_id": p["_id"]}) or p)}
+    current = recorded or await db.patients.find_one({"_id": p["_id"]})
+    if not current:
+        raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
+    return {"registration": ser_patient(current)}
