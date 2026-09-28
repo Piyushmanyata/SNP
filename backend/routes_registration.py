@@ -16,6 +16,7 @@ import arrival
 from aadhaar import decode_aadhaar
 from aadhaar_extract import extract_document
 import sms
+import limits
 import lock_resolution
 from lock_resolution import duplicate_in_camp
 from datetime import date, timedelta
@@ -25,27 +26,19 @@ import re
 
 router = APIRouter(prefix="/api", tags=["registration"])
 
-_rl: dict = {}
-_decode_rl: dict = {}
-SELF_REGISTER_PER_NETWORK = 30
-DECODE_PER_NETWORK = 60
+NETWORK_WINDOW = timedelta(minutes=10)
+SELF_REGISTER_PER_NETWORK = 120
+DECODE_PER_NETWORK = 240
+SELF_REGISTER_PER_PHONE = 12
+SELF_REGISTER_PER_CAMP_DAY = 6000
 HOUSEHOLD_LIMIT = 6
 CARD_IN_HAND = ("card_unreadable", "scanner_down")
 LOOKALIKE_AGE_SPAN = 5
 LOOKALIKE_MAX_WORDS = 6
 
 
-def _rate_limit(store: dict, request: Request, limit: int) -> None:
-    ip = request.client.host if request.client else "unknown"
-    now = now_utc()
-    cutoff = now - timedelta(minutes=10)
-    for seen_ip in [k for k, w in store.items() if w[-1] <= cutoff]:
-        del store[seen_ip]
-    window = store.setdefault(ip, [])
-    window[:] = [t for t in window if t > cutoff]
-    if len(window) >= limit:
-        raise api_error(429, "TOO_MANY_ATTEMPTS_PLEASE_TRY_AGAIN_LATER", 'Too many attempts. Please try again later.')
-    window.append(now)
+def _network(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
 
 
 @router.post("/aadhaar/extract")
@@ -58,7 +51,7 @@ async def aadhaar_decode(body: AadhaarDecodeBody, request: Request) -> Dict[str,
     try:
         await get_current_user(request)
     except HTTPException:
-        _rate_limit(_decode_rl, request, DECODE_PER_NETWORK)
+        await limits.spend(get_db(), "decode-network", _network(request), DECODE_PER_NETWORK, NETWORK_WINDOW)
     return await asyncio.to_thread(decode_aadhaar, body.payload)
 
 
@@ -438,7 +431,15 @@ async def desk_register(
 
 @router.post("/self-register")
 async def self_register(body: RegisterBody, request: Request, background_tasks: BackgroundTasks) -> Dict[str, Any]:
-    _rate_limit(_rl, request, SELF_REGISTER_PER_NETWORK)
+    db = get_db()
+    await limits.spend(db, "self-network", _network(request), SELF_REGISTER_PER_NETWORK, NETWORK_WINDOW)
+    phone = normalize_phone(body.phone)
+    if phone:
+        await limits.spend(db, "self-phone", phone, SELF_REGISTER_PER_PHONE, timedelta(hours=1))
+    camp = await db.camps.find_one({"is_active": True})
+    ceiling = f"self-camp:{camp['_id'] if camp else None}:{today_ist_str()}"
+    if await limits.used(db, ceiling) >= SELF_REGISTER_PER_CAMP_DAY:
+        raise limits.too_many()
     await _apply_scanned_identity(
         body, "We could not read the QR code on this Aadhaar card. Please register at the camp desk.",
     )
@@ -453,12 +454,11 @@ async def self_register(body: RegisterBody, request: Request, background_tasks: 
             ) from exc
         raise
     if created:
+        await limits.add(db, ceiling, timedelta(days=2))
         if background_tasks is not None:
             background_tasks.add_task(_confirm_registration, patient)
         else:
             await _confirm_registration(patient)
-    db = get_db()
-    camp = await db.camps.find_one({"is_active": True})
     day = await db.camp_days.find_one({"_id": ObjectId(body.camp_day_id)})
     return {
         "registration": patient,

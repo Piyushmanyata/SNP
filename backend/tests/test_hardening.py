@@ -17,7 +17,6 @@ import helpers
 import routes_camps
 import lock_resolution
 import routes_desk
-import routes_registration
 import server
 from aadhaar import MAX_DECOMPRESSED_BYTES, MAX_SECURE_QR_DIGITS, _decompress, decode_aadhaar
 from conftest import CommandLog
@@ -220,35 +219,6 @@ class TestPublicOccupancy:
             assert board["days"][0]["registered"] == 3
             assert board["days"][0]["remaining"] == 0
             assert board["total_registered"] == 3
-
-        run_camp(monkeypatch, body)
-
-
-# --------------------------------------------------------------------------
-# The self-register rate limiter is a long-lived process's memory
-# --------------------------------------------------------------------------
-
-class TestRateLimitWindow:
-    def test_an_ip_that_stopped_knocking_is_forgotten(self, monkeypatch):
-        async def body(database):
-            routes_registration._rl.clear()
-            routes_registration._rl["10.0.0.1"] = [
-                helpers.now_utc() - routes_registration.timedelta(minutes=30)
-            ]
-            routes_registration._rl["10.0.0.2"] = [helpers.now_utc()]
-
-            class _Request:
-                class client:
-                    host = "10.0.0.3"
-
-            with pytest.raises(HTTPException):
-                await routes_registration.self_register(
-                    routes_registration.RegisterBody(camp_day_id=str(ObjectId()), full_name="X"),
-                    _Request(),
-                    background_tasks=None)
-            assert "10.0.0.1" not in routes_registration._rl
-            assert routes_registration._rl["10.0.0.2"]
-            assert routes_registration._rl["10.0.0.3"]
 
         run_camp(monkeypatch, body)
 
