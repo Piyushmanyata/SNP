@@ -115,7 +115,9 @@ EXPORT_COLUMNS = [
     "fixed_power_r", "fixed_power_l", "issued_power_r", "issued_power_l",
     "medicine", "fixed_power_specs", "spectacles_to_be_made", "ot",
     "ot_day", "ot_venue", "specs_day", "specs_venue", "specs_start", "specs_end",
+    "corrected_after_issue",
 ]
+CORRECTED_LINE_COLUMNS = (("medicine", "medicine"), ("specs_fixed", "fixed_power_specs"))
 
 
 MANUAL_REASON_LABELS = {
@@ -199,6 +201,8 @@ def _export_row(p: dict, t: dict, fulfilments: dict, day_dates: dict, revision: 
         display_date(specs.get("collection_date")),
         specs.get("collection_venue", "") or "",
         *((sms.SPECS_PICKUP_START_TIME, sms.SPECS_PICKUP_END_TIME) if specs.get("collection_date") else ("", "")),
+        ";".join(column for item_type, column in CORRECTED_LINE_COLUMNS
+                 if fulfilments.get(item_type, {}).get("corrected_after_issue")),
     ]
     return [csv_cell(c) for c in cells]
 

@@ -116,7 +116,7 @@ function DayPicker({ line, days, value, onChange }) {
   );
 }
 
-function MedicineChecklist({ outcomes, onToggle, disabled }) {
+function MedicineChecklist({ outcomes, onToggle, disabled, locked }) {
   return (
     <fieldset className="mb-3" data-testid="medicine-checklist">
       <legend className="text-xs font-mono uppercase tracking-widest text-slate-500 mb-2">
@@ -134,7 +134,7 @@ function MedicineChecklist({ outcomes, onToggle, disabled }) {
                 <button
                   key={String(given)}
                   type="button"
-                  disabled={disabled}
+                  disabled={disabled || locked.has(o.medicine_id)}
                   aria-pressed={o.given === given}
                   onClick={() => onToggle(o.medicine_id, given)}
                   className={`min-h-[44px] px-3 rounded-lg text-xs font-semibold border transition-colors ${
@@ -209,6 +209,10 @@ export function FulfilmentStation({
   const existing = useMemo(() => {
     return data?.fulfilments?.find((f) => f.item_type === line.itemType) || null;
   }, [data, line]);
+  const alreadyGiven = useMemo(() => new Set(
+    (existing?.medicine_outcomes || []).filter((o) => o.given).map((o) => o.name),
+  ), [existing]);
+  const reopened = Boolean(line.perMedicine && existing?.medicine_outcomes?.some((o) => o.given === null));
   const slip = data?.slips?.find((s) => s.item_type === line.itemType && s.active);
   const [dayId, setDayId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -229,6 +233,11 @@ export function FulfilmentStation({
   useEffect(() => {
     setOutcomes(prescribedMedicines.map((m) => ({ ...m, given: true })));
   }, [prescribedMedicines]);
+
+  const locked = useMemo(
+    () => new Set(prescribedMedicines.filter((m) => alreadyGiven.has(m.name)).map((m) => m.medicine_id)),
+    [prescribedMedicines, alreadyGiven],
+  );
 
   useEffect(() => {
     setIssued({
@@ -305,6 +314,12 @@ export function FulfilmentStation({
     </label>
   );
   const withdraw = line.withdraw;
+  const corrected = existing?.corrected_after_issue && (
+    <p className="text-sm font-semibold text-amber-800 mt-2" data-testid={`station-${lineKey}-corrected`}>
+      Corrected after issue: the prescription changed after this line was handed over.
+      {reopened ? " Record the medicines the correction added." : ""}
+    </p>
+  );
 
   if (line.itemType === "ot" && data?.committed_revision?.ot_outcome === "referral") {
     return (
@@ -317,13 +332,14 @@ export function FulfilmentStation({
     );
   }
 
-  if (existing) {
+  if (existing && !reopened) {
     return (
       <div className="rounded-xl border border-slate-200 p-4" data-testid={`station-${lineKey}`}>
         {header}
         <Badge tone={STATUS_TONES[existing.status] || "emerald"} data-testid={`station-${lineKey}-recorded`}>
           {statusLabel(line, existing.status)}
         </Badge>
+        {corrected}
         {slip?.replaces && (
           <p className="text-sm text-amber-800 mt-2" data-testid={`station-${lineKey}-token-replaced`}>
             The date or venue changed. Print this new Token and take back the old one.
@@ -363,6 +379,7 @@ export function FulfilmentStation({
   return (
     <div className="rounded-xl border border-slate-200 p-4" data-testid={`station-${lineKey}`}>
       {header}
+      {corrected}
       {paperReview}
       <p className="text-sm font-semibold text-slate-900 mb-2" data-testid={`station-${lineKey}-patient`}>
         #{data?.registration?.reg_no} {data?.registration?.full_name}
@@ -371,6 +388,7 @@ export function FulfilmentStation({
       {line.perMedicine && (
         <MedicineChecklist
           outcomes={outcomes}
+          locked={locked}
           disabled={busy}
           onToggle={(id, given) =>
             setOutcomes((cur) =>

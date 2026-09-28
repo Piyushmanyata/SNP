@@ -507,3 +507,47 @@ test("a Spectacles to be made order can be cancelled at its station", async () =
   }));
   expect(onDone).toHaveBeenCalled();
 });
+
+describe("Corrected after issue", () => {
+  const ADDED = { medicine_id: "med-2", name: "Chloramphenicol" };
+
+  test("a correction that added a medicine reopens the line for that medicine only", async () => {
+    await renderStation({
+      line: "medicine",
+      data: {
+        transcription: { id: "tx-1", prescribed_medicines: [MEDICINE, ADDED] },
+        registration: { id: "reg-1", reg_no: 101, full_name: "Sunita Devi" },
+        committed_revision: { id: "rev-2" },
+        fulfilments: [{
+          item_type: "medicine", status: "partially_fulfilled", corrected_after_issue: true,
+          medicine_outcomes: [{ ...MEDICINE, given: true }, { ...ADDED, given: null }],
+        }],
+      },
+    });
+    const q = (id) => container.querySelector(`[data-testid="${id}"]`);
+    expect(q("station-medicine-corrected").textContent).toContain("Corrected after issue");
+    expect(q("medicine-med-1-missing").disabled).toBe(true);
+    expect(q("medicine-med-2-missing").disabled).toBe(false);
+    act(() => { q("station-medicine-paper-review").click(); });
+    await act(async () => { q("station-medicine-save").click(); });
+    expect(api.post.mock.calls[0][1].medicine_outcomes).toEqual([
+      { medicine_id: "med-1", given: true }, { medicine_id: "med-2", given: true },
+    ]);
+    expect(api.post.mock.calls[0][1].reviewed_revision_id).toBe("rev-2");
+  });
+
+  test("a line marked corrected after issue with nothing open shows the mark and no form", async () => {
+    await renderStation({
+      line: "specs_fixed",
+      powers: POWERS,
+      data: {
+        transcription: { id: "tx-1", ...FIXED },
+        registration: { id: "reg-1" },
+        committed_revision: { id: "rev-2" },
+        fulfilments: [{ item_type: "specs_fixed", status: "fulfilled", corrected_after_issue: true }],
+      },
+    });
+    expect(container.querySelector('[data-testid="station-specs_fixed-corrected"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="station-specs_fixed-save"]')).toBeNull();
+  });
+});

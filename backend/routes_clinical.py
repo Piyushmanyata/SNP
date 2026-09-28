@@ -14,8 +14,8 @@ from catalogue import resolve_medicines, stocked_power
 import clinical_operation
 from clinical_operation import Operation
 from clinical_state import (
-    CONTENT_FIELDS, PRESCRIBED_LINE_KEYS, SPECS_EXCLUSION, commit, conflict, draft_conflict,
-    extract_content, generation_of, has_issue_history, insert_revision, normalize_ot_eye,
+    CONTENT_FIELDS, PRESCRIBED_LINE_KEYS, SPECS_EXCLUSION, carry_medicine_outcomes, commit, conflict, draft_conflict,
+    extract_content, fixed_power_corrected, generation_of, has_issue_history, insert_revision, keep_given, normalize_ot_eye,
     require_correction_allowed, require_draft_version, require_fresh_review, require_generation,
     require_line_prescribed, require_not_completed, require_printed, require_specs_exclusive,
     require_unchanged, require_undoable, serialize_revision, validate_completion,
@@ -69,6 +69,7 @@ def ser_fulfil(f: dict) -> Dict[str, Any]:
         "medicine_outcomes": f.get("medicine_outcomes") or [],
         "issued_power_r": f.get("issued_power_r"),
         "issued_power_l": f.get("issued_power_l"),
+        "corrected_after_issue": bool(f.get("corrected_after_issue")),
         "created_at": iso(f.get("created_at")),
     }
 
@@ -480,6 +481,9 @@ async def record_fulfilment(
             db, body.item_type, current, trans, prior, _day_requested(body), session,
         ) if body.status == "deferred" else (None, [])
         doc = _build_fulfilment_doc(body, t["_id"], slip, str(actor["_id"]), medicine_outcomes, issued_powers)
+        if medicine_outcomes and prior:
+            doc["medicine_outcomes"] = keep_given(prior.get("medicine_outcomes") or [], medicine_outcomes)
+            doc["status"] = derive_medicine_status(doc["medicine_outcomes"])
         doc.update({
             "operation_id": body.operation_id,
             "reviewed_revision_id": current["committed_revision_id"],
@@ -514,6 +518,26 @@ async def get_slip(slip_id: str, actor: dict = Depends(require_clinical)) -> Dic
         "registration": ser_patient(p) if p else None,
         "camp_name": camp["name"] if camp else None,
     }
+
+
+async def _carry_forward(db, transcription_id, before: dict, after: dict, actor: dict, session) -> None:
+    """Issued lines follow a correction: goods that left stay recorded, and a changed line is marked (ADR 0097)."""
+    mark = {"revision_id": after["_id"], "at": now_utc(), "by": str(actor["_id"])}
+    issued = await db.fulfilments.find(
+        {"transcription_id": transcription_id, "item_type": {"$in": ["medicine", "specs_fixed"]}}, session=session,
+    ).to_list(None)
+    for line in issued:
+        update: Dict[str, Any] = {"corrected_after_issue": mark}
+        if line["item_type"] == "medicine":
+            outcomes, changed = carry_medicine_outcomes(
+                line.get("medicine_outcomes") or [], after.get("prescribed_medicines") or [],
+            )
+            if not changed:
+                continue
+            update.update(medicine_outcomes=outcomes, status=derive_medicine_status(outcomes))
+        elif not fixed_power_corrected(line, before, after):
+            continue
+        await db.fulfilments.update_one({"_id": line["_id"]}, {"$set": update}, session=session)
 
 
 @router.post("/correction")
@@ -589,6 +613,8 @@ async def add_correction(
             db, patient, actor, content, lines, none, body.operation_id or "", "correct", reason, base_id, session,
         )
         committed = await commit(db, patient, {"committed_revision_id": revision["_id"]}, session)
+        if trans:
+            await _carry_forward(db, trans["_id"], current, revision, actor, session)
         trans = await _upsert_transcription(db, committed, actor, content, locked=True, session=session)
         return _clinical_result(committed, revision, trans), []
 

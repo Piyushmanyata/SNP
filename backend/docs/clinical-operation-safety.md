@@ -43,7 +43,7 @@ A draft save requires an unlocked transcription and the draft version the reques
 
 ## Corrections
 
-Corrections apply explicitly supplied fields, so clearing a line, medicine list or measurement is applied. A correction refuses with 409 `surgery_scheduled` or `SPECS_SCHEDULED` while that line has an active Token. Record `cancelled` or `declined` first.
+Corrections apply explicitly supplied fields, so clearing a line, medicine list or measurement is applied. A correction refuses with 409 `surgery_scheduled` or `SPECS_SCHEDULED` while that line has an active Token. Record `cancelled` or `declined` first. Inside the same transaction, the correction re-derives each issued medicine and Fixed-power specs line against the corrected revision and marks what it changed as corrected after issue (ADR 0097).
 
 ## Verification
 
