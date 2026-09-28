@@ -198,3 +198,35 @@ def test_a_catalogue_rename_does_not_reopen_a_medicine_already_given(monkeypatch
 
     run_camp(monkeypatch, run)
 
+def test_an_ordinary_fixed_power_re_record_updates_the_issued_powers(monkeypatch):
+    async def run(database):
+        ids = await _issued(database)
+        patient = await database.patients.find_one({"_id": ids["patient_id"]})
+        rev_id = str(patient["committed_revision_id"])
+        gen = patient["clinical_generation"]
+        await record_fulfilment(fulfil(
+            ids["trans_id"], rev_id, item_type="specs_fixed", status="fulfilled",
+            issued_power_r=2.25, issued_power_l=2.25, reviewed_generation=gen,
+        ), actor=CLINICAL, background_tasks=None)
+        specs = await _line(database, ids, "specs_fixed")
+        assert (specs["issued_power_r"], specs["issued_power_l"]) == (2.25, 2.25)
+        assert "corrected_after_issue" not in specs
+
+    run_camp(monkeypatch, run)
+
+
+def test_a_reissue_after_correction_cannot_alter_settled_medicine_outcomes(monkeypatch):
+    async def run(database):
+        ids = await _issued(database)
+        result = await _correct(ids, prescribed_medicine_ids=[A, B])
+        await record_fulfilment(fulfil(
+            ids["trans_id"], result["revision"]["id"], item_type="medicine", status="fulfilled",
+            medicine_outcomes=[{"medicine_id": A, "given": False}, {"medicine_id": B, "given": True}],
+            reviewed_generation=result["registration"]["clinical_generation"],
+        ), actor=CLINICAL, background_tasks=None)
+        medicine = await _line(database, ids, "medicine")
+        outcomes_by_id = {o["medicine_id"]: o for o in medicine["medicine_outcomes"]}
+        assert outcomes_by_id[A]["given"] is True
+        assert outcomes_by_id[B]["given"] is True
+
+    run_camp(monkeypatch, run)
