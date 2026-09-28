@@ -2,6 +2,7 @@ import React, { act } from "react";
 import ReactDOM from "react-dom/client";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import Layout from "./Layout";
+import { setOffline } from "../lib/connection";
 
 global.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -91,5 +92,23 @@ describe("Layout header chrome", () => {
     expect(document.body.textContent).toContain("Reset Your PIN");
     await act(async () => document.querySelector('[data-testid="pin-change-cancel"]').click());
     expect(document.querySelector('[data-testid="pin-change-form"]')).toBeNull();
+  });
+});
+
+describe("the offline banner", () => {
+  afterEach(() => { act(() => setOffline(false)); });
+
+  test("appears when the server cannot be reached and clears when it answers again", async () => {
+    await renderLayout();
+    const banner = () => container.querySelector('[data-testid="offline-banner"]');
+    expect(banner()).toBeNull();
+    act(() => setOffline(true));
+    expect(banner().textContent).toBe(
+      "No connection to the server. Hold the queue — nothing is lost. This clears by itself when the connection returns.",
+    );
+    expect(banner().getAttribute("role")).toBe("alert");
+    expect(container.textContent).toContain("ok");
+    act(() => setOffline(false));
+    expect(banner()).toBeNull();
   });
 });

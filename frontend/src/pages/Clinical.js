@@ -410,7 +410,7 @@ export default function Clinical() {
           {conflict && (
             <div className="mb-5" data-testid="draft-conflict">
               <Alert tone="amber">
-                Another operator saved this prescription. Your entries are kept below — reload the saved version or review yours before saving again.
+                This prescription changed since you opened it. Your entries are kept below — reload the saved version or review yours before saving again.
               </Alert>
               <div className="mt-2 flex flex-wrap gap-2">
                 <Button variant="outline" disabled={busy} onClick={() => reload()} data-testid="draft-conflict-reload">

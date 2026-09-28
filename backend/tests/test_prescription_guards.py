@@ -57,6 +57,12 @@ def test_draft_version_matches(transcription, expected, ok):
         assert _code(lambda: require_draft_version(transcription, expected)) == "DRAFT_VERSION_CONFLICT"
 
 
+def test_a_lost_draft_save_reply_blames_no_other_operator():
+    with pytest.raises(HTTPException) as exc:
+        require_draft_version({"draft_version": 2}, 1)
+    assert exc.value.detail["message"] == "This prescription changed since you opened it. Reload to see the saved version."
+
+
 def test_undoable():
     require_undoable(SEEN, False)
     assert _code(lambda: require_undoable(SEEN, True)) == "UNDO_AFTER_ISSUE"

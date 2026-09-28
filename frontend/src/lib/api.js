@@ -1,4 +1,5 @@
 import axios from "axios";
+import { setOffline } from "./connection";
 
 function isLoopback(host) {
   return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
@@ -28,7 +29,12 @@ const api = axios.create({
   timeout: 30000,
 });
 
-api.interceptors.response.use(undefined, (err) => {
+api.interceptors.response.use((response) => {
+  setOffline(false);
+  return response;
+}, (err) => {
+  if (err?.response) setOffline(false);
+  else if (!axios.isCancel(err)) setOffline(true);
   if (err?.response?.status === 401 && err.config?.url !== "/auth/login") {
     window.dispatchEvent(new Event("snp:unauthorized"));
   }
