@@ -18,7 +18,7 @@ No card, or a card that will not read: press **Manual entry** under the scanner,
 
 A door scan of a patient who already printed says so and prints nothing. If they lost the paper, find them by registration number or name and press **Reprint**.
 
-**Pending** at the top of the desk is everyone printed today and not yet seen by the doctor. Tap it for the list, longest wait first, with each household phone, to find a patient who has wandered off.
+**Pending** at the top of the desk is everyone printed and not yet seen by the doctor, on any camp day. Tap it for the list, longest wait first, with each household phone, to find a patient who has wandered off. A patient who arrived on an earlier camp day shows the day they arrived. The board counts them too, and says how many are from earlier days: send someone to find them first.
 
 A clinical operator copies the paper in the wizard and saves it. That save is what marks the patient Seen. They then issue medicine or schedule Hospital or spectacles at the same desk. A scheduled IOL surgery or spectacles order prints an A6 Token. A Hospital referral or Surgery declined does not.
 
