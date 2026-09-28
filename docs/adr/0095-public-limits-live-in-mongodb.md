@@ -14,7 +14,7 @@
 - **Counters in MongoDB.** `limits.spend` increments a fixed-window counter in `rate_limits`. The document id is `scope:subject:window start`, and a TTL index on `expires_at` removes each counter when its window ends. The counters survive a restart and would hold across processes. `limits.used` and `limits.add` keep the per-camp daily count.
 - **The limits** (named constants in `routes_registration.py`):
   - **per client address:** 120 self-registrations and 240 anonymous decodes per 10 minutes, up from 30 and 60, for carrier NAT;
-  - **per Household phone:** 12 self-register attempts per hour, counted only when the phone is a valid number;
+  - **per Household phone:** 12 self-register attempts per hour, counted once the card decodes and only for a valid number;
   - **per camp:** 6,000 self-registrations per IST day. This counts registrations actually created, so a flood of refused requests cannot use up the ceiling.
 - Every refusal is the existing 429 `TOO_MANY_ATTEMPTS_PLEASE_TRY_AGAIN_LATER`. Staff decode is never limited.
 - **Unchanged:** the Household limit of 6 patients per camp, the registration SMS cap of 6 a day, one uvicorn worker, and the client-address chain Caddy → nginx → uvicorn. The deploy runbook states the chain's one assumption: nginx is reachable only through Caddy.
@@ -28,4 +28,6 @@
 ## Consequences
 
 - Each self-registration costs three small counter writes and one read.
+- The phone counter is charged once the card decodes, before the registration is checked. Someone who knows a Household's number and can make readable cards can hold that number off self-registration for up to an hour; the desk still registers them. A replayed request also spends the address and phone counters; twelve an hour leaves room for one retry per patient.
+- The daily ceiling is a soft cap: it is read before a registration and counted after it, so requests in flight at the same moment can pass it by a few.
 - A camp whose honest demand passes 6,000 self-registrations a day needs the constant raised.

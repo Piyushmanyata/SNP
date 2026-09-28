@@ -1,4 +1,3 @@
-import importlib
 from datetime import timedelta
 
 import httpx
@@ -8,7 +7,7 @@ from fastapi import HTTPException
 import limits
 import routes_registration
 import server
-from conftest import advance_clock, freeze_clock
+from conftest import advance_clock
 from seed import day, recorder, run_camp, seed_camp
 from test_public_limits import card
 
@@ -22,12 +21,11 @@ def _body(day_id, n, phone="9876500020"):
             "qr_payload": card(f"Member {'abcdefghijklmnop'[n]}", f"55556666{1000 + n}")}
 
 
-def test_a_limit_survives_a_restart(monkeypatch):
+def test_a_limit_is_counted_in_the_database_and_refuses_past_it(monkeypatch):
     async def run(database):
         for _ in range(2):
             await limits.spend(database, "probe", "10.0.0.1", 2, timedelta(minutes=10))
-        importlib.reload(limits)
-        freeze_clock(monkeypatch)
+        assert [c["count"] for c in await database.rate_limits.find({}).to_list(None)] == [2]
         with pytest.raises(HTTPException) as exc:
             await limits.spend(database, "probe", "10.0.0.1", 2, timedelta(minutes=10))
         assert exc.value.status_code == 429

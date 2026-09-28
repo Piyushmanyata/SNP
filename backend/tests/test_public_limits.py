@@ -83,7 +83,6 @@ def test_staff_bodies_are_bounded(monkeypatch):
 
 
 def test_staff_decode_is_never_limited_but_anonymous_decode_is(monkeypatch):
-
     async def body(database, client):
         staff = (await database.users.insert_one(user_doc("Desk", "volunteer"))).inserted_id
         for _ in range(routes_registration.DECODE_PER_NETWORK + 1):

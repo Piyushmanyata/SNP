@@ -433,16 +433,15 @@ async def desk_register(
 async def self_register(body: RegisterBody, request: Request, background_tasks: BackgroundTasks) -> Dict[str, Any]:
     db = get_db()
     await limits.spend(db, "self-network", _network(request), SELF_REGISTER_PER_NETWORK, NETWORK_WINDOW)
-    phone = normalize_phone(body.phone)
-    if phone:
-        await limits.spend(db, "self-phone", phone, SELF_REGISTER_PER_PHONE, timedelta(hours=1))
     camp = await db.camps.find_one({"is_active": True})
     ceiling = f"self-camp:{camp['_id'] if camp else None}:{today_ist_str()}"
-    if await limits.used(db, ceiling) >= SELF_REGISTER_PER_CAMP_DAY:
-        raise limits.too_many()
+    await limits.refuse_at(db, ceiling, SELF_REGISTER_PER_CAMP_DAY)
     await _apply_scanned_identity(
         body, "We could not read the QR code on this Aadhaar card. Please register at the camp desk.",
     )
+    phone = normalize_phone(body.phone)
+    if phone:
+        await limits.spend(db, "self-phone", phone, SELF_REGISTER_PER_PHONE, timedelta(hours=1))
     try:
         patient, created = await _create_registration(body, None, True, request)
     except HTTPException as exc:
@@ -454,7 +453,7 @@ async def self_register(body: RegisterBody, request: Request, background_tasks: 
             ) from exc
         raise
     if created:
-        await limits.add(db, ceiling, timedelta(days=2))
+        await limits.add(db, ceiling)
         if background_tasks is not None:
             background_tasks.add_task(_confirm_registration, patient)
         else:

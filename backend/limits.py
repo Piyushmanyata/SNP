@@ -27,12 +27,14 @@ async def spend(db: AsyncDatabase, scope: str, subject: str, limit: int, window:
         raise too_many()
 
 
-async def used(db: AsyncDatabase, key: str) -> int:
+async def refuse_at(db: AsyncDatabase, key: str, ceiling: int) -> None:
+    """Refuses once a daily ceiling counted by add already holds ceiling successes."""
     counter = await db.rate_limits.find_one({"_id": key})
-    return counter["count"] if counter else 0
+    if counter and counter["count"] >= ceiling:
+        raise too_many()
 
 
-async def add(db: AsyncDatabase, key: str, keep: timedelta) -> None:
+async def add(db: AsyncDatabase, key: str) -> None:
     await db.rate_limits.update_one(
-        {"_id": key}, {"$inc": {"count": 1}, "$setOnInsert": {"expires_at": now_utc() + keep}}, upsert=True,
+        {"_id": key}, {"$inc": {"count": 1}, "$setOnInsert": {"expires_at": now_utc() + timedelta(days=2)}}, upsert=True,
     )
