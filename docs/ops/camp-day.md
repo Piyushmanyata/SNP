@@ -12,9 +12,9 @@ Each person has their own account and PIN. A Volunteer or Clinical operator uses
 
 ## During the day
 
-Registration is Scan at the door, then the household phone if there is no booking, then Print, then Paper check. **Print again** prints the same sheet again. **Printer problem** or Escape records nothing.
+Registration is Scan at the door, then the household phone if there is no booking, then Print, then Paper check. **Print again** prints the same sheet again. **Printer problem** or Escape records nothing. If **Printed — next patient** fails because the connection dropped, press it again when the connection is back: it is recorded even if the print window closed meanwhile, the same day, until the doctor sees the patient.
 
-No card, or a card that will not read: press **Manual entry** under the scanner, pick the reason, type the details and Register. The patient prints straight away. If the desk shows someone already registered with that name, open them if it is the same person. A patient booked by typing who arrives without a card gets **No-card print** on their row.
+No card, or a card that will not read: press **Manual entry** under the scanner, pick the reason, type the details and Register. The patient prints straight away. If the desk shows someone already registered with that name, open them if it is the same person. A booked patient who has not arrived prints only after their card is scanned at the door, even if they scanned it when they booked. Finding them by registration number or name shows **Scan the card** and **No-card print**, never Print. Use **No-card print** for a patient with no card; if the card is in hand but will not read, type its last 4 digits.
 
 A door scan of a patient who already printed says so and prints nothing. If they lost the paper, find them by registration number or name and press **Reprint**.
 
