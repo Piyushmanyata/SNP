@@ -148,3 +148,29 @@ def test_a_reply_that_trickles_in_forever_is_cut_off_at_the_deadline(monkeypatch
         server.close()
     assert time.monotonic() - started < 1.5
     assert not isinstance(exc.value, msg91.Unsent)
+
+
+def test_a_connection_that_opens_after_the_deadline_sends_nothing(monkeypatch):
+    requests = []
+
+    class SlowConnection:
+        sock = None
+
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def connect(self):
+            time.sleep(0.3)
+
+        def request(self, *args, **kwargs):
+            requests.append(args)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(msg91.http.client, "HTTPSConnection", SlowConnection)
+    monkeypatch.setattr(msg91, "TIMEOUT_SECONDS", 0.1)
+    monkeypatch.setenv("MSG91_AUTH_KEY", "auth")
+    with pytest.raises(msg91.Unsent):
+        msg91.send("camp", "9876500001", {})
+    assert requests == []

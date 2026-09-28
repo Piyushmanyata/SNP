@@ -43,8 +43,9 @@ def template_id(message_type: str) -> str:
     return os.environ.get(TEMPLATE_ENV[message_type], "")
 
 
-def _cut(conn: http.client.HTTPConnection) -> None:
+def _cut(conn: http.client.HTTPConnection, expired: threading.Event) -> None:
     """Ends a call that is still running at its deadline; the socket timeout alone bounds each read, not the reply."""
+    expired.set()
     try:
         if conn.sock:
             conn.sock.shutdown(socket.SHUT_RDWR)
@@ -62,13 +63,16 @@ def send(message_type: str, mobile: str, variables: Dict[str, Any]) -> str:
         }],
     }
     conn = http.client.HTTPSConnection(MSG91_HOST, timeout=TIMEOUT_SECONDS)
-    deadline = threading.Timer(TIMEOUT_SECONDS, _cut, (conn,))
+    expired = threading.Event()
+    deadline = threading.Timer(TIMEOUT_SECONDS, _cut, (conn, expired))
     deadline.start()
     try:
         try:
             conn.connect()
         except OSError as exc:
             raise Unsent(f"{type(exc).__name__}: {exc}") from exc
+        if expired.is_set():
+            raise Unsent(f"MSG91 connection took longer than {TIMEOUT_SECONDS} s")
         conn.request(
             "POST",
             MSG91_FLOW_PATH,
