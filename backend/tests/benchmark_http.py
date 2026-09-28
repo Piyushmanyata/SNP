@@ -24,7 +24,7 @@ EXPORT_FIRST_BYTE_S = 1
 EXPORT_TOTAL_S = 15
 EXPORT_RSS_GROWTH_MB = 80
 WARMUPS = 20
-SAMPLES = 40
+SAMPLES = 200
 
 
 def percentile(timings: list[float], fraction: float) -> float:

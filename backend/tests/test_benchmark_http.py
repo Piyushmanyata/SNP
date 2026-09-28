@@ -1,8 +1,22 @@
+import asyncio
 import os
 
 import pytest
 
-from benchmark_http import breaches
+from benchmark_http import WARMUPS, breaches, time_calls
+
+
+def test_one_stalled_concurrency_8_batch_does_not_move_the_p95():
+    calls = 0
+
+    async def call():
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.2 if WARMUPS < calls <= WARMUPS + 8 else 0)
+
+    result = asyncio.run(time_calls(call, 8))
+    assert result["max_ms"] >= 200
+    assert result["p95_ms"] < 100
 
 
 def test_a_concurrency_8_p95_over_the_budget_is_a_breach():

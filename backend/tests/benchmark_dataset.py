@@ -43,7 +43,7 @@ def shape(patients: int) -> dict:
         "specs_slips": patients * 1500 // FULL_PATIENTS,
         "staff": 40,
         "ledger": patients * len(MESSAGE_TYPES),
-        "reserved": 160,
+        "reserved": 480,
     }
 
 
