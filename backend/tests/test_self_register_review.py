@@ -13,7 +13,6 @@ from seed import ACTOR, TOMORROW, Request, recorder, run_camp, seed_camp
 
 def _self_register(monkeypatch, **fields):
     sent = recorder()
-    routes_registration._rl.clear()
     app = FastAPI()
     app.include_router(routes_registration.router)
 

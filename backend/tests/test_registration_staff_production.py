@@ -217,7 +217,7 @@ def test_request_id_reuse_cannot_return_another_patients_record(monkeypatch, ins
 
 
 def test_public_duplicate_errors_exclude_patient_records(monkeypatch):
-    async def run():
+    async def run(_database):
         monkeypatch.setattr(routes_registration, "decode_aadhaar", lambda _: {"outcome": "card", "data": {"full_name": "Patient"}})
 
         async def duplicate(*args):
@@ -234,7 +234,7 @@ def test_public_duplicate_errors_exclude_patient_records(monkeypatch):
         assert exc.value.status_code == 409
         assert exc.value.detail == {"code": "DUPLICATE_IN_CAMP", "message": "Already registered in this camp"}
 
-    asyncio.run(run())
+    run_db(run)
 
 
 @pytest.mark.parametrize("date_value", ["2026-02-30", "not-a-date", "2026-13-01"])

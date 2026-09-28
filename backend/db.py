@@ -63,6 +63,7 @@ async def init_indexes() -> None:
     await db.camp_days.create_index("day_date")
     await db.persons.create_index("aadhaar_key", unique=True, sparse=True)
     await db.persons.create_index("person_no", unique=True)
+    await db.rate_limits.create_index("expires_at", expireAfterSeconds=0)
     await db.patients.create_index("reg_no", unique=True)
     await db.patients.create_index("patient_qr", unique=True)
     await db.patients.create_index("registration_request_id", unique=True, sparse=True)

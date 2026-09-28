@@ -83,13 +83,11 @@ def test_staff_bodies_are_bounded(monkeypatch):
 
 
 def test_staff_decode_is_never_limited_but_anonymous_decode_is(monkeypatch):
-    routes_registration._decode_rl.clear()
-
     async def body(database, client):
         staff = (await database.users.insert_one(user_doc("Desk", "volunteer"))).inserted_id
-        for _ in range(61):
+        for _ in range(routes_registration.DECODE_PER_NETWORK + 1):
             assert (await client.post("/api/aadhaar/decode", json={"payload": CARD}, headers=bearer(staff, "Desk", "volunteer"))).status_code == 200
-        for _ in range(60):
+        for _ in range(routes_registration.DECODE_PER_NETWORK):
             assert (await client.post("/api/aadhaar/decode", json={"payload": CARD})).status_code == 200
         assert (await client.post("/api/aadhaar/decode", json={"payload": CARD})).status_code == 429
 
@@ -98,7 +96,6 @@ def test_staff_decode_is_never_limited_but_anonymous_decode_is(monkeypatch):
 
 def test_self_register_limits_one_network_and_one_household(monkeypatch):
     sent = recorder()
-    routes_registration._rl.clear()
 
     async def body(database, client):
         _camp_id, (day_id,) = await seed_camp(database, days=(day(1),))
@@ -115,7 +112,7 @@ def test_self_register_limits_one_network_and_one_household(monkeypatch):
         assert seventh.status_code == 409 and seventh.json()["detail"]["code"] == "HOUSEHOLD_LIMIT"
         assert await database.patients.count_documents({}) == 6
         assert len(sent) == 6
-        for i in range(24):
+        for i in range(routes_registration.SELF_REGISTER_PER_NETWORK - 7):
             await client.post("/api/self-register", json={"full_name": "x", "camp_day_id": str(day_id), "qr_payload": "not a card"})
         assert (await client.post("/api/self-register", json={"full_name": "x", "camp_day_id": str(day_id), "qr_payload": "no"})).status_code == 429
 

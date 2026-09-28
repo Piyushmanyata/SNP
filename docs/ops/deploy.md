@@ -24,6 +24,10 @@ docker compose --env-file .env.production -f docker-compose.prod.yml up -d --bui
 
 This rebuilds images and recreates containers. It does not remove volumes.
 
+## Client addresses and public limits
+
+The public self-register and decode limits count per client address (ADR 0095). The API learns that address from the chain Caddy → nginx → uvicorn, and the chain is trustworthy only while nginx is reachable solely through Caddy. Never publish the frontend container's port on the host, and never put another proxy in front of nginx: a client that reaches nginx directly can set `X-Forwarded-For` and spread its attempts over invented addresses. Keep one uvicorn worker; the limits live in MongoDB and would hold across workers, but nothing else is designed for more than one.
+
 ## Rollback
 
 Check out the previous release, then run the same update command. The database is not rolled back with the code. Restore a snapshot only from [backups](backups.md), after a drill of that snapshot prints `DRILL OK`.

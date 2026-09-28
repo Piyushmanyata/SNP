@@ -241,7 +241,7 @@ The patient is physically at the camp on a camp day. Stamped by a desk Lock that
 _Avoid_: check-in, checking in, presence, attendance, walk-in (a walk-in registers and arrives in one action), door re-scan (a Lock is taken once)
 
 **Household phone**:
-The one mobile number stored for a registration and used for its SMS. Ten local digits starting 6–9. Input may carry `+91`, `0`, spaces or dashes; the server strips them and refuses anything else. Screens keep what was typed and send the canonical value. One household phone can self-register at most six patients per camp, and receives at most six registration SMS per IST day.
+The one mobile number stored for a registration and used for its SMS. Ten local digits starting 6–9. Input may carry `+91`, `0`, spaces or dashes; the server strips them and refuses anything else. Screens keep what was typed and send the canonical value. One household phone can self-register at most six patients per camp, makes at most twelve self-register attempts an hour, and receives at most six registration SMS per IST day.
 _Avoid_: contact, mobile of the patient (it is the household's)
 
 **Door walk-in**:
