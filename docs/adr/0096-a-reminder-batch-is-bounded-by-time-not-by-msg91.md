@@ -8,7 +8,7 @@
 
 ## Decision
 
-- **Each provider call is bounded.** `sms._submit` runs `_provider.send` on its own eight-thread pool. It waits at most `SEND_SECONDS` (10) for a free thread, then at most `SEND_SECONDS` for the answer, so time spent queued never eats the provider's answer time. MSG91's socket timeout drops to 8 seconds, so a hung thread frees itself soon after, and MSG91's own timeout keeps its own message.
+- **Each provider call is bounded.** `sms._submit` runs `_provider.send` on its own eight-thread pool. It waits at most `SEND_SECONDS` (10) for a free thread, then at most `SEND_SECONDS` for the answer, so time spent queued never eats the provider's answer time. MSG91's socket timeout drops to 8 seconds, and because a socket timeout bounds each read rather than the whole reply, `msg91.send` also shuts its socket down 8 seconds after it starts: a reply that trickles in byte by byte cannot hold an SMS thread. MSG91's own timeout keeps its own message.
 - **The batch stops starting sends when its time is spent.** A send whose turn comes after the 60-second budget is deferred, not attempted. The call returns `complete: false`, the cursor stays on the first deferred patient, and the worker calls again at once, as before. With four sends at a time and eight threads, a send started just before the budget waits for a thread only while earlier sends time out, so the worst case is about 60 + 20 seconds plus database work: inside the 90-second lease and the 120-second worker timeout.
 - **A timed-out send is never guessed at.**
   - If the call had reached the provider when time ran out, the intent is settled `uncertain` and never sent again (ADR 0087's ledger rule).

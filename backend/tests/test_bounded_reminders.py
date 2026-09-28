@@ -1,6 +1,11 @@
 import asyncio
+import http.client
+import socket
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+
+import pytest
 
 import msg91
 import routes_reminders
@@ -108,3 +113,38 @@ def test_the_provider_s_own_socket_timeout_keeps_its_own_words(monkeypatch, sms_
     (error,) = run_camp(monkeypatch, run)
     assert isinstance(error, TimeoutError)
     assert str(error) == "The read operation timed out"
+
+
+def test_a_reply_that_trickles_in_forever_is_cut_off_at_the_deadline(monkeypatch):
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    stop = threading.Event()
+
+    def trickle():
+        conn, _ = server.accept()
+        conn.recv(65536)
+        conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n")
+        while not stop.is_set():
+            try:
+                conn.sendall(b"x")
+            except OSError:
+                break
+            stop.wait(0.1)
+        conn.close()
+
+    threading.Thread(target=trickle, daemon=True).start()
+    port = server.getsockname()[1]
+    monkeypatch.setattr(msg91.http.client, "HTTPSConnection",
+                        lambda _host, timeout: http.client.HTTPConnection("127.0.0.1", port, timeout=timeout))
+    monkeypatch.setattr(msg91, "TIMEOUT_SECONDS", 0.5)
+    monkeypatch.setenv("MSG91_AUTH_KEY", "auth")
+    started = time.monotonic()
+    try:
+        with pytest.raises(Exception) as exc:
+            msg91.send("camp", "9876500001", {})
+    finally:
+        stop.set()
+        server.close()
+    assert time.monotonic() - started < 1.5
+    assert not isinstance(exc.value, msg91.Unsent)

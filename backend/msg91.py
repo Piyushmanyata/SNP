@@ -1,6 +1,8 @@
 import http.client
 import json
 import os
+import socket
+import threading
 from typing import Any, Dict
 
 MSG91_HOST = "control.msg91.com"
@@ -41,6 +43,15 @@ def template_id(message_type: str) -> str:
     return os.environ.get(TEMPLATE_ENV[message_type], "")
 
 
+def _cut(conn: http.client.HTTPConnection) -> None:
+    """Ends a call that is still running at its deadline; the socket timeout alone bounds each read, not the reply."""
+    try:
+        if conn.sock:
+            conn.sock.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass
+
+
 def send(message_type: str, mobile: str, variables: Dict[str, Any]) -> str:
     payload = {
         "template_id": template_id(message_type),
@@ -51,6 +62,8 @@ def send(message_type: str, mobile: str, variables: Dict[str, Any]) -> str:
         }],
     }
     conn = http.client.HTTPSConnection(MSG91_HOST, timeout=TIMEOUT_SECONDS)
+    deadline = threading.Timer(TIMEOUT_SECONDS, _cut, (conn,))
+    deadline.start()
     try:
         try:
             conn.connect()
@@ -70,6 +83,7 @@ def send(message_type: str, mobile: str, variables: Dict[str, Any]) -> str:
         status = response.status
         raw = response.read()
     finally:
+        deadline.cancel()
         conn.close()
     if status in (429, 503):
         raise Throttled(f"MSG91 answered HTTP {status}")
