@@ -80,3 +80,31 @@ def test_a_send_still_queued_when_time_runs_out_is_withdrawn_not_guessed(monkeyp
         provider.release()
     assert isinstance(handed, TimeoutError)
     assert isinstance(queued, msg91.Unsent)
+
+
+def test_time_spent_waiting_for_a_thread_does_not_eat_the_provider_s_answer_time(monkeypatch, sms_provider):
+    sms_provider.switch_on()
+    sms_provider.outcome = lambda *_args: time.sleep(0.15) or "provider-id"
+    monkeypatch.setattr(sms, "SEND_SECONDS", 0.2)
+    monkeypatch.setattr(sms, "_sends", ThreadPoolExecutor(max_workers=1))
+
+    async def run(_database):
+        return await asyncio.gather(sms._submit("camp", "9876500001", {}), sms._submit("camp", "9876500002", {}))
+
+    assert run_camp(monkeypatch, run) == ["provider-id", "provider-id"]
+
+
+def test_the_provider_s_own_socket_timeout_keeps_its_own_words(monkeypatch, sms_provider):
+    sms_provider.switch_on()
+
+    def socket_timeout(*_args):
+        raise TimeoutError("The read operation timed out")
+
+    sms_provider.outcome = socket_timeout
+
+    async def run(_database):
+        return await asyncio.gather(sms._submit("camp", "9876500001", {}), return_exceptions=True)
+
+    (error,) = run_camp(monkeypatch, run)
+    assert isinstance(error, TimeoutError)
+    assert str(error) == "The read operation timed out"

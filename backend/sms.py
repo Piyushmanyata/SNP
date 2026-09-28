@@ -279,31 +279,37 @@ def _compose(
 
 
 async def _submit(message_type: str, number: str, variables: Dict[str, Any]) -> str:
-    """Calls the provider on the SMS threads, for at most SEND_SECONDS (ADR 0096).
+    """Calls the provider on the SMS threads: up to SEND_SECONDS to get a thread, then SEND_SECONDS to answer (ADR 0096).
 
-    A call still queued when time runs out is withdrawn and raises Unsent, so it can be tried again. A call
-    already handed to the provider raises TimeoutError and is settled uncertain, never sent twice.
+    A call still waiting for a thread is withdrawn and raises Unsent, so it can be tried again. A call handed to the
+    provider that does not answer raises TimeoutError and is settled uncertain, never sent twice.
     """
+    loop = asyncio.get_running_loop()
     lock = threading.Lock()
-    state = ["queued"]
+    handed = asyncio.Event()
+    state = "queued"
 
     def call() -> str:
+        nonlocal state
         with lock:
-            if state[0] == "withdrawn":
+            if state == "withdrawn":
                 raise msg91.Unsent("withdrawn before it reached the provider")
-            state[0] = "handed"
+            state = "handed"
+        loop.call_soon_threadsafe(handed.set)
         return _provider.send(message_type, number, variables)
 
+    future = loop.run_in_executor(_sends, call)
     try:
-        return await asyncio.wait_for(asyncio.get_running_loop().run_in_executor(_sends, call), SEND_SECONDS)
+        await asyncio.wait_for(handed.wait(), SEND_SECONDS)
     except TimeoutError:
         with lock:
-            handed = state[0] == "handed"
-            if not handed:
-                state[0] = "withdrawn"
-        if not handed:
-            raise msg91.Unsent(f"no free sender within {SEND_SECONDS} s")
+            if state == "queued":
+                state = "withdrawn"
+                raise msg91.Unsent(f"no free sender within {SEND_SECONDS} s")
+    done, _pending = await asyncio.wait({future}, timeout=SEND_SECONDS)
+    if not done:
         raise TimeoutError(f"MSG91 did not answer within {SEND_SECONDS} s")
+    return future.result()
 
 
 async def _settle(db: AsyncDatabase, row: Dict[str, Any], variables: Dict[str, Any], now: datetime) -> str:
