@@ -105,6 +105,20 @@ def test_a_no_card_print_never_marks_the_card_scanned(monkeypatch):
     run_camp(monkeypatch, run)
 
 
+def test_the_first_no_card_decision_stands_until_arrival(monkeypatch):
+    async def run(database):
+        (day_id,), headers = await _desk(database)
+        async with asgi_client() as client:
+            reg = (await client.post("/api/register", json=_scanned(day_id), headers=headers)).json()["registration"]
+            assert (await _no_card(client, headers, reg["id"], "no_card")).status_code == 200
+            second = await _no_card(client, headers, reg["id"], "other", note="Second desk")
+        assert second.status_code == 200, second.text
+        assert second.json()["registration"]["no_card_print"] is True
+        assert (await database.patients.find_one({}))["no_card_print"]["reason"] == "no_card"
+
+    run_camp(monkeypatch, run)
+
+
 def test_a_no_card_print_is_refused_once_the_doctor_has_seen_the_patient(monkeypatch):
     async def run(database):
         (day_id,), headers = await _desk(database)

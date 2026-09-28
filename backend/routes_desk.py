@@ -293,7 +293,7 @@ async def record_no_card_print(
         if body.aadhaar_last4 != p.get("aadhaar_last4"):
             raise api_error(409, "NO_CARD_LAST4_MISMATCH", "These last 4 digits do not match this patient's booking. Check the card and the patient.")
     recorded = await db.patients.find_one_and_update(
-        {"_id": p["_id"], "arrived_at": None, "queue_status": {"$ne": "seen"}},
+        {"_id": p["_id"], "arrived_at": None, "queue_status": {"$ne": "seen"}, "no_card_print": None},
         {"$set": {
             "identity_recheck_required": False,
             "no_card_print": {"reason": body.reason, "note": note, "by": str(actor["_id"]), "at": now_utc()},
