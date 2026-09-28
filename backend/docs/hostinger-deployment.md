@@ -644,3 +644,23 @@ Live checks:
 - Every service is running, and backend, frontend, mongo and reminders report healthy.
 - The deployed `routes_reports.py` returns `earlier_days`.
 - The backend and reminders logs have no tracebacks and no 5xx.
+
+## Outage readiness — 28 September 2026
+
+[PR 102](https://github.com/Piyushmanyata/SNP/pull/102) (#89 slice 5, ADR 0094) merged as `a8c9b65bc1542fb65f56578d33987d0adaeb03d4`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/a8c9b65…`. CI run [36405424989](https://github.com/Piyushmanyata/SNP/actions/runs/36405424989) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify.
+
+Before the update, the running `ee877a4` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-ee877a47c8e9f679b2700f5b61b8c697c7bc069c`. The backup container was restarted and took snapshot `4f430758` at 09:58 UTC. Only backend, frontend and reminders were rebuilt; MongoDB stayed up. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/ee877a4…`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed. Every staff screen now shows the offline banner when the server cannot be reached, the sign-in occupancy says when it was last updated, and a lost draft-save reply no longer blames another operator.
+
+Live checks:
+
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Every service is running, and backend, frontend, mongo and reminders report healthy.
+- The served `static/index-CTzItPDC.js` carries the offline banner, and the deployed `clinical_state.py` carries the new conflict wording.
+- The backend and reminders logs have no tracebacks and no 5xx.
