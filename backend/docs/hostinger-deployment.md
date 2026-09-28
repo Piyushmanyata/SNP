@@ -664,3 +664,58 @@ Live checks:
 - Every service is running, and backend, frontend, mongo and reminders report healthy.
 - The served `static/index-CTzItPDC.js` carries the offline banner, and the deployed `clinical_state.py` carries the new conflict wording.
 - The backend and reminders logs have no tracebacks and no 5xx.
+
+## A reminder batch is bounded by time — 28 September 2026
+
+[PR 101](https://github.com/Piyushmanyata/SNP/pull/101) (#89 slice 7, ADR 0096) merged as `4874ecc6d9de2d135406d6aacc240eb54a9d5f27`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/4874ecc…`. CI run [36406228270](https://github.com/Piyushmanyata/SNP/actions/runs/36406228270) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify. Its `perf` job passed on the re-run; the first attempt missed `desk_scan_arrived` (p95 153.7 ms against 150 ms), which this slice does not touch.
+
+Before the update, the running `a8c9b65` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-a8c9b65bc1542fb65f56578d33987d0adaeb03d4`. The backup container was restarted and took snapshot `5b2f5571` at 10:15 UTC. Only backend, frontend and reminders were rebuilt; MongoDB stayed up. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/a8c9b65…`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed. Each MSG91 call now waits at most 10 s for one of eight SMS threads and at most 10 s for MSG91, whose socket timeout is 8 s and whose reply is cut off 8 s after the call starts. A batch starts no send after 60 s. A DNS lookup that hangs cannot be interrupted from Python: it keeps one SMS thread busy until the resolver gives up, but it never blocks the API.
+
+Live checks:
+
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Every service is running, and backend, frontend, mongo and reminders report healthy.
+- The deployed backend carries `SEND_SECONDS = 10`, and the reminders image carries `msg91.TIMEOUT_SECONDS = 8`.
+- The backend and reminders logs have no tracebacks and no 5xx.
+
+## Self-register limits live in MongoDB — 28 September 2026
+
+[PR 103](https://github.com/Piyushmanyata/SNP/pull/103) (#89 slice 8, ADR 0095) merged as `9c9a622c4c26e0324c299de97b70570a39417152`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/9c9a622…`. CI run [36405934691](https://github.com/Piyushmanyata/SNP/actions/runs/36405934691) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify.
+
+Before the update, the running `4874ecc` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-4874ecc6d9de2d135406d6aacc240eb54a9d5f27`. The backup container was restarted and took snapshot `9df367e4` at 10:16 UTC. Only backend, frontend and reminders were rebuilt; MongoDB stayed up. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/4874ecc…`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed. `init_indexes()` created the `rate_limits` TTL index on startup. Self-registration now allows 120 attempts per client address per 10 minutes, 12 per Household phone per hour, and 6,000 created per camp per IST day; anonymous decode allows 240 per address per 10 minutes. The in-process limits are gone, so a restart no longer forgets them.
+
+Live checks:
+
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Every service is running, and backend, frontend, mongo and reminders report healthy.
+- A junk self-registration passed the MongoDB limits and was refused for its unreadable QR with 400.
+- The backend and reminders logs have no tracebacks and no 5xx.
+
+## Station failure and kit runbook — 28 September 2026
+
+[PR 104](https://github.com/Piyushmanyata/SNP/pull/104) (#89 slice 6, runbook only) merged as `4c477c670ab926665e2f315960fd5ec58200f5fb`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/4c477c6…`, so `/opt/snp/current` matches `main`. CI run [36406683714](https://github.com/Piyushmanyata/SNP/actions/runs/36406683714) passed backend, frontend, dependencies, workflow, prod-smoke, e2e, perf and verify. The running `9c9a622` images were tagged `rollback-9c9a622c4c26e0324c299de97b70570a39417152`, and the backup container took snapshot `fea83451` at 10:17 UTC. The application code is unchanged.
+
+`docs/ops/camp-day.md` now carries:
+
+- the admin checklist;
+- the kit for 5,000 patients a day;
+- the spares kit;
+- a procedure for each failed station.
+
+Owner steps still open: register the `ot_change` and `specs_change` DLT templates and MSG91 flows, set `MSG91_TEMPLATE_OT_CHANGE` and `MSG91_TEMPLATE_SPECS_CHANGE` in `/opt/snp/.env.production`, send one consented test of each, and buy the 9 hotspots.
+
+Live checks: `/api/health/ready` returned ready, the homepage returned 200, HTTP redirected with 308, and every service is healthy. This completes #89.
