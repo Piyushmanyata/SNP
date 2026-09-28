@@ -64,7 +64,7 @@ Nobody needs to call anyone for these. Tell the Team Lead afterwards.
 | **USB imager** | Press **Scan with camera** under Scan at the door and hold the card to the laptop's camera. If that will not read either, register with **Manual entry**, reason **Scanner not working**, and type the card's last 4 digits. Swap in a spare imager when one is free. |
 | **A4 printer** | Send the queue to the neighbouring desk. Patients who already arrived are found there by registration number or name, and **Print** prints them. Swap in a spare printer, then print one test sheet before taking patients again. |
 | **A6 Token printer** | Carry on issuing: the issue is saved even when the Token does not print. When a printer is back, press **Reprint Token** for each patient issued meanwhile. |
-| **Laptop** | Swap in a spare laptop and sign in with your own account. Nothing is kept on the laptop. |
+| **Laptop** | Swap in a spare laptop and sign in with your own account. No patient data is kept on a laptop, but your sign-in stays on it for up to twelve hours: if the failed laptop leaves your desk, ask the Team Lead to reset your PIN from Team, which signs it out. |
 | **Desk phone camera** | Use another desk phone. |
 
 ## Internet outage
