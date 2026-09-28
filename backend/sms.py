@@ -2,6 +2,8 @@ import asyncio
 import logging
 import re
 import string
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -79,6 +81,8 @@ REGISTRATION_DAILY_CAP = 6
 NOTICE_TYPES = ("ot_change", "specs_change")
 
 _provider: Any = msg91
+SEND_SECONDS = 10
+_sends = ThreadPoolExecutor(max_workers=8, thread_name_prefix="sms-send")
 
 
 def use_provider(adapter: Any) -> Any:
@@ -274,11 +278,45 @@ def _compose(
     return number, variables, template.format(**variables)
 
 
+async def _submit(message_type: str, number: str, variables: Dict[str, Any]) -> str:
+    """Calls the provider on the SMS threads: up to SEND_SECONDS to get a thread, then SEND_SECONDS to answer (ADR 0096).
+
+    A call still waiting for a thread is withdrawn and raises Unsent, so it can be tried again. A call handed to the
+    provider that does not answer raises TimeoutError and is settled uncertain, never sent twice.
+    """
+    loop = asyncio.get_running_loop()
+    lock = threading.Lock()
+    handed = asyncio.Event()
+    state = "queued"
+
+    def call() -> str:
+        nonlocal state
+        with lock:
+            if state == "withdrawn":
+                raise msg91.Unsent("withdrawn before it reached the provider")
+            state = "handed"
+        loop.call_soon_threadsafe(handed.set)
+        return _provider.send(message_type, number, variables)
+
+    future = loop.run_in_executor(_sends, call)
+    try:
+        await asyncio.wait_for(handed.wait(), SEND_SECONDS)
+    except TimeoutError:
+        with lock:
+            if state == "queued":
+                state = "withdrawn"
+                raise msg91.Unsent(f"no free sender within {SEND_SECONDS} s")
+    done, _pending = await asyncio.wait({future}, timeout=SEND_SECONDS)
+    if not done:
+        raise TimeoutError(f"MSG91 did not answer within {SEND_SECONDS} s")
+    return future.result()
+
+
 async def _settle(db: AsyncDatabase, row: Dict[str, Any], variables: Dict[str, Any], now: datetime) -> str:
     """Submits one pending intent and records the provider's outcome as its status."""
     update: Dict[str, Any]
     try:
-        provider_id = await asyncio.to_thread(_provider.send, row["message_type"], row["number"], variables)
+        provider_id = await _submit(row["message_type"], row["number"], variables)
     except msg91.Throttled as exc:
         update = {"status": "failed", "error": str(exc)[:200], "retry_after": now + THROTTLE_BACKOFF}
     except msg91.Unsent as exc:

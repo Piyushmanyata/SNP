@@ -18,6 +18,7 @@ class Recorder:
         self.outcome: Outcome = "accept"
         self.scripted: List[Outcome] = []
         self._lock = threading.Lock()
+        self._released = threading.Event()
 
     def configured(self) -> bool:
         return self.enabled and any(self.templates.values())
@@ -41,11 +42,18 @@ class Recorder:
             raise msg91.Rejected("scripted: rejected")
         if outcome == "unknown":
             raise ValueError("scripted: the reply was lost")
+        if outcome == "hang":
+            self._released.wait(5)
+            raise ValueError("scripted: MSG91 never answered")
         assert outcome == "accept", outcome
         self.sent.append({"type": message_type, "mobile": mobile, **variables})
         request_id = f"id-{len(self.sent)}"
         self.numbers[request_id] = mobile
         return request_id
+
+    def release(self) -> None:
+        """Lets every scripted hang end, so no provider thread outlives its test."""
+        self._released.set()
 
     def report(self, request_id: str, outcome: str = "delivered", reason: str = "") -> Dict[str, Any]:
         """The MSG91 Delivery report for a recorded send: delivered, failed, dlt_failure or dnd."""

@@ -144,12 +144,14 @@ async def _slip_page(
 
 async def _send_fresh(
     db: AsyncDatabase, message_type: str, event_date: str, chosen: List[tuple],
-    camps: Dict[Any, dict], staff: Dict[str, Optional[str]], gate: str,
-) -> Tuple[int, int, int, bool]:
+    camps: Dict[Any, dict], staff: Dict[str, Optional[str]], gate: str, deadline: float,
+) -> Tuple[int, int, int, bool, bool]:
     sem = asyncio.Semaphore(4)
 
     async def one(patient: dict, venue: str, end_date: Optional[str]) -> str:
         async with sem:
+            if time.monotonic() >= deadline:
+                return "deferred"
             return await sms.record_and_send(
                 db, patient, message_type, event_date, venue, end_date,
                 now=helpers.now_utc(), camps=camps, staff_phones=staff, fresh=True,
@@ -165,7 +167,7 @@ async def _send_fresh(
     sent = failed = used = 0
     rejected = False
     for outcome in outcomes:
-        if outcome == "skipped":
+        if outcome in ("skipped", "deferred"):
             continue
         used += 1
         if outcome == "failed":
@@ -176,7 +178,7 @@ async def _send_fresh(
             rejected = True
     if rejected:
         await sms.pause_after_rejection(db, message_type, event_date, helpers.now_utc())
-    return sent, failed, used, rejected
+    return sent, failed, used, rejected, "deferred" in outcomes
 
 
 async def send_d1_reminders() -> Dict[str, Any]:
@@ -193,29 +195,24 @@ async def send_d1_reminders() -> Dict[str, Any]:
     waiting = False
     paused_hit = False
     paused_used = 0
-    complete = True
     started = time.monotonic()
     tomorrow = helpers.tomorrow_ist_str()
     try:
         camps, staff, ot_days = await _context(db)
         for message_type, item_type in REMINDER_TYPES:
             if time.monotonic() - started >= SWEEP_SECONDS or used >= SEND_LIMIT:
-                complete = False
                 break
             gate = await _gate(db, message_type, tomorrow, helpers.now_utc())
             if gate == "paused":
                 waiting = True
-                complete = False
                 paused_hit = True
                 paused_used += await sms.used(db, message_type, tomorrow)
                 continue
             if gate == "waiting":
                 waiting = True
-                complete = False
                 continue
             for row in await sms.due_retries(db, message_type, tomorrow, helpers.now_utc(), SEND_LIMIT):
                 if used >= SEND_LIMIT or time.monotonic() - started >= SWEEP_SECONDS:
-                    complete = False
                     break
                 if await sms.abandon_if_gone(db, row):
                     continue
@@ -236,7 +233,6 @@ async def send_d1_reminders() -> Dict[str, Any]:
                     sent += 1
             if cursor.get(message_type) == "done" or used >= SEND_LIMIT:
                 if used >= SEND_LIMIT:
-                    complete = False
                     break
                 continue
             last_id = cursor.get(message_type)
@@ -263,12 +259,11 @@ async def send_d1_reminders() -> Dict[str, Any]:
                         break
                 if chosen:
                     resume_at = cursor.get(message_type)
-                    page_sent, page_failed, page_used, rejected = await _send_fresh(
-                        db, message_type, tomorrow, chosen, camps, staff, gate,
+                    page_sent, page_failed, page_used, rejected, deferred = await _send_fresh(
+                        db, message_type, tomorrow, chosen, camps, staff, gate, started + SWEEP_SECONDS,
                     )
                     if page_used == 0:
                         cursor[message_type] = resume_at
-                        complete = False
                         break
                     sent += page_sent
                     failed += page_failed
@@ -278,19 +273,18 @@ async def send_d1_reminders() -> Dict[str, Any]:
                     cursor[message_type] = last_id
                     if rejected or await sms.paused(db, message_type):
                         waiting = True
-                        complete = False
                         paused_hit = True
                         paused_used = max(paused_used, page_used)
                         break
+                    if deferred:
+                        break
                     if gate == "canary":
                         waiting = True
-                        complete = False
                         break
                     if last_id == page[-1][3] and len(page) < PAGE_SIZE:
                         cursor[message_type] = "done"
                         break
                     if used >= SEND_LIMIT:
-                        complete = False
                         break
                 if len(page) < PAGE_SIZE and len(chosen) < budget:
                     cursor[message_type] = "done"
@@ -307,11 +301,10 @@ async def send_d1_reminders() -> Dict[str, Any]:
                     break
             if gate == "open" and cursor.get(message_type) != "done" and used >= SEND_LIMIT:
                 break
-        if all(cursor.get(message_type) == "done" for message_type, _item in REMINDER_TYPES) and not waiting:
-            complete = True
+        complete = not waiting and all(cursor.get(message_type) == "done" for message_type, _item in REMINDER_TYPES)
     finally:
         await _release_lease(db, holder, cursor)
-    await _write_ops(db, complete=complete and not waiting)
+    await _write_ops(db, complete=complete)
     extra: Dict[str, Any] = {}
     if paused_hit:
         extra["paused"] = True
