@@ -21,6 +21,7 @@ export function PendingStat({ value }) {
 
 function PendingList({ open, onClose }) {
   const [rows, setRows] = useState(null);
+  const [today, setToday] = useState("");
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -29,7 +30,7 @@ function PendingList({ open, onClose }) {
     setRows(null);
     setError("");
     api.get("/pending").then(
-      ({ data }) => { if (current) setRows(data.patients); },
+      ({ data }) => { if (current) { setRows(data.patients); setToday(data.today); } },
       (err) => { if (current) setError(formatApiError(err)); },
     );
     return () => { current = false; };
@@ -57,7 +58,7 @@ function PendingList({ open, onClose }) {
                   </a>
                 )}
                 <span>{printedLine(p)} · {sincePrint(p.printed_at)}</span>
-                {istDate(p.arrived_at) < istDate(Date.now()) && (
+                {istDate(p.arrived_at) < today && (
                   <span className="font-semibold text-amber-800" data-testid={`pending-earlier-${p.reg_no}`}>
                     Arrived {displayDate(istDate(p.arrived_at))}
                   </span>

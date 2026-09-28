@@ -47,7 +47,7 @@ async def pending_patients(actor: dict = Depends(require_staff)) -> Dict[str, An
     db = get_db()
     camp = await db.camps.find_one({"is_active": True})
     rows = await db.patients.find(_pending_query(camp)).sort("printed_at", 1).to_list(None) if camp else []
-    return {"patients": [ser_patient(p) for p in rows]}
+    return {"today": today_ist_str(), "patients": [ser_patient(p) for p in rows]}
 
 
 @router.get("/leaderboard")
@@ -323,12 +323,6 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
             {"delivery": "failed"},
         ],
     }
-    printed, earlier = {"$gt": ["$printed_at", None]}, {"$lt": ["$arrived_at", start]}
-    owed = {
-        "awaiting_print": {"$lte": ["$printed_at", None]},
-        "awaiting_seen": {"$and": [printed, {"$lte": ["$seen_at", None]}]},
-        "transcription_backlog": printed,
-    }
     (
         day, volunteer_rows, queue_rows, seen_today, fulfilments, sms_groups, (sms_paused, ot_day, specs_day),
     ) = await asyncio.gather(
@@ -345,11 +339,17 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
         ]),
         aggregate_list(db.patients, [
             {"$match": {"camp_id": camp_id, "queue_status": "arrived"}},
-            {"$group": {"_id": None, **{
-                f"{stage}{suffix}": {"$sum": {"$cond": [{"$and": [condition, *extra]}, 1, 0]}}
-                for stage, condition in owed.items()
-                for suffix, extra in (("", []), ("_earlier", [earlier]))
-            }}},
+            {"$group": {
+                "_id": None,
+                "unprinted": {"$sum": {"$cond": [{"$lte": ["$printed_at", None]}, 1, 0]}},
+                "unprinted_earlier": {"$sum": {"$cond": [
+                    {"$and": [{"$lte": ["$printed_at", None]}, {"$lt": ["$arrived_at", start]}]}, 1, 0,
+                ]}},
+                "printed": {"$sum": {"$cond": [{"$gt": ["$printed_at", None]}, 1, 0]}},
+                "printed_earlier": {"$sum": {"$cond": [
+                    {"$and": [{"$gt": ["$printed_at", None]}, {"$lt": ["$arrived_at", start]}]}, 1, 0,
+                ]}},
+            }},
         ]),
         db.patients.count_documents({"camp_id": camp_id, "seen_at": {"$gte": start, "$lt": end}}),
         asyncio.gather(*[
@@ -380,6 +380,8 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
 
     arrived = sum(row["arrived"] for row in volunteer_rows)
     queue = queue_rows[0] if queue_rows else {}
+    unprinted, printed = queue.get("unprinted", 0), queue.get("printed", 0)
+    unprinted_earlier, printed_earlier = queue.get("unprinted_earlier", 0), queue.get("printed_earlier", 0)
     by_vol = {row["_id"]: row for row in volunteer_rows if row["_id"]}
     vol_ids = [ObjectId(v) for v in by_vol if ObjectId.is_valid(v)]
     volunteers = await db.users.find({"_id": {"$in": vol_ids}}).to_list(None) if vol_ids else []
@@ -439,9 +441,15 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
         "day": {"id": str(day["_id"]), "day_date": day["day_date"]},
         "stages": {
             "arrived": arrived,
+            "awaiting_print": unprinted,
+            "awaiting_seen": printed,
             "seen": seen_today,
-            **{stage: queue.get(stage, 0) for stage in owed},
-            "earlier_days": {stage: queue.get(f"{stage}_earlier", 0) for stage in owed},
+            "transcription_backlog": printed,
+            "earlier_days": {
+                "awaiting_print": unprinted_earlier,
+                "awaiting_seen": printed_earlier,
+                "transcription_backlog": printed_earlier,
+            },
         },
         "fulfilment": fulfil_counts,
         "activity": activity,

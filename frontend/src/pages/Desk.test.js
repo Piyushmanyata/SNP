@@ -2041,11 +2041,10 @@ describe("Manual entry, Pending and Reprint (ADR 0084)", () => {
 
   test("Pending marks a patient who arrived on an earlier camp day", async () => {
     const base = api.get.getMockImplementation();
-    const today = new Date().toISOString();
     api.get.mockImplementation((url) => (url === "/pending"
-      ? Promise.resolve({ data: { patients: [
+      ? Promise.resolve({ data: { today: "2026-09-02", patients: [
         { ...PRINTED, arrived_at: "2026-09-01T04:00:00Z" },
-        { ...PRINTED, id: "p-2", reg_no: "102", arrived_at: today, printed_at: today },
+        { ...PRINTED, id: "p-2", reg_no: "102", arrived_at: "2026-09-02T04:00:00Z" },
       ] } })
       : base(url)));
     await renderDesk();

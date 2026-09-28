@@ -100,12 +100,12 @@ class TestCampDayBoard:
             p_seen, p_tx = ObjectId(), ObjectId()
             await database.patients.insert_many([
                 patient_doc(
-                    _id=p_seen, camp_id=camp_id, full_name="Sunita Devi", arrived_by=str(desk_busy),
+                    _id=p_seen, camp_id=camp_id, full_name="Sunita Devi", arrived_by=str(desk_busy), queue_status="seen",
                     arrived_at=NOW - timedelta(minutes=10), printed_at=NOW - timedelta(minutes=8),
                     seen_at=NOW - timedelta(minutes=5),
                 ),
                 patient_doc(
-                    _id=p_tx, camp_id=camp_id, full_name="Ramesh Kumar", arrived_by=str(desk_quiet),
+                    _id=p_tx, camp_id=camp_id, full_name="Ramesh Kumar", arrived_by=str(desk_quiet), queue_status="seen",
                     arrived_at=NOW - timedelta(minutes=40), printed_at=NOW - timedelta(minutes=35),
                     seen_at=NOW - timedelta(minutes=30), committed_revision_id=ObjectId(),
                 ),

@@ -35,6 +35,7 @@ def test_pending_is_every_printed_patient_not_yet_seen_in_the_active_camp_oldest
             listed = await client.get("/api/pending", headers=headers)
         assert kpis["pending"] == 3
         assert listed.status_code == 200, listed.text
+        assert listed.json()["today"] == TODAY
         rows = listed.json()["patients"]
         assert [p["full_name"] for p in rows] == ["From Yesterday", "Waiting Longest", "Kamla Bai"]
         assert rows[0]["arrived_at"].startswith(yesterday.date().isoformat())

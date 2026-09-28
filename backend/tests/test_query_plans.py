@@ -90,10 +90,7 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
             "pending": {"find": "patients", "filter": {
                 "camp_id": camp, "queue_status": "arrived", "printed_at": {"$ne": None},
             }, "sort": {"printed_at": 1}},
-            "board carry-over": {"aggregate": "patients", "pipeline": [
-                {"$match": {"camp_id": camp, "queue_status": "arrived"}},
-                {"$group": {"_id": None, "n": {"$sum": 1}}},
-            ], "cursor": {}},
+
             "lookalikes": {"find": "patients", "filter": {
                 "camp_id": camp, "full_name_normalized": {"$in": [patient["full_name_normalized"]]},
                 "age": {"$gte": 40, "$lte": 50},
@@ -123,6 +120,16 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
                     "patient_seen_at": {"$gte": start, "$lt": end},
                 }},
                 {"$group": {"_id": 1, "n": {"$sum": 1}}},
+            ], "cursor": {}},
+            "board carry-over": {"aggregate": "patients", "pipeline": [
+                {"$match": {"camp_id": camp, "queue_status": "arrived"}},
+                {"$group": {
+                    "_id": None,
+                    "unprinted": {"$sum": {"$cond": [{"$lte": ["$printed_at", None]}, 1, 0]}},
+                    "printed_earlier": {"$sum": {"$cond": [
+                        {"$and": [{"$gt": ["$printed_at", None]}, {"$lt": ["$arrived_at", start]}]}, 1, 0,
+                    ]}},
+                }},
             ], "cursor": {}},
             "board activity": {"aggregate": "patients", "pipeline": [
                 {"$match": {"camp_id": camp, "arrived_at": {"$gte": start, "$lt": end}}},
