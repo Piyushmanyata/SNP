@@ -115,9 +115,12 @@ class TestPrintWindowNoCalendar:
                  gender="F", dob="1980-03-03", aadhaar_last4="1020", aadhaar_scanned=True)
         assert r.status_code == 200, r.text
         pid = r.json()["registration"]["id"]
-        arrived = admin.post(f"{API}/desk/arrive/{pid}", timeout=30)
-        assert arrived.status_code == 409, arrived.text
-        assert arrived.json()["detail"]["code"] == "PRINT_WINDOW_CLOSED"
+        released = admin.post(f"{API}/desk/no-card", json={"patient_id": pid, "reason": "no_card"}, timeout=30)
+        assert released.status_code == 409, released.text
+        assert released.json()["detail"]["code"] == "PRINT_WINDOW_CLOSED"
+        held = admin.post(f"{API}/desk/arrive/{pid}", timeout=30)
+        assert held.status_code == 409, held.text
+        assert held.json()["detail"]["code"] == "NEEDS_DOOR_SCAN"
 
     def test_print_409_after_arrival_then_window_closed(self, admin):
         camp_id = _camp(admin, "printpast")

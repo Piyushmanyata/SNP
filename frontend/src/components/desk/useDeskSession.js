@@ -150,7 +150,10 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
     const noCardPrint = async (reg, reason) => {
       dispatch({ type: "failed", message: "" });
       try {
-        const { data } = await api.post("/desk/no-card", { patient_id: reg.id, reason: reason.code, note: reasonBody(reason).note });
+        const { data } = await api.post("/desk/no-card", {
+          patient_id: reg.id, reason: reason.code, note: reasonBody(reason).note,
+          ...(reason.last4 ? { aadhaar_last4: reason.last4 } : {}),
+        });
         dispatch({ type: "released", registration: data.registration });
         await print(data.registration);
         return true;
@@ -169,29 +172,24 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
       }
       const { seq, walkIn } = dispatch({ type: "walkInStarted", key: scanPayload || "", reqId: v4() });
       try {
-        let patientId = walkIn.patientId;
-        if (!patientId) {
-          const card = scanResult.card;
-          const created = await registerPatient({
-            form: {
-              full_name: card.full_name,
-              age: card.age ?? "",
-              phone: doorPhone,
-              gender: card.gender,
-              address: card.address,
-              aadhaar_last4: card.aadhaar_last4,
-              dob: card.dob,
-            },
-            qrPayload: scanPayload,
-            dayId: operatingDayId,
-            reqId: walkIn.reqId,
-          });
-          onCreated(created);
-          patientId = created.registration.id;
-          dispatch({ type: "walkInRegistered", patientId });
-        }
-        const { data } = await api.post(`/desk/arrive/${patientId}`);
-        dispatch({ type: "walkInResolved", seq, registration: data.registration, prescription: data.prescription });
+        const card = scanResult.card;
+        const created = await registerPatient({
+          form: {
+            full_name: card.full_name,
+            age: card.age ?? "",
+            phone: doorPhone,
+            gender: card.gender,
+            address: card.address,
+            aadhaar_last4: card.aadhaar_last4,
+            dob: card.dob,
+          },
+          qrPayload: scanPayload,
+          dayId: operatingDayId,
+          reqId: walkIn.reqId,
+          atDoor: true,
+        });
+        onCreated(created);
+        dispatch({ type: "walkInResolved", seq, registration: created.registration });
       } catch (err) {
         dispatch({
           type: "walkInFailed",

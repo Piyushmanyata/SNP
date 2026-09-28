@@ -20,6 +20,7 @@ from models import (
     NoCardBody,
     PrintWindowBody,
     RegisterBody,
+    ScanBody,
     TranscriptionBody,
     UndoCompletionBody,
 )
@@ -31,10 +32,10 @@ from routes_clinical import (
     record_fulfilment,
     undo_completion,
 )
-from routes_desk import arrive, preview_prescription, print_prescription, record_no_card_print
+from routes_desk import arrive, preview_prescription, print_prescription, record_no_card_print, scan
 from routes_registration import _create_registration
 from seed import (
-    FIXED_POWER, MEDICINE, MEDICINE_ALT, NOW, TODAY, TOMORROW, Request, asgi_client, bearer, day, patient_doc, register,
+    CARD, FIXED_POWER, MEDICINE, MEDICINE_ALT, NOW, TODAY, TOMORROW, Request, asgi_client, bearer, day, patient_doc, register,
     run_camp, seed_camp, user_doc,
 )
 
@@ -705,7 +706,7 @@ class TestPrintingMatrix:
                 day_id, actor=VOLUNTEER, full_name="Walk", aadhaar_scanned=True, aadhaar_last4="7766", dob="1970-02-02",
             ))["id"]
             with pytest.raises(HTTPException) as exc:
-                await arrive(pid, actor=VOLUNTEER)
+                await scan(ScanBody(payload=CARD), actor=VOLUNTEER)
             assert exc.value.detail["code"] == "PRINT_WINDOW_CLOSED"
             refreshed = await db.patients.find_one({"_id": ObjectId(pid)})
             assert refreshed.get("arrived_at") is None

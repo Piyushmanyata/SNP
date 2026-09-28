@@ -223,6 +223,7 @@ class NoCardBody(BaseModel):
     patient_id: str = Field(max_length=24)
     reason: ManualReason
     note: Optional[ManualNote] = None
+    aadhaar_last4: Optional[str] = Field(default=None, pattern=r"^\d{4}$")
 
 
 class OtScheduleBody(BaseModel):

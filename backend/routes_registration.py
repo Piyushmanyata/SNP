@@ -162,7 +162,7 @@ def _build_patient_document(
         "manual_reason": body.manual_reason if is_manual else None,
         "manual_note": body.manual_note if is_manual else None,
         "manual_at_door": bool(body.at_door) if is_manual else False,
-        **arrival.fields_at_creation(str(actor_id) if is_manual and body.at_door and actor_id else None, now_utc()),
+        **arrival.fields_at_creation(str(actor_id) if body.at_door and actor_id else None, now_utc()),
         **({"registration_request_id": body.registration_request_id} if body.registration_request_id else {}),
         "reminder_sms_sent_at": None,
         "created_at": now_utc(),
@@ -263,8 +263,12 @@ async def _create_registration(
 
     if is_self and not body.aadhaar_scanned:
         raise api_error(400, "MANUAL_ENTRY_NOT_ALLOWED", 'Scan the Aadhaar card. Public registration has no manual entry.')
+    if is_self:
+        body.at_door = False
     if not body.aadhaar_scanned:
-        _reject_unscanned_staff_entry(body, operating)
+        _reject_unscanned_staff_entry(body)
+    if body.at_door and not operating:
+        raise api_error(409, "NOT_OPERATING_DAY", 'The door registers patients for the Operating day only.')
 
     phone = normalize_phone(body.phone)
     if is_self and (not phone or is_dummy_phone(phone)):
@@ -399,12 +403,10 @@ def checked_manual_note(reason: Optional[str], note: Optional[str]) -> Optional[
     return note
 
 
-def _reject_unscanned_staff_entry(body: RegisterBody, operating: bool) -> None:
+def _reject_unscanned_staff_entry(body: RegisterBody) -> None:
     body.manual_note = checked_manual_note(body.manual_reason, body.manual_note)
     if body.manual_reason in CARD_IN_HAND and not body.aadhaar_last4:
         raise api_error(400, "AADHAAR_LAST4_REQUIRED", 'The card is here: type the last 4 digits of its Aadhaar number.')
-    if body.at_door and not operating:
-        raise api_error(409, "NOT_OPERATING_DAY", 'The door registers patients for the Operating day only.')
 
 
 @router.post("/register")

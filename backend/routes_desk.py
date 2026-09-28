@@ -13,7 +13,7 @@ import arrival
 from aadhaar import decode_aadhaar
 import lock_resolution
 from lock_resolution import duplicate_in_camp, is_manual
-from routes_registration import checked_manual_note
+from routes_registration import CARD_IN_HAND, checked_manual_note
 router = APIRouter(prefix="/api/desk", tags=["desk"])
 
 MAX_REG_NO_DIGITS = 12
@@ -283,12 +283,24 @@ async def record_no_card_print(
     if not p:
         raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
     _require_in_camp(p, camp)
-    released = await db.patients.find_one_and_update(
-        {"_id": p["_id"], "identity_recheck_required": True},
+    if p.get("queue_status") == "seen":
+        raise api_error(409, "ALREADY_SEEN", 'The doctor has already seen this patient. The prescription cannot be printed again.')
+    if p.get("arrived_at"):
+        return {"registration": ser_patient(p)}
+    if lock_resolution.is_scanned(p) and body.reason in CARD_IN_HAND:
+        if not body.aadhaar_last4:
+            raise api_error(400, "AADHAAR_LAST4_REQUIRED", 'The card is here: type the last 4 digits of its Aadhaar number.')
+        if body.aadhaar_last4 != p.get("aadhaar_last4"):
+            raise api_error(409, "NO_CARD_LAST4_MISMATCH", "These last 4 digits do not match this patient's booking. Check the card and the patient.")
+    recorded = await db.patients.find_one_and_update(
+        {"_id": p["_id"], "arrived_at": None, "queue_status": {"$ne": "seen"}, "no_card_print": None},
         {"$set": {
             "identity_recheck_required": False,
             "no_card_print": {"reason": body.reason, "note": note, "by": str(actor["_id"]), "at": now_utc()},
         }},
         return_document=True,
     )
-    return {"registration": ser_patient(released or p)}
+    current = recorded or await db.patients.find_one({"_id": p["_id"]})
+    if not current:
+        raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
+    return {"registration": ser_patient(current)}
