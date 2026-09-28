@@ -183,7 +183,7 @@ def require_unchanged(patient: dict, expected: int, revision_id: Any) -> None:
 
 
 def draft_conflict() -> HTTPException:
-    return conflict("draft_version_conflict", "Another operator saved this prescription; reload before saving.")
+    return conflict("draft_version_conflict", "This prescription changed since you opened it. Reload to see the saved version.")
 
 
 def require_draft_version(transcription: Optional[dict], expected: Optional[int]) -> None:

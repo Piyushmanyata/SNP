@@ -24,7 +24,22 @@ A clinical operator copies the paper in the wizard and saves it. That save is wh
 
 ## Internet outage
 
-Switch to the second SIM router. If the camp still has no connection, write arrivals on a paper register. When the network returns, enter those patients with **Manual entry**, reason Other, note "network outage". Do not invent a scan.
+The camp rides out an outage on a second network, not on paper (ADR 0094).
+
+**Before the doors open**
+
+1. Place one 4G/5G hotspot for every six desks, on a carrier different from the venue link, plus two spares: 9 hotspots for 37 desks. Put each within a few metres of its desks, away from metal cupboards.
+2. On every laptop, save both the venue Wi-Fi and its group's hotspot, and let Windows join the hotspot automatically when the venue link drops.
+3. Test failover: unplug the venue router for one minute. Every desk should keep working, and any desk that shows the amber banner **No connection to the server** must clear it within a minute on the hotspot. Plug the router back in.
+
+**When a desk shows "No connection to the server"**
+
+- The banner appears on every staff screen the moment the device cannot reach the server, and clears by itself on the next request that gets an answer. Nothing already saved is lost.
+- **The door holds the queue.** Do not scan, register or print until the banner clears.
+- **Clinical desks pause.** Keep the paper and the entries on screen; save when the banner clears.
+- **No paper registrations.** Nothing is written down for later entry: a later entry loses the card Lock and the Paper check.
+- A Paper check that failed: once the banner clears, press **Printed — next patient** again. It is recorded even if the Print window closed in the meantime, the same day, until the doctor sees the patient.
+- **Who to tell:** the Team Lead first, then the Admin. If the whole camp is down for more than ten minutes, the Admin announces the pause to the queue.
 
 ## SMS pause
 

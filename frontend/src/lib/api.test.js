@@ -1,5 +1,6 @@
 import { AxiosError } from "axios";
 import api, { backendOrigin, formatApiError } from "./api";
+import { isOffline, setOffline } from "./connection";
 
 const ORIGINAL_ENV = process.env.REACT_APP_BACKEND_URL;
 
@@ -76,4 +77,73 @@ test("a validation error lists every field message", () => {
     fields: { prescribed_medicines: "Select every medicine written on the paper.", fixed_power: "Select the fixed power for both eyes." },
   } } } };
   expect(formatApiError(err)).toBe("Select every medicine written on the paper. Select the fixed power for both eyes.");
+});
+
+describe("the connection state", () => {
+  const original = api.defaults.adapter;
+  afterEach(() => {
+    api.defaults.adapter = original;
+    setOffline(false);
+  });
+
+  const answer = (status) => async (config) => {
+    if (status < 400) return { status, statusText: "OK", data: {}, headers: {}, config };
+    throw new AxiosError("Conflict", "ERR_BAD_REQUEST", config, null, { status, data: {}, headers: {}, config });
+  };
+
+  test("a request that gets no answer marks the server unreachable", async () => {
+    api.defaults.adapter = async (config) => { throw new AxiosError("Network Error", "ERR_NETWORK", config); };
+    await expect(api.get("/kpis")).rejects.toThrow("Network Error");
+    expect(isOffline()).toBe(true);
+  });
+
+  test.each([200, 409])("any answer from the server (%i) clears it", async (status) => {
+    setOffline(true);
+    api.defaults.adapter = answer(status);
+    await api.get("/kpis").catch(() => {});
+    expect(isOffline()).toBe(false);
+  });
+
+  test("a gateway error from the proxy, with no answer from the API, counts as unreachable", async () => {
+    api.defaults.adapter = async (config) => {
+      throw new AxiosError("Bad Gateway", "ERR_BAD_RESPONSE", config, null, { status: 502, data: "<html>", headers: {}, config });
+    };
+    await api.get("/kpis").catch(() => {});
+    expect(isOffline()).toBe(true);
+  });
+
+  test("a 503 the API itself sends is an answer", async () => {
+    setOffline(true);
+    api.defaults.adapter = async (config) => {
+      throw new AxiosError("Unavailable", "ERR_BAD_RESPONSE", config, null, {
+        status: 503, data: { detail: { code: "QR_UNAVAILABLE" } }, headers: {}, config,
+      });
+    };
+    await api.get("/aadhaar/extract").catch(() => {});
+    expect(isOffline()).toBe(false);
+  });
+
+  test("a request sent before the latest answer cannot bring the banner back", async () => {
+    let failOld;
+    api.defaults.adapter = (config) => (config.url === "/old"
+      ? new Promise((_resolve, reject) => { failOld = () => reject(new AxiosError("timeout", "ECONNABORTED", config)); })
+      : answer(200)(config));
+    const old = api.get("/old").catch(() => {});
+    await api.get("/new");
+    failOld();
+    await old;
+    expect(isOffline()).toBe(false);
+  });
+
+  test("a request the page cancelled says nothing about the connection", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(api.get("/kpis", { signal: controller.signal })).rejects.toThrow();
+    expect(isOffline()).toBe(false);
+  });
+
+  test("the browser going offline marks it at once", () => {
+    window.dispatchEvent(new Event("offline"));
+    expect(isOffline()).toBe(true);
+  });
 });

@@ -1,9 +1,10 @@
-import React, { useState } from "react";
+import React, { useEffect, useState, useSyncExternalStore } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { LogOut, Stethoscope } from "lucide-react";
 import { Alert, Badge } from "./ui";
-import { formatApiError } from "../lib/api";
+import api, { formatApiError } from "../lib/api";
+import { isOffline, subscribeConnection } from "../lib/connection";
 import PinChangeModal from "./PinChangeModal";
 
 const ROLE_LABELS = {
@@ -19,6 +20,13 @@ export default function Layout({ children, title }) {
   const [changingPin, setChangingPin] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [logoutError, setLogoutError] = useState("");
+  const offline = useSyncExternalStore(subscribeConnection, isOffline);
+
+  useEffect(() => {
+    if (!offline) return undefined;
+    const ping = setInterval(() => { api.get("/health").catch(() => {}); }, 10000);
+    return () => clearInterval(ping);
+  }, [offline]);
 
   return (
     <div className="min-h-screen">
@@ -72,6 +80,11 @@ export default function Layout({ children, title }) {
             </div>
           )}
         </div>
+        {offline && (
+          <div role="alert" className="bg-amber-300 text-slate-950 font-semibold text-sm sm:text-base px-4 py-3 text-center" data-testid="offline-banner">
+            No connection to the server. Hold the queue — nothing is lost. This clears by itself when the connection returns.
+          </div>
+        )}
       </header>
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 animate-fade-up">
         {logoutError && <Alert className="mb-4">{logoutError}</Alert>}

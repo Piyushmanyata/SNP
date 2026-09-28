@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth, roleHome } from "../context/AuthContext";
 import { Button, Input, Field, Alert } from "../components/ui";
 import api, { formatApiError } from "../lib/api";
+import { displayTime } from "../lib/dates";
 import { Stethoscope } from "lucide-react";
 
 export default function Login() {
@@ -13,6 +14,7 @@ export default function Login() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [occupancy, setOccupancy] = useState(null);
+  const [stale, setStale] = useState(false);
 
   useEffect(() => {
     if (user) navigate(roleHome(user.role), { replace: true });
@@ -25,8 +27,12 @@ export default function Login() {
       if (cancelled || inFlight || document.hidden) return;
       inFlight = true;
       api.get("/camps/active/public").then((r) => {
-        if (!cancelled) setOccupancy(r.data);
-      }).catch(() => {}).finally(() => { inFlight = false; });
+        if (cancelled) return;
+        setOccupancy({ ...r.data, loadedAt: Date.now() });
+        setStale(false);
+      }).catch(() => {
+        if (!cancelled) setStale(true);
+      }).finally(() => { inFlight = false; });
     };
     load();
     const t = setInterval(load, 30000);
@@ -60,7 +66,7 @@ export default function Login() {
           </div>
           <span className="font-display font-extrabold text-xl">SNP Camps</span>
         </div>
-        <Occupancy occupancy={occupancy} />
+        <Occupancy occupancy={occupancy} stale={stale} />
         <p className="text-xs text-slate-500 font-mono">Registered → Arrived → Seen · one active camp</p>
       </div>
 
@@ -112,7 +118,7 @@ export default function Login() {
               Patient self-registration →
             </a>
             <div className="lg:hidden mt-4">
-              <Occupancy occupancy={occupancy} compact />
+              <Occupancy occupancy={occupancy} stale={stale} compact />
             </div>
           </div>
         </div>
@@ -121,7 +127,7 @@ export default function Login() {
   );
 }
 
-function Occupancy({ occupancy, compact }) {
+function Occupancy({ occupancy, stale, compact }) {
   if (!occupancy?.camp) return null;
   const seats = occupancy.total_seats ?? 0;
   const registered = occupancy.total_registered ?? 0;
@@ -146,6 +152,11 @@ function Occupancy({ occupancy, compact }) {
       <p className="mt-1 text-xs text-slate-500">
         {occupancy.camp.venue}
       </p>
+      {stale && (
+        <p className={`mt-2 text-sm font-semibold ${compact ? "text-amber-800" : "text-amber-300"}`} data-testid="occupancy-stale">
+          Not updated since {displayTime(occupancy.loadedAt)}.
+        </p>
+      )}
     </div>
   );
 }

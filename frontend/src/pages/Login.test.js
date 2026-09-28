@@ -139,4 +139,19 @@ describe("Login page occupancy", () => {
     await act(async () => { jest.advanceTimersByTime(1); });
     expect(api.get.mock.calls.filter((c) => c[0] === "/camps/active/public")).toHaveLength(2);
   });
+
+  test("marks the numbers stale, with the time of the last good value, while a refresh fails", async () => {
+    jest.setSystemTime(new Date("2026-10-05T04:00:00Z"));
+    await act(async () => { root.render(<MemoryRouter><Login /></MemoryRouter>); });
+    const stale = () => container.querySelector('[data-testid="occupancy-stale"]');
+    expect(stale()).toBeNull();
+
+    api.get.mockRejectedValueOnce(new Error("Network Error"));
+    await act(async () => { jest.advanceTimersByTime(30000); });
+    expect(stale().textContent).toBe("Not updated since 09:30.");
+    expect(container.querySelector('[data-testid="occupancy-headline"]').textContent).toBe("15 / 80");
+
+    await act(async () => { jest.advanceTimersByTime(30000); });
+    expect(stale()).toBeNull();
+  });
 });

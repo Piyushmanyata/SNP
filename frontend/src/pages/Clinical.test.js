@@ -797,7 +797,7 @@ describe("Clinical draft version and dirty-draft protection", () => {
 
   const conflictError = { response: { status: 409, data: { detail: {
     code: "DRAFT_VERSION_CONFLICT",
-    message: "Another operator saved this prescription; reload before saving.",
+    message: "This prescription changed since you opened it. Reload to see the saved version.",
   } } } };
 
   const openDraft = async (version) => {
@@ -857,7 +857,10 @@ describe("Clinical draft version and dirty-draft protection", () => {
 
     expect(container.querySelector('[data-testid="wizard-progress"]').textContent).toContain("Step 1 of");
     expect(otherValue()).toBe("Pterygium left eye");
-    expect(container.querySelector('[data-testid="draft-conflict"]')).not.toBeNull();
+    expect(container.querySelector('[data-testid="draft-conflict"]').textContent).toContain(
+      "This prescription changed since you opened it.",
+    );
+    expect(container.querySelector('[data-testid="draft-conflict"]').textContent).not.toContain("Another operator");
     expect(container.querySelector('[data-testid="draft-conflict-reload"]')).not.toBeNull();
 
     api.post.mockResolvedValueOnce({ data: {
@@ -1131,7 +1134,7 @@ describe("S7 clinical desk", () => {
     expect(q("wizard-progress").textContent).toContain("Step 2 of");
     await act(async () => q("none-prescribed").click());
     api.post.mockRejectedValueOnce({ response: { status: 409, data: { detail: {
-      code: "DRAFT_VERSION_CONFLICT", message: "Another operator saved this prescription; reload before saving.",
+      code: "DRAFT_VERSION_CONFLICT", message: "This prescription changed since you opened it. Reload to see the saved version.",
     } } } });
     await act(async () => q("wizard-next").click());
     api.post.mockResolvedValueOnce(draft(9));

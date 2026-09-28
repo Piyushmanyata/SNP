@@ -1,4 +1,5 @@
 import axios from "axios";
+import { setOffline } from "./connection";
 
 function isLoopback(host) {
   return host === "localhost" || host === "127.0.0.1" || host === "[::1]" || host === "::1";
@@ -28,7 +29,31 @@ const api = axios.create({
   timeout: 30000,
 });
 
-api.interceptors.response.use(undefined, (err) => {
+function answeredByApi(response) {
+  return Boolean(response) && !(response.status >= 502 && response.status <= 504 && !response.data?.detail);
+}
+
+const sequence = new WeakMap();
+let sent = 0;
+let newestAnswered = 0;
+
+function answered(config) {
+  newestAnswered = Math.max(newestAnswered, sequence.get(config) ?? 0);
+  setOffline(false);
+}
+
+api.interceptors.request.use((config) => {
+  sent += 1;
+  sequence.set(config, sent);
+  return config;
+});
+
+api.interceptors.response.use((response) => {
+  answered(response.config);
+  return response;
+}, (err) => {
+  if (answeredByApi(err?.response)) answered(err.config);
+  else if (!axios.isCancel(err) && (sequence.get(err?.config) ?? Infinity) > newestAnswered) setOffline(true);
   if (err?.response?.status === 401 && err.config?.url !== "/auth/login") {
     window.dispatchEvent(new Event("snp:unauthorized"));
   }
