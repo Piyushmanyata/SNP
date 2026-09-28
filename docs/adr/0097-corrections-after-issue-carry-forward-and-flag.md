@@ -17,9 +17,9 @@ On a correction commit, inside the correction's `apply` step and its one transac
 - one the correction adds is open (`given: null`);
 - one it removes after it was given stays recorded as given, with `prescribed: false`.
 
-The status is derived as before, so a line with open medicines is Partially fulfilled, and a line where nothing was handed over is Not available, never Fulfilled. The line is reopened at the Fulfilment station for the open medicines only: every settled outcome, given or not available, stays as recorded.
+The status is derived as before: a line with open medicines is Partially fulfilled when at least one medicine was given, and Not available when none was; a line where nothing was handed over is never Fulfilled. The line is reopened at the Fulfilment station for the open medicines only: every settled outcome, given or not available, stays as recorded.
 
-**Fixed-power specs:** if the correction moved the prescribed power away from the Issued power, the Issued power stays, and nothing reopens. A desk substitution without a correction is not marked.
+**Fixed-power specs:** if the correction moved the prescribed power away from the Issued power, the Issued power stays, and nothing reopens. A desk substitution without a correction is not marked. A second issue of the line keeps the Issued power already recorded: those spectacles left the camp.
 
 **The mark:** any line the correction changed gets `corrected_after_issue: {revision_id, at, by}`. A reopened line is issued again only after a fresh Paper review against the corrected revision and generation (`STALE_REVIEW` until then), and a re-issue records only the open medicines (`settle_open`). The mark is never cleared: it records that the line changed after goods left, which stays true.
 

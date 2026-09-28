@@ -186,3 +186,18 @@ def test_a_catalogue_rename_does_not_reopen_a_medicine_already_given(monkeypatch
         assert "corrected_after_issue" not in medicine
 
     run_camp(monkeypatch, run)
+
+
+def test_a_second_fixed_power_issue_keeps_the_power_already_handed_over(monkeypatch):
+    async def run(database):
+        ids = await _issued(database)
+        result = await _correct(ids, fixed_power_r=2.25, fixed_power_l=2.25)
+        await record_fulfilment(fulfil(
+            ids["trans_id"], result["revision"]["id"], item_type="specs_fixed", status="fulfilled",
+            issued_power_r=2.25, issued_power_l=2.25,
+            reviewed_generation=result["registration"]["clinical_generation"],
+        ), actor=CLINICAL, background_tasks=None)
+        specs = await _line(database, ids, "specs_fixed")
+        assert (specs["issued_power_r"], specs["issued_power_l"]) == (2.0, 2.0)
+
+    run_camp(monkeypatch, run)

@@ -485,6 +485,8 @@ async def record_fulfilment(
         if medicine_outcomes and prior:
             doc["medicine_outcomes"] = settle_open(prior.get("medicine_outcomes") or [], medicine_outcomes)
             doc["status"] = derive_medicine_status(doc["medicine_outcomes"])
+        if issued_powers and prior and prior.get("issued_power_r") is not None:
+            doc["issued_power_r"], doc["issued_power_l"] = prior["issued_power_r"], prior["issued_power_l"]
         doc.update({
             "operation_id": body.operation_id,
             "reviewed_revision_id": current["committed_revision_id"],

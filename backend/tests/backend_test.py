@@ -841,7 +841,8 @@ class TestReports:
             "medicines_prescribed,medicines_not_given,"
             "fixed_power_r,fixed_power_l,issued_power_r,issued_power_l,"
             "medicine,fixed_power_specs,spectacles_to_be_made,ot,"
-            "ot_day,ot_venue,specs_day,specs_venue,specs_start,specs_end"
+            "ot_day,ot_venue,specs_day,specs_venue,specs_start,specs_end,"
+            "corrected_after_issue"
         ), header
         assert str(STATE["p1"]["reg_no"]) in r.text
 
