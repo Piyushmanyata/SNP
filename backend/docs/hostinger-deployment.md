@@ -743,3 +743,23 @@ Live checks:
 - The deployed backend carries `carry_medicine_outcomes` and `fixed_power_corrected`.
 - The deployed frontend bundle carries the `Corrected after issue` alert.
 - The backend and reminders logs have no tracebacks and no 5xx.
+
+
+## Settled outcomes on corrected lines — 29 September 2026
+
+[PR 108](https://github.com/Piyushmanyata/SNP/pull/108) (CodeRabbit follow-up to PR 106) merged to `main` as `5d70ff5cd4e8c9cb5266f77d2ebfa24fd5dc753c`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/5d70ff5cd4e8c9cb5266f77d2ebfa24fd5dc753c`. CI run [36425421801](https://github.com/Piyushmanyata/SNP/actions/runs/36425421801) on `main` passed.
+
+Before the update, the running `a3d2d0c` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-a3d2d0cd24cb4981faa383ed663f3128f11fe5f7`. The backup container was restarted and took snapshot `f20343d6` at 06:03 UTC. Backend and reminders were recreated; the frontend image was rebuilt unchanged, and MongoDB and Caddy stayed up. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/a3d2d0cd24cb4981faa383ed663f3128f11fe5f7`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed. On a line corrected after issue, a re-issue keeps the outcomes already settled as given, and the fixed-power line keeps the powers that were handed over. An ordinary re-record, with no correction, still lets the latest issue win. This closes the last open CodeRabbit thread on PR 106.
+
+Live checks:
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Every service reports healthy or running.
+- The deployed backend carries the `corrected` argument on `keep_removed`.
+- The backend and reminders logs have no tracebacks and no 5xx.
