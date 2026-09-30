@@ -796,3 +796,30 @@ Live checks:
 - The backend and reminders logs have no tracebacks and no 5xx.
 
 Open: ADR 0101 asks for a p95 check of `/desk/lookup` and `/patients/search` from the backend logs. There was no camp traffic at deploy time, so take it at the next camp session.
+
+
+## Searchable desk lists, sponsor logos side by side — 30 September 2026
+
+[PR 120](https://github.com/Piyushmanyata/SNP/pull/120) (searchable Registered, Seen and Pending lists; sponsor logos side by side), [PR 121](https://github.com/Piyushmanyata/SNP/pull/121) (Rx Template tab no longer overflows at phone width) and [PR 122](https://github.com/Piyushmanyata/SNP/pull/122) (the "Add logo" control stays in the tab order) merged to `main` as `558545edf88226cb8d6a60ea9436fd701107fbf3`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/558545edf88226cb8d6a60ea9436fd701107fbf3`. PR 120's CI run [36755509601](https://github.com/Piyushmanyata/SNP/actions/runs/36755509601) passed every check on `86407ad`, which already carried PRs 121 and 122; its tree is the tree of `558545e`.
+
+Before the update, the running `d23ecbd` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-d23ecbd02ff0271f886534e37b0184e784a4dd43`. The backup container was restarted and took snapshot `754f8eba` at 18:15 UTC. Backend, frontend and reminders were rebuilt; Compose also recreated MongoDB on the same volumes, and Caddy stayed up. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/d23ecbd02ff0271f886534e37b0184e784a4dd43`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed and no index changed. `init_indexes` now names the `camp_id + full_name_normalized` index explicitly; the live index already had that default name, checked before the update.
+
+Behaviour changes:
+- `GET /api/lists/{registered|seen|pending}?q=` replaces `GET /api/pending`, which now returns 404. It returns ten rows, the total (counted up to 1,000, then "1,000+") and each row's Queue stage.
+- Desk search: fewer than ten digits is a registration number, ten digits is the household phone, letters match the start of any word in the name. `/patients/search` (Find one patient) follows the same rule.
+- Sponsor logos pack from the left and shrink together to stay on one row.
+
+Live checks:
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- `/api/lists/registered` without a session returned 401; `/api/pending` returned 404.
+- Backend, frontend and mongo report healthy; backup, caddy and reminders are running.
+- Document counts are unchanged: 4 users, 1 camp, 8 patients.
+- The backend carries `desk_search.py` and the one-pass list search. The served `StageList-BRZaexlc.js` carries `list-search-input` and the packed sponsor strip, and no longer carries the stretched logo class.
+- The backend and reminders logs have no tracebacks and no 5xx.
