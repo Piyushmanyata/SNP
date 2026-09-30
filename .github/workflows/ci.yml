@@ -128,8 +128,10 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 2
       - run: docker run --rm --network none -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12
-      - run: git diff --check
+      - run: git diff --check HEAD^1 HEAD
 
   prod-smoke:
     runs-on: ubuntu-24.04

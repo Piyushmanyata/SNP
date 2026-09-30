@@ -80,6 +80,19 @@ def test_a_medicine_removed_after_it_was_given_stays_given_and_is_marked(monkeyp
     run_camp(monkeypatch, run)
 
 
+def test_a_correction_that_only_changes_the_lines_saves_without_a_separate_confirmation(monkeypatch):
+    async def run(database):
+        ids = await _issued(database)
+        result = await add_correction(CorrectionBody(
+            transcription_id=str(ids["trans_id"]), patient_id=str(ids["patient_id"]), reason="Medicine was not written",
+            changes={}, prescribed_lines=["specs_fixed"], expected_generation=1, operation_id=str(ObjectId()),
+        ), actor=CLINICAL)
+        revision = await database.prescription_revisions.find_one({"_id": ObjectId(result["revision"]["id"])})
+        assert revision["prescribed_lines"] == ["specs_fixed"]
+
+    run_camp(monkeypatch, run)
+
+
 def test_a_fixed_power_changed_after_issue_keeps_the_issued_power_and_is_marked_not_reopened(monkeypatch):
     async def run(database):
         ids = await _issued(database)

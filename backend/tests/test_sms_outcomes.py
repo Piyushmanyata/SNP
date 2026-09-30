@@ -14,7 +14,7 @@ from conftest import advance_clock
 import sms_recorder
 import reminder_worker
 import routes_reminders
-from seed import TODAY, TOMORROW, patient_doc, recorder, seed_camp
+from seed import TODAY, TOMORROW, day, patient_doc, recorder, seed_camp
 from test_reminder_worker import IST, Clock
 from test_reminders import (
     HOUSEHOLD,
@@ -458,7 +458,7 @@ class TestFailedRemindersRetryOnALaterRun:
             ))
             await database.deferred_slips.insert_one({
                 "patient_id": pid, "item_type": "specs_made", "active": True, "cancelled": False,
-                "collection_date": TOMORROW, "collection_venue": "Token Hall",
+                "collection_date": TOMORROW, "collection_end_date": day(8), "collection_venue": "Token Hall",
                 "collection_start_time": "10:00", "collection_end_time": "17:00", "version": 1,
             })
             await _post(client)
@@ -466,7 +466,7 @@ class TestFailedRemindersRetryOnALaterRun:
 
             await _post(client)
 
-            assert [(c["date"], c["end_date"]) for c in calls] == [(TOMORROW_SHOWN, TOMORROW_SHOWN)] * 2
+            assert [(c["date"], c["end_date"]) for c in calls] == [(TOMORROW_SHOWN, "13-10-2026")] * 2
 
         _run(monkeypatch, body)
 

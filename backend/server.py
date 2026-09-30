@@ -34,7 +34,7 @@ import routes_sms
 
 async def seed_admin() -> None:
     db = get_db()
-    existing = await db.users.find_one({"name_normalized": "admin"})
+    existing = await db.users.find_one({"$or": [{"name_normalized": "admin"}, {"role": "admin"}]})
     if existing is not None:
         return
     pin = (os.environ.get("ADMIN_BOOTSTRAP_PIN") or "").strip()

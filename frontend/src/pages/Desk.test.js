@@ -2153,6 +2153,29 @@ describe("Manual entry, Pending and Reprint (ADR 0084)", () => {
     expect(registered()).toHaveLength(1);
   });
 
+  test("This is them replaces the found patient without carrying over an open No-card form", async () => {
+    const booked = { ...ARRIVED, queue_status: "registered", arrived_at: null, aadhaar_scanned: true, print: NEEDS_CARD };
+    const other = { ...booked, id: "p-3", reg_no: "103", full_name: "Ram Kumar" };
+    api.post.mockImplementation((url) => {
+      if (url === "/desk/lookup") return Promise.resolve({ data: { registration: booked } });
+      if (url === "/register") return Promise.reject(lookalikes([other]));
+      return Promise.resolve({ data: {} });
+    });
+    await renderDesk();
+    await findTyped("101");
+    act(() => { q("no-card-101").click(); });
+    expect(q("no-card-submit-101")).not.toBeNull();
+    act(() => { q("door-manual-button").click(); });
+    typeManual("Ram Kumar");
+    act(() => { q("manual-reason-no_card").click(); });
+    await act(async () => { q("patient-register-submit").click(); });
+    await act(async () => { q("lookalike-open-103").click(); });
+
+    expect(q("desk-found-patient").textContent).toContain("#103");
+    expect(q("no-card-submit-103")).toBeNull();
+    expect(q("no-card-103")).not.toBeNull();
+  });
+
   test("a door scan of a printed patient says so and offers no print", async () => {
     api.post.mockResolvedValueOnce({ data: { outcome: "arrived", registration: PRINTED, prescription: null } });
     await renderDesk();

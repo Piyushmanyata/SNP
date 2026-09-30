@@ -317,6 +317,35 @@ describe("Fulfilment lines", () => {
     expect(onDone).toHaveBeenCalled();
   });
 
+  test("a Token that fails to print is named in the banner that survives the station closing", async () => {
+    const onDone = jest.fn();
+    const setBanner = jest.fn();
+    api.post.mockResolvedValueOnce({ data: { slip: { id: "hospital-token" } } });
+    api.get.mockRejectedValueOnce(new Error("Network Error"));
+    await renderStation({
+      line: "ot",
+      data: {
+        transcription: { id: "tx-1" },
+        committed_revision: { id: "rev-1", ot_outcome: "iol_surgery", ot_eye: "R" },
+        registration: { id: "r" },
+        fulfilments: [],
+      },
+      otDays: [{ id: "ot-1", day_date: "2026-10-02", venue: "Bajaj Hospital", seats_free: 5 }],
+      onDone,
+      setBanner,
+    });
+    await act(async () => {
+      container.querySelector('[data-testid="station-ot-paper-review"]').click();
+      container.querySelector('[data-testid="station-ot-save"]').click();
+    });
+    expect(window.print).not.toHaveBeenCalled();
+    expect(setBanner).toHaveBeenCalledTimes(1);
+    expect(setBanner.mock.calls[0][0]).toContain("Hospital: IOL surgery scheduled");
+    expect(setBanner.mock.calls[0][0]).toContain("The Token did not print: Network Error");
+    expect(setBanner.mock.calls[0][0]).toContain("Reprint Token");
+    expect(onDone).toHaveBeenCalledTimes(1);
+  });
+
   test("Patient declined records the refusal with no day and prints nothing", async () => {
     const onDone = jest.fn();
     const setBanner = jest.fn();

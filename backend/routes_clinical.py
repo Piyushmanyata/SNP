@@ -520,7 +520,7 @@ async def add_correction(
         merged["prescribed_medicines"] = [{"medicine_id": mid} for mid in body.prescribed_medicine_ids]
     lines = list(body.prescribed_lines if "prescribed_lines" in body.model_fields_set else current.get("prescribed_lines") or [])
     none = body.none_prescribed if "none_prescribed" in body.model_fields_set else bool(current.get("none_prescribed") and not lines)
-    confirmed = body.full_transcription_confirmed or bool(body.changes)
+    confirmed = body.full_transcription_confirmed or bool(body.changes) or set(lines) != set(current.get("prescribed_lines") or [])
     try:
         view = CompletePrescriptionBody.model_validate({
             **merged, "patient_id": str(p["_id"]), "operation_id": body.operation_id or "",

@@ -169,7 +169,7 @@ export default function Desk() {
 
         {found && (
           <div className="mt-4" data-testid="desk-found-patient">
-            <PatientRow p={found.reg} onPrint={actions.print} printingOpen={printingOpen} reprint={found.reprint} onNoCard={actions.noCardPrint} />
+            <PatientRow key={found.reg.id} p={found.reg} onPrint={actions.print} printingOpen={printingOpen} reprint={found.reprint} onNoCard={actions.noCardPrint} />
           </div>
         )}
 

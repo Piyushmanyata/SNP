@@ -27,7 +27,7 @@ def _checked_sms_venue(venue: str, venue_sms: Optional[str]) -> Optional[str]:
 
 # ---- auth ----
 class LoginBody(BaseModel):
-    name: str
+    name: str = Field(max_length=80)
     pin: str = Field(min_length=4, max_length=6)
 
 
