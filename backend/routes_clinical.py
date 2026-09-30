@@ -28,6 +28,7 @@ from helpers import (
 )
 from serializers import ser_patient, ser_person
 from security import require_clinical, require_admin, require_any
+import queue_stage
 import sms
 import tokens
 
@@ -288,8 +289,7 @@ async def complete_prescription(
             db, patient, actor, content, lines, none, body.operation_id, "complete", None, None, session,
         )
         committed = await commit(db, patient, {
-            "committed_revision_id": revision["_id"], "queue_status": "seen",
-            "seen_at": now_utc(), "seen_by": str(actor["_id"]),
+            "committed_revision_id": revision["_id"], **queue_stage.seen_fields(str(actor["_id"]), now_utc()),
         }, session)
         transcription = await _upsert_transcription(db, committed, actor, content, locked=True, session=session)
         return _clinical_result(committed, revision, transcription), []
@@ -322,9 +322,7 @@ async def undo_completion(
     async def apply(patient, session):
         require_undoable(patient, await has_issue_history(db, patient, session))
         require_generation(patient, body.expected_generation)
-        updated = await commit(db, patient, {
-            "committed_revision_id": None, "queue_status": "arrived", "seen_at": None, "seen_by": None,
-        }, session)
+        updated = await commit(db, patient, {"committed_revision_id": None, **queue_stage.unseen_fields()}, session)
         trans = await db.transcriptions.find_one_and_update(
             {"patient_id": patient["_id"]}, {"$set": {"locked": False}}, return_document=True, session=session,
         )
