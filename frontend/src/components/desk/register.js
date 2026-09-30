@@ -1,8 +1,7 @@
 import api, { errorPayload, formatApiError } from "../../lib/api";
 import { normalizePhone } from "../../lib/phone";
+import { REQUEST_CONFLICT } from "../../lib/useRegistrationRequest";
 import { reasonBody } from "./ManualReason";
-
-export const REQUEST_CONFLICT = "REGISTRATION_REQUEST_CONFLICT";
 
 export function hasAge(age) {
   return String(age ?? "") !== "";
@@ -21,10 +20,17 @@ export function registrationError(err) {
   return formatApiError(err);
 }
 
-export async function registerPatient({ form, qrPayload, dayId, reqId, reason, atDoor, reviewConfirmedId, differentPerson }) {
+export function registrationFailure(err) {
+  const payload = errorPayload(err);
+  if (payload?.code === "MISMATCH_REVIEW_REQUIRED") return { kind: "review", review: payload };
+  if (payload?.code === "LOOKALIKES") return { kind: "lookalikes", lookalikes: payload.registrations };
+  return { kind: "error", message: registrationError(err) };
+}
+
+export function registrationBody({ form, qrPayload, dayId, reason, atDoor }) {
   const scanned = Boolean(qrPayload);
   const manual = scanned ? { code: null, note: null } : reasonBody(reason);
-  const { data } = await api.post("/register", {
+  return {
     full_name: form.full_name,
     age: hasAge(form.age) ? Number(form.age) : null,
     phone: normalizePhone(form.phone),
@@ -35,12 +41,19 @@ export async function registerPatient({ form, qrPayload, dayId, reqId, reason, a
     aadhaar_scanned: scanned,
     qr_payload: qrPayload || null,
     camp_day_id: dayId,
-    registration_request_id: reqId,
     manual_reason: manual.code,
     manual_note: manual.note,
     at_door: Boolean(atDoor),
+  };
+}
+
+export async function registerPatient(request, { reviewConfirmedId, differentPerson, ...registration }) {
+  const body = registrationBody(registration);
+  const { data } = await request.send(body, (id) => api.post("/register", {
+    ...body,
+    registration_request_id: id,
     review_confirmed_id: reviewConfirmedId || null,
     different_person: Boolean(differentPerson),
-  });
+  }));
   return data;
 }

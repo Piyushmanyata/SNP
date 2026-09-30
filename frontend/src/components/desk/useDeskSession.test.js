@@ -129,3 +129,77 @@ test("Print again fetches a fresh sheet, and the Paper check sends that sheet's 
   expect(api.get).toHaveBeenCalledTimes(2);
   expect(api.post).toHaveBeenCalledWith("/desk/print/p-1", { sheet_stamp: "s-2" });
 });
+
+const WALK_IN_CARD = { full_name: "Asha Devi", age: 42, gender: "F", address: "Sikar", aadhaar_last4: "8888", dob: "1984-05-12" };
+const registerBodies = () => api.post.mock.calls.filter(([url]) => url === "/register").map(([, body]) => body);
+const requestIds = () => registerBodies().map((body) => body.registration_request_id);
+
+async function scanWalkIn(phone = "9876500001") {
+  api.post.mockResolvedValueOnce({ data: { outcome: "no_match", card: WALK_IN_CARD } });
+  await act(async () => { await actions().resolveDoorScan("CARD-A"); });
+  await act(async () => actions().setDoorPhone(phone));
+}
+
+async function walkIn() {
+  await act(async () => { await actions().submitDoorWalkIn(); });
+}
+
+test("a walk-in registers the card at the door on the operating day", async () => {
+  const onCreated = jest.fn();
+  await mount({ onCreated });
+  await scanWalkIn();
+  api.post.mockResolvedValueOnce({ data: { registration: REG, created: true } });
+  await walkIn();
+  expect(registerBodies()[0]).toEqual(expect.objectContaining({
+    full_name: "Asha Devi", phone: "9876500001", aadhaar_scanned: true, qr_payload: "CARD-A",
+    camp_day_id: "day-1", at_door: true, review_confirmed_id: null, different_person: false,
+  }));
+  expect(onCreated).toHaveBeenCalledWith({ registration: REG, created: true });
+  expect(state().scanResult.registration).toBe(REG);
+});
+
+test("a walk-in whose phone is edited after a failure sends a new id, and an unchanged retry reuses it", async () => {
+  await mount();
+  await scanWalkIn();
+  api.post.mockRejectedValue(new Error("Network Error"));
+  await walkIn();
+  await walkIn();
+  await act(async () => actions().setDoorPhone("9876500009"));
+  await walkIn();
+  await walkIn();
+  const [first, retry, edited, editedRetry] = requestIds();
+  expect(retry).toBe(first);
+  expect(edited).not.toBe(first);
+  expect(editedRetry).toBe(edited);
+  expect(state().error).toBe("Network Error");
+  expect(state().busy).toBe(false);
+});
+
+test("a walk-in request conflict points to search and renews the id", async () => {
+  await mount();
+  await scanWalkIn();
+  api.post.mockRejectedValue({ response: { status: 409, data: { detail: { code: "REGISTRATION_REQUEST_CONFLICT", message: "Request id reused." } } } });
+  await walkIn();
+  expect(state().error).toBe("Saved earlier. Search for the patient.");
+  await walkIn();
+  expect(requestIds()[1]).not.toBe(requestIds()[0]);
+});
+
+test("an arrived walk-in clears its id, so the same card and phone register anew", async () => {
+  await mount();
+  await scanWalkIn();
+  api.post.mockResolvedValueOnce({ data: { registration: REG, created: true } });
+  await walkIn();
+  await scanWalkIn();
+  api.post.mockResolvedValueOnce({ data: { registration: NEXT, created: true } });
+  await walkIn();
+  expect(requestIds()[1]).not.toBe(requestIds()[0]);
+});
+
+test("a walk-in with no operating day registers nobody", async () => {
+  await mount({ operatingDayId: "" });
+  await scanWalkIn();
+  await walkIn();
+  expect(registerBodies()).toHaveLength(0);
+  expect(state().error).toBe("No operating camp day. Use Pre-registration.");
+});

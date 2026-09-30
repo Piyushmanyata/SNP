@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import api, { errorPayload, formatApiError } from "../../lib/api";
-import { v4 } from "../../lib/uuid";
+import { useRegistrationRequest } from "../../lib/useRegistrationRequest";
 import { deskSession, initialDeskSession } from "./deskSession";
 import { reasonBody } from "./ManualReason";
-import { REQUEST_CONFLICT, registerPatient, registrationError } from "./register";
+import { registerPatient, registrationError } from "./register";
 
 const AADHAAR_PAYLOAD = /^(\d{100,}|<.*>)$/s;
 
@@ -15,6 +15,7 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
   const [state, setState] = useState(initialDeskSession);
   const latest = useRef(initialDeskSession);
   const printing = useRef(false);
+  const request = useRegistrationRequest();
 
   const dispatch = useCallback((event) => {
     latest.current = deskSession(latest.current, event);
@@ -170,10 +171,10 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
         dispatch({ type: "failed", message: "No operating camp day. Use Pre-registration." });
         return;
       }
-      const { seq, walkIn } = dispatch({ type: "walkInStarted", key: scanPayload || "", reqId: v4() });
+      const { seq } = dispatch({ type: "walkInStarted" });
       try {
         const card = scanResult.card;
-        const created = await registerPatient({
+        const created = await registerPatient(request, {
           form: {
             full_name: card.full_name,
             age: card.age ?? "",
@@ -185,18 +186,12 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
           },
           qrPayload: scanPayload,
           dayId: operatingDayId,
-          reqId: walkIn.reqId,
           atDoor: true,
         });
         onCreated(created);
         dispatch({ type: "walkInResolved", seq, registration: created.registration });
       } catch (err) {
-        dispatch({
-          type: "walkInFailed",
-          seq,
-          reqId: errorPayload(err)?.code === REQUEST_CONFLICT ? v4() : "",
-          message: registrationError(err),
-        });
+        dispatch({ type: "walkInFailed", seq, message: registrationError(err) });
       } finally {
         dispatch({ type: "settled" });
       }
@@ -231,7 +226,7 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
       showRegistered: (registration) => dispatch({ type: "registered", registration }),
       showBanner: (message) => dispatch({ type: "bannerShown", message }),
     };
-  }, [dispatch, printPrescription, onCreated, printingOpen, operatingDayId]);
+  }, [dispatch, request, printPrescription, onCreated, printingOpen, operatingDayId]);
 
   return [state, actions];
 }
