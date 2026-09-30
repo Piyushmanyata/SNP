@@ -4,7 +4,7 @@ import csv
 import shutil
 from collections import Counter
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Literal
+from typing import Any, Dict, List, Literal, Tuple
 from bson import ObjectId
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -49,6 +49,13 @@ STAGE_LISTS = {
 }
 
 
+def stage_query(stage: str, camp_id: ObjectId, match: Dict[str, Any]) -> Tuple[Dict[str, Any], Any, Dict[str, Any]]:
+    """The small Pending list reads its own index; Registered and Seen read the name index for a name."""
+    members, sort = STAGE_LISTS[stage]
+    options = {} if stage == "pending" else desk_search.options(match)
+    return {**members(camp_id), **match}, sort, options
+
+
 @router.get("/lists/{stage}")
 async def stage_list(
     stage: Literal["registered", "seen", "pending"], q: str = "", actor: dict = Depends(require_staff),
@@ -58,9 +65,7 @@ async def stage_list(
     match = desk_search.where(q)
     if not camp or match is None:
         return {"today": today_ist_str(), "total": 0, "patients": []}
-    where, sort = STAGE_LISTS[stage]
-    query = {**where(camp["_id"]), **match}
-    options = desk_search.options(match)
+    query, sort, options = stage_query(stage, camp["_id"], match)
     total, rows = await asyncio.gather(
         db.patients.count_documents(query, **options),
         db.patients.find(query, **options).sort(sort).limit(LIST_ROWS).to_list(LIST_ROWS),

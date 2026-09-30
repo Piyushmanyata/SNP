@@ -71,6 +71,20 @@ def test_stage_filters_select_the_camps_patients_by_stage(monkeypatch):
     run_camp(monkeypatch, run)
 
 
+def test_a_registered_patients_stage_is_the_stage_filter_that_selects_them(monkeypatch):
+    async def run(db):
+        camp_id = await _seed_stages(db)
+        named = {"awaiting_print": "awaiting_print", "pending": "pending", "doctor_seen": "seen"}
+        seen = []
+        async for patient in db.patients.find(queue_stage.registered(camp_id)):
+            selected = [named[stage] for stage in await _stages_of(db, camp_id, patient["_id"])] or ["booked"]
+            assert [queue_stage.stage_of(patient)] == selected, patient["full_name"]
+            seen.append(patient["full_name"])
+        assert len(seen) == 6
+
+    run_camp(monkeypatch, run)
+
+
 def test_awaiting_print_and_pending_partition_the_arrived_status(monkeypatch):
     async def run(db):
         camp_id = await _seed_stages(db)

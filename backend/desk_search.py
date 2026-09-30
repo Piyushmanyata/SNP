@@ -3,14 +3,13 @@
 import re
 from typing import Any, Dict, Optional
 
+from db import PATIENT_NAME_INDEX
 from helpers import normalize_name, normalize_phone
-
-NAME_INDEX = [("camp_id", 1), ("full_name_normalized", 1)]
 
 
 def options(match: Dict[str, Any]) -> Dict[str, Any]:
     """A name search reads the name index, so a rare name never walks every registration."""
-    return {"hint": NAME_INDEX} if "full_name_normalized" in match else {}
+    return {"hint": PATIENT_NAME_INDEX} if "full_name_normalized" in match else {}
 
 
 def where(typed: str) -> Optional[Dict[str, Any]]:

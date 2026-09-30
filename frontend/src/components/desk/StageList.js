@@ -30,6 +30,8 @@ const STAGE_BADGES = {
   seen: { label: "Doctor seen", tone: "emerald" },
 };
 
+const SEARCH_PAUSE_MS = 300;
+
 function since(at) {
   const minutes = Math.max(0, Math.floor((Date.now() - new Date(at).getTime()) / 60000));
   return minutes < 60 ? `${minutes} min ago` : `${Math.floor(minutes / 60)} h ${minutes % 60} min ago`;
@@ -50,6 +52,7 @@ function StageList({ stage, onClose }) {
   const { label, about, empty } = LISTS[stage];
   const [typed, setTyped] = useState("");
   const [query, setQuery] = useState("");
+  const [attempt, setAttempt] = useState(0);
   const [list, setList] = useState(null);
   const [error, setError] = useState("");
 
@@ -62,11 +65,17 @@ function StageList({ stage, onClose }) {
       (err) => { if (current) setError(formatApiError(err)); },
     );
     return () => { current = false; };
-  }, [stage, query]);
+  }, [stage, query, attempt]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setQuery(typed.trim()), SEARCH_PAUSE_MS);
+    return () => clearTimeout(timer);
+  }, [typed]);
 
   const search = (e) => {
     e.preventDefault();
     setQuery(typed.trim());
+    setAttempt((n) => n + 1);
   };
   const rows = list?.patients;
   const total = list?.total.toLocaleString("en-IN");
@@ -111,6 +120,9 @@ function StageList({ stage, onClose }) {
                   <a href={`tel:${p.phone}`} className="min-h-[44px] inline-flex items-center font-semibold text-emerald-800 underline">
                     {p.phone}
                   </a>
+                )}
+                {stage === "registered" && p.created_at && (
+                  <span>Registered {displayDate(istDate(p.created_at))}, {displayTime(p.created_at)}</span>
                 )}
                 {stage === "pending" && <span>{printedLine(p)} · {since(p.printed_at)}</span>}
                 {stage === "seen" && <span>Seen {displayTime(p.seen_at)} · {since(p.seen_at)}</span>}

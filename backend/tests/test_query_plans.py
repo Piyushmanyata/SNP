@@ -6,6 +6,7 @@ from bson.codec_options import CodecOptions, DatetimeConversion
 
 import desk_search
 import queue_stage
+import routes_reports
 from helpers import ist_day_bounds, now_utc, today_ist_str
 from conftest import run_db
 from benchmark_dataset import seed
@@ -121,13 +122,17 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
             "explain": {"count": "patients", "query": plans["pending"]["filter"]}, "verbosity": "executionStats",
         }, codec_options=CodecOptions(datetime_conversion=DatetimeConversion.DATETIME_AUTO))
         assert pending_count["executionStats"]["totalDocsExamined"] == 0
-        nobody = desk_search.where("nobody")
-        rare = await db.command({"explain": {
-            "find": "patients", "filter": {**queue_stage.registered(camp), **nobody},
-            "sort": dict(queue_stage.REGISTERED_SORT), "limit": 10,
-            "hint": dict(desk_search.options(nobody)["hint"]),
-        }, "verbosity": "executionStats"}, codec_options=CodecOptions(datetime_conversion=DatetimeConversion.DATETIME_AUTO))
-        assert rare["executionStats"]["totalDocsExamined"] == 0
+        for stage in ("registered", "seen"):
+            query, sort, options = routes_reports.stage_query(stage, camp, desk_search.where("nobody"))
+            rare = await db.command({"explain": {
+                "find": "patients", "filter": query, "sort": dict(sort), "limit": 10,
+                **({"hint": dict(options["hint"])} if options else {}),
+            }, "verbosity": "executionStats"}, codec_options=CodecOptions(datetime_conversion=DatetimeConversion.DATETIME_AUTO))
+            assert rare["executionStats"]["totalDocsExamined"] == 0, stage
+        query, sort, options = routes_reports.stage_query("pending", camp, desk_search.where("synthetic"))
+        assert options == {}
+        pending_by_name = {"find": "patients", "filter": query, "sort": dict(sort), "limit": 10}
+        assert "SORT" not in _stages(await _winning(db, pending_by_name))
         assert "SORT" not in _stages(await _winning(db, plans["clinical name search"]))
         quiet = now_utc() - timedelta(minutes=15)
         group_plans = {

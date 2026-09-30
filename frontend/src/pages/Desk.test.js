@@ -2069,13 +2069,14 @@ describe("Manual entry, Pending and Reprint (ADR 0084)", () => {
 
   test("the Registered count opens every registration with its stage, and says how many more there are", async () => {
     listReturns("registered", { total: 45, patients: [
-      { ...PRINTED, stage: "pending" },
+      { ...PRINTED, stage: "pending", created_at: "2026-09-01T09:02:00Z" },
       { ...ARRIVED, id: "p-2", reg_no: "102", stage: "booked" },
     ] });
     await renderDesk();
     await act(async () => { q("kpi-registered-count-button").click(); });
     expect(api.get).toHaveBeenCalledWith("/lists/registered", { params: { q: "" } });
     expect(q("registered-row-101").textContent).toContain("Pending");
+    expect(q("registered-row-101").textContent).toContain("Registered 01-09-2026, 14:32");
     expect(q("registered-row-102").textContent).toContain("Booked");
     expect(q("registered-row-101").querySelector("button")).toBeNull();
     expect(q("registered-row-101").querySelector('a[href="tel:9876543210"]')).not.toBeNull();
@@ -2101,6 +2102,44 @@ describe("Manual entry, Pending and Reprint (ADR 0084)", () => {
     await searchList("zzz");
     expect(q("pending-list")).toBeNull();
     expect(q("list-empty").textContent).toBe("No one matches “zzz”.");
+  });
+
+  test("searching again retries a list that failed to load", async () => {
+    let calls = 0;
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url, config) => {
+      if (url !== "/lists/pending") return base(url, config);
+      calls += 1;
+      return calls === 1
+        ? Promise.reject(Object.assign(new Error("Network Error"), { request: {} }))
+        : Promise.resolve({ data: { total: 1, patients: [PRINTED] } });
+    });
+    await renderDesk();
+    await act(async () => { q("kpi-pending-count-button").click(); });
+    expect(document.body.querySelector('[role="dialog"] [role="alert"]')).not.toBeNull();
+    await act(async () => { q("list-search-button").click(); });
+    expect(calls).toBe(2);
+    expect(q("pending-row-101")).not.toBeNull();
+  });
+
+  test("a list searches once the operator pauses typing", async () => {
+    listReturns("pending", (typed) => ({
+      "": { total: 1, patients: [PRINTED] },
+      kum: { total: 1, patients: [{ ...PRINTED, full_name: "Ram Kumar" }] },
+    }[typed]));
+    await renderDesk();
+    await act(async () => { q("kpi-pending-count-button").click(); });
+    jest.useFakeTimers();
+    try {
+      act(() => { setInput(q("list-search-input"), "kum"); });
+      expect(api.get).not.toHaveBeenCalledWith("/lists/pending", { params: { q: "kum" } });
+      await act(async () => { jest.advanceTimersByTime(400); });
+    } finally {
+      jest.useRealTimers();
+    }
+    await act(async () => {});
+    expect(api.get).toHaveBeenCalledWith("/lists/pending", { params: { q: "kum" } });
+    expect(q("pending-row-101").textContent).toContain("Ram Kumar");
   });
 
   test("the Seen count opens who the doctor has seen, with when", async () => {

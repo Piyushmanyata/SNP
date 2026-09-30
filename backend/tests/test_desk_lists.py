@@ -14,9 +14,7 @@ async def volunteer(database):
 def test_pending_is_every_printed_patient_not_yet_seen_in_the_active_camp_oldest_print_first(monkeypatch):
     async def run(database):
         camp_id, (today_id, tomorrow_id) = await seed_camp(database, days=(TODAY, TOMORROW))
-        user_id = ObjectId()
-        await database.users.insert_one(user_doc("Ramesh", _id=user_id))
-        headers = bearer(user_id, "Ramesh", "volunteer")
+        headers = await volunteer(database)
 
         def row(name, **fields):
             return patient_doc(**{"camp_id": camp_id, "camp_day_id": today_id, "full_name": name,
@@ -188,7 +186,7 @@ def test_find_one_patient_reads_a_typed_line_the_same_way(monkeypatch):
     run_camp(monkeypatch, run)
 
 
-def test_the_clinical_desk_operator_cannot_list_pending(monkeypatch):
+def test_the_clinical_desk_operator_cannot_open_the_desk_lists_or_counts(monkeypatch):
     async def run(database):
         await seed_camp(database)
         user_id = ObjectId()
