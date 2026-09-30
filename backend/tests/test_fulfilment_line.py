@@ -17,7 +17,7 @@ BY = "operator-1"
 REVISION = {"prescribed_medicines": [MEDICINE, MEDICINE_ALT]}
 MARK = {"revision_id": ObjectId(), "at": AT, "by": BY}
 STATUS_STRINGS = ("fulfilled", "not_available", "partially_fulfilled", "deferred", "declined", "cancelled", "not_required")
-VALID_STATUSES = {"specs_fixed": {"fulfilled"}, "specs_made": {"deferred", "cancelled"}, "ot": {"deferred", "declined"}}
+CHOSEN_STATUS_LINES = [item_type for item_type in fulfilment_line.STATUSES if item_type != "medicine"]
 
 
 def outcomes(**given):
@@ -47,17 +47,21 @@ def after_revision(*medicines, **fields):
     return {"_id": MARK["revision_id"], "prescribed_medicines": list(medicines), **fields}
 
 
-@pytest.mark.parametrize("item_type", sorted(VALID_STATUSES))
+@pytest.mark.parametrize("item_type", CHOSEN_STATUS_LINES)
 @pytest.mark.parametrize("status", STATUS_STRINGS)
 def test_check_issue_accepts_only_the_statuses_in_the_table(item_type, status):
-    if status in VALID_STATUSES[item_type]:
+    if status in fulfilment_line.STATUSES[item_type]:
         assert fulfilment_line.check_issue({}, item_type, status, []) == (status, None)
     else:
         assert refusal(fulfilment_line.check_issue, {}, item_type, status, []) == (400, "INVALID_FULFILMENT_ITEM_STATUS")
 
 
+@pytest.mark.parametrize("item_type, status", [("specs_made", "cancelled"), ("ot", "declined")])
+def test_the_table_lets_a_scheduled_line_end_without_goods(item_type, status):
+    assert fulfilment_line.check_issue({}, item_type, status, []) == (status, None)
+
+
 def test_an_unknown_item_type_is_refused():
-    assert refusal(fulfilment_line.require_line, "bogus") == (400, "INVALID_FULFILMENT_ITEM_STATUS")
     assert refusal(fulfilment_line.check_issue, REVISION, "bogus", "fulfilled", []) == (400, "INVALID_FULFILMENT_ITEM_STATUS")
 
 

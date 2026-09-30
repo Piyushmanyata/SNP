@@ -19,10 +19,6 @@ def _invalid() -> HTTPException:
     return api_error(400, "INVALID_FULFILMENT_ITEM_STATUS", "Invalid fulfilment item/status")
 
 
-def _settled(outcome: dict) -> bool:
-    return outcome.get("given") is not None
-
-
 def _derive_status(outcomes: List[dict]) -> str:
     given = sum(1 for o in outcomes if o["given"])
     if given == 0:
@@ -45,7 +41,7 @@ def _keep_removed(prior: List[dict], outcomes: List[dict], corrected: bool) -> L
     resolved = []
     for o in outcomes:
         p = prior_by_id.get(o["medicine_id"])
-        resolved.append({**o, "given": p["given"]} if corrected and p and _settled(p) else o)
+        resolved.append({**o, "given": p["given"]} if corrected and p and p.get("given") is not None else o)
     ids = {o["medicine_id"] for o in resolved}
     return resolved + [o for o in prior if o.get("prescribed") is False and o["medicine_id"] not in ids]
 
@@ -76,11 +72,10 @@ def require_line(item_type: str) -> None:
 
 
 def check_issue(revision: dict, item_type: str, status: str, outcomes) -> Tuple[str, Optional[List[dict]]]:
-    require_line(item_type)
     if item_type == "medicine":
         matched = _match_outcomes(revision, outcomes)
         return _derive_status(matched), matched
-    if status not in STATUSES[item_type]:
+    if status not in STATUSES.get(item_type, ()):
         raise _invalid()
     return status, None
 
