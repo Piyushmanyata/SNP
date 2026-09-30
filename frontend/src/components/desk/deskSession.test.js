@@ -146,7 +146,7 @@ test("a walk-in that came back not arrived shows its row instead of claiming arr
   expect(next.found).toEqual({ reg: booked, reprint: true });
 });
 
-test("printingChanged clears the found patient and search results only", () => {
+test("printingChanged clears the found patient and search results and starts a new find generation only", () => {
   const state = run([
     { type: "failed", seq: 1, message: "Old error" },
     { type: "searchResolved", seq: 1, results: [REG] },
@@ -157,9 +157,22 @@ test("printingChanged clears the found patient and search results only", () => {
   const next = deskSession(state, { type: "printingChanged" });
   expect(next.found).toBeNull();
   expect(next.searchResults).toBeNull();
-  expect({ ...next, found: state.found, searchResults: state.searchResults }).toEqual(state);
+  expect(next.findSeq).toBe(state.findSeq + 1);
+  expect({ ...next, found: state.found, searchResults: state.searchResults, findSeq: state.findSeq }).toEqual(state);
   expect(next.paperCheck).toBe(state.paperCheck);
   expect(next.seq).toBe(state.seq);
+});
+
+test.each([
+  { type: "lookupResolved", registration: REG, reprint: true },
+  { type: "lookupFailed", message: "Not found" },
+  { type: "searchResolved", results: [REG] },
+  { type: "failed", message: "Search failed" },
+])("a $type reply to a find started before printingChanged changes nothing", (reply) => {
+  const started = deskSession(initialDeskSession, { type: "findStarted" });
+  const flipped = deskSession(started, { type: "printingChanged" });
+  const next = deskSession(flipped, { ...reply, seq: started.seq, findSeq: started.findSeq });
+  expect(next).toBe(flipped);
 });
 
 test("an unknown event is a programming error", () => {

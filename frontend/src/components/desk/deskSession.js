@@ -1,5 +1,6 @@
 export const initialDeskSession = Object.freeze({
   seq: 0,
+  findSeq: 0,
   regMode: "",
   preRegPayload: "",
   scanResult: null,
@@ -36,7 +37,8 @@ function arrivedBanner(registration, extra = "") {
 }
 
 export function deskSession(state, event) {
-  const current = event.seq === undefined || event.seq === state.seq;
+  const current = (event.seq === undefined || event.seq === state.seq)
+    && (event.findSeq === undefined || event.findSeq === state.findSeq);
   switch (event.type) {
     case "scanStarted":
       return {
@@ -155,7 +157,7 @@ export function deskSession(state, event) {
     case "registered":
       return { ...state, found: { reg: event.registration, reprint: true } };
     case "printingChanged":
-      return { ...state, found: null, searchResults: null };
+      return { ...state, findSeq: state.findSeq + 1, found: null, searchResults: null };
     case "bannerShown":
       return { ...state, banner: event.message };
     case "unmounted":
