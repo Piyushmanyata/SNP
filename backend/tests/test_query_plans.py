@@ -4,6 +4,7 @@ from datetime import timedelta
 
 from bson.codec_options import CodecOptions, DatetimeConversion
 
+import queue_stage
 from helpers import ist_day_bounds, now_utc, today_ist_str
 from conftest import run_db
 from benchmark_dataset import seed
@@ -75,7 +76,7 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
                 "camp_id": camp, "arrived_at": {"$gte": start, "$lt": end},
             }, "limit": 1},
             "kpi camp": {"find": "patients", "filter": {"camp_id": camp}, "limit": 1},
-            "kpi seen": {"find": "patients", "filter": {"camp_id": camp, "queue_status": "seen"}, "limit": 1},
+            "kpi seen": {"find": "patients", "filter": queue_stage.doctor_seen(camp), "limit": 1},
             "reminder targets": {"find": "patients", "filter": {"camp_day_id": day_id}, "sort": {"_id": 1}, "limit": 200},
             "canary": {"find": "reminder_ledger", "filter": {
                 "message_type": "camp", "event_date": today_ist_str(),
@@ -89,9 +90,9 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
                 {"operation_id": {"$type": "string"}},
             ]}, "limit": 1},
             "revision by id": {"find": "prescription_revisions", "filter": {"_id": revision_id}, "limit": 1},
-            "pending": {"find": "patients", "filter": {
-                "camp_id": camp, "queue_status": "arrived", "printed_at": {"$type": "date"},
-            }, "sort": {"printed_at": 1}},
+            "pending": {
+                "find": "patients", "filter": queue_stage.pending(camp), "sort": dict(queue_stage.PENDING_SORT),
+            },
 
             "lookalikes": {"find": "patients", "filter": {
                 "camp_id": camp, "full_name_normalized": {"$in": [patient["full_name_normalized"]]},
@@ -127,23 +128,13 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
                 }},
                 {"$group": {"_id": 1, "n": {"$sum": 1}}},
             ], "cursor": {}},
-            "board carry-over": {"aggregate": "patients", "pipeline": [
-                {"$match": {"camp_id": camp, "queue_status": "arrived"}},
-                {"$group": {
-                    "_id": None,
-                    "unprinted": {"$sum": {"$cond": [{"$lte": ["$printed_at", None]}, 1, 0]}},
-                    "printed_earlier": {"$sum": {"$cond": [
-                        {"$and": [{"$gt": ["$printed_at", None]}, {"$lt": ["$arrived_at", start]}]}, 1, 0,
-                    ]}},
-                }},
-            ], "cursor": {}},
+            "board carry-over": {
+                "aggregate": "patients", "pipeline": queue_stage.board_pipeline(camp, start), "cursor": {},
+            },
             "board activity": {"aggregate": "patients", "pipeline": [
                 {"$match": {"camp_id": camp, "arrived_at": {"$gte": start, "$lt": end}}},
                 {"$group": {"_id": "$arrived_by", "last": {"$max": "$arrived_at"},
-                            "last_15m": {"$sum": {"$cond": [{"$gte": ["$arrived_at", quiet]}, 1, 0]}},
-                            "awaiting_print": {"$sum": {"$cond": [{"$eq": ["$printed_at", None]}, 1, 0]}},
-                            "backlog": {"$sum": {"$cond": [{"$eq": ["$committed_revision_id", None]}, 1, 0]}},
-                            "awaiting_seen": {"$sum": {"$cond": [{"$eq": ["$seen_at", None]}, 1, 0]}}}},
+                            "last_15m": {"$sum": {"$cond": [{"$gte": ["$arrived_at", quiet]}, 1, 0]}}}},
             ], "cursor": {}},
             "sms groups": {"aggregate": "reminder_ledger", "pipeline": [
                 {"$match": {
