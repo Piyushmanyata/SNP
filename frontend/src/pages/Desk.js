@@ -12,7 +12,7 @@ import { Lookalikes } from "../components/desk/Lookalikes";
 import { EMPTY_REASON, ManualReason, cardInHand, reasonReady } from "../components/desk/ManualReason";
 import { REQUEST_CONFLICT, hasAge, registerPatient, registrationError } from "../components/desk/register";
 import { useDeskSession } from "../components/desk/useDeskSession";
-import { alreadyPrintedLine, printedLine } from "../components/desk/printed";
+import { AWAITING_SCAN_LINE, PRINT_WINDOW_CLOSED_LINE, alreadyPrintedLine, printedLine } from "../components/desk/printed";
 import { PrescriptionSheet } from "../components/print/PrescriptionSheet";
 import { printDocument, IMAGE_WAIT_MS } from "../lib/printJob";
 import { loadLogos } from "../lib/logoCache";
@@ -267,11 +267,11 @@ function DoorScanCard({ noCamp, state, actions }) {
 export function PatientRow({ p, onPrint, printingOpen, reprint = false, onNoCard }) {
   const [noCard, setNoCard] = useState(null);
   const [sending, setSending] = useState(false);
-  const seen = p.queue_status === "seen";
-  const printed = Boolean(p.printed_at) && !seen;
-  const needsDoorScan = !p.arrived_at && !p.no_card_print;
-  const windowShut = !printingOpen && !p.printed_at;
-  const canPrint = !seen && !needsDoorScan && !windowShut && (!printed || reprint);
+  const { allowed, code, stage } = p.print;
+  const printed = stage === "printed";
+  const needsDoorScan = code === "NEEDS_DOOR_SCAN";
+  const windowShut = code === "PRINT_WINDOW_CLOSED";
+  const canPrint = allowed && (!printed || reprint);
   const askLast4 = Boolean(noCard) && Boolean(p.aadhaar_scanned || p.person_id) && cardInHand(noCard);
   const noCardReady = Boolean(noCard) && reasonReady(noCard) && (!askLast4 || String(noCard.last4 ?? "").length === 4);
   const submitNoCard = async (e) => {
@@ -297,12 +297,12 @@ export function PatientRow({ p, onPrint, printingOpen, reprint = false, onNoCard
       {p.printed_at && <Badge tone="indigo">Printed</Badge>}
       {needsDoorScan && (
         <span className="text-xs text-slate-600" data-testid={`awaiting-scan-${p.reg_no}`}>
-          Scan their Aadhaar card, or record a No-card print
+          {AWAITING_SCAN_LINE}
         </span>
       )}
-      {!needsDoorScan && !seen && windowShut && (
+      {windowShut && (
         <span className="text-xs text-slate-600" data-testid={`print-window-closed-${p.reg_no}`}>
-          The print window is closed.
+          {PRINT_WINDOW_CLOSED_LINE}
         </span>
       )}
       {printed && reprint && (

@@ -174,6 +174,8 @@ export function deskSession(state, event) {
       return { ...state, regMode: "", preRegPayload: "" };
     case "registered":
       return { ...state, found: { reg: event.registration, reprint: true } };
+    case "printingChanged":
+      return { ...state, found: null, searchResults: null };
     case "bannerShown":
       return { ...state, banner: event.message };
     case "unmounted":

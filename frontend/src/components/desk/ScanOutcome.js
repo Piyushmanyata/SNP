@@ -4,7 +4,12 @@ import { PhoneInput } from "../PhoneInput";
 import { normalizePhone } from "../../lib/phone";
 import { Printer } from "lucide-react";
 import { displayDate } from "../../lib/dates";
-import { alreadyPrintedLine } from "./printed";
+import { AWAITING_SCAN_LINE, PRINT_WINDOW_CLOSED_LINE, alreadyPrintedLine } from "./printed";
+
+const REFUSAL_LINES = {
+  PRINT_WINDOW_CLOSED: { testid: "scan-print-window-closed", line: PRINT_WINDOW_CLOSED_LINE },
+  NEEDS_DOOR_SCAN: { testid: "scan-awaiting-scan", line: AWAITING_SCAN_LINE },
+};
 
 const FIELD_LABELS = {
   full_name: "Name",
@@ -16,7 +21,9 @@ const FIELD_LABELS = {
 };
 
 export function ArrivedCard({ registration, onPrint }) {
-  const seen = registration.queue_status === "seen";
+  const { allowed, code, stage } = registration.print;
+  const unprinted = stage !== "seen" && stage !== "printed";
+  const refusal = unprinted ? REFUSAL_LINES[code] : null;
   return (
     <div className="rounded-xl border border-emerald-300 bg-emerald-50 p-4" data-testid="scan-arrived">
       <div className="flex flex-wrap items-center gap-3">
@@ -34,17 +41,20 @@ export function ArrivedCard({ registration, onPrint }) {
         {registration.phone ? ` · ${registration.phone}` : ""}
       </p>
       <div className="flex gap-2 mt-3">
-        {seen && (
+        {stage === "seen" && (
           <span className="text-xs text-slate-600" data-testid="scan-already-seen">
             The doctor has already seen this patient. There is nothing to print.
           </span>
         )}
-        {!seen && registration.printed_at && (
+        {stage === "printed" && (
           <span className="text-sm font-semibold text-amber-800" data-testid="scan-already-printed">
             {alreadyPrintedLine(registration)}
           </span>
         )}
-        {!seen && !registration.printed_at && (
+        {refusal && (
+          <span className="text-xs text-slate-600" data-testid={refusal.testid}>{refusal.line}</span>
+        )}
+        {unprinted && allowed && (
           <Button size="lg" onClick={() => onPrint(registration)} data-testid="scan-print-button">
             <Printer className="w-4 h-4" /> Print prescription
           </Button>

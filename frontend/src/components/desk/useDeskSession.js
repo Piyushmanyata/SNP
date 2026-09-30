@@ -24,6 +24,14 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
 
   useEffect(() => () => { dispatch({ type: "unmounted" }); }, [dispatch]);
 
+  const seenPrinting = useRef({ printingOpen, operatingDayId });
+  useEffect(() => {
+    const last = seenPrinting.current;
+    if (last.printingOpen === printingOpen && last.operatingDayId === operatingDayId) return;
+    seenPrinting.current = { printingOpen, operatingDayId };
+    dispatch({ type: "printingChanged" });
+  }, [printingOpen, operatingDayId, dispatch]);
+
   useEffect(() => {
     if (state.paperCheck || !state.focusUsbBox) return;
     dispatch({ type: "usbFocused" });

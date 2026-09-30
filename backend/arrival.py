@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 from bson import ObjectId
 from pymongo.asynchronous.database import AsyncDatabase
 
+import printing
 from helpers import api_error, now_utc
 
 
@@ -19,15 +20,14 @@ def fields_at_creation(arrived_by: Optional[str], now: datetime) -> Dict[str, An
 
 def require_arrivable(patient: dict) -> None:
     if not (patient.get("no_card_print") or patient.get("arrived_at")):
-        raise api_error(409, "NEEDS_DOOR_SCAN", "Scan this patient's Aadhaar card at the door, or record a No-card print.")
+        raise printing.error("NEEDS_DOOR_SCAN")
 
 
 async def stamp(db: AsyncDatabase, patient: dict, actor_id: str, printing_state: dict) -> dict:
     """Stamps Arrival once and moves the patient onto the Operating day, recording the day they had booked."""
     if patient.get("arrived_at"):
         return patient
-    if not printing_state.get("printing_open"):
-        raise api_error(409, "PRINT_WINDOW_CLOSED", 'The print window is closed.')
+    printing.require_open(printing_state)
     updates: Dict[str, Any] = {
         "arrived_at": now_utc(),
         "arrived_by": actor_id,

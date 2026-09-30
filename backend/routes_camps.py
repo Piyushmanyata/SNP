@@ -4,8 +4,9 @@ from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
 from db import get_db, in_transaction
 from models import CampBody, CampDayBody, PrintWindowBody
-from helpers import IST, as_utc, iso, next_ist_midnight, now_utc, today_ist_str, api_error
+from helpers import iso, next_ist_midnight, now_utc, today_ist_str, api_error
 from security import require_admin, require_any
+import printing
 import sms
 
 router = APIRouter(prefix="/api/camps", tags=["camps"])
@@ -24,9 +25,8 @@ def ser_camp(c: dict) -> Dict[str, Any]:
     }
 
 
-def ser_day(d: dict, *, printing_open: bool | None = None, today: str | None = None) -> Dict[str, Any]:
+def ser_day(d: dict, state: dict, *, today: str | None = None) -> Dict[str, Any]:
     today = today or today_ist_str()
-    open_ = bool(printing_open) if printing_open is not None else bool(d.get("printing_open", False))
     booked = d.get("booked", 0)
     return {
         "id": str(d["_id"]),
@@ -35,52 +35,10 @@ def ser_day(d: dict, *, printing_open: bool | None = None, today: str | None = N
         "seat_limit": d.get("seat_limit", 0),
         "booked": booked,
         "over_capacity": booked > d.get("seat_limit", 0),
-        "printing_open": open_,
+        "printing_open": printing.operates(state, d),
         "is_today": d["day_date"] == today,
         "can_edit": d["day_date"] >= today,
     }
-
-
-def effective_printing(camp: dict | None, days, now=None) -> Dict[str, Any]:
-    now = as_utc(now or now_utc())
-    today = now.astimezone(IST).strftime("%Y-%m-%d")
-    days = list(days or [])
-    override = (camp or {}).get("print_override") or {}
-    expires = override.get("expires_at")
-    if expires and as_utc(expires) <= now:
-        override = {}
-    mode = override.get("mode")
-    selected = override.get("day_id")
-    operating = None
-    if mode == "disable":
-        printing_open = False
-    elif mode == "enable" and selected is not None:
-        operating = next((d for d in days if str(d["_id"]) == str(selected)), None)
-        printing_open = operating is not None
-    else:
-        operating = next((d for d in days if d.get("day_date") == today), None)
-        printing_open = operating is not None
-        mode = "automatic"
-    return {
-        "printing_open": printing_open,
-        "operating_day_id": str(operating["_id"]) if operating else None,
-        "operating_day_date": operating.get("day_date") if operating else None,
-        "mode": mode or "automatic",
-        "override_expires_at": iso(override.get("expires_at")) if override.get("mode") else None,
-        "server_time": iso(now),
-    }
-
-
-def _days_projection(camp: dict, days) -> tuple[list, dict]:
-    state = effective_printing(camp, days)
-    out = [
-        ser_day(
-            d,
-            printing_open=bool(state["printing_open"] and str(d["_id"]) == state["operating_day_id"]),
-        )
-        for d in days
-    ]
-    return out, state
 
 
 @router.post("")
@@ -143,12 +101,8 @@ async def active_camp(actor: dict = Depends(require_any)) -> Dict[str, Any]:
     c = await db.camps.find_one({"is_active": True})
     if not c:
         return {"camp": None, "days": []}
-    days = await db.camp_days.find({"camp_id": c["_id"]}).sort("day_date", 1).to_list(100)
-    days_out, state = _days_projection(c, days)
-    return {"camp": ser_camp(c), "days": days_out, **{k: state[k] for k in (
-        "printing_open", "operating_day_id", "operating_day_date", "mode",
-        "override_expires_at", "server_time",
-    )}}
+    days, state = await printing.load(db, c)
+    return {"camp": ser_camp(c), "days": [ser_day(d, state) for d in days], **state}
 
 
 @router.get("/active/public")
@@ -231,7 +185,8 @@ async def delete_camp(camp_id: str, actor: dict = Depends(require_admin)) -> Dic
 async def upsert_camp_day(body: CampDayBody, actor: dict = Depends(require_admin)) -> Dict[str, Any]:
     db = get_db()
     camp_oid = ObjectId(body.camp_id)
-    if not await db.camps.find_one({"_id": camp_oid}):
+    camp = await db.camps.find_one({"_id": camp_oid})
+    if not camp:
         raise api_error(404, "CAMP_NOT_FOUND", 'Camp not found')
     existing = await db.camp_days.find_one({"camp_id": camp_oid, "day_date": body.day_date})
     if existing:
@@ -252,21 +207,18 @@ async def upsert_camp_day(body: CampDayBody, actor: dict = Depends(require_admin
         d = await db.camp_days.find_one({"_id": res.inserted_id})
     if not d:
         raise api_error(404, "DAY_NOT_FOUND", 'Day not found')
-    camp = await db.camps.find_one({"_id": camp_oid})
-    days = await db.camp_days.find({"camp_id": camp_oid}).to_list(100)
-    state = effective_printing(camp, days)
-    return {"day": ser_day(d, printing_open=bool(
-        state["printing_open"] and state["operating_day_id"] == str(d["_id"])
-    ))}
+    _days, state = await printing.load(db, camp)
+    return {"day": ser_day(d, state)}
 
 
 @router.get("/{camp_id}/days")
 async def list_days(camp_id: str, actor: dict = Depends(require_any)) -> Dict[str, Any]:
     db = get_db()
     camp = await db.camps.find_one({"_id": ObjectId(camp_id)})
-    days = await db.camp_days.find({"camp_id": ObjectId(camp_id)}).sort("day_date", 1).to_list(100)
-    days_out, _state = _days_projection(camp or {}, days)
-    return {"days": days_out}
+    if not camp:
+        return {"days": []}
+    days, state = await printing.load(db, camp)
+    return {"days": [ser_day(d, state) for d in days]}
 
 
 NOTICE_FIELDS = {"phone": 1, "phone_normalized": 1, "reg_no": 1, "created_by": 1, "camp_id": 1}
@@ -326,10 +278,7 @@ async def update_camp_day(day_id: str, body: CampDayBody, background_tasks: Back
     except DuplicateKeyError:
         raise api_error(409, "ANOTHER_CAMP_DAY_ALREADY_USES_THAT_DATE", 'Another camp day already uses that date')
     await sms.dispatch(background_tasks, db, queued, now_utc())
-    state = effective_printing(camp, days)
-    return {"day": ser_day(changed, printing_open=bool(
-        state["printing_open"] and state["operating_day_id"] == str(changed["_id"])
-    ))}
+    return {"day": ser_day(changed, printing.resolve(camp, days))}
 
 
 @router.patch("/days/{day_id}/print-window")
@@ -370,8 +319,7 @@ async def toggle_print_window(day_id: str, body: PrintWindowBody, actor: dict = 
     d = await db.camp_days.find_one({"_id": d["_id"]})
     if not d:
         raise api_error(404, "DAY_NOT_FOUND", 'Day not found')
-    state = effective_printing(camp, [d])
-    return {"day": ser_day(d, printing_open=bool(state["printing_open"] and state["operating_day_id"] == str(d["_id"])))}
+    return {"day": ser_day(d, printing.resolve(camp, [d]))}
 
 
 @router.delete("/days/{day_id}")

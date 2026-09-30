@@ -413,7 +413,7 @@ describe("CHALLENGE 2: Desk.js Form Persistence vs Modal Lifecycle", () => {
       if (url === "/register") {
         capturedReqIds.push(body.registration_request_id);
         return Promise.resolve({
-          data: { registration: { id: "r-1", reg_no: "101", full_name: body.full_name } }
+          data: { registration: { id: "r-1", reg_no: "101", full_name: body.full_name, print: { allowed: false, code: "NEEDS_DOOR_SCAN", stage: "booked" } } }
         });
       }
       return Promise.resolve({ data: {} });

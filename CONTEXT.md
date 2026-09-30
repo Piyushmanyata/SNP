@@ -201,7 +201,7 @@ The dialog that follows every prescription print at the desk. "Printed — next 
 _Avoid_: print confirmation, printed flag, auto-stamp
 
 **Sheet stamp**:
-The server's signature on a first-print sheet: this registration, fetched at this moment while the Print window was open. It is not stored. The Paper check sends it back so a sheet fetched while the window was open can be recorded after it closes, on the same IST calendar date, while the patient is arrived, not printed, not Doctor seen and not held for identity. "Print again" fetches a new sheet and so a new stamp. A missing, altered or another patient's stamp changes nothing: the window refuses as before.
+The server's signature on a first-print sheet: this registration, fetched at this moment while the Print window was open. It is not stored. The Paper check sends it back so a sheet fetched while the window was open can be recorded after it closes, on the same IST calendar date, while the patient is arrived, not printed, not Doctor seen and not held for identity. "Print again" fetches a new sheet and so a new stamp. A missing, altered or another patient's stamp changes nothing: the window refuses as before. The server mints one only while the Print window is open.
 _Avoid_: print token (Token is the Fulfilment slip), receipt
 
 **Print Prescription**:
@@ -213,8 +213,12 @@ A fresh copy of the prescription for a patient who already has Print Prescriptio
 _Avoid_: duplicate print, Paper check's Print again (a first print not yet recorded)
 
 **Print window**:
-Server-derived printing availability for the active camp: automatic on the IST calendar camp day, or one admin-selected day, or off. Manual enable/disable expires at the next IST midnight. A stored per-day boolean is not the authority. Chooses Desk mode via the operating day. While it is closed the desk withdraws Print and says so rather than offering a control that fails; a sheet that has already printed keeps its reprint.
+Server-derived printing availability for the active camp: automatic on the IST calendar camp day, or one admin-selected day, or off. Manual enable/disable expires at the next IST midnight. A stored per-day boolean is not the authority. Chooses Desk mode via the operating day. While it is closed the desk withdraws Print and says so rather than offering a control that fails; a sheet that has already printed keeps its reprint. The desk learns it for each registration from the Print verdict.
 _Avoid_: paused camp, calendar-today-only print, client timer
+
+**Print verdict**:
+The server's answer to "may this registration be printed now?": `{allowed, code, stage}`, carried on the desk payloads the desk renders as a row or a card. `stage` is Doctor seen, printed, arrived or booked, in that order of precedence, and a printed registration is allowed (a Reprint). `code` is the refusal: `ALREADY_SEEN`, `NEEDS_DOOR_SCAN` (a booking with no Lock or No-card print, or one still held for identity) or `PRINT_WINDOW_CLOSED`. The desk renders it and derives nothing; the Reprint offer stays a desk rule. It is a snapshot at fetch, and the print endpoints re-check on every request. The desk drops a found row when the Print window or the Operating day changes, so the operator finds the patient again.
+_Avoid_: canPrint, print state
 
 **Desk mode**:
 Camp-day mode when printing is open for the operating day: Scan at the door first, Pre-registration hidden. Pre-registration mode when printing is closed: Pre-registration first, and no Scan at the door, because the door refuses scans while printing is closed. Search stays in both.

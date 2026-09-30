@@ -1,29 +1,26 @@
 import asyncio
-import hmac
-from datetime import datetime, timezone
 from typing import Any, Dict, Optional
-from fastapi import HTTPException, APIRouter, Depends
+from fastapi import APIRouter, Depends
 from bson import ObjectId
 from pymongo.asynchronous.database import AsyncDatabase
 from db import get_db
 from models import NoCardBody, PaperCheckBody, QrLookupBody, ScanBody, ScanConfirmBody
-from helpers import IST, now_ist, now_utc, age_from_dob, parse_patient_identifier, api_error
+from helpers import now_utc, age_from_dob, parse_patient_identifier, api_error
 from serializers import ser_patient
-from security import require_staff, sign
-from routes_camps import effective_printing
+from security import require_staff
 import arrival
+import printing
 from aadhaar import decode_aadhaar
 import lock_resolution
-from lock_resolution import duplicate_in_camp, is_manual
-from routes_registration import CARD_IN_HAND, checked_manual_note
+from lock_resolution import CARD_IN_HAND, checked_manual_note, duplicate_in_camp, is_manual
 router = APIRouter(prefix="/api/desk", tags=["desk"])
 
 MAX_REG_NO_DIGITS = 12
 
 
-async def _resolve(value: str) -> Optional[Dict[str, Any]]:
+async def _resolve(value: str, camp: Optional[dict] = None) -> Optional[Dict[str, Any]]:
     db = get_db()
-    camp = await _active_camp(db)
+    camp = camp or await _active_camp(db)
     v = parse_patient_identifier(value)
     p = await db.patients.find_one({"camp_id": camp["_id"], "patient_qr": v})
     if p:
@@ -39,10 +36,13 @@ async def _resolve(value: str) -> Optional[Dict[str, Any]]:
 
 @router.post("/lookup")
 async def lookup(body: QrLookupBody, actor: dict = Depends(require_staff)) -> Dict[str, Any]:
-    p = await _resolve(body.value)
+    db = get_db()
+    camp = await _active_camp(db)
+    p = await _resolve(body.value, camp)
     if not p:
         raise api_error(404, "NO_MATCHING_REGISTRATION_FOUND", 'No matching registration found')
-    return {"registration": ser_patient(p)}
+    _days, state = await printing.load(db, camp)
+    return {"registration": ser_patient(p, state)}
 
 
 def _card_values(data: dict) -> Dict[str, Any]:
@@ -71,15 +71,9 @@ async def _active_camp(db: AsyncDatabase) -> dict:
     return camp
 
 
-async def _printing_state(db, camp: dict) -> dict:
-    days = await db.camp_days.find({"camp_id": camp["_id"]}).to_list(100)
-    return effective_printing(camp, days)
-
-
 async def _require_door_open(db, camp: dict) -> dict:
-    state = await _printing_state(db, camp)
-    if not state.get("printing_open"):
-        raise api_error(409, "PRINT_WINDOW_CLOSED", 'The print window is closed.')
+    _days, state = await printing.load(db, camp)
+    printing.require_open(state)
     return state
 
 
@@ -115,7 +109,7 @@ async def scan(
         arrived = await arrival.stamp(db, patient, str(actor["_id"]), state)
         return {
             "outcome": "arrived",
-            "registration": ser_patient(arrived),
+            "registration": ser_patient(arrived, state),
             "prescription": await _printable_prescription(db, arrived, camp, state),
             **({"overwritten": True} if outcome.kind == "overwrite" else {}),
         }
@@ -157,7 +151,7 @@ async def scan_confirm(
     arrived = await arrival.stamp(db, patient, str(actor["_id"]), state)
     return {
         "outcome": "arrived",
-        "registration": ser_patient(arrived),
+        "registration": ser_patient(arrived, state),
         "prescription": await _printable_prescription(db, arrived, camp, state),
     }
 
@@ -174,48 +168,16 @@ async def arrive(
         raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
     _require_in_camp(p, camp)
     arrival.require_arrivable(p)
-    state = await _printing_state(db, camp)
+    _days, state = await printing.load(db, camp)
     arrived = await arrival.stamp(db, p, str(actor["_id"]), state)
     return {"registration": ser_patient(arrived), "prescription": await _printable_prescription(db, arrived, camp, state)}
-
-
-def _print_refusal(p: dict, state: dict, fetched_while_open: bool = False) -> Optional[HTTPException]:
-    if p.get("queue_status") == "seen":
-        return api_error(409, "ALREADY_SEEN", 'The doctor has already seen this patient. The prescription cannot be printed again.')
-    if not p.get("arrived_at"):
-        return api_error(409, "NOT_ARRIVED", 'Scan the patient in at the door before printing.')
-    if p.get("printed_at"):
-        return None
-    if not state.get("printing_open") and not fetched_while_open:
-        return api_error(409, "PRINT_WINDOW_CLOSED", 'The print window is closed.')
-    if p.get("identity_recheck_required"):
-        return api_error(409, "NEEDS_DOOR_SCAN", "Scan this patient's Aadhaar card at the door, or record a No-card print.")
-    return None
-
-
-def _sheet_signature(p: dict, fetched_ms: str) -> str:
-    return sign("sheet-stamp", "|".join((str(p["_id"]), fetched_ms)))
-
-
-def _sheet_stamp(p: dict) -> str:
-    """Signs the moment a first-print sheet left the server while the Print window was open (ADR 0093)."""
-    fetched_ms = str(int(now_utc().timestamp() * 1000))
-    return f"{fetched_ms}.{_sheet_signature(p, fetched_ms)}"
-
-
-def _fetched_while_open(p: dict, stamp: Optional[str]) -> bool:
-    fetched_ms, _, signature = (stamp or "").partition(".")
-    if not fetched_ms.isdecimal() or not hmac.compare_digest(signature, _sheet_signature(p, fetched_ms)):
-        return False
-    fetched = datetime.fromtimestamp(int(fetched_ms) / 1000, timezone.utc)
-    return fetched.astimezone(IST).date() == now_ist().date()
 
 
 async def _prescription_payload(
     db, p: dict, actor: dict, record: bool, camp: dict, sheet_stamp: Optional[str] = None,
 ) -> Dict[str, Any]:
-    state = await _printing_state(db, camp)
-    refusal = _print_refusal(p, state, record and _fetched_while_open(p, sheet_stamp))
+    _days, state = await printing.load(db, camp)
+    refusal = printing.refusal(p, state, sheet_stamp if record else None)
     if refusal:
         raise refusal
     day = await db.camp_days.find_one({"_id": p["camp_day_id"]})
@@ -223,10 +185,7 @@ async def _prescription_payload(
         raise api_error(404, "CAMP_DAY_NOT_FOUND", 'Camp day not found')
     if record and not p.get("printed_at"):
         stamped = await db.patients.find_one_and_update(
-            {
-                "_id": p["_id"], "printed_at": None,
-                "queue_status": {"$ne": "seen"}, "identity_recheck_required": {"$ne": True},
-            },
+            printing.first_print_filter(p["_id"]),
             {"$set": {
                 "printed_at": now_utc(),
                 "checked_in_by": str(actor["_id"]),
@@ -239,7 +198,7 @@ async def _prescription_payload(
             raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
         if not p.get("printed_at"):
             raise api_error(409, "PRINT_CONFLICT", 'This registration changed while printing. Try again.')
-    return {"registration": ser_patient(p), "prescription": _sheet(p, camp, day["day_date"])}
+    return {"registration": ser_patient(p), "prescription": _sheet(p, camp, day["day_date"], state)}
 
 
 def _prescription(p: dict, camp: Optional[dict], day_date: str) -> Dict[str, Any]:
@@ -258,18 +217,18 @@ def _prescription(p: dict, camp: Optional[dict], day_date: str) -> Dict[str, Any
     }
 
 
-def _sheet(p: dict, camp: dict, day_date: str) -> Dict[str, Any]:
+def _sheet(p: dict, camp: dict, day_date: str, state: dict) -> Dict[str, Any]:
     prescription = _prescription(p, camp, day_date)
     if not p.get("printed_at"):
-        prescription["sheet_stamp"] = _sheet_stamp(p)
+        prescription["sheet_stamp"] = printing.sign_sheet(p, state)
     return prescription
 
 
 async def _printable_prescription(db: AsyncDatabase, p: dict, camp: dict, state: dict) -> Optional[Dict[str, Any]]:
-    if p.get("printed_at") or _print_refusal(p, state):
+    if p.get("printed_at") or printing.refusal(p, state):
         return None
     day = await db.camp_days.find_one({"_id": p["camp_day_id"]})
-    return _sheet(p, camp, day["day_date"]) if day else None
+    return _sheet(p, camp, day["day_date"], state) if day else None
 
 
 @router.get("/print/{patient_id}")
@@ -309,15 +268,14 @@ async def record_no_card_print(
     note = checked_manual_note(body.reason, body.note)
     db = get_db()
     camp = await _active_camp(db)
-    await _require_door_open(db, camp)
+    state = await _require_door_open(db, camp)
     p = await db.patients.find_one({"_id": ObjectId(body.patient_id)})
     if not p:
         raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
     _require_in_camp(p, camp)
-    if p.get("queue_status") == "seen":
-        raise api_error(409, "ALREADY_SEEN", 'The doctor has already seen this patient. The prescription cannot be printed again.')
+    printing.require_not_seen(p)
     if p.get("arrived_at"):
-        return {"registration": ser_patient(p)}
+        return {"registration": ser_patient(p, state)}
     if lock_resolution.is_scanned(p) and body.reason in CARD_IN_HAND:
         if not body.aadhaar_last4:
             raise api_error(400, "AADHAAR_LAST4_REQUIRED", 'The card is here: type the last 4 digits of its Aadhaar number.')
@@ -334,4 +292,4 @@ async def record_no_card_print(
     current = recorded or await db.patients.find_one({"_id": p["_id"]})
     if not current:
         raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
-    return {"registration": ser_patient(current)}
+    return {"registration": ser_patient(current, state)}

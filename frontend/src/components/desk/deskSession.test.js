@@ -144,6 +144,22 @@ test("a walk-in that came back not arrived shows its row instead of claiming arr
   expect(next.found).toEqual({ reg: booked, reprint: true });
 });
 
+test("printingChanged clears the found patient and search results only", () => {
+  const state = run([
+    { type: "failed", seq: 1, message: "Old error" },
+    { type: "searchResolved", seq: 1, results: [REG] },
+    { type: "lookupResolved", seq: 1, registration: REG, reprint: true },
+    { type: "bannerShown", message: "Registered #101" },
+  ], withPaperCheck);
+  expect(state.found).not.toBeNull();
+  const next = deskSession(state, { type: "printingChanged" });
+  expect(next.found).toBeNull();
+  expect(next.searchResults).toBeNull();
+  expect({ ...next, found: state.found, searchResults: state.searchResults }).toEqual(state);
+  expect(next.paperCheck).toBe(state.paperCheck);
+  expect(next.seq).toBe(state.seq);
+});
+
 test("an unknown event is a programming error", () => {
   expect(() => deskSession(initialDeskSession, { type: "nope" })).toThrow("Unknown Desk session event: nope");
 });
