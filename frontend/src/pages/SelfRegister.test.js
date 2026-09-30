@@ -217,6 +217,19 @@ test("a retry after a failed submit reuses the same registration request id", as
   expect(ids[0]).toBe(ids[1]);
 });
 
+test("editing the phone after a failed submit sends a new request id, and an unchanged retry reuses it", async () => {
+  await renderAndScan();
+  api.post.mockRejectedValue(new Error("Network Error"));
+  await submit();
+  typePhone("9876500009");
+  await submit();
+  await submit();
+  const [first, second, third] = api.post.mock.calls.map((c) => c[1]);
+  expect(second.phone).toBe("9876500009");
+  expect(second.registration_request_id).not.toBe(first.registration_request_id);
+  expect(third.registration_request_id).toBe(second.registration_request_id);
+});
+
 test("a different patient scanned after a failed submit gets its own request id", async () => {
   await renderAndScan();
   api.post.mockRejectedValueOnce(new Error("Network Error"));
@@ -316,6 +329,20 @@ test.each(["CAMP_DAY_FULL", "DAY_PASSED"])("a %s refusal reloads the days and mo
   expect(container.querySelector('[data-testid="self-day-select"]').value).toBe("d2");
   expect(container.textContent).toContain("This camp day is full.");
   expect(container.querySelector('[data-testid="self-scanned-preview"]')).not.toBeNull();
+});
+
+test("a seat refusal that moves the chosen day sends the next submit with a new request id", async () => {
+  withDays([TODAY_OPEN, TOMORROW_OPEN]);
+  await renderAndScan();
+  withDays([TODAY_FULL, TOMORROW_OPEN]);
+  api.post.mockRejectedValueOnce({ response: { data: { detail: { code: "CAMP_DAY_FULL", message: "This camp day is full." } } } });
+  await submit();
+  api.post.mockResolvedValueOnce({ data: { receipt: { reg_no: 12, patient_qr: "qr-12" } } });
+  await submit();
+  const [refused, moved] = api.post.mock.calls.map((c) => c[1]);
+  expect(refused.camp_day_id).toBe("d1");
+  expect(moved.camp_day_id).toBe("d2");
+  expect(moved.registration_request_id).not.toBe(refused.registration_request_id);
 });
 
 test("a network failure on submit keeps the page as it is", async () => {

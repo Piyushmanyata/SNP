@@ -129,8 +129,12 @@ The one of four Fulfilment lines the operator chooses for their current session.
 _Avoid_: role, station, desk assignment
 
 **Corrected after issue**:
-The mark on a medicine or Fixed-power specs line that a correction changed after goods were handed over. It records the correction's revision, when and by whom. The issued outcome is carried forward, never rewritten: medicines given stay given, one the correction removes stays recorded as given, and an Issued power stays. A medicine the correction adds opens on the line, which then needs a fresh Paper review against the corrected prescription; a changed fixed power does not reopen anything. Shown at the Fulfilment station and in the Camp records export.
+The mark on a medicine or Fixed-power specs line that a correction changed after goods were handed over. It records the correction's revision, when and by whom. The issued outcome is carried forward, never rewritten: medicines given stay given, one the correction removes stays recorded as given, and an Issued power stays. A medicine the correction adds opens on the line, which then needs a fresh Paper review against the corrected prescription; a changed fixed power does not reopen anything. Shown at the Fulfilment station and in the Camp records export. What an issue and a correction each make of the line is one module, `backend/fulfilment_line.py` (ADR 0098).
 _Avoid_: stale line, amended outcome, re-issue (nothing already given is issued again)
+
+**Settled outcome**:
+A medicine outcome recorded as given or not available on an issued line, stored as `given` not null. An open outcome has `given` null: a medicine a correction added that nobody has recorded yet. On a line that is Corrected after issue, a re-issue never changes a settled outcome and fills an open one.
+_Avoid_: closed outcome, final outcome
 
 **Fulfilment line**:
 One of the four things a patient can be sent to after Seen: medicine, Fixed-power specs, Spectacles to be made, or Hospital. Each has its own item type and record. The Hospital line carries the Hospital outcome; operations do not occur at camp. A prescription names at most one of Fixed-power specs, Spectacles to be made, or IOL surgery; medicine goes with any of them, and a Hospital referral goes with either specs line. A patient who declines IOL surgery and then wants spectacles needs a correction to the prescription. An absent record means not needed.
@@ -308,9 +312,13 @@ _Avoid_: opening the prescription, automatic approval
 The single admin-only CSV for a camp, one row per patient including no-shows. Carries identity (name, age, gender, household phone, address, Aadhaar last-4, reg_no), the Manual entry mark and its reason, the registration / arrival / seen timestamps, diagnosis, BP and blood sugar, each eye's power, the medicines prescribed and any not given, the prescribed and issued fixed powers, the status of each of the four Fulfilment lines with blank meaning the patient was never recorded at that desk, and the assigned clinical day and venue for each deferral. It is a wide file of patient data and is not downloadable by a volunteer.
 _Avoid_: camp records, clinical audit, the reports (there is exactly one export)
 
+**Registration request**:
+One attempt to register one patient, identified by the id the screen sent. The same id and the same payload replay the saved row, so a retry after a lost reply cannot save twice. The screen mints a new id when the person, household phone, camp day or reason changes, and after a save, a request conflict, a card read or the form opening. Mismatch review and Different person answer the server about the same registration, so they keep the id of the attempt that raised them. An edited retry gets a new id, so the server answers it with Duplicate in camp or Lookalikes, never with the row saved before the edit. The desk, the Door walk-in and Self-registration share one rule (ADR 0102). The Admin New Camp form is the one exception: its id stays until the form is reopened, because the server already compares the whole camp body.
+_Avoid_: request id (say Registration request, or Clinical operation for a clinical write), idempotency key
+
 **Clinical operation**:
 One clinical write — completing a prescription, undoing it, issuing a line, or recording a correction — identified by the operation id the desk sent. The same id and the same payload replay the saved result. A different payload for that id is refused, so the desk mints a new id whenever the operator changes the payload. The write and its ledger intent commit together, or not at all.
-_Avoid_: request id (that is the registration idempotency key), correction id
+_Avoid_: request id (that is the Registration request), correction id
 
 **SMS intent**:
 A `reminder_ledger` row written before any send: queued, then pending while the provider has the message, then sent, failed, uncertain, rejected, paused, abandoned or skipped. A restart sends queued rows older than 30 seconds and failed rows whose retry time has passed. A pending row older than five minutes becomes uncertain and is never sent again.
