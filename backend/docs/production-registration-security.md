@@ -6,6 +6,8 @@ Request IDs are client supplied. Reusing one previously returned the stored pati
 
 Both the ordinary retry path and the database uniqueness-conflict path now require the same camp, original booked day, normalized name, and scanned Aadhaar last four digits and date of birth. A mismatch returns `409 REGISTRATION_REQUEST_CONFLICT` without a patient record. Arrival may change the operating day; retries still compare the original booking. Trusting the request ID alone was rejected because it is an idempotency key, not proof of patient identity.
 
+The replay compares no phone, age, gender or address, so the desk, the Door walk-in and Self-registration send a new request ID whenever the registration's payload changes (ADR 0102). An edited retry then reaches the Lock rules and gets `DUPLICATE_IN_CAMP` or `LOOKALIKES` instead of the row saved before the edit.
+
 Public registration errors expose only a code and message. Authenticated desk duplicate handling retains patient details needed to resolve registrations.
 
 ## Decision: use database constraints and existing session versions

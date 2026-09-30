@@ -308,9 +308,13 @@ _Avoid_: opening the prescription, automatic approval
 The single admin-only CSV for a camp, one row per patient including no-shows. Carries identity (name, age, gender, household phone, address, Aadhaar last-4, reg_no), the Manual entry mark and its reason, the registration / arrival / seen timestamps, diagnosis, BP and blood sugar, each eye's power, the medicines prescribed and any not given, the prescribed and issued fixed powers, the status of each of the four Fulfilment lines with blank meaning the patient was never recorded at that desk, and the assigned clinical day and venue for each deferral. It is a wide file of patient data and is not downloadable by a volunteer.
 _Avoid_: camp records, clinical audit, the reports (there is exactly one export)
 
+**Registration request**:
+One attempt to register one patient, identified by the id the screen sent. The same id and the same payload replay the saved row, so a retry after a lost reply cannot save twice. The screen mints a new id when the person, household phone, camp day or reason changes, and after a save, a request conflict, a card read or the form opening. Mismatch review and Different person answer the server about the same registration, so they keep the id of the attempt that raised them. An edited retry gets a new id, so the server answers it with Duplicate in camp or Lookalikes, never with the row saved before the edit. The desk, the Door walk-in and Self-registration share one rule (ADR 0102). The Admin New Camp form is the one exception: its id stays until the form is reopened, because the server already compares the whole camp body.
+_Avoid_: request id (say Registration request, or Clinical operation for a clinical write), idempotency key
+
 **Clinical operation**:
 One clinical write — completing a prescription, undoing it, issuing a line, or recording a correction — identified by the operation id the desk sent. The same id and the same payload replay the saved result. A different payload for that id is refused, so the desk mints a new id whenever the operator changes the payload. The write and its ledger intent commit together, or not at all.
-_Avoid_: request id (that is the registration idempotency key), correction id
+_Avoid_: request id (that is the Registration request), correction id
 
 **SMS intent**:
 A `reminder_ledger` row written before any send: queued, then pending while the provider has the message, then sent, failed, uncertain, rejected, paused, abandoned or skipped. A restart sends queued rows older than 30 seconds and failed rows whose retry time has passed. A pending row older than five minutes becomes uncertain and is never sent again.
