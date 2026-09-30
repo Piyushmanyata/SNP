@@ -125,6 +125,12 @@ describe("TemplateEditor", () => {
     expect(api.post).not.toHaveBeenCalled();
   });
 
+  test("the logo fieldset can shrink to a phone-width grid column", async () => {
+    await render();
+    const fieldset = container.querySelector('[data-testid="tpl-save-logos-button"]').closest("fieldset");
+    expect(fieldset.className).toContain("min-w-0");
+  });
+
   test("shows the A4 preview of the fixed prescription", async () => {
     await render();
     const preview = container.querySelector('[data-testid="tpl-preview"]');

@@ -131,7 +131,7 @@ export default function TemplateEditor() {
 
       {logos && (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-          <fieldset className="space-y-4" disabled={busy}>
+          <fieldset className="min-w-0 space-y-4" disabled={busy}>
             <TemplateLogosEditor
               logos={logos}
               onAddLogo={addLogo}
