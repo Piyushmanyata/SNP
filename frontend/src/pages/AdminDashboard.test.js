@@ -258,6 +258,44 @@ describe("AdminDashboard component", () => {
     });
   });
 
+  test("an edited create-camp retry after a lost reply keeps its setup request id, and reopening New Camp mints a new one", async () => {
+    api.post.mockResolvedValue({ data: {} });
+    await act(async () => {
+      root.render(<MemoryRouter><AdminDashboard /></MemoryRouter>);
+    });
+    await act(async () => container.querySelector('[data-testid="admin-tab-camps"]').click());
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+    const type = (testid, value) => {
+      const input = document.querySelector(`[data-testid="${testid}"]`);
+      setter.call(input, value);
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    const submit = () => document.querySelector('[data-testid="camp-create-submit"]');
+    const fill = () => {
+      type("camp-date-input", "2026-10-10");
+      type("camp-number-input", "163");
+    };
+    const setupIds = () => api.post.mock.calls.filter(([url]) => url === "/camps").map(([, sent]) => sent.setup_request_id);
+
+    await act(async () => container.querySelector('[data-testid="create-camp-button"]').click());
+    act(fill);
+    api.post.mockRejectedValueOnce(new Error("Network Error"));
+    await act(async () => submit().click());
+    act(() => type("camp-number-input", "164"));
+    api.post.mockRejectedValueOnce({ response: { data: { detail: { code: "CAMP_REQUEST_CONFLICT", message: "Close this form and edit the camp." } } } });
+    await act(async () => submit().click());
+    await act(async () => submit().click());
+    expect(setupIds()).toHaveLength(3);
+    expect(setupIds()[1]).toBe(setupIds()[0]);
+    expect(setupIds()[2]).toBe(setupIds()[0]);
+
+    await act(async () => container.querySelector('[data-testid="create-camp-button"]').click());
+    act(fill);
+    await act(async () => submit().click());
+    expect(setupIds()).toHaveLength(4);
+    expect(setupIds()[3]).not.toBe(setupIds()[0]);
+  });
+
   test("has no Staff or Roster tab or content and links to Team once", async () => {
     await act(async () => {
       root.render(

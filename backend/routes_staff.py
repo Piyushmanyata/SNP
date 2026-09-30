@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, Depends
 from bson import ObjectId
 from pymongo.errors import DuplicateKeyError
+import fulfilment_line
 from db import aggregate_list, get_db
 from models import CreateStaffBody, PatchStaffLineBody, PatchStaffTeamLeadBody
 from helpers import iso, now_utc, normalize_name, api_error
@@ -20,7 +21,7 @@ from security import (
 router = APIRouter(prefix="/api/staff", tags=["staff"])
 
 VALID_ROLES = {"admin", "team_lead", "volunteer", "clinical_desk_operator"}
-VALID_LINES = {"rx", "medicine", "specs_fixed", "specs_made", "ot"}
+VALID_LINES = {"rx", *fulfilment_line.STATUSES}
 CLINICAL_ROLE = "clinical_desk_operator"
 
 

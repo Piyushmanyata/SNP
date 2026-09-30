@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 from bson import ObjectId
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
+import fulfilment_line
 from catalogue import format_power
 from db import aggregate_list, get_db
 from helpers import IST, as_utc, display_date, display_timestamp, iso, ist_day_bounds, now_utc, today_ist_str
@@ -269,10 +270,7 @@ def _empty_board(as_of: str, state: str) -> Dict[str, Any]:
         "day": None,
         "stages": {"arrived": 0, "seen": 0, **queue_stage.board_stages([])},
         "fulfilment": {
-            "medicine": {"fulfilled": 0, "not_available": 0, "partially_fulfilled": 0},
-            "specs_fixed": {"fulfilled": 0},
-            "specs_made": {"deferred": 0},
-            "ot": {"deferred": 0, "declined": 0},
+            item_type: {status: 0 for status in statuses} for item_type, statuses in fulfilment_line.STATUSES.items()
         },
         "activity": [],
         "quiet_count": 0,
@@ -286,9 +284,7 @@ def _empty_board(as_of: str, state: str) -> Dict[str, Any]:
 
 
 FULFILMENT_BUCKETS = [
-    (item_type, status)
-    for item_type, statuses in _empty_board("", "")["fulfilment"].items()
-    for status in statuses
+    (item_type, status) for item_type, statuses in fulfilment_line.STATUSES.items() for status in statuses
 ]
 
 

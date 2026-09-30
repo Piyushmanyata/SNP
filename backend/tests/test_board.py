@@ -120,6 +120,7 @@ class TestCampDayBoard:
             await database.fulfilments.insert_many([
                 {"transcription_id": tx, "item_type": "medicine", "status": "fulfilled", "camp_id": camp_id, "patient_seen_at": seen, "created_at": NOW - timedelta(minutes=2)},
                 {"transcription_id": tx, "item_type": "ot", "status": "deferred", "camp_id": camp_id, "patient_seen_at": seen, "created_at": NOW - timedelta(minutes=3)},
+                {"transcription_id": tx, "item_type": "specs_made", "status": "cancelled", "camp_id": camp_id, "patient_seen_at": seen, "created_at": NOW - timedelta(minutes=4)},
             ])
             await database.ot_schedule_days.insert_one({
                 "camp_id": camp_id, "day_date": day(1), "venue": "OT Hall", "seat_limit": 10, "seats_taken": 3,
@@ -167,6 +168,8 @@ class TestCampDayBoard:
             assert out["quiet_count"] == 1
             assert out["fulfilment"]["medicine"]["fulfilled"] == 1
             assert out["fulfilment"]["ot"]["deferred"] == 1
+            assert out["fulfilment"]["specs_made"]["cancelled"] == 1
+            assert out["fulfilment"]["specs_made"]["deferred"] == 0
             assert out["next_ot"]["seats_left"] == 7
             assert out["next_ot"]["venue"] == "OT Hall"
             assert "start_time" not in out["next_specs"]
