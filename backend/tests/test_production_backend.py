@@ -49,14 +49,18 @@ def test_long_surgery_venue_requires_short_dlt_name():
         OtScheduleBody(camp_id=str(ObjectId()), day_date=TOMORROW, venue="A" * 41, venue_sms="B" * 41, seat_limit=20)
 
 
-def test_patient_history_uses_three_queries_for_twenty_visits(monkeypatch):
+def test_patient_history_uses_four_queries_for_twenty_visits(monkeypatch):
     log = CommandLog()
 
     async def body(database):
         camp_id = (await database.camps.insert_one({"name": "Eye camp"})).inserted_id
         person_id = ObjectId()
-        patients = [patient_doc(camp_id=camp_id) for _ in range(20)]
+        patients = [patient_doc(camp_id=camp_id, committed_revision_id=ObjectId()) for _ in range(20)]
         await database.patients.insert_many(patients)
+        await database.prescription_revisions.insert_many([
+            {"_id": p["committed_revision_id"], "patient_id": p["_id"], "camp_id": camp_id, "operation_id": str(p["_id"])}
+            for p in patients
+        ])
         await database.transcriptions.insert_many([
             {"patient_id": p["_id"], "camp_id": camp_id, "person_id": person_id, "created_at": NOW} for p in patients
         ])
@@ -64,7 +68,9 @@ def test_patient_history_uses_three_queries_for_twenty_visits(monkeypatch):
         result = await routes_clinical.clinical_history(str(person_id), actor=CLINICAL)
         assert len(result["history"]) == 20
         assert all(visit["camp_name"] == "Eye camp" for visit in result["history"])
-        assert len(log.commands) <= 3
+        assert all(visit["committed_revision"] for visit in result["history"])
+        assert len(log.commands) <= 4
+        assert [collection for _, collection in log.commands].count("prescription_revisions") == 1
 
     run_camp(monkeypatch, body, listener=log)
 

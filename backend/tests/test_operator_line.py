@@ -9,8 +9,8 @@ from routes_clinical import add_correction, record_fulfilment
 from routes_reports import export_camp_records
 from routes_staff import create_staff, list_staff, patch_staff_line
 from seed import (
-    ADMIN, CLINICAL, FIXED_POWER, MEDICINE, OTHER_DAY, TOMORROW, asgi_client, bearer, fulfil, recorder, run_camp, seed_camp,
-    seen_patient, user_doc,
+    ADMIN, CLINICAL, FIXED_POWER, MEDICINE, OTHER_DAY, RX, TOMORROW, asgi_client, bearer, fulfil, recorder, run_camp,
+    seed_camp, seen_patient, user_doc,
 )
 
 PASS = "ClinicLine1!"
@@ -218,12 +218,16 @@ class TestFulfilmentMatrix:
 
         async def body(database):
             seen = await seen_patient(database, measurements=None, fixed_power=None)
+            await database.transcriptions.update_one({"_id": seen["trans_id"]}, {"$set": {
+                "specs_measurements": RX, "fixed_power_r": FIXED_POWER, "fixed_power_l": FIXED_POWER,
+            }})
             specs_day = await _specs_day(database, seen["camp_id"])
             ot_day = (await database.ot_schedule_days.insert_one({
                 "camp_id": seen["camp_id"], "day_date": TOMORROW, "venue": "OT Theatre", "seat_limit": 2, "seats_taken": 0,
             })).inserted_id
             for item_type, status, extra, code in (
                 ("specs_fixed", "fulfilled", {}, "FIXED_POWER_REQUIRED"),
+                ("specs_fixed", "fulfilled", {"issued_power_r": FIXED_POWER, "issued_power_l": FIXED_POWER}, "FIXED_POWER_REQUIRED"),
                 ("specs_made", "deferred", {"specs_collection_day_id": str(specs_day)}, "SPECS_MEASUREMENTS_REQUIRED"),
             ):
                 with pytest.raises(HTTPException) as exc:

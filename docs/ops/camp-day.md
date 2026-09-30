@@ -96,4 +96,4 @@ The person's Team Lead or an Admin resets the PIN from Team. The new one-time PI
 
 ## End of day
 
-Admin → Exports → camp records. The file has one row per patient, including people who did not arrive. Keep that file with the day's papers.
+Admin → Exports → camp records. The file has one row per patient, including people who did not arrive. Keep that file with the day's papers. Diagnosis, BP, blood sugar, powers and medicines come from the committed prescription: they are blank for a patient who was never completed or whose completion was undone, even if a draft was saved (ADR 0100).

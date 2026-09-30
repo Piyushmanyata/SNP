@@ -1,7 +1,9 @@
 import React, { act } from "react";
 import ReactDOM from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
-import Desk from "./Desk";
+import Desk, { PatientRow } from "./Desk";
+import { ArrivedCard } from "../components/desk/ScanOutcome";
+import { Lookalikes } from "../components/desk/Lookalikes";
 import api from "../lib/api";
 import { forgetLogos } from "../lib/logoCache";
 
@@ -118,7 +120,14 @@ const ARRIVED = {
   arrived_at: "2026-09-01T04:00:00Z",
   printed_at: null,
   camp_day_changed_from: null,
+  print: { allowed: true, code: null, stage: "arrived" },
 };
+
+const NEEDS_CARD = { allowed: false, code: "NEEDS_DOOR_SCAN", stage: "booked" };
+const CARD_WAIVED = { allowed: true, code: null, stage: "booked" };
+const WINDOW_CLOSED = { allowed: false, code: "PRINT_WINDOW_CLOSED", stage: "arrived" };
+const DOCTOR_SEEN = { allowed: false, code: "ALREADY_SEEN", stage: "seen" };
+const ALREADY_PRINTED = { allowed: true, code: null, stage: "printed" };
 
 let container = null;
 let root = null;
@@ -420,7 +429,7 @@ describe("Desk page", () => {
 
   test("a repeat door scan of a patient the doctor has seen offers no print", async () => {
     api.post.mockResolvedValueOnce({
-      data: { outcome: "arrived", registration: { ...ARRIVED, queue_status: "seen" } },
+      data: { outcome: "arrived", registration: { ...ARRIVED, queue_status: "seen", print: DOCTOR_SEEN } },
     });
     await renderDesk();
     await scanAtDoor();
@@ -579,7 +588,7 @@ describe("Desk page", () => {
     });
     api.post.mockImplementation((url, body) => {
       if (url === "/register") {
-        return Promise.resolve({ data: { registration: { id: "p-7", reg_no: "107", full_name: body.full_name } } });
+        return Promise.resolve({ data: { registration: { id: "p-7", reg_no: "107", full_name: body.full_name, print: NEEDS_CARD } } });
       }
       return Promise.resolve({ data: {} });
     });
@@ -619,7 +628,7 @@ describe("Desk page", () => {
       return Promise.resolve({ data: {} });
     });
     api.post.mockImplementation((url, body) => (url === "/register"
-      ? Promise.resolve({ data: { registration: { id: "p-7", reg_no: "107", full_name: body.full_name }, created: true } })
+      ? Promise.resolve({ data: { registration: { id: "p-7", reg_no: "107", full_name: body.full_name, print: NEEDS_CARD }, created: true } })
       : Promise.resolve({ data: {} })));
   }
 
@@ -700,7 +709,7 @@ describe("Desk page", () => {
   test("desk does not offer independent mark seen", async () => {
     api.post.mockImplementation((url) => {
       if (url === "/desk/lookup") {
-        return Promise.resolve({ data: { registration: { ...ARRIVED, printed_at: "2026-09-01T05:00:00Z" } } });
+        return Promise.resolve({ data: { registration: { ...ARRIVED, printed_at: "2026-09-01T05:00:00Z", print: ALREADY_PRINTED } } });
       }
 
       return Promise.resolve({ data: {} });
@@ -727,12 +736,12 @@ describe("Desk page", () => {
       }
       if (url.startsWith("/patients/search")) {
         return Promise.resolve({
-          data: { results: [{ ...ARRIVED, printed_at: "2026-09-01T05:00:00Z" }] },
+          data: { results: [{ ...ARRIVED, printed_at: "2026-09-01T05:00:00Z", print: ALREADY_PRINTED }] },
         });
       }
       return Promise.resolve({ data: {} });
     });
-    api.post.mockResolvedValue({ data: { registration: { ...ARRIVED, queue_status: "seen" } } });
+    api.post.mockResolvedValue({ data: { registration: { ...ARRIVED, queue_status: "seen", print: DOCTOR_SEEN } } });
 
     await renderDesk();
     act(() => {
@@ -768,6 +777,7 @@ describe("Desk page", () => {
                 reg_no: "102",
                 queue_status: "seen",
                 printed_at: "2026-09-01T05:00:00Z",
+                print: DOCTOR_SEEN,
               },
             ],
           },
@@ -790,7 +800,7 @@ describe("Desk page", () => {
 
   test("a booking that has not arrived cannot be checked in from a lookup", async () => {
     api.post.mockResolvedValue({
-      data: { registration: { ...ARRIVED, queue_status: "registered", arrived_at: null } },
+      data: { registration: { ...ARRIVED, queue_status: "registered", arrived_at: null, print: NEEDS_CARD } },
     });
     await renderDesk();
     act(() => {
@@ -835,7 +845,7 @@ describe("Desk page", () => {
   }
 
   test("a scanned booking that has not arrived offers the card scan or a No-card print, never Print", async () => {
-    await lookup({ ...ARRIVED, queue_status: "registered", arrived_at: null, aadhaar_scanned: true });
+    await lookup({ ...ARRIVED, queue_status: "registered", arrived_at: null, aadhaar_scanned: true, print: NEEDS_CARD });
 
     expect(container.querySelector('[data-testid="awaiting-scan-101"]').textContent)
       .toBe("Scan their Aadhaar card, or record a No-card print");
@@ -847,10 +857,10 @@ describe("Desk page", () => {
   });
 
   test("a No-card print for a scanned booking with the card in hand asks for its last 4 digits", async () => {
-    const booked = { ...ARRIVED, queue_status: "registered", arrived_at: null, aadhaar_scanned: true };
+    const booked = { ...ARRIVED, queue_status: "registered", arrived_at: null, aadhaar_scanned: true, print: NEEDS_CARD };
     await lookup(booked);
     api.post.mockImplementation((url) => {
-      if (url === "/desk/no-card") return Promise.resolve({ data: { registration: { ...booked, no_card_print: true } } });
+      if (url === "/desk/no-card") return Promise.resolve({ data: { registration: { ...booked, no_card_print: true, print: CARD_WAIVED } } });
       if (url.startsWith("/desk/arrive/")) return Promise.resolve({ data: { registration: { ...booked, arrived_at: "2026-09-01T04:00:00Z" }, prescription: RX } });
       return Promise.resolve({ data: {} });
     });
@@ -869,7 +879,7 @@ describe("Desk page", () => {
   });
 
   test("a Patient code read of a patient who has not arrived is only a lookup", async () => {
-    api.post.mockResolvedValue({ data: { registration: { ...ARRIVED, queue_status: "registered", arrived_at: null, aadhaar_scanned: true } } });
+    api.post.mockResolvedValue({ data: { registration: { ...ARRIVED, queue_status: "registered", arrived_at: null, aadhaar_scanned: true, print: NEEDS_CARD } } });
     await renderDesk();
     await act(async () => {
       deskScanner().parentNode.querySelector('[data-testid="mock-patient-code-trigger"]').click();
@@ -879,7 +889,7 @@ describe("Desk page", () => {
   });
 
   test("a closed print window withdraws print and says so instead", async () => {
-    await lookup(ARRIVED, [{ id: "day-1", day_date: "2026-08-27", is_today: true, printing_open: false }]);
+    await lookup({ ...ARRIVED, print: WINDOW_CLOSED }, [{ id: "day-1", day_date: "2026-08-27", is_today: true, printing_open: false }]);
 
     expect(container.querySelector('[data-testid="print-button-101"]')).toBeNull();
     expect(container.querySelector('[data-testid="print-window-closed-101"]')).not.toBeNull();
@@ -887,7 +897,7 @@ describe("Desk page", () => {
 
   test("a closed print window still reprints a sheet that already printed", async () => {
     await lookup(
-      { ...ARRIVED, printed_at: "2026-09-01T05:00:00Z" },
+      { ...ARRIVED, printed_at: "2026-09-01T05:00:00Z", print: ALREADY_PRINTED },
       [{ id: "day-1", day_date: "2026-08-27", is_today: true, printing_open: false }],
     );
 
@@ -1263,7 +1273,7 @@ describe("Desk page", () => {
         return Promise.resolve({ data: { outcome: "no_match", card: { full_name: "Aadhaar Scanned User", aadhaar_last4: "8888", dob: "1984-05-12" } } });
       }
       if (url === "/register") {
-        return Promise.resolve({ data: { registration: { id: "p-9", reg_no: "109", full_name: body.full_name } } });
+        return Promise.resolve({ data: { registration: { id: "p-9", reg_no: "109", full_name: body.full_name, print: ARRIVED.print } } });
       }
       return Promise.resolve({ data: { registration: { ...ARRIVED, id: "p-9", reg_no: "109" } } });
     });
@@ -1667,7 +1677,7 @@ describe("Desk page", () => {
       card: { full_name: "Aadhaar Scanned User", age: 42 },
       diff: [{ field: "age", stored: 30, card: 42 }],
     } } } })));
-    api.post.mockImplementationOnce(() => Promise.resolve({ data: { registration: { ...manual, aadhaar_scanned: true } } }));
+    api.post.mockImplementationOnce(() => Promise.resolve({ data: { registration: { ...manual, aadhaar_scanned: true, print: NEEDS_CARD } } }));
     await renderDesk();
     act(() => { container.querySelector('[data-testid="new-registration-button"]').click(); });
     act(() => { modalScanner("mock-scan-trigger").click(); });
@@ -2022,7 +2032,7 @@ describe("Desk page", () => {
 describe("Manual entry, Pending and Reprint (ADR 0084)", () => {
   const q = (id) => document.body.querySelector(`[data-testid="${id}"]`);
   const registered = () => api.post.mock.calls.filter((c) => c[0] === "/register").map((c) => c[1]);
-  const PRINTED = { ...ARRIVED, printed_at: "2026-09-01T04:42:00Z", printed_by_name: "Ramesh" };
+  const PRINTED = { ...ARRIVED, printed_at: "2026-09-01T04:42:00Z", printed_by_name: "Ramesh", print: ALREADY_PRINTED };
   const lookalikes = (registrations) => Object.assign(new Error("Request failed with status code 409"), {
     response: { status: 409, data: { detail: { code: "LOOKALIKES", registrations } } },
   });
@@ -2108,7 +2118,7 @@ describe("Manual entry, Pending and Reprint (ADR 0084)", () => {
   });
 
   test("a Lookalike is shown before saving, and Different person registers anyway", async () => {
-    const seen = { ...ARRIVED, id: "p-3", reg_no: "103", full_name: "Ram Kumar", queue_status: "seen", phone: "9876500021" };
+    const seen = { ...ARRIVED, id: "p-3", reg_no: "103", full_name: "Ram Kumar", queue_status: "seen", phone: "9876500021", print: DOCTOR_SEEN };
     api.post.mockImplementation((url, sent) => {
       if (url !== "/register") return Promise.resolve({ data: {} });
       if (!sent.different_person) return Promise.reject(lookalikes([seen]));
@@ -2128,7 +2138,7 @@ describe("Manual entry, Pending and Reprint (ADR 0084)", () => {
   });
 
   test("This is them opens the existing registration instead of saving a second one", async () => {
-    const seen = { ...ARRIVED, id: "p-3", reg_no: "103", full_name: "Ram Kumar", queue_status: "seen" };
+    const seen = { ...ARRIVED, id: "p-3", reg_no: "103", full_name: "Ram Kumar", queue_status: "seen", print: DOCTOR_SEEN };
     api.post.mockImplementation((url) => (url === "/register" ? Promise.reject(lookalikes([seen])) : Promise.resolve({ data: {} })));
     await renderDesk();
     act(() => { q("door-manual-button").click(); });
@@ -2177,12 +2187,12 @@ describe("Manual entry, Pending and Reprint (ADR 0084)", () => {
     mockAuth.user = { id: "u2", name: "Vol", role: "volunteer" };
     const typed = {
       ...ARRIVED, queue_status: "registered", arrived_at: null, aadhaar_scanned: false,
-      manual_entry: true, identity_recheck_required: true,
+      manual_entry: true, identity_recheck_required: true, print: NEEDS_CARD,
     };
     api.post.mockImplementation((url) => {
       if (url === "/desk/lookup") return Promise.resolve({ data: { registration: typed } });
       if (url === "/desk/no-card") {
-        return Promise.resolve({ data: { registration: { ...typed, identity_recheck_required: false, no_card_print: true } } });
+        return Promise.resolve({ data: { registration: { ...typed, identity_recheck_required: false, no_card_print: true, print: CARD_WAIVED } } });
       }
       if (url.startsWith("/desk/arrive/")) {
         return Promise.resolve({ data: { registration: { ...typed, arrived_at: "2026-09-01T04:00:00Z" }, prescription: RX } });
@@ -2217,7 +2227,7 @@ describe("Manual entry, Pending and Reprint (ADR 0084)", () => {
       return Promise.resolve({ data: {} });
     });
     api.post.mockImplementation((url, sent) => (url === "/register"
-      ? Promise.resolve({ data: { registration: { id: "p-7", reg_no: "107", full_name: sent.full_name }, created: true } })
+      ? Promise.resolve({ data: { registration: { id: "p-7", reg_no: "107", full_name: sent.full_name, print: NEEDS_CARD }, created: true } })
       : Promise.resolve({ data: {} })));
     await renderDesk();
     act(() => { q("new-registration-button").click(); });
@@ -2229,5 +2239,140 @@ describe("Manual entry, Pending and Reprint (ADR 0084)", () => {
     expect(registered()[0]).toEqual(expect.objectContaining({
       at_door: false, manual_reason: "no_card", camp_day_id: "day-1", aadhaar_scanned: false,
     }));
+  });
+});
+
+describe("The Print verdict (ADR 0101)", () => {
+  const q = (id) => container.querySelector(`[data-testid="${id}"]`);
+  const show = (node) => act(() => { root.render(node); });
+  const noop = () => {};
+
+  test.each([
+    ["allowed", { ...ARRIVED }, {}, { print: true, copy: null }],
+    ["allowed with the page saying the window is closed", { ...ARRIVED }, { printingOpen: false }, { print: true, copy: null }],
+    ["the window closed with the page saying it is open", { ...ARRIVED, print: WINDOW_CLOSED }, {}, { print: false, copy: "print-window-closed-101" }],
+    ["held for a door scan", { ...ARRIVED, arrived_at: null, print: NEEDS_CARD }, {}, { print: false, copy: "awaiting-scan-101" }],
+    ["Doctor seen", { ...ARRIVED, queue_status: "seen", print: DOCTOR_SEEN }, {}, { print: false, copy: null }],
+  ])("PatientRow renders the server verdict when %s", (_label, p, props, expected) => {
+    show(<PatientRow p={p} onPrint={noop} printingOpen onNoCard={noop} {...props} />);
+    expect(q("print-button-101") !== null).toBe(expected.print);
+    for (const copy of ["print-window-closed-101", "awaiting-scan-101"]) {
+      expect(q(copy) !== null).toBe(copy === expected.copy);
+    }
+    expect(q("reprint-button-101")).toBeNull();
+  });
+
+  test("PatientRow offers the door buttons on a held row only while the page has the door open", () => {
+    const held = { ...ARRIVED, arrived_at: null, print: NEEDS_CARD };
+    show(<PatientRow p={held} onPrint={noop} printingOpen onNoCard={noop} />);
+    expect(q("scan-card-101")).not.toBeNull();
+    expect(q("no-card-101")).not.toBeNull();
+    show(<PatientRow p={held} onPrint={noop} printingOpen={false} onNoCard={noop} />);
+    expect(q("scan-card-101")).toBeNull();
+    expect(q("awaiting-scan-101")).not.toBeNull();
+  });
+
+  test.each([
+    ["a typed find", true, "reprint-button-101", "printed-by-101"],
+    ["a Patient code or door read", false, null, "already-printed-101"],
+  ])("a printed row from %s follows the Reprint offer, even with the window closed", (_label, reprint, button, line) => {
+    const printed = { ...ARRIVED, printed_at: "2026-09-01T05:00:00Z", print: ALREADY_PRINTED };
+    show(<PatientRow p={printed} onPrint={noop} printingOpen={false} reprint={reprint} onNoCard={noop} />);
+    expect(q("print-button-101")).toBeNull();
+    expect(q("reprint-button-101") !== null).toBe(button !== null);
+    expect(q(line)).not.toBeNull();
+    expect(q("print-window-closed-101")).toBeNull();
+  });
+
+  test.each([
+    ["allowed", ARRIVED.print, { print: true, copy: null }],
+    ["the window closed", WINDOW_CLOSED, { print: false, copy: "scan-print-window-closed" }],
+    ["held for a door scan", { allowed: false, code: "NEEDS_DOOR_SCAN", stage: "arrived" }, { print: false, copy: "scan-awaiting-scan" }],
+    ["Doctor seen", DOCTOR_SEEN, { print: false, copy: "scan-already-seen" }],
+    ["already printed", ALREADY_PRINTED, { print: false, copy: "scan-already-printed" }],
+  ])("ArrivedCard respects the Print window and the hold when %s", (_label, print, expected) => {
+    show(<ArrivedCard registration={{ ...ARRIVED, printed_at: print.stage === "printed" ? "2026-09-01T05:00:00Z" : null, print }} onPrint={noop} />);
+    expect(q("scan-print-button") !== null).toBe(expected.print);
+    for (const copy of ["scan-print-window-closed", "scan-awaiting-scan", "scan-already-seen", "scan-already-printed"]) {
+      expect(q(copy) !== null).toBe(copy === expected.copy);
+    }
+  });
+
+  test("a door scan whose verdict says the window is closed offers no Print", async () => {
+    api.post.mockResolvedValueOnce({ data: { outcome: "arrived", registration: { ...ARRIVED, print: WINDOW_CLOSED }, prescription: null } });
+    await renderDesk();
+    await scanAtDoor();
+    expect(q("scan-arrived")).not.toBeNull();
+    expect(q("scan-print-button")).toBeNull();
+    expect(q("scan-print-window-closed").textContent).toBe("The print window is closed.");
+  });
+
+  test("Lookalikes badges come from print.stage", () => {
+    const stages = [["booked", "Booked"], ["arrived", "Arrived"], ["printed", "Printed"], ["seen", "Doctor seen"]];
+    const rows = stages.map(([stage], i) => ({
+      id: `p-${i}`, reg_no: String(i + 1), full_name: `Person ${i}`, age: 40, phone: "9876500000",
+      queue_status: "seen", arrived_at: "2026-09-01T04:00:00Z", printed_at: "2026-09-01T05:00:00Z",
+      print: { allowed: false, code: null, stage },
+    }));
+    show(<Lookalikes rows={rows} busy={false} onOpen={noop} onDifferent={noop} />);
+    stages.forEach(([, label], i) => {
+      const text = q(`lookalike-${i + 1}`).textContent;
+      expect(text).toContain(label);
+      for (const [, other] of stages) if (other !== label) expect(text).not.toContain(other);
+    });
+  });
+
+  function pollReturns(open) {
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url === "/camps/active"
+      ? Promise.resolve({ data: {
+        camp: { id: "camp-1", name: "Howrah Eye Camp" },
+        days: [{ id: "day-1", day_date: "2026-08-27", is_today: true, printing_open: open }],
+        printing_open: open,
+        operating_day_id: open ? "day-1" : null,
+      } })
+      : base(url)));
+  }
+
+  const poll = () => act(async () => { document.dispatchEvent(new Event("visibilitychange")); });
+
+  async function findByNumber(registration) {
+    api.post.mockResolvedValue({ data: { registration } });
+    act(() => { setInput(q("desk-find-input"), "101"); });
+    await act(async () => { q("desk-find-button").click(); });
+  }
+
+  test("a found row is cleared when the polled camp state flips the Print window, and only then", async () => {
+    await renderDesk();
+    await findByNumber(ARRIVED);
+    expect(q("print-button-101")).not.toBeNull();
+
+    await poll();
+    expect(q("print-button-101")).not.toBeNull();
+
+    pollReturns(false);
+    await poll();
+    expect(q("desk-found-patient")).toBeNull();
+    expect(q("print-button-101")).toBeNull();
+
+    await findByNumber({ ...ARRIVED, print: WINDOW_CLOSED });
+    expect(q("print-window-closed-101")).not.toBeNull();
+    pollReturns(true);
+    await poll();
+    expect(q("desk-found-patient")).toBeNull();
+    expect(q("print-window-closed-101")).toBeNull();
+  });
+
+  test("search results are cleared too when the Print window flips", async () => {
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url.startsWith("/patients/search") ? Promise.resolve({ data: { results: [ARRIVED] } }) : base(url)));
+    await renderDesk();
+    act(() => { setInput(q("desk-find-input"), "Aadhaar"); });
+    await act(async () => { q("desk-find-button").click(); });
+    expect(q("desk-search-results")).not.toBeNull();
+
+    pollReturns(false);
+    await poll();
+    expect(q("desk-search-results")).toBeNull();
   });
 });

@@ -32,6 +32,20 @@ def is_scanned(patient: dict) -> bool:
     return bool(patient.get("aadhaar_scanned") or patient.get("person_id"))
 
 
+CARD_IN_HAND = ("card_unreadable", "scanner_down")
+
+
+def checked_manual_note(reason: Optional[str], note: Optional[str]) -> Optional[str]:
+    if not reason:
+        raise api_error(400, "MANUAL_ENTRY_NOT_ALLOWED", 'Scan the Aadhaar card, or choose why it cannot be scanned.')
+    if reason != "other":
+        return None
+    note = (note or "").strip()
+    if not note:
+        raise api_error(400, "MANUAL_NOTE_REQUIRED", 'Write why the card cannot be scanned.')
+    return note
+
+
 def duplicate_in_camp(row: dict) -> HTTPException:
     return api_error(409, "DUPLICATE_IN_CAMP", 'Already registered in this camp', registration=ser_patient(row))
 

@@ -43,6 +43,23 @@ test("clinical history shows each visit date as DD-MM-YYYY", () => {
   expect(document.body.textContent).not.toContain("2026-03-0");
 });
 
+test("clinical history shows Dx from the committed revision and a dash when there is none", () => {
+  act(() => root.render(<HistoryModal open onClose={jest.fn()} history={[
+    {
+      reg_no: 7, camp_name: "Spring camp", transcription: { id: "tx-9", diagnosis_options: ["Draft Dx"] },
+      committed_revision: { id: "rev-9", diagnosis_options: ["Cataract"], diagnosis_other: "Dry eye" },
+    },
+    {
+      reg_no: 8, camp_name: "Spring camp", transcription: { id: "tx-10", diagnosis_options: ["Draft Dx"] },
+      committed_revision: null,
+    },
+  ]} />));
+  const [committed, draft] = document.body.querySelectorAll("p");
+  expect(committed.textContent).toBe("Dx: Cataract, Dry eye");
+  expect(draft.textContent).toBe("Dx: -");
+  expect(document.body.textContent).not.toContain("Draft Dx");
+});
+
 test("the saved prescription lists what was prescribed and shows only those lines", () => {
   act(() => root.render(<ReadOnlyPrescription lines={["medicine"]} transcription={{
     id: "tx-3", prescribed_medicines: [{ name: "Moxifloxacin" }], fixed_power_r: 2, fixed_power_l: 2,

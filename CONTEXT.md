@@ -102,7 +102,12 @@ _Avoid_: OT slot, surgery day, OT appointment
 
 **Prescription transcription**:
 The operator copies the doctor's paper prescription at any Fulfilment line, then issues supplies or schedules hospital treatment or collection at the same desk. It runs as a wizard: one question per screen, the same sequence for every operator, with a step for each prescribed line only and a read-back before commit. Corrections after fulfilment require an audit reason and use their own form, not the wizard.
+The transcription is the wizard's editable draft, plus a mirror of the last commit written in the same transaction. It is never the source of what was prescribed.
 _Avoid_: Doctor's Rx line, separate transcription desk, prescription form (it is no longer one screen)
+
+**Committed prescription**:
+The prescription as of the patient's committed revision (ADR 0100): what every reader other than the wizard treats as prescribed. A patient with no committed revision has none, so the Camp records export shows blank prescription columns for a patient who was never completed or whose completion was undone, whatever the draft holds. Read through one module, never from the transcription.
+_Avoid_: saved prescription (a draft is saved too), current transcription, the mirror
 
 **Medicine catalogue**:
 The single global list of medicines the trust carries, maintained by an admin. The clinical desk can prescribe nothing else; a medicine the camp does not stock is recorded as not available at the desk. Retiring an entry hides it from operators without touching prescriptions already committed.
@@ -205,7 +210,7 @@ The dialog that follows every prescription print at the desk. "Printed — next 
 _Avoid_: print confirmation, printed flag, auto-stamp
 
 **Sheet stamp**:
-The server's signature on a first-print sheet: this registration, fetched at this moment while the Print window was open. It is not stored. The Paper check sends it back so a sheet fetched while the window was open can be recorded after it closes, on the same IST calendar date, while the patient is arrived, not printed, not Doctor seen and not held for identity. "Print again" fetches a new sheet and so a new stamp. A missing, altered or another patient's stamp changes nothing: the window refuses as before.
+The server's signature on a first-print sheet: this registration, fetched at this moment while the Print window was open. It is not stored. The Paper check sends it back so a sheet fetched while the window was open can be recorded after it closes, on the same IST calendar date, while the patient is arrived, not printed, not Doctor seen and not held for identity. "Print again" fetches a new sheet and so a new stamp. A missing, altered or another patient's stamp changes nothing: the window refuses as before. The server mints one only while the Print window is open.
 _Avoid_: print token (Token is the Fulfilment slip), receipt
 
 **Print Prescription**:
@@ -217,8 +222,12 @@ A fresh copy of the prescription for a patient who already has Print Prescriptio
 _Avoid_: duplicate print, Paper check's Print again (a first print not yet recorded)
 
 **Print window**:
-Server-derived printing availability for the active camp: automatic on the IST calendar camp day, or one admin-selected day, or off. Manual enable/disable expires at the next IST midnight. A stored per-day boolean is not the authority. Chooses Desk mode via the operating day. While it is closed the desk withdraws Print and says so rather than offering a control that fails; a sheet that has already printed keeps its reprint.
+Server-derived printing availability for the active camp: automatic on the IST calendar camp day, or one admin-selected day, or off. Manual enable/disable expires at the next IST midnight. A stored per-day boolean is not the authority. Chooses Desk mode via the operating day. While it is closed the desk withdraws Print and says so rather than offering a control that fails; a sheet that has already printed keeps its reprint. The desk learns it for each registration from the Print verdict.
 _Avoid_: paused camp, calendar-today-only print, client timer
+
+**Print verdict**:
+The server's answer to "may this registration be printed now?": `{allowed, code, stage}`, carried on the desk payloads the desk renders as a row or a card. `stage` is Doctor seen, printed, arrived or booked, in that order of precedence, and a printed registration is allowed (a Reprint). `code` is the refusal: `ALREADY_SEEN`, `NEEDS_DOOR_SCAN` (a booking with no Lock or No-card print, or one still held for identity) or `PRINT_WINDOW_CLOSED`. The desk renders it and derives nothing; the Reprint offer stays a desk rule. It is a snapshot at fetch, and the print endpoints re-check on every request. The desk drops a found row when the Print window or the Operating day changes, so the operator finds the patient again.
+_Avoid_: canPrint, print state
 
 **Desk mode**:
 Camp-day mode when printing is open for the operating day: Scan at the door first, Pre-registration hidden. Pre-registration mode when printing is closed: Pre-registration first, and no Scan at the door, because the door refuses scans while printing is closed. Search stays in both.
@@ -292,16 +301,24 @@ _Avoid_: seats_taken (that counter is OT and Spectacles to be made only), unlimi
 The read-only page a team lead watches during a camp day. Per Registration desk, Arrivals in the last fifteen minutes and the last hour, with a desk that has gone quiet highlighted; awaiting print, awaiting seen and the transcription backlog across every camp day of the active camp, each with how many arrived on an earlier camp day; each Fulfilment line's count today; seats left on the next OT Schedule Day; the next Specs collection day with no seat count; SMS failures; one banner when backups are red. Counts only, refreshes on its own, no actions and no patient names. The clock on the page is the server's.
 _Avoid_: dashboard (that is the admin area), live feed, monitor, alerts (the board pushes nothing)
 
+**Queue stage**:
+Where a patient in the active camp stands between the door and the doctor: booked, Arrived or Doctor seen. Arrived has two halves, Awaiting print and Pending, which never overlap and together are exactly Arrived. `backend/queue_stage.py` defines every stage once, for the Pending list, the KPIs and the Camp-day board (ADR 0099). A stage is the same on every camp day; only the board's "earlier camp day" split and its "seen today" count look at a day. The board's `arrived` count is the arrivals on the current IST calendar day, not the Operating day, and is a different number from the Arrived stage and must not be read as it.
+_Avoid_: queue status (the stored field, not a term for staff), waiting (ambiguous with the physical queue)
+
+**Awaiting print**:
+Arrived patients in the active camp who do not yet have Print Prescription, whichever camp day they arrived on. The Camp-day board's first queue count, with how many arrived on an earlier camp day. Arrival made the patient Arrived; Print Prescription moves them on to Pending.
+_Avoid_: unprinted, print queue (a physical queue is not the stage)
+
 **Transcription backlog**:
-Arrived and printed patients in the active camp who do not yet have a completed prescription, whichever camp day they arrived on. The board shows how many arrived on an earlier camp day. Doctor seen is committed with completion, not before it.
+Arrived and printed patients in the active camp who do not yet have a completed prescription, whichever camp day they arrived on. The board shows how many arrived on an earlier camp day. Doctor seen is committed with completion, not before it. The same set as Pending and as the board's awaiting seen: one definition, `queue_stage.pending`.
 _Avoid_: pending Rx after seen, queue at Doctor's Rx (a physical queue is not the backlog)
 
 **Pending**:
-Patients in the active camp who have Print Prescription but are not yet Doctor seen, on any camp day: the people the camp still owes a consultation. A patient who arrived on an earlier camp day is marked with that day. The same patients the Camp-day board counts as the Transcription backlog. Patients who booked but have not arrived, or arrived but have not printed, are not Pending. The count opens the whole list, longest since print first, with each household phone so a lost patient can be found and called. The list is for finding people and offers no reprint; the clinical desk operator does not see it.
+Patients in the active camp who have Print Prescription but are not yet Doctor seen, on any camp day: the people the camp still owes a consultation. A patient who arrived on an earlier camp day is marked with that day. The same patients the Camp-day board counts as the Transcription backlog. Patients who booked but have not arrived, or arrived but have not printed (Awaiting print), are not Pending. Defined once, with the Transcription backlog, by `queue_stage.pending`: Arrived with a Print Prescription date. The count opens the whole list, longest since print first, with each household phone so a lost patient can be found and called. The list is for finding people and offers no reprint; the clinical desk operator does not see it.
 _Avoid_: registered minus seen, waiting (ambiguous with the physical queue)
 
 **Doctor seen**:
-A clinical desk operator's attestation that consultation is complete, committed with whole-prescription completion after arrival and print. Drafts, reprints and volunteer mark-seen cannot confer it. Undo completion withdraws it, with a reason, only while no line has been issued; the patient returns to Arrived and can print again.
+A clinical desk operator's attestation that consultation is complete, committed with whole-prescription completion after arrival and print. Drafts, reprints and volunteer mark-seen cannot confer it. Undo completion withdraws it, with a reason, only while no line has been issued; the patient returns to Arrived and can print again, and a printed patient is Pending again. Entering and leaving Doctor seen are one pair of exact-inverse fields in `queue_stage` (queue status, seen time, seen by); the committed prescription revision is a clinical field and not part of the stage. Each fulfilment carries `patient_seen_at`, a fixed copy of the patient's seen time for board counting: undo is refused once a fulfilment exists and a correction never changes the seen time, so the copy cannot drift.
 _Avoid_: arrival, prescription printed, independent mark-seen
 
 **Paper review**:
@@ -309,7 +326,7 @@ The issuing operator's explicit comparison of a fulfilment line with the physica
 _Avoid_: opening the prescription, automatic approval
 
 **Camp records export**:
-The single admin-only CSV for a camp, one row per patient including no-shows. Carries identity (name, age, gender, household phone, address, Aadhaar last-4, reg_no), the Manual entry mark and its reason, the registration / arrival / seen timestamps, diagnosis, BP and blood sugar, each eye's power, the medicines prescribed and any not given, the prescribed and issued fixed powers, the status of each of the four Fulfilment lines with blank meaning the patient was never recorded at that desk, and the assigned clinical day and venue for each deferral. It is a wide file of patient data and is not downloadable by a volunteer.
+The single admin-only CSV for a camp, one row per patient including no-shows. Carries identity (name, age, gender, household phone, address, Aadhaar last-4, reg_no), the Manual entry mark and its reason, the registration / arrival / seen timestamps, diagnosis, BP and blood sugar, each eye's power, the medicines prescribed and any not given, the prescribed and issued fixed powers (all read from the Committed prescription, blank for a patient without one), the status of each of the four Fulfilment lines with blank meaning the patient was never recorded at that desk, and the assigned clinical day and venue for each deferral. It is a wide file of patient data and is not downloadable by a volunteer.
 _Avoid_: camp records, clinical audit, the reports (there is exactly one export)
 
 **Registration request**:

@@ -8,6 +8,7 @@ from bson import ObjectId
 from fastapi import HTTPException
 from pymongo.asynchronous.collection import AsyncCollection
 
+import printing
 import routes_camps
 import routes_reports
 import sms
@@ -691,8 +692,8 @@ class TestPrintingMatrix:
             camp_id, day_id = await _seed_camp(db, day_date=TOMORROW)
             camp = await db.camps.find_one({"_id": camp_id})
             days = await db.camp_days.find().to_list(None)
-            closed = routes_camps.effective_printing(camp, days, now=ist(TODAY, "23:30"))
-            opened = routes_camps.effective_printing(camp, days, now=ist(TOMORROW, "00:01"))
+            closed = printing.resolve(camp, days, now=ist(TODAY, "23:30"))
+            opened = printing.resolve(camp, days, now=ist(TOMORROW, "00:01"))
             assert closed["printing_open"] is False
             assert opened["printing_open"] is True
             assert opened["operating_day_id"] == str(day_id)
@@ -722,7 +723,7 @@ class TestPrintingMatrix:
             )
             camp = await db.camps.find_one({"_id": camp_id})
             days = await db.camp_days.find().to_list(None)
-            state = routes_camps.effective_printing(camp, days, now=ist(TODAY, "10:00"))
+            state = printing.resolve(camp, days, now=ist(TODAY, "10:00"))
             assert state["printing_open"] is True
             assert state["operating_day_id"] == str(future_id)
         run_camp(monkeypatch, run)
@@ -735,8 +736,8 @@ class TestPrintingMatrix:
             )
             camp = await db.camps.find_one({"_id": camp_id})
             days = await db.camp_days.find().to_list(None)
-            assert routes_camps.effective_printing(camp, days, now=ist(TODAY, "23:59"))["printing_open"] is True
-            expired = routes_camps.effective_printing(camp, days, now=ist(TOMORROW, "00:01"))
+            assert printing.resolve(camp, days, now=ist(TODAY, "23:59"))["printing_open"] is True
+            expired = printing.resolve(camp, days, now=ist(TOMORROW, "00:01"))
             assert expired["printing_open"] is False
             other = ObjectId()
             await db.camps.insert_one({

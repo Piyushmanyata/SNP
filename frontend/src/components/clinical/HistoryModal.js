@@ -20,9 +20,9 @@ export function HistoryModal({ open, onClose, history }) {
               </span>
             </div>
             <p className="text-sm text-slate-600 mt-1">
-              Dx: {(h.transcription?.diagnosis_options || []).join(", ") || "-"}
-              {h.transcription?.diagnosis_other
-                ? `, ${h.transcription.diagnosis_other}`
+              Dx: {(h.committed_revision?.diagnosis_options || []).join(", ") || "-"}
+              {h.committed_revision?.diagnosis_other
+                ? `, ${h.committed_revision.diagnosis_other}`
                 : ""}
             </p>
           </Card>
