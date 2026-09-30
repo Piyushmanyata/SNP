@@ -138,8 +138,7 @@ async def defer(
         message_type = "specs_token"
     token = await _issue(db, transcription, line, day, session)
     intent_ids = await sms.record(
-        db, [patient], message_type, token["collection_date"],
-        token.get("collection_venue_sms") or token["collection_venue"], token.get("collection_end_date"),
+        db, [patient], message_type, token["collection_date"], sms.sms_venue(token), token.get("collection_end_date"),
         event_key=sms.token_key(token), session=session, now=now_utc(),
     )
     return token, intent_ids
@@ -183,7 +182,7 @@ async def _replace_tokens(db: AsyncDatabase, day_field: str, day: dict, message_
         {"_id": {"$in": [token["patient_id"] for token in old_tokens]}}, NOTICE_FIELDS, session=session,
     ).to_list(None)
     return await sms.record(
-        db, patients, message_type, day["day_date"], day.get("venue_sms") or day["venue"], end_date,
+        db, patients, message_type, day["day_date"], sms.sms_venue(day), end_date,
         event_key=sms.edit_key(revision), session=session, now=now_utc(),
     )
 

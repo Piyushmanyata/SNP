@@ -342,7 +342,7 @@ async def _confirm_registration(patient: Dict[str, Any], skip_walk_in: bool = Fa
         if effective_printing(camp, days)["operating_day_id"] == str(day["_id"]):
             return
     await sms.record_and_send(
-        db, row, "registration", day["day_date"], camp.get("venue_sms") or camp["venue"],
+        db, row, "registration", day["day_date"], sms.sms_venue(camp),
         event_key=sms.edit_key(day["edit_revision"]) if day.get("edit_revision") else None,
         now=now_utc(),
     )

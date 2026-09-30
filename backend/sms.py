@@ -5,7 +5,7 @@ import string
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from bson import ObjectId
 from pymongo.asynchronous.database import AsyncDatabase
@@ -51,6 +51,13 @@ _DLT_REASON = re.compile(r"dlt|template|header|entity|scrub|consent", re.IGNOREC
 
 def clean_sms_venue(raw: Optional[str]) -> str:
     return " ".join((raw or "").split())
+
+
+def sms_venue(place: Optional[Mapping[str, Any]]) -> str:
+    """The SMS venue of a camp, a Schedule day or a Token: the admin's short name, else the full venue, else empty."""
+    place = place or {}
+    short = clean_sms_venue(place.get("venue_sms") or place.get("collection_venue_sms"))
+    return short or clean_sms_venue(place.get("venue") or place.get("collection_venue"))
 
 
 def sms_venue_problem(venue: str) -> Optional[str]:

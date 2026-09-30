@@ -95,14 +95,13 @@ def _result(sent: int, failed: int, complete: bool, waiting: bool, **extra: Any)
     return body
 
 
-async def _context(db: AsyncDatabase) -> Tuple[Dict[Any, dict], Dict[str, Optional[str]], Dict[Any, dict]]:
+async def _context(db: AsyncDatabase) -> Tuple[Dict[Any, dict], Dict[str, Optional[str]]]:
     camps = {row["_id"]: row for row in await db.camps.find({}).to_list(None)}
     staff = {
         str(row["_id"]): helpers.normalize_phone(row.get("phone"))
         for row in await db.users.find({}, {"phone": 1}).to_list(None)
     }
-    days = {row["_id"]: row for row in await db.ot_schedule_days.find({}).to_list(None)}
-    return camps, staff, days
+    return camps, staff
 
 
 async def _camp_page(db: AsyncDatabase, event_date: str, last_id: Any, camps: Dict[Any, dict]) -> List[tuple]:
@@ -113,14 +112,11 @@ async def _camp_page(db: AsyncDatabase, event_date: str, last_id: Any, camps: Di
     patients = await db.patients.find(query).sort("_id", 1).limit(PAGE_SIZE).to_list(PAGE_SIZE)
     rows = []
     for patient in patients:
-        camp = camps.get(patient.get("camp_id")) or {}
-        rows.append((patient, camp.get("venue_sms") or camp.get("venue") or "", None, patient["_id"]))
+        rows.append((patient, sms.sms_venue(camps.get(patient.get("camp_id"))), None, patient["_id"]))
     return rows
 
 
-async def _slip_page(
-    db: AsyncDatabase, item_type: str, event_date: str, last_id: Any, ot_days: Dict[Any, dict],
-) -> List[tuple]:
+async def _slip_page(db: AsyncDatabase, item_type: str, event_date: str, last_id: Any) -> List[tuple]:
     query: Dict[str, Any] = {"item_type": item_type, "active": True, "collection_date": event_date}
     if last_id not in (None, "done"):
         query["_id"] = {"$gt": last_id}
@@ -134,11 +130,7 @@ async def _slip_page(
     rows = []
     for slip in slips:
         patient = None if slip.get("cancelled") else patients.get(slip["patient_id"])
-        venue = slip.get("collection_venue_sms") or slip.get("collection_venue") or ""
-        day = ot_days.get(slip.get("ot_schedule_day_id"))
-        if day:
-            venue = day.get("venue_sms") or day["venue"]
-        rows.append((patient, venue, slip.get("collection_end_date"), slip["_id"]))
+        rows.append((patient, sms.sms_venue(slip), slip.get("collection_end_date"), slip["_id"]))
     return rows
 
 
@@ -198,7 +190,7 @@ async def send_d1_reminders() -> Dict[str, Any]:
     started = time.monotonic()
     tomorrow = helpers.tomorrow_ist_str()
     try:
-        camps, staff, ot_days = await _context(db)
+        camps, staff = await _context(db)
         for message_type, item_type in REMINDER_TYPES:
             if time.monotonic() - started >= SWEEP_SECONDS or used >= SEND_LIMIT:
                 break
@@ -240,7 +232,7 @@ async def send_d1_reminders() -> Dict[str, Any]:
             while budget > 0 and time.monotonic() - started < SWEEP_SECONDS:
                 page = (
                     await _camp_page(db, tomorrow, last_id, camps) if item_type is None
-                    else await _slip_page(db, item_type, tomorrow, last_id, ot_days)
+                    else await _slip_page(db, item_type, tomorrow, last_id)
                 )
                 if not page:
                     cursor[message_type] = "done"

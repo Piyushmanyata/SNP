@@ -2,7 +2,7 @@ from datetime import date
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 from typing import Annotated, Literal, Optional, List, Dict, Any
 
-from sms import clean_sms_venue, sms_venue_problem
+from sms import clean_sms_venue, sms_venue, sms_venue_problem
 
 NAME_LIMIT = 100
 ADDRESS_LIMIT = 300
@@ -19,7 +19,7 @@ def _checked_sms_venue(venue: str, venue_sms: Optional[str]) -> Optional[str]:
     short = clean_sms_venue(venue_sms) or None
     if not short and not venue.strip():
         return None
-    problem = sms_venue_problem(short or clean_sms_venue(venue))
+    problem = sms_venue_problem(sms_venue({"venue": venue, "venue_sms": venue_sms}))
     if problem:
         raise ValueError(problem if short else f"{problem}; set a short SMS venue")
     return short

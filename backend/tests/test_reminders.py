@@ -10,7 +10,9 @@ import sms_recorder
 import routes_reminders
 import server
 import sms
+import tokens
 from conftest import advance_clock
+from db import in_transaction
 from seed import record_and_send, TOMORROW, day, patient_doc, recorder, run_camp, seed_camp
 from sms import (
     CAMP_REMINDER,
@@ -222,7 +224,7 @@ class TestReminderCronHttp:
             })
             await database.deferred_slips.insert_one({
                 "patient_id": ids[0], "item_type": "ot", "active": True, "cancelled": False,
-                "collection_date": TOMORROW, "collection_venue": "stale",
+                "collection_date": TOMORROW, "collection_venue": "OT Theatre",
                 "ot_schedule_day_id": ot_day, "version": 1,
             })
             r = await _post(client)
@@ -410,6 +412,7 @@ class TestReminderCronHttp:
             await database.deferred_slips.insert_one({
                 "patient_id": pid, "item_type": "ot", "active": True, "cancelled": False,
                 "collection_date": TOMORROW, "collection_venue": long_venue,
+                "collection_venue_sms": "बजाज हॉस्पिटल, देवघर",
                 "ot_schedule_day_id": ot_day, "version": 1,
             })
             r = await _post(client)
@@ -420,5 +423,86 @@ class TestReminderCronHttp:
             }]
             [row] = await _ledger(database)
             assert long_venue not in row["copy"]
+
+        _run(monkeypatch, body)
+
+    def test_an_ot_reminder_follows_a_schedule_edit_made_after_the_token(self, monkeypatch):
+        captured = recorder()
+
+        async def body(database, client):
+            camp_id = await _numbered_camp(database)
+            patient = patient_doc(
+                camp_id=camp_id, camp_day_id=ObjectId(), reg_no=11, phone=HOUSEHOLD, phone_normalized=HOUSEHOLD,
+            )
+            await database.patients.insert_one(patient)
+            transcription = {"_id": ObjectId(), "patient_id": patient["_id"]}
+            await database.transcriptions.insert_one(transcription)
+            ot_day = (await database.ot_schedule_days.insert_one({
+                "camp_id": camp_id, "day_date": TOMORROW, "venue": "Bajaj Eye Hospital, Deoghar",
+                "venue_sms": "Old Hospital", "seat_limit": 5, "seats_taken": 0,
+            })).inserted_id
+            await in_transaction(lambda session: tokens.defer(
+                database, "ot", patient, transcription, None, str(ot_day), session,
+            ))
+            loaded = await database.ot_schedule_days.find_one({"_id": ot_day})
+            await tokens.edit_day(database, "ot", loaded, {
+                "day_date": TOMORROW, "seat_limit": 5, "venue": loaded["venue"], "venue_sms": "New Hospital",
+            }, None)
+
+            assert (await _post(client)).json()["sent"] == 1
+            assert [(c["type"], c["venue"]) for c in captured if c["type"] == "ot"] == [("ot", "New Hospital")]
+
+        _run(monkeypatch, body)
+
+    def test_a_legacy_ot_token_without_a_short_name_sends_its_full_venue_or_is_skipped(self, monkeypatch):
+        captured = recorder()
+
+        async def body(database, client):
+            camp_id = await _numbered_camp(database)
+            ot_day = (await database.ot_schedule_days.insert_one({
+                "camp_id": camp_id, "day_date": TOMORROW, "venue": "Day Hall", "venue_sms": "Day Short",
+            })).inserted_id
+            for reg_no, venue in ((21, "Legacy Hospital"), (22, "L" * 31)):
+                pid = ObjectId()
+                await database.patients.insert_one(patient_doc(
+                    _id=pid, camp_id=camp_id, camp_day_id=ObjectId(), reg_no=reg_no,
+                    phone=HOUSEHOLD, phone_normalized=HOUSEHOLD,
+                ))
+                await database.deferred_slips.insert_one({
+                    "patient_id": pid, "item_type": "ot", "active": True, "cancelled": False,
+                    "collection_date": TOMORROW, "collection_venue": venue,
+                    "ot_schedule_day_id": ot_day, "version": 1,
+                })
+
+            assert (await _post(client)).json()["sent"] == 1
+
+            assert [(c["reg_no"], c["venue"]) for c in captured] == [(21, "Legacy Hospital")]
+            assert [row["venue"] for row in await _ledger(database)] == ["Legacy Hospital"]
+
+        _run(monkeypatch, body)
+
+    def test_a_token_with_no_usable_sms_venue_is_not_submitted_or_charged(self, monkeypatch):
+        captured = recorder()
+
+        async def body(database, client):
+            camp_id = await _numbered_camp(database)
+            for reg_no, item_type, venues in (
+                (31, "ot", {"collection_venue": None}),
+                (32, "specs_made", {"collection_venue_sms": "  "}),
+            ):
+                pid = ObjectId()
+                await database.patients.insert_one(patient_doc(
+                    _id=pid, camp_id=camp_id, camp_day_id=ObjectId(), reg_no=reg_no,
+                    phone=HOUSEHOLD, phone_normalized=HOUSEHOLD,
+                ))
+                await database.deferred_slips.insert_one({
+                    "patient_id": pid, "item_type": item_type, "active": True, "cancelled": False,
+                    "collection_date": TOMORROW, "version": 1, **venues,
+                })
+
+            assert (await _post(client)).json()["sent"] == 0
+
+            assert captured == []
+            assert await _ledger(database) == []
 
         _run(monkeypatch, body)
