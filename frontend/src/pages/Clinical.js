@@ -90,6 +90,9 @@ export default function Clinical() {
   const undoCommand = useClinicalCommand("undo", data);
   const patientId = data?.registration?.id;
   const locked = Boolean(data?.transcription?.locked);
+  const unprescribed = line !== "doctor_rx" && Boolean(data?.committed_revision)
+    && !(data.committed_revision.prescribed_lines || []).includes(line);
+  const nothingToRecord = unprescribed && !(data.fulfilments || []).some((f) => f.item_type === line);
 
   useEffect(() => {
     if (!picking) {
@@ -196,7 +199,7 @@ export default function Clinical() {
   }, [lookup, find, dirty]);
 
   useWedgeBurst({
-    enabled: !picking && !busy && !showCorrection && !pending,
+    enabled: !picking && !busy && !showCorrection && !pending && !undo,
     minLength: PATIENT_CODE_PAYLOAD_LENGTH,
     onBurst: openPatient,
   });
@@ -463,12 +466,12 @@ export default function Clinical() {
                   Undo completion
                 </Button>
               )}
-              {line !== "doctor_rx" && data.committed_revision && !(data.committed_revision.prescribed_lines || []).includes(line) && (
+              {nothingToRecord && (
                 <p className="text-sm text-amber-800 mb-3" data-testid="line-mismatch-warning">
-                  This prescription does not imply {lineLabel(line)}. Record anyway.
+                  This prescription has no {lineLabel(line)}. Nothing to record at this station.
                 </p>
               )}
-              {(data.committed_revision || data.transcription?.locked) && line !== "doctor_rx" && (
+              {(data.committed_revision || data.transcription?.locked) && line !== "doctor_rx" && !nothingToRecord && (
                 <FulfilmentSection
                   line={line}
                   data={data}

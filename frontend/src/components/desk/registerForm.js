@@ -104,9 +104,11 @@ export function registerForm(state, event) {
     case "saveStarted":
       return { ...state, busy: true, error: "" };
     case "saveSucceeded":
+      if (!current) return { ...state, busy: false };
       if (event.next) return { ...fresh(state, event.atDoor, state.dayId), busy: false };
       return { ...state, busy: false };
     case "saveFailed": {
+      if (!current) return { ...state, busy: false };
       const { failure } = event;
       const next = { ...state, busy: false };
       if (failure.kind === "review") return { ...next, review: failure.review };

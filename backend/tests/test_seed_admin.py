@@ -37,6 +37,20 @@ def test_seed_admin_refuses_missing_or_known_pin(monkeypatch):
     run_db(run)
 
 
+def test_seed_admin_does_not_bring_back_a_deleted_admin(monkeypatch):
+    monkeypatch.setenv("ADMIN_BOOTSTRAP_PIN", "864200")
+
+    async def run(database):
+        await database.users.insert_many([
+            {"name": "admin", "name_normalized": "deleted:seeded", "role": "admin", "deleted_at": "2026-09-30"},
+            {"name": "Owner", "name_normalized": "owner", "role": "admin"},
+        ])
+        await seed_admin()
+        assert await database.users.count_documents({}) == 2
+
+    run_db(run)
+
+
 def test_seed_admin_leaves_existing_unchanged(monkeypatch):
     monkeypatch.setenv("ADMIN_BOOTSTRAP_PIN", "864200")
     existing = {"name": "admin", "name_normalized": "admin", "pin_hash": "not-a-real-hash", "role": "admin"}

@@ -13,7 +13,7 @@ Recording any fulfilment locks the transcription. With one operator on one scree
 - A clinical operator works one station. Five exist: Doctor's Rx, Medicine, Fixed-power specs, Spectacles to be made, OT.
 - Doctor's Rx is the only station with an editable prescription form, and it carries no Fulfilment controls. The four line desks show the prescription read-only and record only their own line's outcome.
 - The lock on first fulfilment is retained and is now the intended sequencing rule: Doctor's Rx finishes, then the patient walks the lines.
-- Which lines a patient is due is derived from the transcription — recorded powers imply a specs line, an OT eye or procedure implies OT, a recorded diagnosis implies medicine. Nothing is stored to say so. A patient standing at a line their prescription does not imply gets an advisory warning and an explicit override, never a block.
+- Which lines a patient is due is derived from the transcription — recorded powers imply a specs line, an OT eye or procedure implies OT, a recorded diagnosis implies medicine. Nothing is stored to say so. A patient standing at a line their prescription does not imply gets an advisory warning and an explicit override, never a block. (Superseded by ADR 0105: the server refuses that line, so the desk offers nothing to record.)
 - `not_required` is never written. A line is recorded or it is absent, and absence means not needed.
 - The prescribed power stays on the Doctor's Rx station. The Correction form gains a real seven-field measurements editor so a missed power is fixable without a walk-back to a locked prescription.
 - The line is a station, not a permission. The server does not check which line an operator records against.

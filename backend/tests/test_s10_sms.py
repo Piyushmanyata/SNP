@@ -59,6 +59,22 @@ def test_a_held_lease_does_not_start_another_sweep(monkeypatch, sms_provider):
     run_camp(monkeypatch, body)
 
 
+def test_a_cursor_left_for_another_event_date_is_not_reused(monkeypatch, sms_provider):
+    sms_provider.switch_on()
+    monkeypatch.setattr(routes_reminders, "_gate", _gate_open)
+
+    async def body(database):
+        await _seed_camp_household(database, n_patients=1)
+        await database.sms_controls.insert_one({
+            "_id": "reminder_lease", "holder": None, "expires_at": NOW - timedelta(minutes=1),
+            "cursor": {"ot": "done", "specs": "done", "camp": "done"}, "event_date": TODAY,
+        })
+        result = await send_d1_reminders()
+        assert (result["sent"], result["complete"]) == (1, True)
+
+    run_camp(monkeypatch, body)
+
+
 async def _open(*_args):
     return "open"
 

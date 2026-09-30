@@ -13,7 +13,7 @@ import sms
 import tokens
 from conftest import advance_clock
 from db import in_transaction
-from seed import record_and_send, TOMORROW, day, patient_doc, recorder, run_camp, seed_camp
+from seed import record_and_send, TOMORROW, day, patient_doc, recorder, run_camp, seed_camp, user_doc
 from sms import (
     CAMP_REMINDER,
     OT_REMINDER,
@@ -141,6 +141,13 @@ class TestReminderCronHttp:
     def test_wrong_secret_refused(self, monkeypatch):
         async def body(database, client):
             assert (await _post(client, secret="nope")).status_code == 401
+
+        _run(monkeypatch, body)
+
+    def test_a_non_ascii_secret_is_refused_not_a_server_error(self, monkeypatch):
+        async def body(database, client):
+            r = await client.post("/api/cron/reminders", headers={"X-Cron-Secret": "cron-tést".encode("latin-1")})
+            assert r.status_code == 401
 
         _run(monkeypatch, body)
 
@@ -364,6 +371,30 @@ class TestReminderCronHttp:
             assert captured[0]["camp_no"] == "162"
 
         _run(monkeypatch, body)
+
+    def test_a_sweep_whose_patients_are_all_skipped_still_finishes(self, monkeypatch):
+        recorder()
+
+        async def body(database, client):
+            await _seed_camp_household(database, n_patients=1, camp_number=None)
+            result = (await _post(client)).json()
+            assert (result["sent"], result["complete"]) == (0, True)
+
+        _run(monkeypatch, body)
+
+    def test_a_canary_skipped_for_the_registrars_phone_goes_to_the_next_patient(self, monkeypatch):
+        captured = recorder()
+
+        async def body(database, client):
+            _camp, _day, ids = await _seed_camp_household(database, n_patients=2)
+            registrar = ObjectId()
+            await database.users.insert_one(user_doc("Registrar", _id=registrar, phone=HOUSEHOLD))
+            await database.patients.update_one({"_id": ids[0]}, {"$set": {"created_by": str(registrar)}})
+            result = (await _post(client)).json()
+            assert (result["sent"], result["waiting"]) == (1, True)
+            assert [c["reg_no"] for c in captured] == [1001]
+
+        _run(monkeypatch, body, canary=True)
 
     def test_venue_over_dlt_variable_limit_is_not_submitted_or_charged(self, monkeypatch):
         captured = recorder()

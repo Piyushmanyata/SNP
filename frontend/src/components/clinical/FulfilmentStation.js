@@ -281,12 +281,14 @@ export function FulfilmentStation({
         paper_reviewed: paperReviewed,
         reviewed_revision_id: data.committed_revision?.id,
       });
-      setBanner(`${line.label}: ${statusLabel(line, res.fulfilment?.status || nextStatus)}`);
+      let printFailure = "";
       if (res.slip) {
-        await printToken(res.slip.id).catch((err) => {
-          setError(`Saved. The Token did not print: ${formatApiError(err)} Use Reprint Token.`);
-        });
+        await printToken(res.slip.id).catch((err) => { printFailure = formatApiError(err); });
       }
+      const done = `${line.label}: ${statusLabel(line, res.fulfilment?.status || nextStatus)}`;
+      setBanner(printFailure
+        ? `${done}. The Token did not print: ${printFailure} Look the patient up and use Reprint Token.`
+        : done);
       onDone();
     } catch (failure) {
       if (failure.kind === "reload") onStale();

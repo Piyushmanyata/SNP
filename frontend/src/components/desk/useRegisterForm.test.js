@@ -56,8 +56,9 @@ async function update(overrides) {
 
 function deferred() {
   let resolve;
-  const promise = new Promise((done) => { resolve = done; });
-  return { promise, resolve };
+  let reject;
+  const promise = new Promise((done, fail) => { resolve = done; reject = fail; });
+  return { promise, resolve, reject };
 }
 
 function routes(handlers) {
@@ -407,6 +408,48 @@ test("a failed save shows its error and leaves the form to fix", async () => {
   expect(state().qrPayload).toBe(PAYLOAD);
   expect(props.onClose).not.toHaveBeenCalled();
   expect(props.onDone).not.toHaveBeenCalled();
+});
+
+test.each([false, true])("a save that lands after Cancel and reopen leaves the new form and modal alone (next: %s)", async (next) => {
+  await mount();
+  const reply = deferred();
+  routes({ "/register": () => reply.promise });
+  await scan();
+  let saving;
+  await act(async () => { saving = actions().save({ next }); });
+  await update({ open: false });
+  await update({ open: true });
+  await act(async () => actions().setField("full_name", "New Patient"));
+  await act(async () => { reply.resolve({ data: { registration: REG, created: true } }); await saving; });
+  expect(props.onClose).not.toHaveBeenCalled();
+  expect(props.onDone).toHaveBeenCalledTimes(1);
+  expect(props.setBanner).toHaveBeenCalledTimes(1);
+  expect(state().form.full_name).toBe("New Patient");
+  expect(state().busy).toBe(false);
+});
+
+test("a failed save that lands after Cancel and reopen writes nothing into the new form", async () => {
+  await mount();
+  const reply = deferred();
+  routes({ "/register": () => reply.promise });
+  await act(async () => actions().toggleManual());
+  await act(async () => actions().chooseReason({ code: "no_card", note: "" }));
+  await act(async () => {
+    actions().setField("gender", "F");
+    actions().setField("full_name", "Ram Kumar");
+    actions().setField("age", "40");
+    actions().setField("phone", "9876500001");
+  });
+  let saving;
+  await act(async () => { saving = actions().save(); });
+  await update({ open: false });
+  await update({ open: true });
+  const lookalikes = { code: "LOOKALIKES", registrations: [{ id: "p-3", reg_no: "103" }] };
+  await act(async () => { reply.reject(refusal(lookalikes)); await saving; });
+  expect(state().lookalikeRows).toBeNull();
+  expect(state().review).toBeNull();
+  expect(state().error).toBe("");
+  expect(state().busy).toBe(false);
 });
 
 test("the actions keep their identity across renders", async () => {

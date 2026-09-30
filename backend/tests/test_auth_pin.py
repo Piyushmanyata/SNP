@@ -49,6 +49,15 @@ def test_login_and_pin_change_flow(monkeypatch):
     run_db(run)
 
 
+def test_an_overlong_login_name_is_refused_before_any_work(monkeypatch):
+    async def run(database):
+        async with asgi_client() as client:
+            res = await client.post("/api/auth/login", json={"name": "a" * 81, "pin": "1234"})
+            assert res.status_code == 422
+
+    run_db(run)
+
+
 def test_changing_pin_invalidates_other_sessions_and_keeps_current_session(monkeypatch):
     async def run(database):
         await database.users.insert_one(user_doc(

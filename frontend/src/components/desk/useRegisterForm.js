@@ -59,7 +59,7 @@ export function useRegisterForm({ open, atDoor, doorDayId, days, initialPayload,
     const { form, qrPayload, reason } = latest.current;
     const { canSubmit, bookedDay } = registrationView(latest.current, desk);
     if (!canSubmit) return;
-    dispatch({ type: "saveStarted" });
+    const { seq } = dispatch({ type: "saveStarted" });
     try {
       const data = await registerPatient(request, {
         form, qrPayload, dayId: bookedDay, reason, atDoor: desk.atDoor, reviewConfirmedId, differentPerson,
@@ -70,10 +70,11 @@ export function useRegisterForm({ open, atDoor, doorDayId, days, initialPayload,
         : `Registered #${reg.reg_no} — ${reg.full_name}. SMS sent.`);
       desk.onRegistered?.(reg);
       desk.onDone(data);
-      dispatch({ type: "saveSucceeded", next, atDoor: desk.atDoor });
-      if (!next) desk.onClose();
+      const stillOpen = seq === latest.current.seq;
+      dispatch({ type: "saveSucceeded", seq, next, atDoor: desk.atDoor });
+      if (!next && stillOpen) desk.onClose();
     } catch (err) {
-      dispatch({ type: "saveFailed", failure: registrationFailure(err) });
+      dispatch({ type: "saveFailed", seq, failure: registrationFailure(err) });
     }
   }, [dispatch, request]);
 

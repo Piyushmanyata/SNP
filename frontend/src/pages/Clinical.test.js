@@ -392,7 +392,7 @@ describe("Clinical page component", () => {
         id: "tx-101", locked: true, diagnosis_options: ["Cataract"],
         specs_measurements: { r_sph: "-1.5", l_sph: "-1.0" },
       },
-      committed_revision: { id: "rev-101" },
+      committed_revision: { id: "rev-101", prescribed_lines: ["medicine"] },
       clinical_generation: 1,
       fulfilments: [],
       slips: [],
@@ -452,39 +452,40 @@ describe("Clinical page component", () => {
     expect(container.querySelector('[data-testid="pick-line-rx"]')).toBeNull();
   });
 
-  test("a mismatch is advisory and the control stays usable", async () => {
+  const unprescribedHospital = (fulfilments) => ({
+    data: {
+      registration: { id: "reg-101", reg_no: "1001", full_name: "Subhash Bose", gender_label: "Male", age: 58 },
+      person: { id: "p-101" },
+      transcription: { id: "tx-101", locked: true, diagnosis_options: ["Cataract"], specs_measurements: { r_sph: "-1", l_sph: "-1" } },
+      committed_revision: { id: "rev-101", prescribed_lines: ["medicine", "specs_fixed"] },
+      clinical_generation: 1,
+      fulfilments,
+      slips: [],
+    },
+  });
+
+  test("a line the prescription does not imply says so and offers no control to record it", async () => {
     auth.user.line = "ot";
     sessionStorage.setItem(LINE_STORAGE_KEY, "ot");
-    api.post.mockResolvedValueOnce({
-      data: {
-        registration: { id: "reg-101", reg_no: "1001", full_name: "Subhash Bose", gender_label: "Male", age: 58 },
-        person: { id: "p-101" },
-        transcription: { id: "tx-101", locked: true, diagnosis_options: ["Cataract"], specs_measurements: { r_sph: "-1", l_sph: "-1" } },
-        committed_revision: { id: "rev-101", prescribed_lines: ["medicine", "specs_fixed"] },
-        clinical_generation: 1,
-        fulfilments: [],
-        slips: [],
-      },
-    });
-    await act(async () => {
-      root.render(<MemoryRouter><Clinical /></MemoryRouter>);
-    });
-    const lookupInput = container.querySelector('[data-testid="clinical-lookup-input"]');
-    act(() => {
-      const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-      nativeSetter.call(lookupInput, "1001");
-      lookupInput.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await act(async () => {
-      container.querySelector('[data-testid="clinical-lookup-button"]').click();
-    });
-    expect(container.querySelector('[data-testid="line-mismatch-warning"]').textContent).toContain("Record anyway");
-    expect(container.querySelector('[data-testid="station-ot-fulfilled"]')).toBeNull();
-    expect(container.querySelector('[data-testid="station-ot-save"]').disabled).toBe(true);
-    await act(async () => {
-      container.querySelector('[data-testid="station-ot-paper-review"]').click();
-    });
-    expect(container.querySelector('[data-testid="station-ot-save"]').disabled).toBe(false);
+    api.post.mockResolvedValueOnce(unprescribedHospital([]));
+    await renderPage();
+    typeLookup("1001");
+    await submitLookup();
+    expect(container.querySelector('[data-testid="line-mismatch-warning"]').textContent)
+      .toBe("This prescription has no Hospital. Nothing to record at this station.");
+    expect(container.querySelector('[data-testid="fulfilment-section"]')).toBeNull();
+    expect(container.querySelector('[data-testid="station-ot-save"]')).toBeNull();
+  });
+
+  test("a line removed by a correction after issue keeps its record and stays usable", async () => {
+    auth.user.line = "ot";
+    sessionStorage.setItem(LINE_STORAGE_KEY, "ot");
+    api.post.mockResolvedValueOnce(unprescribedHospital([{ id: "f-1", item_type: "ot", status: "deferred" }]));
+    await renderPage();
+    typeLookup("1001");
+    await submitLookup();
+    expect(container.querySelector('[data-testid="line-mismatch-warning"]')).toBeNull();
+    expect(container.querySelector('[data-testid="fulfilment-section"]')).not.toBeNull();
   });
 
   test("operators transcribe a patient at their own line", async () => {
@@ -599,7 +600,7 @@ describe("Clinical page component", () => {
     api.post.mockResolvedValueOnce({ data: {
       registration: { id: "r1", reg_no: "1001", full_name: "Patient" }, person: { id: "p1" },
       transcription: { id: "tx1", locked: true, diagnosis_options: ["Cataract"] },
-      committed_revision: { id: "rev1" },
+      committed_revision: { id: "rev1", prescribed_lines: ["medicine"] },
       clinical_generation: 1,
       fulfilments: [], slips: [],
     } });
@@ -685,7 +686,7 @@ describe("Clinical page component", () => {
         id: "tx-101", locked: true, diagnosis_options: ["Cataract"],
         specs_measurements: { r_sph: "-1.00", l_sph: "-1.25" },
       },
-      committed_revision: { id: "rev-101" },
+      committed_revision: { id: "rev-101", prescribed_lines: ["specs_made"] },
       clinical_generation: 1,
       fulfilments: [],
       slips: [],
@@ -1125,6 +1126,24 @@ describe("S7 clinical desk", () => {
     sessionStorage.setItem(LINE_STORAGE_KEY, "doctor_rx");
     await open(completed([{ id: "f-1", item_type: "medicine", status: "fulfilled" }]));
     expect(q("undo-completion-button")).toBeNull();
+  });
+
+  test("a USB scan while the Undo completion dialog is open does not switch patients", async () => {
+    let now = 0;
+    jest.spyOn(performance, "now").mockImplementation(() => now);
+    sessionStorage.setItem(LINE_STORAGE_KEY, "doctor_rx");
+    await open(completed());
+    await act(async () => q("undo-completion-button").click());
+    expect(document.querySelector('[data-testid="undo-completion-confirm"]')).not.toBeNull();
+    await act(async () => {
+      for (const key of [..."SNP:AB3K7T29", "Enter"]) {
+        now += 10;
+        document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+      }
+    });
+    expect(posts("/clinical/lookup")).toHaveLength(1);
+    expect(document.querySelector('[data-testid="undo-completion-confirm"]')).not.toBeNull();
+    expect(container.textContent).toContain("Done Patient");
   });
 
   test("a conflict reload starts the wizard again from its first step", async () => {
