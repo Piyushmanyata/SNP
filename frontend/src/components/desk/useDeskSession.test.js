@@ -117,6 +117,65 @@ test("Printed — next patient stamps once and moves the cursor to the USB box",
   box.remove();
 });
 
+test("a flip of printingOpen or operatingDayId clears the found patient; unchanged props and the first render do not", async () => {
+  api.post.mockResolvedValue({ data: { registration: REG } });
+  await mount();
+  expect(state().found).toBeNull();
+  await act(async () => { await actions().lookupCode("snp:ONE"); });
+  expect(state().found.reg).toBe(REG);
+  await mount();
+  expect(state().found.reg).toBe(REG);
+  await mount({ printingOpen: false });
+  expect(state().found).toBeNull();
+  await act(async () => { await actions().lookupCode("snp:TWO"); });
+  expect(state().found.reg).toBe(REG);
+  await mount({ printingOpen: false });
+  expect(state().found.reg).toBe(REG);
+  await mount({ printingOpen: false, operatingDayId: "day-2" });
+  expect(state().found).toBeNull();
+});
+
+test("a lookup or search reply that lands after the Print window flips is dropped", async () => {
+  const lookupReply = deferred();
+  const searchReply = deferred();
+  api.post.mockReturnValueOnce(lookupReply.promise);
+  api.get.mockReturnValueOnce(searchReply.promise);
+  await mount();
+  let pending;
+  await act(async () => { pending = actions().lookupCode("snp:OLD"); });
+  await mount({ printingOpen: false });
+  let current;
+  await act(async () => { lookupReply.resolve({ data: { registration: REG } }); current = await pending; });
+  expect(current).toBe(false);
+  expect(state().found).toBeNull();
+
+  await act(async () => { actions().setFindVal("Ravi"); });
+  await act(async () => { pending = actions().find(); });
+  await mount({ printingOpen: false, operatingDayId: "day-2" });
+  await act(async () => { searchReply.resolve({ data: { results: [NEXT] } }); await pending; });
+  expect(state().searchResults).toBeNull();
+});
+
+test("a flip of the Print window clears the search results and keeps a Paper check that is open", async () => {
+  api.get.mockImplementation((url) => Promise.resolve({
+    data: url.startsWith("/patients/search") ? { results: [NEXT] } : { prescription: { reg_no: "101", sheet_stamp: "s-1" } },
+  }));
+  api.post.mockResolvedValueOnce({ data: { registration: REG } });
+  await mount();
+  await act(async () => { actions().setFindVal("Ravi"); });
+  await act(async () => { await actions().find(); });
+  expect(state().searchResults).toEqual([NEXT]);
+  await act(async () => { await actions().print(REG); });
+  expect(state().paperCheck).not.toBeNull();
+
+  await mount({ printingOpen: false });
+  expect(state().searchResults).toBeNull();
+  expect(state().paperCheck).not.toBeNull();
+  await act(async () => { await actions().confirmPaper(); });
+  expect(api.post).toHaveBeenCalledWith("/desk/print/p-1", { sheet_stamp: "s-1" });
+  expect(state().banner).toBe("Printed #101 — Asha Devi. Next patient.");
+});
+
 test("Print again fetches a fresh sheet, and the Paper check sends that sheet's stamp", async () => {
   api.get
     .mockResolvedValueOnce({ data: { prescription: { reg_no: "101", sheet_stamp: "s-1" } } })

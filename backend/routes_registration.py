@@ -11,14 +11,14 @@ from helpers import (
 )
 from serializers import ser_patient
 from security import get_current_user, require_staff, require_any
-from routes_camps import effective_printing
 import arrival
+import printing
 from aadhaar import decode_aadhaar
 from aadhaar_extract import extract_document
 import sms
 import limits
 import lock_resolution
-from lock_resolution import duplicate_in_camp
+from lock_resolution import CARD_IN_HAND, checked_manual_note, duplicate_in_camp
 from datetime import date, timedelta
 from itertools import permutations
 import asyncio
@@ -34,7 +34,6 @@ DECODE_PER_NETWORK = 240
 SELF_REGISTER_PER_PHONE = 12
 SELF_REGISTER_PER_CAMP_DAY = 6000
 HOUSEHOLD_LIMIT = 6
-CARD_IN_HAND = ("card_unreadable", "scanner_down")
 LOOKALIKE_AGE_SPAN = 5
 LOOKALIKE_MAX_WORDS = 6
 
@@ -57,8 +56,8 @@ async def aadhaar_decode(body: AadhaarDecodeBody, request: Request) -> Dict[str,
     return await asyncio.to_thread(decode_aadhaar, body.payload)
 
 
-async def _validate_camp_and_day(db: AsyncDatabase, camp_day_id: str) -> tuple[dict, dict, bool]:
-    """Returns the active camp, the day and whether the day is the Operating day."""
+async def _validate_camp_and_day(db: AsyncDatabase, camp_day_id: str) -> tuple[dict, dict, dict]:
+    """Returns the active camp, the day and the printing state."""
     camp = await db.camps.find_one({"is_active": True})
     if not camp:
         raise api_error(409, "NO_ACTIVE_CAMP", 'No active camp')
@@ -66,11 +65,15 @@ async def _validate_camp_and_day(db: AsyncDatabase, camp_day_id: str) -> tuple[d
     day = await db.camp_days.find_one({"_id": ObjectId(camp_day_id), "camp_id": camp["_id"]})
     if not day:
         raise api_error(404, "CAMP_DAY_NOT_FOUND", 'Camp day not found')
-    days = await db.camp_days.find({"camp_id": camp["_id"]}).to_list(100)
-    operating = effective_printing(camp, days)["operating_day_id"] == str(day["_id"])
-    if day["day_date"] < today_ist_str() and not operating:
+    _days, state = await printing.load(db, camp)
+    if day["day_date"] < today_ist_str() and not printing.operates(state, day):
         raise api_error(409, "DAY_PASSED", 'That camp day has passed. Choose a later day.')
-    return camp, day, operating
+    return camp, day, state
+
+
+def _with_verdict(result: Tuple[Dict[str, Any], bool], state: dict, is_self: bool) -> Tuple[Dict[str, Any], bool]:
+    patient, created = result
+    return (patient if is_self else {**patient, "print": printing.verdict(patient, state)}), created
 
 
 async def _lookalikes(db: AsyncDatabase, camp_id: ObjectId | str, body: RegisterBody) -> List[Dict[str, Any]]:
@@ -249,12 +252,13 @@ async def _create_registration(
     request: Request,
 ) -> Tuple[Dict[str, Any], bool]:
     db = get_db()
-    camp, day, operating = await _validate_camp_and_day(db, body.camp_day_id)
+    camp, day, state = await _validate_camp_and_day(db, body.camp_day_id)
+    operating = printing.operates(state, day)
 
     if body.registration_request_id:
         existing = await db.patients.find_one({"registration_request_id": body.registration_request_id})
         if existing:
-            return _replay_registration(existing, body, camp["_id"])
+            return _with_verdict(_replay_registration(existing, body, camp["_id"]), state, is_self)
 
     if is_self and not body.aadhaar_scanned:
         raise api_error(400, "MANUAL_ENTRY_NOT_ALLOWED", 'Scan the Aadhaar card. Public registration has no manual entry.')
@@ -285,12 +289,12 @@ async def _create_registration(
     )
     conflict_result = await _resolve_registration_conflict(db, candidates, card, body, person, is_self)
     if conflict_result is not None:
-        return conflict_result
+        return _with_verdict(conflict_result, state, is_self)
     lookalikes = [] if body.aadhaar_scanned else await _lookalikes(db, camp["_id"], body)
     if lookalikes and not body.different_person:
         raise api_error(
             409, "LOOKALIKES", 'Someone with this name and a similar age is already registered. Check them first.',
-            registrations=[ser_patient(p) for p in lookalikes],
+            registrations=[ser_patient(p, state) for p in lookalikes],
         )
 
     walk_in = not is_self and operating
@@ -324,7 +328,7 @@ async def _create_registration(
         patient, created = await _insert_patient_document(db, doc, body, person, camp["_id"])
         if not created:
             await _release_capacity(db, day["_id"])
-        return patient, created
+        return _with_verdict((patient, created), state, is_self)
     except Exception:
         await _release_capacity(db, day["_id"])
         raise
@@ -338,8 +342,8 @@ async def _confirm_registration(patient: Dict[str, Any], skip_walk_in: bool = Fa
     if not row or not day or not camp:
         return
     if skip_walk_in:
-        days = await db.camp_days.find({"camp_id": camp["_id"]}).to_list(100)
-        if effective_printing(camp, days)["operating_day_id"] == str(day["_id"]):
+        _days, state = await printing.load(db, camp)
+        if printing.operates(state, day):
             return
     await sms.record_and_send(
         db, row, "registration", day["day_date"], camp.get("venue_sms") or camp["venue"],
@@ -385,17 +389,6 @@ def _validate_manual_identity(body: RegisterBody, now) -> None:
         raise api_error(400, "ENTER_AN_AGE_BETWEEN_0_AND_130_OR_A_VALID_DATE_OF_BIRTH", 'Enter an age between 0 and 130, or a valid date of birth')
     if not body.gender:
         raise api_error(400, "GENDER_REQUIRED", "Choose the patient's gender.")
-
-
-def checked_manual_note(reason: Optional[str], note: Optional[str]) -> Optional[str]:
-    if not reason:
-        raise api_error(400, "MANUAL_ENTRY_NOT_ALLOWED", 'Scan the Aadhaar card, or choose why it cannot be scanned.')
-    if reason != "other":
-        return None
-    note = (note or "").strip()
-    if not note:
-        raise api_error(400, "MANUAL_NOTE_REQUIRED", 'Write why the card cannot be scanned.')
-    return note
 
 
 def _reject_unscanned_staff_entry(body: RegisterBody) -> None:
@@ -476,6 +469,13 @@ async def self_register(body: RegisterBody, request: Request, background_tasks: 
     }
 
 
+async def _search_results(db: AsyncDatabase, camp: dict, rows: List[dict]) -> List[Dict[str, Any]]:
+    if not rows:
+        return []
+    _days, state = await printing.load(db, camp)
+    return [ser_patient(r, state) for r in rows]
+
+
 @router.get("/patients/search")
 async def name_search(q: str, actor: dict = Depends(require_any)) -> Dict[str, Any]:
     db = get_db()
@@ -488,7 +488,7 @@ async def name_search(q: str, actor: dict = Depends(require_any)) -> Dict[str, A
             "camp_id": camp["_id"],
             "phone_normalized": phone,
         }).limit(25).to_list(25)
-        return {"results": [ser_patient(r) for r in results]}
+        return {"results": await _search_results(db, camp, results)}
     norm = normalize_name(q)
     if not norm:
         return {"results": []}
@@ -496,4 +496,4 @@ async def name_search(q: str, actor: dict = Depends(require_any)) -> Dict[str, A
         "camp_id": camp["_id"],
         "full_name_normalized": {"$regex": "^" + norm},
     }).limit(25).to_list(25)
-    return {"results": [ser_patient(r) for r in results]}
+    return {"results": await _search_results(db, camp, results)}

@@ -1,11 +1,16 @@
 import React from "react";
 import { Badge, Button } from "../ui";
 
+const STAGE_BADGES = {
+  seen: { tone: "rose", label: "Doctor seen" },
+  printed: { tone: "indigo", label: "Printed" },
+  arrived: { tone: "emerald", label: "Arrived" },
+  booked: { tone: "amber", label: "Booked" },
+};
+
 function status(r) {
-  if (r.queue_status === "seen") return <Badge tone="rose">Doctor seen</Badge>;
-  if (r.printed_at) return <Badge tone="indigo">Printed</Badge>;
-  if (r.arrived_at) return <Badge tone="emerald">Arrived</Badge>;
-  return <Badge tone="amber">Booked</Badge>;
+  const { tone, label } = STAGE_BADGES[r.print.stage];
+  return <Badge tone={tone}>{label}</Badge>;
 }
 
 export function Lookalikes({ rows, busy, onOpen, onDifferent }) {

@@ -1,8 +1,9 @@
+import printing
 from helpers import iso, STATUS_LABELS, GENDER_LABELS
 
 
-def ser_patient(p: dict) -> dict:
-    return {
+def ser_patient(p: dict, printing_state: dict | None = None) -> dict:
+    out = {
         "id": str(p["_id"]),
         "person_id": str(p["person_id"]) if p.get("person_id") else None,
         "camp_id": str(p["camp_id"]) if p.get("camp_id") else None,
@@ -38,6 +39,9 @@ def ser_patient(p: dict) -> dict:
         "clinical_generation": int(p.get("clinical_generation") or 0),
         "created_at": iso(p.get("created_at")),
     }
+    if printing_state is not None:
+        out["print"] = printing.verdict(p, printing_state)
+    return out
 
 
 def ser_person(p: dict) -> dict:

@@ -25,6 +25,14 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
 
   useEffect(() => () => { dispatch({ type: "unmounted" }); }, [dispatch]);
 
+  const seenPrinting = useRef({ printingOpen, operatingDayId });
+  useEffect(() => {
+    const last = seenPrinting.current;
+    if (last.printingOpen === printingOpen && last.operatingDayId === operatingDayId) return;
+    seenPrinting.current = { printingOpen, operatingDayId };
+    dispatch({ type: "printingChanged" });
+  }, [printingOpen, operatingDayId, dispatch]);
+
   useEffect(() => {
     if (state.paperCheck || !state.focusUsbBox) return;
     dispatch({ type: "usbFocused" });
@@ -66,14 +74,14 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
     };
 
     const lookup = async (value, reprint) => {
-      const { seq } = dispatch({ type: "findStarted" });
+      const { seq, findSeq } = dispatch({ type: "findStarted" });
       try {
         const { data } = await api.post("/desk/lookup", { value });
-        const current = isCurrent(seq);
-        dispatch({ type: "lookupResolved", seq, registration: data.registration, reprint });
+        const current = isCurrent(seq) && findSeq === latest.current.findSeq;
+        dispatch({ type: "lookupResolved", seq, findSeq, registration: data.registration, reprint });
         return current;
       } catch (err) {
-        dispatch({ type: "lookupFailed", seq, message: formatApiError(err) });
+        dispatch({ type: "lookupFailed", seq, findSeq, message: formatApiError(err) });
         return false;
       }
     };
@@ -103,12 +111,12 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
         if (await lookup(value, /^\d+$/.test(value))) dispatch({ type: "findChanged", value: "" });
         return;
       }
-      const { seq } = dispatch({ type: "findStarted" });
+      const { seq, findSeq } = dispatch({ type: "findStarted" });
       try {
         const { data } = await api.get(`/patients/search?q=${encodeURIComponent(value)}`);
-        dispatch({ type: "searchResolved", seq, results: data.results });
+        dispatch({ type: "searchResolved", seq, findSeq, results: data.results });
       } catch (err) {
-        dispatch({ type: "failed", seq, message: formatApiError(err) });
+        dispatch({ type: "failed", seq, findSeq, message: formatApiError(err) });
       }
     };
 
