@@ -763,3 +763,36 @@ Live checks:
 - Every service reports healthy or running.
 - The deployed backend carries the `corrected` argument on `keep_removed`.
 - The backend and reminders logs have no tracebacks and no 5xx.
+
+
+## Issue #110 and the deep-review fixes — 30 September 2026
+
+[PRs 111–116](https://github.com/Piyushmanyata/SNP/issues/110) (issue #110, ADRs 0098–0103), [PR 117](https://github.com/Piyushmanyata/SNP/pull/117) and [PR 118](https://github.com/Piyushmanyata/SNP/pull/118) (deep-review fixes, ADRs 0104–0105) merged to `main` as `d23ecbd02ff0271f886534e37b0184e784a4dd43`. It was deployed from a `git archive` of that commit into `/opt/snp/releases/d23ecbd02ff0271f886534e37b0184e784a4dd43`. PR 118's CI run [36741935003](https://github.com/Piyushmanyata/SNP/actions/runs/36741935003) passed every check, and its tested tree is the tree of `d23ecbd`.
+
+Before the update, the running `5d70ff5` images were tagged `snp-{backend,frontend,reminders,backup}:rollback-5d70ff5cd4e8c9cb5266f77d2ebfa24fd5dc753c`. The backup container was restarted and took snapshot `61770089` at 16:29 UTC (8 patients). Backend, frontend and reminders were rebuilt. Compose also recreated MongoDB on the same `snp_mongo_data` and `snp_mongo_config` volumes, and Caddy stayed up. `docker-compose.prod.yml` now names its project `snp`, the same as the `-p snp` used here. To roll back:
+
+1. Retag those images to `:latest`.
+2. Point `/opt/snp/current` at `/opt/snp/releases/5d70ff5cd4e8c9cb5266f77d2ebfa24fd5dc753c`.
+3. Run `up -d --no-build` from that directory.
+
+No data migration was needed and no index changed. A read-only check found 0 active OT Tokens, so slice 6 needed no backfill. The first sweep drops the stored reminder cursor, which has no `event_date`; the ledger still stops a second send.
+
+Behaviour changes:
+- The export leaves the prescription columns blank for a patient with no committed revision (slice 3).
+- The Desk respects the Print window, and a stale find reply is dropped (slice 4).
+- An OT reminder uses the SMS venue stored on its Token (slice 6).
+- A reminder sweep passes over skipped patients instead of stalling, and a cursor is used only for its own event date. A retried Specs reminder keeps its collection window (ADR 0104).
+- A line desk with nothing prescribed and nothing recorded offers no station (ADR 0105).
+- A lines-only correction saves. Login names are capped at 80 characters. A deleted `admin` is not reseeded.
+- `pyjwt` is 2.15.0 (CVE-2026-101918).
+
+Live checks:
+- `/api/health/ready` returned `{"ready":true,"db":"reachable","active_camps":1}`.
+- The homepage returned 200, and HTTP redirected with 308.
+- Backend, frontend and mongo report healthy; backup, caddy and reminders are running.
+- Document counts are unchanged: 4 users, 1 camp, 8 patients.
+- The backend runs `pyjwt` 2.15.0 and carries the new sweep cursor; the frontend's Clinical bundle carries "Nothing to record at this station".
+- The reminder worker recorded the 10:00 and 20:00 slots for 30 September.
+- The backend and reminders logs have no tracebacks and no 5xx.
+
+Open: ADR 0101 asks for a p95 check of `/desk/lookup` and `/patients/search` from the backend logs. There was no camp traffic at deploy time, so take it at the next camp session.
