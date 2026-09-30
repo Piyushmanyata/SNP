@@ -7,7 +7,7 @@ import AadhaarScanner from "../components/AadhaarScanner";
 import { useWedgeBurst } from "../components/aadhaar";
 import { ScanOutcome, MismatchReview } from "../components/desk/ScanOutcome";
 import { PaperCheck } from "../components/desk/PaperCheck";
-import { PendingStat } from "../components/desk/Pending";
+import { StageStat } from "../components/desk/StageList";
 import { Lookalikes } from "../components/desk/Lookalikes";
 import { EMPTY_REASON, ManualReason, cardInHand, reasonReady } from "../components/desk/ManualReason";
 import { useDeskSession } from "../components/desk/useDeskSession";
@@ -19,7 +19,7 @@ import { loadLogos } from "../lib/logoCache";
 import { PhoneInput } from "../components/PhoneInput";
 import { displayDate } from "../lib/dates";
 import {
-  Button, Card, Input, Field, Alert, Modal, Stat, StatusBadge, Badge, ErrorCard, Spinner, Select,
+  Button, Card, Input, Field, Alert, Modal, StatusBadge, Badge, ErrorCard, Spinner, Select,
 } from "../components/ui";
 import {
   UserPlus, Search, Printer, ScanLine,
@@ -126,9 +126,9 @@ export default function Desk() {
       )}
 
       <div className={`grid gap-2 sm:gap-3 mb-5 ${printingOpen ? "grid-cols-3" : "grid-cols-1"}`}>
-        <Stat label="Registered" value={kpi?.registered ?? "—"} testid="kpi-registered-count" />
-        {printingOpen && <Stat label="Seen" value={kpi?.seen ?? "—"} tone="emerald" testid="kpi-seen-count" />}
-        {printingOpen && <PendingStat value={kpi?.pending ?? "—"} />}
+        <StageStat stage="registered" value={kpi?.registered ?? "—"} />
+        {printingOpen && <StageStat stage="seen" value={kpi?.seen ?? "—"} />}
+        {printingOpen && <StageStat stage="pending" value={kpi?.pending ?? "—"} />}
       </div>
 
       {!printingOpen && (

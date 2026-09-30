@@ -4,11 +4,12 @@ import csv
 import shutil
 from collections import Counter
 from datetime import datetime, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Literal
 from bson import ObjectId
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
 import committed_prescription
+import desk_search
 import fulfilment_line
 from catalogue import format_power
 from db import aggregate_list, get_db
@@ -28,7 +29,7 @@ async def kpis(actor: dict = Depends(require_staff)) -> Dict[str, Any]:
     if not camp:
         return {"active_camp": None, "registered": 0, "seen": 0, "pending": 0}
     registered, seen, pending = await asyncio.gather(
-        db.patients.count_documents({"camp_id": camp["_id"]}),
+        db.patients.count_documents(queue_stage.registered(camp["_id"])),
         db.patients.count_documents(queue_stage.doctor_seen(camp["_id"])),
         db.patients.count_documents(queue_stage.pending(camp["_id"])),
     )
@@ -40,12 +41,32 @@ async def kpis(actor: dict = Depends(require_staff)) -> Dict[str, Any]:
     }
 
 
-@router.get("/pending")
-async def pending_patients(actor: dict = Depends(require_staff)) -> Dict[str, Any]:
+LIST_ROWS = 10
+STAGE_LISTS = {
+    "registered": (queue_stage.registered, queue_stage.REGISTERED_SORT),
+    "seen": (queue_stage.doctor_seen, queue_stage.SEEN_SORT),
+    "pending": (queue_stage.pending, queue_stage.PENDING_SORT),
+}
+
+
+@router.get("/lists/{stage}")
+async def stage_list(
+    stage: Literal["registered", "seen", "pending"], q: str = "", actor: dict = Depends(require_staff),
+) -> Dict[str, Any]:
     db = get_db()
     camp = await db.camps.find_one({"is_active": True})
-    rows = await db.patients.find(queue_stage.pending(camp["_id"])).sort(queue_stage.PENDING_SORT).to_list(None) if camp else []
-    return {"today": today_ist_str(), "patients": [ser_patient(p) for p in rows]}
+    match = desk_search.where(q)
+    if not camp or match is None:
+        return {"today": today_ist_str(), "total": 0, "patients": []}
+    where, sort = STAGE_LISTS[stage]
+    query = {**where(camp["_id"]), **match}
+    options = desk_search.options(match)
+    total, rows = await asyncio.gather(
+        db.patients.count_documents(query, **options),
+        db.patients.find(query, **options).sort(sort).limit(LIST_ROWS).to_list(LIST_ROWS),
+    )
+    patients = [{**ser_patient(p), "stage": queue_stage.stage_of(p)} for p in rows]
+    return {"today": today_ist_str(), "total": total, "patients": patients}
 
 
 @router.get("/leaderboard")

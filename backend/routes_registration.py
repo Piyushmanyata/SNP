@@ -12,6 +12,7 @@ from helpers import (
 from serializers import ser_patient
 from security import get_current_user, require_staff, require_any
 import arrival
+import desk_search
 import printing
 from aadhaar import decode_aadhaar
 from aadhaar_extract import extract_document
@@ -480,20 +481,10 @@ async def _search_results(db: AsyncDatabase, camp: dict, rows: List[dict]) -> Li
 async def name_search(q: str, actor: dict = Depends(require_any)) -> Dict[str, Any]:
     db = get_db()
     camp = await db.camps.find_one({"is_active": True})
-    if not camp:
+    match = desk_search.where(q)
+    if not camp or not match:
         return {"results": []}
-    phone = normalize_phone(q)
-    if phone and len(phone) == 10 and q.strip().replace(" ", "").isdigit():
-        results = await db.patients.find({
-            "camp_id": camp["_id"],
-            "phone_normalized": phone,
-        }).limit(25).to_list(25)
-        return {"results": await _search_results(db, camp, results)}
-    norm = normalize_name(q)
-    if not norm:
-        return {"results": []}
-    results = await db.patients.find({
-        "camp_id": camp["_id"],
-        "full_name_normalized": {"$regex": "^" + norm},
-    }).limit(25).to_list(25)
+    results = await db.patients.find(
+        {"camp_id": camp["_id"], **match}, **desk_search.options(match),
+    ).limit(25).to_list(25)
     return {"results": await _search_results(db, camp, results)}

@@ -2055,11 +2055,88 @@ describe("Manual entry, Pending and Reprint (ADR 0084)", () => {
     await act(async () => { q("desk-find-button").click(); });
   }
 
-  test("the Pending count opens who is printed and waiting for the doctor", async () => {
+  function listReturns(stage, data) {
     const base = api.get.getMockImplementation();
-    api.get.mockImplementation((url) => (url === "/pending"
-      ? Promise.resolve({ data: { patients: [PRINTED] } })
+    api.get.mockImplementation((url, config) => (url === `/lists/${stage}`
+      ? Promise.resolve({ data: typeof data === "function" ? data(config.params.q) : data })
       : base(url)));
+  }
+
+  async function searchList(value) {
+    act(() => { setInput(q("list-search-input"), value); });
+    await act(async () => { q("list-search-button").click(); });
+  }
+
+  test("the Registered count opens every registration with its stage, and says how many more there are", async () => {
+    listReturns("registered", { total: 45, patients: [
+      { ...PRINTED, stage: "pending" },
+      { ...ARRIVED, id: "p-2", reg_no: "102", stage: "booked" },
+    ] });
+    await renderDesk();
+    await act(async () => { q("kpi-registered-count-button").click(); });
+    expect(api.get).toHaveBeenCalledWith("/lists/registered", { params: { q: "" } });
+    expect(q("registered-row-101").textContent).toContain("Pending");
+    expect(q("registered-row-102").textContent).toContain("Booked");
+    expect(q("registered-row-101").querySelector("button")).toBeNull();
+    expect(q("registered-row-101").querySelector('a[href="tel:9876543210"]')).not.toBeNull();
+    expect(q("list-shown").textContent).toBe("Showing 2 of 45. Search by name, phone or registration number to find anyone else.");
+    expect(document.activeElement).toBe(q("list-search-input"));
+  });
+
+  test("a list searches the whole camp and says when more match", async () => {
+    listReturns("pending", (typed) => ({
+      "": { total: 1, patients: [PRINTED] },
+      kumar: { total: 14, patients: [{ ...PRINTED, full_name: "Ram Kumar" }] },
+      zzz: { total: 0, patients: [] },
+    }[typed]));
+    await renderDesk();
+    await act(async () => { q("kpi-pending-count-button").click(); });
+    expect(q("list-shown")).toBeNull();
+
+    await searchList("kumar");
+    expect(api.get).toHaveBeenLastCalledWith("/lists/pending", { params: { q: "kumar" } });
+    expect(q("pending-row-101").textContent).toContain("Ram Kumar");
+    expect(q("list-shown").textContent).toBe("1 of 14 match. Type more of the name, or the whole phone number.");
+
+    await searchList("zzz");
+    expect(q("pending-list")).toBeNull();
+    expect(q("list-empty").textContent).toBe("No one matches “zzz”.");
+  });
+
+  test("the Seen count opens who the doctor has seen, with when", async () => {
+    listReturns("seen", { total: 1, patients: [{ ...PRINTED, queue_status: "seen", seen_at: "2026-09-01T09:02:00Z" }] });
+    await renderDesk();
+    await act(async () => { q("kpi-seen-count-button").click(); });
+    expect(q("seen-row-101").textContent).toContain("Seen 14:32");
+    expect(q("seen-row-101").textContent).not.toContain("Printed");
+  });
+
+  test("the Registered count opens during Pre-registration too", async () => {
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url, config) => (url === "/camps/active"
+      ? Promise.resolve({ data: { camp: { id: "camp-1", name: "Howrah Eye Camp" }, days: [{ id: "day-1", day_date: "2026-08-27", is_today: true, printing_open: false }] } })
+      : base(url, config)));
+    listReturns("registered", { total: 1, patients: [{ ...ARRIVED, stage: "booked" }] });
+    await renderDesk();
+    expect(q("kpi-seen-count-button")).toBeNull();
+    await act(async () => { q("kpi-registered-count-button").click(); });
+    expect(q("registered-row-101").textContent).toContain("Booked");
+  });
+
+  test("Find reads ten digits as the household phone, not a registration number", async () => {
+    const base = api.get.getMockImplementation();
+    api.get.mockImplementation((url) => (url.startsWith("/patients/search")
+      ? Promise.resolve({ data: { results: [ARRIVED] } })
+      : base(url)));
+    await renderDesk();
+    await findTyped("9876543210");
+    expect(api.get).toHaveBeenCalledWith("/patients/search?q=9876543210");
+    expect(api.post.mock.calls.filter((c) => c[0] === "/desk/lookup")).toHaveLength(0);
+    expect(q("patient-row-101")).not.toBeNull();
+  });
+
+  test("the Pending count opens who is printed and waiting for the doctor", async () => {
+    listReturns("pending", { total: 1, patients: [PRINTED] });
     await renderDesk();
     await act(async () => { q("kpi-pending-count-button").click(); });
     const row = q("pending-row-101");
@@ -2070,13 +2147,10 @@ describe("Manual entry, Pending and Reprint (ADR 0084)", () => {
   });
 
   test("Pending marks a patient who arrived on an earlier camp day", async () => {
-    const base = api.get.getMockImplementation();
-    api.get.mockImplementation((url) => (url === "/pending"
-      ? Promise.resolve({ data: { today: "2026-09-02", patients: [
-        { ...PRINTED, arrived_at: "2026-09-01T04:00:00Z" },
-        { ...PRINTED, id: "p-2", reg_no: "102", arrived_at: "2026-09-02T04:00:00Z" },
-      ] } })
-      : base(url)));
+    listReturns("pending", { today: "2026-09-02", total: 2, patients: [
+      { ...PRINTED, arrived_at: "2026-09-01T04:00:00Z" },
+      { ...PRINTED, id: "p-2", reg_no: "102", arrived_at: "2026-09-02T04:00:00Z" },
+    ] });
     await renderDesk();
     await act(async () => { q("kpi-pending-count-button").click(); });
     expect(q("pending-earlier-101").textContent).toBe("Arrived 01-09-2026");

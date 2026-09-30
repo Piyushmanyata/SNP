@@ -195,11 +195,12 @@ describe("AdminDashboard component", () => {
 
   test("the overview Pending count opens who is printed and waiting for the doctor", async () => {
     const base = api.get.getMockImplementation();
-    api.get.mockImplementation((url) => (url === "/pending"
-      ? Promise.resolve({ data: { patients: [{
-        id: "p-1", reg_no: 101, full_name: "Kamla Bai", gender_label: "Female", age: 62, phone: "9876500011",
-        printed_at: "2026-09-01T04:42:00Z", printed_by_name: "Ramesh",
-      }] } })
+    const kamla = {
+      id: "p-1", reg_no: 101, full_name: "Kamla Bai", gender_label: "Female", age: 62, phone: "9876500011",
+      printed_at: "2026-09-01T04:42:00Z", printed_by_name: "Ramesh", seen_at: "2026-09-01T09:02:00Z", stage: "seen",
+    };
+    api.get.mockImplementation((url) => (url.startsWith("/lists/")
+      ? Promise.resolve({ data: { total: 1, patients: [kamla] } })
       : base(url)));
     await act(async () => {
       root.render(
@@ -209,8 +210,16 @@ describe("AdminDashboard component", () => {
       );
     });
     await act(async () => container.querySelector('[data-testid="kpi-pending-count-button"]').click());
-    expect(api.get).toHaveBeenCalledWith("/pending");
+    expect(api.get).toHaveBeenCalledWith("/lists/pending", { params: { q: "" } });
     expect(document.body.querySelector('[data-testid="pending-row-101"]').textContent).toContain("Printed 10:12 by Ramesh");
+    await act(async () => document.body.querySelector('[data-testid="modal-close-button"]').click());
+
+    await act(async () => container.querySelector('[data-testid="kpi-registered-count-button"]').click());
+    expect(document.body.querySelector('[data-testid="registered-row-101"]').textContent).toContain("Doctor seen");
+    await act(async () => document.body.querySelector('[data-testid="modal-close-button"]').click());
+
+    await act(async () => container.querySelector('[data-testid="kpi-seen-count-button"]').click());
+    expect(document.body.querySelector('[data-testid="seen-row-101"]').textContent).toContain("Seen 14:32");
   });
 
   test("a camp's SMS number is set at creation and can be corrected later", async () => {

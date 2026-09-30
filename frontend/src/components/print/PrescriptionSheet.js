@@ -161,13 +161,13 @@ export function PrescriptionSheet({ rx, logos = [], preview }) {
 
       <div className="mt-2 pt-2 border-t border-slate-300 shrink-0" data-testid="rx-footer">
         <p className="font-semibold text-[12px] mb-1">Sponsorer :</p>
-        <div className="flex items-center gap-3" data-testid="rx-sponsor-strip">
+        <div className="flex items-center gap-5" data-testid="rx-sponsor-strip">
           {logos.map((lg, i) => (
             <img
               key={lg.id || i}
               src={lg.data_url}
               alt={lg.name}
-              className="flex-1 min-w-0 object-contain object-left"
+              className="min-w-0 object-contain object-left"
               style={{ height: "18mm" }}
             />
           ))}
