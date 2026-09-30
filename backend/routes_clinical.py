@@ -12,6 +12,7 @@ from models import (
 )
 from catalogue import resolve_medicines, stocked_power
 import clinical_operation
+import committed_prescription
 from clinical_operation import Operation
 from clinical_state import (
     CONTENT_FIELDS, PRESCRIBED_LINE_KEYS, SPECS_EXCLUSION, carry_medicine_outcomes, commit, conflict, draft_conflict,
@@ -150,10 +151,7 @@ async def clinical_lookup(body: dict, actor: dict = Depends(require_clinical)) -
         raise api_error(404, "NO_MATCHING_REGISTRATION_FOUND", 'No matching registration found')
     require_printed(p)
     bundle = await _fetch_clinical_bundle(db, p)
-    rev = None
-    if p.get("committed_revision_id"):
-        rev = await db.prescription_revisions.find_one({"_id": p["committed_revision_id"]})
-    bundle["committed_revision"] = serialize_revision(rev)
+    bundle["committed_revision"] = serialize_revision(await committed_prescription.of_patient(db, p))
     bundle["clinical_generation"] = generation_of(p)
     return bundle
 
@@ -383,14 +381,14 @@ async def resolve_issued_powers(db, revision: dict, body: FulfilmentBody) -> tup
     return await stocked_power(db, right, active_only=True), await stocked_power(db, left, active_only=True)
 
 
-def _assert_specs_prescription(item_type: str, transcription: dict) -> None:
+def _assert_specs_prescription(item_type: str, revision: dict) -> None:
     """Made specs are ground from the grid; fixed specs are picked from the camp's stocked powers."""
     if item_type == "specs_made":
-        m = transcription.get("specs_measurements") or {}
+        m = revision.get("specs_measurements") or {}
         if not (str(m.get("r_sph") or "").strip() and str(m.get("l_sph") or "").strip()):
             raise api_error(400, "SPECS_MEASUREMENTS_REQUIRED", 'Record the prescribed power for both eyes before recording a spectacles line.')
     elif item_type == "specs_fixed":
-        if transcription.get("fixed_power_r") is None or transcription.get("fixed_power_l") is None:
+        if revision.get("fixed_power_r") is None or revision.get("fixed_power_l") is None:
             raise api_error(400, "FIXED_POWER_REQUIRED", 'Select the fixed power for both eyes before recording a spectacles line.')
 
 
@@ -445,10 +443,9 @@ async def record_fulfilment(
     patient = await db.patients.find_one({"_id": t["patient_id"]}) if t.get("patient_id") else None
     if not patient:
         raise api_error(404, "REGISTRATION_NOT_FOUND", 'Registration not found')
-    committed_id = patient.get("committed_revision_id")
-    revision = await db.prescription_revisions.find_one({"_id": committed_id}) if committed_id else None
     revision = require_fresh_review(
-        patient, revision, body.paper_reviewed, body.reviewed_revision_id, body.reviewed_generation,
+        patient, await committed_prescription.of_patient(db, patient),
+        body.paper_reviewed, body.reviewed_revision_id, body.reviewed_generation,
     )
     if body.item_type not in PRESCRIBED_LINE_KEYS:
         raise api_error(400, "INVALID_FULFILMENT_ITEM_STATUS", 'Invalid fulfilment item/status')
@@ -463,11 +460,11 @@ async def record_fulfilment(
     _validate_fulfilment_matrix(body.item_type, body.status)
 
     async def apply(current, session):
-        committed = current.get("committed_revision_id")
-        claimed = await db.prescription_revisions.find_one({"_id": committed}, session=session) if committed else None
-        require_line_prescribed(require_fresh_review(
-            current, claimed, body.paper_reviewed, body.reviewed_revision_id, body.reviewed_generation,
-        ), body.item_type)
+        prescription = require_fresh_review(
+            current, await committed_prescription.of_patient(db, current, session),
+            body.paper_reviewed, body.reviewed_revision_id, body.reviewed_generation,
+        )
+        require_line_prescribed(prescription, body.item_type)
         trans = await db.transcriptions.find_one({"_id": t["_id"]}, session=session)
         if not trans:
             raise api_error(404, "TRANSCRIPTION_NOT_FOUND", 'Transcription not found')
@@ -476,7 +473,7 @@ async def record_fulfilment(
                 "transcription_id": t["_id"], "item_type": SPECS_EXCLUSION[body.item_type][0],
                 "status": {"$ne": "cancelled"},
             }, session=session))
-        _assert_specs_prescription(body.item_type, trans)
+        _assert_specs_prescription(body.item_type, prescription)
         prior = await db.fulfilments.find_one({"transcription_id": t["_id"], "item_type": body.item_type}, session=session)
         slip, queued = await tokens.defer(
             db, body.item_type, current, trans, prior, _day_requested(body), session,
@@ -519,8 +516,8 @@ async def get_slip(slip_id: str, actor: dict = Depends(require_clinical)) -> Dic
     p = await db.patients.find_one({"_id": s["patient_id"]})
     camp = await db.camps.find_one({"_id": p["camp_id"]}) if p and p.get("camp_id") else None
     surgery: dict = {}
-    if s["item_type"] == "ot" and p and p.get("committed_revision_id"):
-        surgery = await db.prescription_revisions.find_one({"_id": p["committed_revision_id"]}) or {}
+    if s["item_type"] == "ot" and p:
+        surgery = await committed_prescription.of_patient(db, p) or {}
     return {
         "slip": {**ser_slip(s), **{field: surgery.get(field) for field in ("ot_eye", "bp", "blood_sugar")}},
         "registration": ser_patient(p) if p else None,
@@ -574,7 +571,7 @@ async def add_correction(
     base_id = p.get("committed_revision_id")
     if not base_id:
         raise conflict("not_completed", "There is no current completion to correct.")
-    current = await db.prescription_revisions.find_one({"_id": base_id}) or {}
+    current = await committed_prescription.of_patient(db, p) or {}
     merged = {field: current.get(field) for field in CONTENT_FIELDS}
     for field in ("diagnosis_options", "prescribed_medicines"):
         if merged[field] is None:
@@ -641,12 +638,14 @@ async def clinical_history(person_id: str, actor: dict = Depends(require_clinica
     camps = await db.camps.find({"_id": {"$in": list({t["camp_id"] for t in items if t.get("camp_id")})}}).to_list(100)
     patient_by_id = {p["_id"]: p for p in patients}
     camp_by_id = {c["_id"]: c for c in camps}
+    revisions = await committed_prescription.of_patients(db, patients)
     out = []
     for t in items:
         p = patient_by_id.get(t["patient_id"])
         camp = camp_by_id.get(t.get("camp_id"))
         out.append({
             "transcription": ser_trans(t),
+            "committed_revision": serialize_revision(revisions.get(t["patient_id"])),
             "camp_name": camp["name"] if camp else None,
             "reg_no": p["reg_no"] if p else None,
         })
