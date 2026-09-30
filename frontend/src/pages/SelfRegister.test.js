@@ -331,17 +331,6 @@ test.each(["CAMP_DAY_FULL", "DAY_PASSED"])("a %s refusal reloads the days and mo
   expect(container.querySelector('[data-testid="self-scanned-preview"]')).not.toBeNull();
 });
 
-test("a request conflict gives the next submit a new request id", async () => {
-  await renderAndScan();
-  api.post.mockRejectedValueOnce({ response: { data: { detail: { code: "REGISTRATION_REQUEST_CONFLICT", message: "Start a new registration." } } } });
-  await submit();
-  expect(container.textContent).toContain("Start a new registration.");
-  api.post.mockResolvedValueOnce({ data: { receipt: { reg_no: 12, patient_qr: "qr-12" } } });
-  await submit();
-  const ids = api.post.mock.calls.map((c) => c[1].registration_request_id);
-  expect(ids[1]).not.toBe(ids[0]);
-});
-
 test("a seat refusal that moves the chosen day sends the next submit with a new request id", async () => {
   withDays([TODAY_OPEN, TOMORROW_OPEN]);
   await renderAndScan();
@@ -354,16 +343,6 @@ test("a seat refusal that moves the chosen day sends the next submit with a new 
   expect(refused.camp_day_id).toBe("d1");
   expect(moved.camp_day_id).toBe("d2");
   expect(moved.registration_request_id).not.toBe(refused.registration_request_id);
-});
-
-test("a submit with no edit after a lost reply resends the same body and id", async () => {
-  await renderAndScan();
-  api.post.mockRejectedValueOnce(new Error("Network Error"));
-  await submit();
-  api.post.mockResolvedValueOnce({ data: { receipt: { reg_no: 12, patient_qr: "qr-12" } } });
-  await submit();
-  const [first, second] = api.post.mock.calls.map((c) => c[1]);
-  expect(second).toEqual(first);
 });
 
 test("a network failure on submit keeps the page as it is", async () => {

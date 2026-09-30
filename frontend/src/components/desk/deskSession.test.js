@@ -114,28 +114,21 @@ test("Reprint follows the lookup that found the row", () => {
   expect(code.found.reprint).toBe(false);
 });
 
-test("a walk-in holds the desk busy and moves to a new seq", () => {
+test("a started confirm or walk-in holds the desk busy on a new seq, and its failure shows the message", () => {
   const scanned = { ...initialDeskSession, scanPayload: "card-A", error: "Old error" };
-  const started = deskSession(scanned, { type: "walkInStarted" });
+  const started = deskSession(scanned, { type: "confirmStarted" });
   expect(started).toEqual(expect.objectContaining({ busy: true, error: "", seq: scanned.seq + 1 }));
-  expect(started).not.toHaveProperty("walkIn");
-});
-
-test("a failed walk-in shows its message, and a stale one is ignored", () => {
-  const started = deskSession({ ...initialDeskSession, scanPayload: "card-A" }, { type: "walkInStarted" });
-  expect(deskSession(started, { type: "walkInFailed", seq: started.seq, message: "Saved earlier." }).error).toBe("Saved earlier.");
-  const moved = deskSession(started, { type: "findStarted" });
-  expect(deskSession(moved, { type: "walkInFailed", seq: started.seq, message: "Late" })).toBe(moved);
+  expect(deskSession(started, { type: "failed", seq: started.seq, message: "Saved earlier." }).error).toBe("Saved earlier.");
 });
 
 test("a walk-in reply that lands after the desk moved on is ignored", () => {
-  const started = deskSession({ ...initialDeskSession, scanPayload: "card-A" }, { type: "walkInStarted" });
+  const started = deskSession({ ...initialDeskSession, scanPayload: "card-A" }, { type: "confirmStarted" });
   const moved = deskSession(started, { type: "scanStarted", payload: "card-B" });
   expect(deskSession(moved, { type: "walkInResolved", seq: started.seq, registration: { ...REG, arrived_at: "2026-10-05T03:30:00Z" } })).toBe(moved);
 });
 
 test("a walk-in that arrives puts the arrived patient on the card", () => {
-  const started = deskSession({ ...initialDeskSession, scanPayload: "card-A", doorPhone: "98765" }, { type: "walkInStarted" });
+  const started = deskSession({ ...initialDeskSession, scanPayload: "card-A", doorPhone: "98765" }, { type: "confirmStarted" });
   const arrived = { ...REG, arrived_at: "2026-10-05T03:30:00Z" };
   const next = deskSession(started, { type: "walkInResolved", seq: started.seq, registration: arrived });
   expect(next).toEqual(expect.objectContaining({
@@ -145,7 +138,7 @@ test("a walk-in that arrives puts the arrived patient on the card", () => {
 });
 
 test("a walk-in that came back not arrived shows its row instead of claiming arrival", () => {
-  const started = deskSession({ ...initialDeskSession, scanPayload: "card-A" }, { type: "walkInStarted" });
+  const started = deskSession({ ...initialDeskSession, scanPayload: "card-A" }, { type: "confirmStarted" });
   const booked = { ...REG, arrived_at: null };
   const next = deskSession(started, { type: "walkInResolved", seq: started.seq, registration: booked });
   expect(next.scanResult).toBeNull();

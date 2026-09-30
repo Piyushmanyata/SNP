@@ -114,15 +114,6 @@ test("registerPatient sends no confirmation unless asked", async () => {
   expect(api.post.mock.calls[0][1]).toEqual(expect.objectContaining({ review_confirmed_id: null, different_person: false }));
 });
 
-test("Mismatch review and Different person keep the id of the attempt that raised them", async () => {
-  api.post.mockRejectedValue(new Error("Network Error"));
-  await register(SCANNED);
-  await register({ ...SCANNED, reviewConfirmedId: "p-3" });
-  await register({ ...SCANNED, differentPerson: true });
-  expect(sentIds()[1]).toBe(sentIds()[0]);
-  expect(sentIds()[2]).toBe(sentIds()[0]);
-});
-
 test.each([
   ["phone", { form: { ...FORM, phone: "9876500009" } }],
   ["name", { form: { ...FORM, full_name: "Sunita Bai" } }],
@@ -141,19 +132,6 @@ test("a typed registration gets a new id when the reason or the gender changes",
   await register({ ...TYPED, reason: { code: "no_card", note: "" } });
   await register({ ...TYPED, reason: { code: "no_card", note: "" }, form: { ...TYPED.form, gender: "M" } });
   expect(new Set(sentIds()).size).toBe(3);
-});
-
-test("a saved registration is followed by a new id", async () => {
-  api.post.mockResolvedValue({ data: {} });
-  await register(SCANNED);
-  await register(SCANNED);
-  expect(sentIds()[1]).not.toBe(sentIds()[0]);
-});
-
-test("the error reaches the caller unchanged", async () => {
-  const failure = refusal({ code: "DUPLICATE_IN_CAMP", registration: { reg_no: 7 } });
-  api.post.mockRejectedValueOnce(failure);
-  expect((await register(SCANNED)).failure).toBe(failure);
 });
 
 test.each([

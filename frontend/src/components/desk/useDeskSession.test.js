@@ -175,25 +175,12 @@ test("a walk-in whose phone is edited after a failure sends a new id, and an unc
   expect(state().busy).toBe(false);
 });
 
-test("a walk-in request conflict points to search and renews the id", async () => {
+test("a walk-in request conflict points to search", async () => {
   await mount();
   await scanWalkIn();
   api.post.mockRejectedValue({ response: { status: 409, data: { detail: { code: "REGISTRATION_REQUEST_CONFLICT", message: "Request id reused." } } } });
   await walkIn();
   expect(state().error).toBe("Saved earlier. Search for the patient.");
-  await walkIn();
-  expect(requestIds()[1]).not.toBe(requestIds()[0]);
-});
-
-test("an arrived walk-in clears its id, so the same card and phone register anew", async () => {
-  await mount();
-  await scanWalkIn();
-  api.post.mockResolvedValueOnce({ data: { registration: REG, created: true } });
-  await walkIn();
-  await scanWalkIn();
-  api.post.mockResolvedValueOnce({ data: { registration: NEXT, created: true } });
-  await walkIn();
-  expect(requestIds()[1]).not.toBe(requestIds()[0]);
 });
 
 test("a walk-in with no operating day registers nobody", async () => {

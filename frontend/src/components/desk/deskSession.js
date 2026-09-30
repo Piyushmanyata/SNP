@@ -126,8 +126,6 @@ export function deskSession(state, event) {
         searchResults: state.searchResults && state.searchResults.map((row) => (row.id === reg.id ? reg : row)),
       };
     }
-    case "walkInStarted":
-      return { ...state, seq: state.seq + 1, busy: true, error: "" };
     case "walkInResolved":
       if (!current) return state;
       if (!event.registration.arrived_at) {
@@ -146,9 +144,6 @@ export function deskSession(state, event) {
         banner: `Registered and arrived: #${event.registration.reg_no} — ${event.registration.full_name}`,
         doorPhone: "",
       };
-    case "walkInFailed":
-      if (!current) return state;
-      return { ...state, error: event.message };
     case "settled":
       return { ...state, busy: false };
     case "phoneChanged":

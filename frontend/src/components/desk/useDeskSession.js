@@ -171,7 +171,7 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
         dispatch({ type: "failed", message: "No operating camp day. Use Pre-registration." });
         return;
       }
-      const { seq } = dispatch({ type: "walkInStarted" });
+      const { seq } = dispatch({ type: "confirmStarted" });
       try {
         const card = scanResult.card;
         const created = await registerPatient(request, {
@@ -191,7 +191,7 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
         onCreated(created);
         dispatch({ type: "walkInResolved", seq, registration: created.registration });
       } catch (err) {
-        dispatch({ type: "walkInFailed", seq, message: registrationError(err) });
+        dispatch({ type: "failed", seq, message: registrationError(err) });
       } finally {
         dispatch({ type: "settled" });
       }

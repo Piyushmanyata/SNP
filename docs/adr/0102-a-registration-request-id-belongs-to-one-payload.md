@@ -23,7 +23,7 @@
   - `registrationView` holds the submit rules: the effective camp day (today's, else the first, so days that arrive after the modal opened need no event), `canSubmit`, `dirty` and `locked`.
   - `useRegisterForm.js` is the hook. Its `save` reads `canSubmit` from the latest state, so a fast Enter and click send one request.
   - `registrationFailure` in `register.js` routes an error to a Mismatch review, the Lookalikes or a message.
-- The Door walk-in's `walkIn` state, `NO_WALK_IN` and the ids on `walkInStarted` and `walkInFailed` are deleted.
+- The Door walk-in's `walkIn` state, `NO_WALK_IN` and the `walkInStarted` and `walkInFailed` events are deleted. Once the ids were gone the two events matched `confirmStarted` and `failed`, so the walk-in dispatches those and keeps only `walkInResolved`.
 - **Admin New Camp uses the hook with a constant key on purpose.** The server already compares the whole camp body per `setup_request_id` and answers `CAMP_REQUEST_CONFLICT` ("close this form and edit the camp"). A payload-keyed id would mint a second id after an edit and create a second camp. The hook renews an id only on `REGISTRATION_REQUEST_CONFLICT`, never on `CAMP_REQUEST_CONFLICT`.
 - **Deliberate fix:** a corrected phone, age, name, gender, address, last-4, reason or day after a failed save now sends a new id. The server then answers honestly: a scanned card gets `DUPLICATE_IN_CAMP`, a typed entry gets `LOOKALIKES`. An unchanged retry still replays.
 
