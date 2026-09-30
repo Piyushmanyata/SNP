@@ -490,3 +490,4 @@ class TestDisplayedDates:
 
 def test_board_hospital_counts_are_scheduled_and_declined():
     assert _empty_board("now", "no_camp")["fulfilment"]["ot"] == {"deferred": 0, "declined": 0}
+    assert _empty_board("now", "no_camp")["fulfilment"]["specs_made"] == {"deferred": 0, "cancelled": 0}

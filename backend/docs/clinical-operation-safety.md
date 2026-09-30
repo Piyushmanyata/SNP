@@ -43,10 +43,11 @@ A draft save requires an unlocked transcription and the draft version the reques
 
 ## Corrections
 
-Corrections apply explicitly supplied fields, so clearing a line, medicine list or measurement is applied. A correction refuses with 409 `surgery_scheduled` or `SPECS_SCHEDULED` while that line has an active Token. Record `cancelled` or `declined` first. Inside the same transaction, the correction re-derives each issued medicine and Fixed-power specs line against the corrected revision and marks what it changed as corrected after issue (ADR 0097).
+Corrections apply explicitly supplied fields, so clearing a line, medicine list or measurement is applied. A correction refuses with 409 `surgery_scheduled` or `SPECS_SCHEDULED` while that line has an active Token. Record `cancelled` or `declined` first. Inside the same transaction, the correction hands each existing Fulfilment line to `fulfilment_line.correct`, which re-derives an issued medicine or Fixed-power specs line against the corrected revision and marks what it changed as corrected after issue (ADR 0097, ADR 0098). A fulfilment issue reads the same module: `fulfilment_line.check_issue` derives the medicine status from the committed revision before the transaction, because the payload hash covers it, and `fulfilment_line.issue` decides inside the transaction what the line becomes over a prior one.
 
 ## Verification
 
 - `tests/test_clinical_transactions.py`: an error after the seat `$inc` and a failed SMS intent leave nothing behind; concurrent lines and duplicate issues; replay after undo; `SPECS_SCHEDULED`.
 - `tests/test_clinical_operation_safety.py`: foreign and changed replays, and injected failures at each write.
 - `tests/test_clinical_draft_concurrency.py`: draft races.
+- `tests/test_fulfilment_line.py`: the Fulfilment line rules with no database, including a correction followed by a re-issue.

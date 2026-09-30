@@ -1,5 +1,3 @@
-const NO_WALK_IN = Object.freeze({ key: "", reqId: "" });
-
 export const initialDeskSession = Object.freeze({
   seq: 0,
   regMode: "",
@@ -17,7 +15,6 @@ export const initialDeskSession = Object.freeze({
   paperCheck: null,
   printNote: "",
   focusUsbBox: false,
-  walkIn: NO_WALK_IN,
 });
 
 function newFind(state) {
@@ -129,20 +126,11 @@ export function deskSession(state, event) {
         searchResults: state.searchResults && state.searchResults.map((row) => (row.id === reg.id ? reg : row)),
       };
     }
-    case "walkInStarted":
-      return {
-        ...state,
-        seq: state.seq + 1,
-        busy: true,
-        error: "",
-        walkIn: state.walkIn.key === event.key ? state.walkIn : { key: event.key, reqId: event.reqId },
-      };
     case "walkInResolved":
-      if (!current) return { ...state, walkIn: NO_WALK_IN };
+      if (!current) return state;
       if (!event.registration.arrived_at) {
         return {
           ...state,
-          walkIn: NO_WALK_IN,
           scanResult: null,
           scanPayload: "",
           doorPhone: "",
@@ -151,18 +139,10 @@ export function deskSession(state, event) {
       }
       return {
         ...state,
-        walkIn: NO_WALK_IN,
         scanResult: { outcome: "arrived", registration: event.registration, prescription: null },
         scanPayload: "",
         banner: `Registered and arrived: #${event.registration.reg_no} — ${event.registration.full_name}`,
         doorPhone: "",
-      };
-    case "walkInFailed":
-      if (!current) return state;
-      return {
-        ...state,
-        walkIn: event.reqId ? { key: state.walkIn.key, reqId: event.reqId } : state.walkIn,
-        error: event.message,
       };
     case "settled":
       return { ...state, busy: false };

@@ -4,9 +4,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
 
+import fulfilment_line
 from helpers import api_error, now_utc
 
-PRESCRIBED_LINE_KEYS = ("medicine", "specs_fixed", "specs_made", "ot")
+PRESCRIBED_LINE_KEYS = tuple(fulfilment_line.STATUSES)
 CONTENT_FIELDS = (
     "diagnosis_options",
     "diagnosis_other",
@@ -233,50 +234,6 @@ def require_correction_allowed(surgery_scheduled: bool, specs_scheduled: bool) -
         raise conflict("surgery_scheduled", "Record Surgery declined at the Hospital station before changing a scheduled IOL surgery.")
     if specs_scheduled:
         raise conflict("SPECS_SCHEDULED", "Cancel the Spectacles to be made order at the Spectacles station before changing it.")
-
-
-def carry_medicine_outcomes(outcomes: List[dict], prescribed: List[dict]) -> Tuple[List[dict], bool]:
-    """Issued medicine outcomes against a corrected prescription, matched by catalogue id, then name (ADR 0097).
-
-    Given stays given and not available stays not available while still prescribed. A medicine the correction adds
-    is open (given None). One it removes after it was given stays, marked prescribed False. Returns the outcomes and
-    whether the correction changed the line.
-    """
-    by_id = {o["medicine_id"]: o for o in outcomes}
-    by_name = {o["name"]: o for o in outcomes}
-    carried, matched = [], []
-    for m in prescribed:
-        earlier = by_id.get(m["medicine_id"]) or by_name.get(m["name"])
-        if earlier:
-            matched.append(earlier)
-        carried.append({"medicine_id": m["medicine_id"], "name": m["name"], "given": earlier["given"] if earlier else None})
-    unmatched = [o for o in outcomes if not any(o is m for m in matched)]
-    carried += [{**o, "prescribed": False} for o in unmatched if o["given"]]
-    return carried, len(matched) < len(prescribed) or any(o.get("prescribed") is not False for o in unmatched)
-
-
-def fixed_power_corrected(issued: dict, before: dict, after: dict) -> bool:
-    """The correction moved the prescribed fixed power away from the power already handed over."""
-    was = (before.get("fixed_power_r"), before.get("fixed_power_l"))
-    now = (after.get("fixed_power_r"), after.get("fixed_power_l"))
-    return was != now and now != (issued.get("issued_power_r"), issued.get("issued_power_l"))
-
-
-def keep_removed(prior: List[dict], outcomes: List[dict], corrected: bool = False) -> List[dict]:
-    """A re-issue records the prescribed medicines; one a correction removed after it was given stays recorded.
-
-    When the line was corrected after issue, settled outcomes cannot be altered at the persistence boundary.
-    """
-    prior_by_id = {o["medicine_id"]: o for o in prior}
-    resolved = []
-    for o in outcomes:
-        p = prior_by_id.get(o["medicine_id"])
-        if corrected and p and p.get("given") is not None:
-            resolved.append({**o, "given": p["given"]})
-        else:
-            resolved.append(o)
-    ids = {o["medicine_id"] for o in resolved}
-    return resolved + [o for o in prior if o.get("prescribed") is False and o["medicine_id"] not in ids]
 
 
 async def insert_revision(
