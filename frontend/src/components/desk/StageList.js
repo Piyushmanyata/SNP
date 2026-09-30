@@ -85,14 +85,16 @@ function StageList({ stage, onClose }) {
       <p className="text-sm text-slate-600 mb-3">{about}</p>
       <form onSubmit={search} role="search" className="flex gap-2 mb-3">
         <Input value={typed} onChange={(e) => setTyped(e.target.value)}
-          aria-label="Name, phone or registration number" placeholder="Name, phone or registration number"
+          aria-label="Name, phone or registration number" placeholder="Name, phone or reg no"
           autoComplete="off" enterKeyHint="search" data-testid="list-search-input" />
         <Button type="submit" variant="secondary" aria-label={`Search ${label}`} data-testid="list-search-button">
           <Search className="w-5 h-5" />
         </Button>
       </form>
       <Alert>{error}</Alert>
-      {!list && !error && <Spinner className="w-6 h-6 text-emerald-700" />}
+      {!list && !error && (
+        <span role="status" aria-label={`Loading ${label}`}><Spinner className="w-6 h-6 text-emerald-700" /></span>
+      )}
       {rows?.length === 0 && (
         <p className="text-slate-700" data-testid="list-empty">{query ? `No one matches “${query}”.` : empty}</p>
       )}
