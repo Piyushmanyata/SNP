@@ -12,11 +12,11 @@ from models import (
 )
 from catalogue import resolve_medicines, stocked_power
 import clinical_operation
+import fulfilment_line
 from clinical_operation import Operation
 from clinical_state import (
-    CONTENT_FIELDS, PRESCRIBED_LINE_KEYS, SPECS_EXCLUSION, carry_medicine_outcomes, commit, conflict, draft_conflict,
-    extract_content, fixed_power_corrected, generation_of, has_issue_history, insert_revision, normalize_ot_eye,
-    keep_removed,
+    CONTENT_FIELDS, SPECS_EXCLUSION, commit, conflict, draft_conflict,
+    extract_content, generation_of, has_issue_history, insert_revision, normalize_ot_eye,
     require_correction_allowed, require_draft_version, require_fresh_review, require_generation,
     require_line_prescribed, require_not_completed, require_printed, require_specs_exclusive,
     require_unchanged, require_undoable, serialize_revision, validate_completion,
@@ -345,35 +345,6 @@ async def undo_completion(
     ))
 
 
-def _validate_fulfilment_matrix(item_type: str, status: str) -> None:
-    valid = {
-        "medicine": {"fulfilled", "not_available", "partially_fulfilled"},
-        "specs_fixed": {"fulfilled"},
-        "specs_made": {"deferred", "cancelled"},
-        "ot": {"deferred", "declined"},
-    }
-    if item_type not in valid or status not in valid[item_type]:
-        raise api_error(400, "INVALID_FULFILMENT_ITEM_STATUS", 'Invalid fulfilment item/status')
-
-
-def match_medicine_outcomes(revision: dict, outcomes) -> list[dict]:
-    """Every prescribed medicine is accounted for exactly once, and names come from the revision."""
-    prescribed = {m["medicine_id"]: m["name"] for m in (revision.get("prescribed_medicines") or [])}
-    supplied = {o.medicine_id: bool(o.given) for o in (outcomes or [])}
-    if not prescribed or len(supplied) != len(outcomes or []) or set(supplied) != set(prescribed):
-        raise api_error(400, "MEDICINE_OUTCOMES_MISMATCH", 'Record given or not available for every prescribed medicine.')
-    return [{"medicine_id": mid, "name": name, "given": supplied[mid]} for mid, name in prescribed.items()]
-
-
-def derive_medicine_status(outcomes: list[dict]) -> str:
-    given = sum(1 for o in outcomes if o["given"])
-    if given == 0:
-        return "not_available"
-    if given == len(outcomes):
-        return "fulfilled"
-    return "partially_fulfilled"
-
-
 async def resolve_issued_powers(db, revision: dict, body: FulfilmentBody) -> tuple[float, float]:
     """A power that ran out is substituted at the desk; the prescribed power on the revision never moves."""
     right = body.issued_power_r if body.issued_power_r is not None else revision.get("fixed_power_r")
@@ -408,21 +379,10 @@ def _day_requested(body: FulfilmentBody) -> Optional[str]:
     return body.ot_schedule_day_id if body.item_type == "ot" else body.specs_collection_day_id
 
 
-def _build_fulfilment_doc(
-    body: FulfilmentBody,
-    transcription_id: ObjectId | str,
-    slip: dict | None,
-    actor_id: str,
-    medicine_outcomes: list[dict] | None = None,
-    issued_powers: tuple[float, float] | None = None,
-) -> dict:
+def _build_fulfilment_doc(body: FulfilmentBody, transcription_id: ObjectId | str, slip: dict | None, actor_id: str) -> dict:
     return {
         "transcription_id": transcription_id,
         "item_type": body.item_type,
-        "status": body.status,
-        "medicine_outcomes": medicine_outcomes,
-        "issued_power_r": issued_powers[0] if issued_powers else None,
-        "issued_power_l": issued_powers[1] if issued_powers else None,
         "collection_date": (slip or {}).get("collection_date"),
         "collection_venue": (slip or {}).get("collection_venue"),
         "ot_schedule_day_id": (slip or {}).get("ot_schedule_day_id"),
@@ -450,17 +410,12 @@ async def record_fulfilment(
     revision = require_fresh_review(
         patient, revision, body.paper_reviewed, body.reviewed_revision_id, body.reviewed_generation,
     )
-    if body.item_type not in PRESCRIBED_LINE_KEYS:
-        raise api_error(400, "INVALID_FULFILMENT_ITEM_STATUS", 'Invalid fulfilment item/status')
+    fulfilment_line.require_line(body.item_type)
     require_line_prescribed(revision, body.item_type)
-    medicine_outcomes = None
-    issued_powers = None
-    if body.item_type == "medicine":
-        medicine_outcomes = match_medicine_outcomes(revision, body.medicine_outcomes)
-        body.status = derive_medicine_status(medicine_outcomes)
-    elif body.item_type == "specs_fixed":
-        issued_powers = await resolve_issued_powers(db, revision, body)
-    _validate_fulfilment_matrix(body.item_type, body.status)
+    issued_powers = await resolve_issued_powers(db, revision, body) if body.item_type == "specs_fixed" else None
+    body.status, medicine_outcomes = fulfilment_line.check_issue(
+        revision, body.item_type, body.status, body.medicine_outcomes,
+    )
 
     async def apply(current, session):
         committed = current.get("committed_revision_id")
@@ -481,17 +436,10 @@ async def record_fulfilment(
         slip, queued = await tokens.defer(
             db, body.item_type, current, trans, prior, _day_requested(body), session,
         ) if body.status == "deferred" else (None, [])
-        doc = _build_fulfilment_doc(body, t["_id"], slip, str(actor["_id"]), medicine_outcomes, issued_powers)
-        if medicine_outcomes and prior:
-            corrected = bool(prior.get("corrected_after_issue"))
-            doc["medicine_outcomes"] = keep_removed(
-                prior.get("medicine_outcomes") or [], medicine_outcomes, corrected=corrected,
-            )
-            doc["status"] = derive_medicine_status(doc["medicine_outcomes"])
-        if prior and prior.get("corrected_after_issue"):
-            doc["corrected_after_issue"] = prior["corrected_after_issue"]
-            if body.item_type == "specs_fixed" and prior.get("issued_power_r") is not None:
-                doc["issued_power_r"], doc["issued_power_l"] = prior["issued_power_r"], prior["issued_power_l"]
+        doc = {
+            **_build_fulfilment_doc(body, t["_id"], slip, str(actor["_id"])),
+            **fulfilment_line.issue(body.item_type, body.status, medicine_outcomes, issued_powers, prior),
+        }
         doc.update({
             "operation_id": body.operation_id,
             "reviewed_revision_id": current["committed_revision_id"],
@@ -529,23 +477,11 @@ async def get_slip(slip_id: str, actor: dict = Depends(require_clinical)) -> Dic
 
 
 async def _carry_forward(db, transcription_id, before: dict, after: dict, actor: dict, session) -> None:
-    """Issued lines follow a correction: goods that left stay recorded, and a changed line is marked (ADR 0097)."""
-    mark = {"revision_id": after["_id"], "at": now_utc(), "by": str(actor["_id"])}
-    issued = await db.fulfilments.find(
-        {"transcription_id": transcription_id, "item_type": {"$in": ["medicine", "specs_fixed"]}}, session=session,
-    ).to_list(None)
-    for line in issued:
-        update: Dict[str, Any] = {"corrected_after_issue": mark}
-        if line["item_type"] == "medicine":
-            outcomes, changed = carry_medicine_outcomes(
-                line.get("medicine_outcomes") or [], after.get("prescribed_medicines") or [],
-            )
-            if not changed:
-                continue
-            update.update(medicine_outcomes=outcomes, status=derive_medicine_status(outcomes))
-        elif not fixed_power_corrected(line, before, after):
-            continue
-        await db.fulfilments.update_one({"_id": line["_id"]}, {"$set": update}, session=session)
+    at = now_utc()
+    for line in await db.fulfilments.find({"transcription_id": transcription_id}, session=session).to_list(None):
+        patch = fulfilment_line.correct(line, before, after, by=str(actor["_id"]), at=at)
+        if patch:
+            await db.fulfilments.update_one({"_id": line["_id"]}, {"$set": patch}, session=session)
 
 
 @router.post("/correction")

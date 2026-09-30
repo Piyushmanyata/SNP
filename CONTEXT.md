@@ -129,8 +129,12 @@ The one of four Fulfilment lines the operator chooses for their current session.
 _Avoid_: role, station, desk assignment
 
 **Corrected after issue**:
-The mark on a medicine or Fixed-power specs line that a correction changed after goods were handed over. It records the correction's revision, when and by whom. The issued outcome is carried forward, never rewritten: medicines given stay given, one the correction removes stays recorded as given, and an Issued power stays. A medicine the correction adds opens on the line, which then needs a fresh Paper review against the corrected prescription; a changed fixed power does not reopen anything. Shown at the Fulfilment station and in the Camp records export.
+The mark on a medicine or Fixed-power specs line that a correction changed after goods were handed over. It records the correction's revision, when and by whom. The issued outcome is carried forward, never rewritten: medicines given stay given, one the correction removes stays recorded as given, and an Issued power stays. A medicine the correction adds opens on the line, which then needs a fresh Paper review against the corrected prescription; a changed fixed power does not reopen anything. Shown at the Fulfilment station and in the Camp records export. What an issue and a correction each make of the line is one module, `backend/fulfilment_line.py` (ADR 0098).
 _Avoid_: stale line, amended outcome, re-issue (nothing already given is issued again)
+
+**Settled outcome**:
+A medicine outcome recorded as given or not available on an issued line, stored as `given` not null. An open outcome has `given` null: a medicine a correction added that nobody has recorded yet. On a line that is Corrected after issue, a re-issue never changes a settled outcome and fills an open one.
+_Avoid_: closed outcome, final outcome
 
 **Fulfilment line**:
 One of the four things a patient can be sent to after Seen: medicine, Fixed-power specs, Spectacles to be made, or Hospital. Each has its own item type and record. The Hospital line carries the Hospital outcome; operations do not occur at camp. A prescription names at most one of Fixed-power specs, Spectacles to be made, or IOL surgery; medicine goes with any of them, and a Hospital referral goes with either specs line. A patient who declines IOL surgery and then wants spectacles needs a correction to the prescription. An absent record means not needed.
