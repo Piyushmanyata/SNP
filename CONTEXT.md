@@ -293,7 +293,7 @@ The read-only page a team lead watches during a camp day. Per Registration desk,
 _Avoid_: dashboard (that is the admin area), live feed, monitor, alerts (the board pushes nothing)
 
 **Queue stage**:
-Where a patient in the active camp stands between the door and the doctor: booked, Arrived or Doctor seen. Arrived has two halves, Awaiting print and Pending, which never overlap and together are exactly Arrived. `backend/queue_stage.py` defines every stage once, for the Pending list, the KPIs and the Camp-day board (ADR 0099). A stage is the same on every camp day; only the board's "earlier camp day" split and its "seen today" count look at a day. The board's `arrived` count is the arrivals on the Operating day, which is a different number from the Arrived stage and must not be read as it.
+Where a patient in the active camp stands between the door and the doctor: booked, Arrived or Doctor seen. Arrived has two halves, Awaiting print and Pending, which never overlap and together are exactly Arrived. `backend/queue_stage.py` defines every stage once, for the Pending list, the KPIs and the Camp-day board (ADR 0099). A stage is the same on every camp day; only the board's "earlier camp day" split and its "seen today" count look at a day. The board's `arrived` count is the arrivals on the current IST calendar day, not the Operating day, and is a different number from the Arrived stage and must not be read as it.
 _Avoid_: queue status (the stored field, not a term for staff), waiting (ambiguous with the physical queue)
 
 **Awaiting print**:
