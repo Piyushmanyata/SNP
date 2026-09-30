@@ -90,9 +90,9 @@ export default function Clinical() {
   const undoCommand = useClinicalCommand("undo", data);
   const patientId = data?.registration?.id;
   const locked = Boolean(data?.transcription?.locked);
-  const unprescribed = line !== "doctor_rx" && Boolean(data?.committed_revision)
-    && !(data.committed_revision.prescribed_lines || []).includes(line);
-  const nothingToRecord = unprescribed && !(data.fulfilments || []).some((f) => f.item_type === line);
+  const nothingToRecord = line !== "doctor_rx" && Boolean(data?.committed_revision)
+    && !(data.committed_revision.prescribed_lines || []).includes(line)
+    && !(data.fulfilments || []).some((f) => f.item_type === line);
 
   useEffect(() => {
     if (!picking) {

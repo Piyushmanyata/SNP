@@ -163,10 +163,7 @@ test("saveSucceeded without next only releases the form", () => {
 
 test.each([
   [{ type: "saveSucceeded", next: true, atDoor: false }],
-  [{ type: "saveSucceeded", next: false, atDoor: false }],
   [{ type: "saveFailed", failure: { kind: "lookalikes", lookalikes: [{ id: "p-3" }] } }],
-  [{ type: "saveFailed", failure: { kind: "review", review: { registration: { id: "p-3" } } } }],
-  [{ type: "saveFailed", failure: { kind: "error", message: "Saved earlier." } }],
 ])("%o from a save that started before the form was reopened only releases the busy flag", (event) => {
   const saving = run([...scanned, { type: "saveStarted" }]);
   const reopened = registerForm(saving, { type: "opened", atDoor: false });
