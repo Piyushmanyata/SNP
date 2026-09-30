@@ -6,7 +6,7 @@ from pymongo.asynchronous.collection import AsyncCollection
 from pymongo.asynchronous.database import AsyncDatabase
 
 T = TypeVar("T")
-PATIENT_NAME_INDEX = [("camp_id", ASCENDING), ("full_name_normalized", ASCENDING)]
+PATIENT_NAME_INDEX = "camp_id_1_full_name_normalized_1"
 
 _client: AsyncMongoClient | None = None
 _db: AsyncDatabase | None = None
@@ -73,7 +73,9 @@ async def init_indexes() -> None:
         unique=True,
         partialFilterExpression={"person_id": {"$type": "objectId"}},
     )
-    await db.patients.create_index(PATIENT_NAME_INDEX)
+    await db.patients.create_index(
+        [("camp_id", ASCENDING), ("full_name_normalized", ASCENDING)], name=PATIENT_NAME_INDEX,
+    )
     await db.patients.create_index([
         ("camp_id", ASCENDING), ("arrived_at", ASCENDING), ("arrived_by", ASCENDING),
         ("printed_at", ASCENDING), ("seen_at", ASCENDING), ("committed_revision_id", ASCENDING),

@@ -322,7 +322,7 @@ Every registration in the active camp, on any camp day, whatever its Queue stage
 _Avoid_: patients (alone), arrived (a booking is Registered but not arrived), attendance
 
 **Desk search**:
-How the registration desk reads what is typed into Find one patient or into the Registered, Seen and Pending lists, scoped to the active camp. Fewer than ten digits are a registration number, matched exactly. Ten digits, with or without `+91`, `0`, spaces or dashes, are a Household phone, matched exactly. Anything with letters is a name, matching the start of any word in it. A partial phone is never matched, because it cannot be told apart from a registration number. A list shows ten matches and says how many more there are. A Patient code or an Aadhaar QR in the Find box keeps its own path.
+How the registration desk reads what is typed into Find one patient or into the Registered, Seen and Pending lists, scoped to the active camp. Fewer than ten digits are a registration number, matched exactly. Ten digits, with or without `+91`, `0`, spaces or dashes, are a Household phone, matched exactly. Anything with letters is a name, matching the start of any word in it. A partial phone is never matched, because it cannot be told apart from a registration number. A list shows ten matches and says how many more there are, counting up to a thousand and then saying "1,000+". A Patient code or an Aadhaar QR in the Find box keeps its own path.
 _Avoid_: patient search, lookup, filter (the lists search the whole camp, not the rows on screen)
 
 **Doctor seen**:

@@ -42,6 +42,7 @@ async def kpis(actor: dict = Depends(require_staff)) -> Dict[str, Any]:
 
 
 LIST_ROWS = 10
+SEARCH_COUNT_LIMIT = 1000
 STAGE_LISTS = {
     "registered": (queue_stage.registered, queue_stage.REGISTERED_SORT),
     "seen": (queue_stage.doctor_seen, queue_stage.SEEN_SORT),
@@ -49,11 +50,23 @@ STAGE_LISTS = {
 }
 
 
-def stage_query(stage: str, camp_id: ObjectId, match: Dict[str, Any]) -> Tuple[Dict[str, Any], Any, Dict[str, Any]]:
-    """The small Pending list reads its own index; Registered and Seen read the name index for a name."""
+def stage_query(stage: str, camp_id: ObjectId, match: Dict[str, Any]) -> Tuple[Dict[str, Any], Any]:
     members, sort = STAGE_LISTS[stage]
-    options = {} if stage == "pending" else desk_search.options(match)
-    return {**members(camp_id), **match}, sort, options
+    return {**members(camp_id), **match}, sort
+
+
+def name_hint(stage: str, match: Dict[str, Any]) -> Dict[str, Any]:
+    """Registered and Seen read the name index for a name; the small Pending list reads its own."""
+    return {} if stage == "pending" else desk_search.options(match)
+
+
+def search_pipeline(query: Dict[str, Any], sort: Any) -> List[Dict[str, Any]]:
+    """One pass over at most SEARCH_COUNT_LIMIT matches gives both the count and the first rows."""
+    return [
+        {"$match": query},
+        {"$limit": SEARCH_COUNT_LIMIT},
+        {"$facet": {"rows": [{"$sort": dict(sort)}, {"$limit": LIST_ROWS}], "total": [{"$count": "n"}]}},
+    ]
 
 
 @router.get("/lists/{stage}")
@@ -64,14 +77,20 @@ async def stage_list(
     camp = await db.camps.find_one({"is_active": True})
     match = desk_search.where(q)
     if not camp or match is None:
-        return {"today": today_ist_str(), "total": 0, "patients": []}
-    query, sort, options = stage_query(stage, camp["_id"], match)
-    total, rows = await asyncio.gather(
-        db.patients.count_documents(query, **options),
-        db.patients.find(query, **options).sort(sort).limit(LIST_ROWS).to_list(LIST_ROWS),
-    )
+        return {"today": today_ist_str(), "total": 0, "total_is_floor": False, "patients": []}
+    query, sort = stage_query(stage, camp["_id"], match)
+    in_order = db.patients.find(query).sort(sort).limit(LIST_ROWS)
+    if not match:
+        total, rows = await asyncio.gather(db.patients.count_documents(query), in_order.to_list(LIST_ROWS))
+        crowded = False
+    else:
+        cursor = await db.patients.aggregate(search_pipeline(query, sort), **name_hint(stage, match))
+        (found,) = await cursor.to_list(None)
+        total = found["total"][0]["n"] if found["total"] else 0
+        crowded = total >= SEARCH_COUNT_LIMIT
+        rows = await in_order.to_list(LIST_ROWS) if crowded else found["rows"]
     patients = [{**ser_patient(p), "stage": queue_stage.stage_of(p)} for p in rows]
-    return {"today": today_ist_str(), "total": total, "patients": patients}
+    return {"today": today_ist_str(), "total": total, "total_is_floor": crowded, "patients": patients}
 
 
 @router.get("/leaderboard")

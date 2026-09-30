@@ -164,6 +164,32 @@ def test_a_list_searches_by_registration_number_household_phone_or_any_word_of_t
     run_camp(monkeypatch, run)
 
 
+def test_a_crowded_search_counts_up_to_a_limit_and_says_so(monkeypatch):
+    import routes_reports
+    monkeypatch.setattr(routes_reports, "SEARCH_COUNT_LIMIT", 3)
+
+    async def run(database):
+        camp_id, (day_id,) = await seed_camp(database)
+        await database.patients.insert_many([
+            patient_doc(camp_id=camp_id, camp_day_id=day_id, reg_no=500 + n, full_name=f"Kumar {n}",
+                        full_name_normalized=f"kumar {n}", queue_status="registered")
+            for n in range(5)
+        ] + [patient_doc(camp_id=camp_id, camp_day_id=day_id, reg_no=600, full_name="Geeta Bai",
+                         full_name_normalized="geeta bai", queue_status="registered")])
+        headers = await volunteer(database)
+        async with asgi_client() as client:
+            async def listed(q):
+                return (await client.get("/api/lists/registered", params={"q": q}, headers=headers)).json()
+
+            crowded, single, everyone = await listed("kum"), await listed("geeta"), await listed("")
+        assert (crowded["total"], crowded["total_is_floor"]) == (3, True)
+        assert [p["reg_no"] for p in crowded["patients"]] == [504, 503, 502, 501, 500]
+        assert (single["total"], single["total_is_floor"]) == (1, False)
+        assert (everyone["total"], everyone["total_is_floor"]) == (6, False)
+
+    run_camp(monkeypatch, run)
+
+
 def test_find_one_patient_reads_a_typed_line_the_same_way(monkeypatch):
     async def run(database):
         camp_id, (day_id,) = await seed_camp(database)

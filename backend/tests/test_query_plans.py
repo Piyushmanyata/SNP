@@ -122,15 +122,32 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
             "explain": {"count": "patients", "query": plans["pending"]["filter"]}, "verbosity": "executionStats",
         }, codec_options=CodecOptions(datetime_conversion=DatetimeConversion.DATETIME_AUTO))
         assert pending_count["executionStats"]["totalDocsExamined"] == 0
-        for stage in ("registered", "seen"):
-            query, sort, options = routes_reports.stage_query(stage, camp, desk_search.where("nobody"))
-            rare = await db.command({"explain": {
+        codecs = CodecOptions(datetime_conversion=DatetimeConversion.DATETIME_AUTO)
+
+        async def searched(stage, typed):
+            match = desk_search.where(typed)
+            query, sort = routes_reports.stage_query(stage, camp, match)
+            hint = routes_reports.name_hint(stage, match)
+            explained = await db.command({"explain": {
+                "aggregate": "patients", "pipeline": routes_reports.search_pipeline(query, sort), "cursor": {}, **hint,
+            }, "verbosity": "executionStats"}, codec_options=codecs)
+            stats = explained.get("executionStats") or explained["stages"][0]["$cursor"]["executionStats"]
+            return stats["totalDocsExamined"]
+
+        async def crowd_reread(stage):
+            query, sort = routes_reports.stage_query(stage, camp, desk_search.where("synthetic"))
+            explained = await db.command({"explain": {
                 "find": "patients", "filter": query, "sort": dict(sort), "limit": 10,
-                **({"hint": dict(options["hint"])} if options else {}),
-            }, "verbosity": "executionStats"}, codec_options=CodecOptions(datetime_conversion=DatetimeConversion.DATETIME_AUTO))
-            assert rare["executionStats"]["totalDocsExamined"] == 0, stage
-        query, sort, options = routes_reports.stage_query("pending", camp, desk_search.where("synthetic"))
-        assert options == {}
+            }, "verbosity": "executionStats"}, codec_options=codecs)
+            return explained["executionStats"]["totalDocsExamined"]
+
+        for stage in ("registered", "seen"):
+            assert await searched(stage, "nobody") == 0, stage
+            assert await crowd_reread(stage) <= 50, stage
+        assert await searched("registered", "synthetic") <= routes_reports.SEARCH_COUNT_LIMIT
+        pending_match = desk_search.where("synthetic")
+        assert routes_reports.name_hint("pending", pending_match) == {}
+        query, sort = routes_reports.stage_query("pending", camp, pending_match)
         pending_by_name = {"find": "patients", "filter": query, "sort": dict(sort), "limit": 10}
         assert "SORT" not in _stages(await _winning(db, pending_by_name))
         assert "SORT" not in _stages(await _winning(db, plans["clinical name search"]))

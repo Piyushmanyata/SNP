@@ -2088,6 +2088,7 @@ describe("Manual entry, Pending and Reprint (ADR 0084)", () => {
     listReturns("pending", (typed) => ({
       "": { total: 1, patients: [PRINTED] },
       kumar: { total: 14, patients: [{ ...PRINTED, full_name: "Ram Kumar" }] },
+      s: { total: 1000, total_is_floor: true, patients: [PRINTED] },
       zzz: { total: 0, patients: [] },
     }[typed]));
     await renderDesk();
@@ -2098,6 +2099,9 @@ describe("Manual entry, Pending and Reprint (ADR 0084)", () => {
     expect(api.get).toHaveBeenLastCalledWith("/lists/pending", { params: { q: "kumar" } });
     expect(q("pending-row-101").textContent).toContain("Ram Kumar");
     expect(q("list-shown").textContent).toBe("1 of 14 match. Type more of the name, or the whole phone number.");
+
+    await searchList("s");
+    expect(q("list-shown").textContent).toBe("1 of 1,000+ match. Type more of the name, or the whole phone number.");
 
     await searchList("zzz");
     expect(q("pending-list")).toBeNull();

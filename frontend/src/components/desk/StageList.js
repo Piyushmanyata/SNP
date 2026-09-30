@@ -78,7 +78,7 @@ function StageList({ stage, onClose }) {
     setAttempt((n) => n + 1);
   };
   const rows = list?.patients;
-  const total = list?.total.toLocaleString("en-IN");
+  const total = list && `${list.total.toLocaleString("en-IN")}${list.total_is_floor ? "+" : ""}`;
 
   return (
     <Modal open onClose={onClose} title={label} size="lg">
