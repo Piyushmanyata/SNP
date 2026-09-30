@@ -817,9 +817,11 @@ class TestReports:
         assert k["registered"] >= 3
         assert k["seen"] >= 2
         assert 0 <= k["pending"] <= k["registered"] - k["seen"]
-        pending = admin.get(f"{API}/pending", timeout=30)
-        assert pending.status_code == 200, pending.text
-        assert len(pending.json()["patients"]) == k["pending"]
+        for stage in ("registered", "seen", "pending"):
+            listed = admin.get(f"{API}/lists/{stage}", timeout=30)
+            assert listed.status_code == 200, listed.text
+            assert listed.json()["total"] == k[stage]
+            assert len(listed.json()["patients"]) == min(10, k[stage])
 
     def test_leaderboard(self, admin):
         r = admin.get(f"{API}/leaderboard", timeout=30)

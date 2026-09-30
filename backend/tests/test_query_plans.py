@@ -4,7 +4,9 @@ from datetime import timedelta
 
 from bson.codec_options import CodecOptions, DatetimeConversion
 
+import desk_search
 import queue_stage
+import routes_reports
 from helpers import ist_day_bounds, now_utc, today_ist_str
 from conftest import run_db
 from benchmark_dataset import seed
@@ -93,6 +95,18 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
             "pending": {
                 "find": "patients", "filter": queue_stage.pending(camp), "sort": dict(queue_stage.PENDING_SORT),
             },
+            "registered list": {
+                "find": "patients", "filter": queue_stage.registered(camp),
+                "sort": dict(queue_stage.REGISTERED_SORT), "limit": 10,
+            },
+            "seen list": {
+                "find": "patients", "filter": queue_stage.doctor_seen(camp),
+                "sort": dict(queue_stage.SEEN_SORT), "limit": 10,
+            },
+            "list phone search": {
+                "find": "patients", "filter": {**queue_stage.pending(camp), **desk_search.where(patient["phone_normalized"])},
+                "sort": dict(queue_stage.PENDING_SORT), "limit": 10,
+            },
 
             "lookalikes": {"find": "patients", "filter": {
                 "camp_id": camp, "full_name_normalized": {"$in": [patient["full_name_normalized"]]},
@@ -102,11 +116,40 @@ def test_hot_queries_are_not_collection_scans(monkeypatch):
         for name, command in plans.items():
             stages = _stages(await _winning(db, command))
             assert "COLLSCAN" not in stages, (name, stages)
-        assert "SORT" not in _stages(await _winning(db, plans["pending"]))
+        for listed in ("pending", "registered list", "seen list"):
+            assert "SORT" not in _stages(await _winning(db, plans[listed])), listed
         pending_count = await db.command({
             "explain": {"count": "patients", "query": plans["pending"]["filter"]}, "verbosity": "executionStats",
         }, codec_options=CodecOptions(datetime_conversion=DatetimeConversion.DATETIME_AUTO))
         assert pending_count["executionStats"]["totalDocsExamined"] == 0
+        codecs = CodecOptions(datetime_conversion=DatetimeConversion.DATETIME_AUTO)
+
+        async def searched(stage, typed):
+            match = desk_search.where(typed)
+            query, sort = routes_reports.stage_query(stage, camp, match)
+            hint = routes_reports.name_hint(stage, match)
+            explained = await db.command({"explain": {
+                "aggregate": "patients", "pipeline": routes_reports.search_pipeline(query, sort), "cursor": {}, **hint,
+            }, "verbosity": "executionStats"}, codec_options=codecs)
+            stats = explained.get("executionStats") or explained["stages"][0]["$cursor"]["executionStats"]
+            return stats["totalDocsExamined"]
+
+        async def crowd_reread(stage):
+            query, sort = routes_reports.stage_query(stage, camp, desk_search.where("synthetic"))
+            explained = await db.command({"explain": {
+                "find": "patients", "filter": query, "sort": dict(sort), "limit": 10,
+            }, "verbosity": "executionStats"}, codec_options=codecs)
+            return explained["executionStats"]["totalDocsExamined"]
+
+        for stage in ("registered", "seen"):
+            assert await searched(stage, "nobody") == 0, stage
+            assert await crowd_reread(stage) <= 50, stage
+        assert await searched("registered", "synthetic") <= routes_reports.SEARCH_COUNT_LIMIT
+        pending_match = desk_search.where("synthetic")
+        assert routes_reports.name_hint("pending", pending_match) == {}
+        query, sort = routes_reports.stage_query("pending", camp, pending_match)
+        pending_by_name = {"find": "patients", "filter": query, "sort": dict(sort), "limit": 10}
+        assert "SORT" not in _stages(await _winning(db, pending_by_name))
         assert "SORT" not in _stages(await _winning(db, plans["clinical name search"]))
         quiet = now_utc() - timedelta(minutes=15)
         group_plans = {

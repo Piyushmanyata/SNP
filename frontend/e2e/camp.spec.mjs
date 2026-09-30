@@ -113,6 +113,42 @@ test.describe.serial("a camp day on the headless desk", () => {
     await page.getByTestId("logout-button").click();
   });
 
+  test("sponsor logos sit side by side and shrink together to stay on one row", async ({ page }) => {
+    page.on("dialog", (dialog) => dialog.accept());
+    await login(page, "admin", "135790");
+    await page.getByRole("tab", { name: "Rx Template" }).click();
+    const banner = async (fill) => Buffer.from((await page.evaluate((colour) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 480;
+      canvas.height = 120;
+      const context = canvas.getContext("2d");
+      context.fillStyle = colour;
+      context.fillRect(0, 0, 480, 120);
+      return canvas.toDataURL("image/png");
+    }, fill)).split(",")[1], "base64");
+    const strip = page.getByTestId("tpl-preview").getByTestId("rx-sponsor-strip");
+    const logos = strip.locator("img");
+    const boxes = async () => Promise.all((await logos.all()).map((logo) => logo.boundingBox()));
+    await expect(logos).toHaveCount(1);
+    const colours = ["#1d4ed8", "#dc2626", "#16a34a", "#ca8a04", "#7c3aed"];
+    for (const [i, colour] of colours.entries()) {
+      await page.getByTestId("tpl-logo-input").setInputFiles({
+        name: `sponsor-${i}.png`, mimeType: "image/png", buffer: await banner(colour),
+      });
+      await expect(logos).toHaveCount(i + 2);
+      if (i === 0) {
+        const [first, second] = await boxes();
+        for (const box of [first, second]) expect(box.width).toBeLessThanOrEqual(box.height * 4 + 1);
+        expect(second.x - (first.x + first.width)).toBeLessThan((await strip.boundingBox()).width * 0.05);
+      }
+    }
+    const row = await strip.boundingBox();
+    const placed = await boxes();
+    for (const box of placed) expect(Math.abs(box.y - placed[0].y)).toBeLessThan(1);
+    expect(placed[5].x + placed[5].width).toBeLessThanOrEqual(row.x + row.width + 1);
+    await page.getByTestId("logout-button").click();
+  });
+
   test("the door scans a card through to paper", async ({ page }) => {
     await login(page, "E2E Volunteer", pins["E2E Volunteer"]);
     await changePin(page, pins["E2E Volunteer"], "2468");
@@ -137,6 +173,12 @@ test.describe.serial("a camp day on the headless desk", () => {
     await usb.fill(card("Bina Devi", "1982-04-02", "2222"));
     await usb.press("Enter");
     await expect(page.getByTestId("door-phone-input")).toHaveValue("");
+    await page.getByTestId("kpi-registered-count-button").click();
+    const search = page.getByTestId("list-search-input");
+    await search.fill("asha");
+    await search.press("Enter");
+    await expect(page.getByTestId(`registered-row-${regNo}`)).toContainText("Pending");
+    await page.getByTestId("modal-close-button").click();
     await page.getByTestId("logout-button").click();
   });
 

@@ -107,7 +107,7 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
         }
         return;
       }
-      if (/^\d+$/.test(value) || /^snp:/i.test(value)) {
+      if (/^\d{1,9}$/.test(value) || /^snp:/i.test(value)) {
         if (await lookup(value, /^\d+$/.test(value))) dispatch({ type: "findChanged", value: "" });
         return;
       }

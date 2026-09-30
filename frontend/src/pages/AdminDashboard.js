@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { formatPower } from "../components/clinical";
 import TemplateEditor from "../components/TemplateEditor";
-import { PendingStat } from "../components/desk/Pending";
+import { StageStat } from "../components/desk/StageList";
 import { SPECS_HOURS, displayDate, displayDateRange, displayTimestamp } from "../lib/dates";
 import { SMS_LABELS, SMS_VENUE_MAX, smsVenueFor } from "../lib/sms";
 import { logosAreUnsaved, markLogosUnsaved } from "../components/template/templateHelpers";
@@ -111,9 +111,9 @@ function Overview() {
       </Card>
       <SystemCard />
       <div className="grid grid-cols-3 gap-3" data-testid="overview-kpis" data-loading={kpi ? "false" : "true"}>
-        <Stat label="Registered" value={kpi ? kpi.registered : "…"} testid="kpi-registered-count" />
-        <Stat label="Seen" value={kpi ? kpi.seen : "…"} tone="emerald" testid="kpi-seen-count" />
-        <PendingStat value={kpi ? kpi.pending : "…"} />
+        <StageStat stage="registered" value={kpi ? kpi.registered : "…"} />
+        <StageStat stage="seen" value={kpi ? kpi.seen : "…"} />
+        <StageStat stage="pending" value={kpi ? kpi.pending : "…"} />
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Button size="lg" variant="outline" onClick={() => navigate("/desk")} data-testid="goto-desk-button"><Stethoscope className="w-5 h-5" /> Open Registration Desk</Button>

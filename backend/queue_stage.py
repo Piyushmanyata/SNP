@@ -6,6 +6,12 @@ from typing import Any, Dict, List, Tuple
 from bson import ObjectId
 
 PENDING_SORT: List[Tuple[str, int]] = [("printed_at", 1)]
+REGISTERED_SORT: List[Tuple[str, int]] = [("reg_no", -1)]
+SEEN_SORT: List[Tuple[str, int]] = [("seen_at", -1)]
+
+
+def registered(camp_id: ObjectId) -> Dict[str, Any]:
+    return {"camp_id": camp_id}
 
 
 def awaiting_print(camp_id: ObjectId) -> Dict[str, Any]:
@@ -18,6 +24,14 @@ def pending(camp_id: ObjectId) -> Dict[str, Any]:
 
 def doctor_seen(camp_id: ObjectId) -> Dict[str, Any]:
     return {"camp_id": camp_id, "queue_status": "seen"}
+
+
+def stage_of(patient: Dict[str, Any]) -> str:
+    if patient.get("queue_status") == "seen":
+        return "seen"
+    if patient.get("queue_status") != "arrived":
+        return "booked"
+    return "pending" if patient.get("printed_at") else "awaiting_print"
 
 
 def seen_fields(actor_id: str, now: datetime) -> Dict[str, Any]:
