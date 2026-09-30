@@ -6,6 +6,7 @@ import pytest
 from bson import ObjectId
 from fastapi import HTTPException
 
+import sms
 import tokens
 from conftest import advance_clock
 from db import in_transaction
@@ -222,5 +223,68 @@ def test_a_queued_notice_is_listed_only_once_it_is_stuck(monkeypatch):
         advance_clock(timedelta(minutes=11))
         [notice] = await tokens.patients_to_phone(db, helpers.now_utc())
         assert notice["sms_status"] == "not_sent"
+
+    run_camp(monkeypatch, run)
+
+
+SMS_VENUE_EDITS = {
+    "ot": (
+        {"seat_limit": 5},
+        {"venue_sms": "Hosp A"},
+        {"venue_sms": None},
+        {"day_date": day(4)},
+        {"venue": "New Hospital, Near The Old Bus Stand", "venue_sms": "New Hospital"},
+        {"venue": "Third Hospital, Near The Old Bus Stand"},
+    ),
+    "specs": (
+        {"venue_sms": "Optic A"},
+        {"venue_sms": None},
+        {"day_date": day(4)},
+        {"end_date": day(9)},
+        {"venue": "New Optician, Near The Old Bus Stand", "venue_sms": "New Optician"},
+        {"venue": "Third Optician, Near The Old Bus Stand"},
+    ),
+}
+
+
+def _edit_fields(kind, day_doc, **changes):
+    fields = ("day_date", "seat_limit", "venue", "venue_sms") if kind == "ot" else ("day_date", "end_date", "venue", "venue_sms")
+    return {**{key: day_doc.get(key) for key in fields}, **changes}
+
+
+@pytest.mark.parametrize("kind", ["ot", "specs"])
+def test_every_edit_path_leaves_each_active_token_reading_its_days_sms_venue(monkeypatch, kind):
+    recorder()
+
+    async def run(db):
+        camp_id, (first, _second) = await _camp(db)
+        if kind == "ot":
+            day_id, collection, line = first, db.ot_schedule_days, "ot"
+        else:
+            day_id = (await db.specs_collection_days.insert_one({
+                "camp_id": camp_id, "day_date": day(3), "end_date": day(5), "venue": "Optician Hall, Near The Old Bus Stand",
+            })).inserted_id
+            collection, line = db.specs_collection_days, "specs_made"
+        await collection.update_one({"_id": day_id}, {"$set": {"venue_sms": "Start Short"}})
+
+        async def assert_tokens_read_their_day(count):
+            day_doc = await collection.find_one({"_id": day_id})
+            active = await db.deferred_slips.find({"active": True}).to_list(None)
+            assert len(active) == count
+            for token in active:
+                assert sms.sms_venue(token) == sms.sms_venue(day_doc)
+                assert token.get("collection_venue_sms") == day_doc.get("venue_sms")
+
+        for _ in range(2):
+            patient, transcription = await _patient(db, camp_id)
+            await _defer(db, patient, transcription, day_id, line=line)
+        await assert_tokens_read_their_day(2)
+        for step in SMS_VENUE_EDITS[kind]:
+            loaded = await collection.find_one({"_id": day_id})
+            await tokens.edit_day(db, kind, loaded, _edit_fields(kind, loaded, **step), None)
+            await assert_tokens_read_their_day(2)
+        patient, transcription = await _patient(db, camp_id)
+        await _defer(db, patient, transcription, day_id, line=line)
+        await assert_tokens_read_their_day(3)
 
     run_camp(monkeypatch, run)

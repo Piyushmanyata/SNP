@@ -268,7 +268,7 @@ async def update_camp_day(day_id: str, body: CampDayBody, background_tasks: Back
             return changed, days, []
         booked = await db.patients.find(booked_here, NOTICE_FIELDS, session=session).to_list(None)
         queued = await sms.record(
-            db, booked, "registration", body.day_date, camp.get("venue_sms") or camp["venue"],
+            db, booked, "registration", body.day_date, sms.sms_venue(camp),
             event_key=sms.edit_key(updates["edit_revision"]), session=session, now=now_utc(),
         )
         return changed, days, queued

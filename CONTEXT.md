@@ -158,7 +158,7 @@ An admin-created date range, unique per camp and start date, with a venue, on wh
 _Avoid_: specs slot, collection appointment, specs schedule
 
 **Token**:
-The short A6 paper printed when IOL surgery or Spectacles to be made is scheduled — never for a Hospital referral or Surgery declined. It contains the patient's name, registration number, date or collection window and venue. Each Token sends its own SMS, so moving a patient A→B→A sends three. An IOL surgery Token is titled as IOL surgery, names the eye, carries BP and blood sugar when recorded, the hospital phone, and the Bring list. Rescheduling cancels the previous Token. A Schedule edit replaces it: the old Token is marked replaced, a new one is printed, and the patient gets one notice by SMS or by phone.
+The short A6 paper printed when IOL surgery or Spectacles to be made is scheduled — never for a Hospital referral or Surgery declined. It contains the patient's name, registration number, date or collection window and venue. Each Token sends its own SMS, so moving a patient A→B→A sends three. An IOL surgery Token is titled as IOL surgery, names the eye, carries BP and blood sugar when recorded, the hospital phone, and the Bring list. Rescheduling cancels the previous Token. A Schedule edit replaces it: the old Token is marked replaced, a new one is printed, and the patient gets one notice by SMS or by phone. A Token carries the SMS venue of its day, and every Schedule edit keeps it in step, so the reminder reads the Token, never the live day.
 _Avoid_: slip, deferred slip, thermal slip, queue ticket, final token
 
 **Schedule edit**:
@@ -352,7 +352,7 @@ _Avoid_: status page, health check (that is the readiness route), monitoring
 Every SMS below is Devanagari, per patient, and carries that patient's reg_no. A household number covering three patients receives three messages. Each is its own DLT template.
 
 **SMS venue**:
-The place name an SMS gives the patient: the short name the admin set on the camp, OT Schedule Day or Specs collection day, else its full venue. It is 3 to 30 characters, carries no link and no phone number, and is never a placeholder such as NA. A schedule whose SMS venue breaks the rule cannot be saved, and no SMS is submitted with one, because the provider charges for a message that fails.
+The place name an SMS gives the patient: the short name the admin set on the camp, OT Schedule Day or Specs collection day, else its full venue. It is chosen in one place, `sms.sms_venue`, for a camp, a day or a Token alike. It is 3 to 30 characters, carries no link and no phone number, and is never a placeholder such as NA. A schedule whose SMS venue breaks the rule cannot be saved, and no SMS is submitted with one, because the provider charges for a message that fails.
 _Avoid_: short venue, venue_sms (the field, not the idea), SMS address
 
 **Delivery report**:

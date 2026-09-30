@@ -1,6 +1,6 @@
 # ADR 0040: The surgery venue is admin-typed, with a separate short name for SMS
 
-**Amends ADR 0039.**
+**Amends ADR 0039.** Amended by ADR 0103: the D-1 reminder reads the Token's SMS venue, not the day document.
 
 ## Context
 
