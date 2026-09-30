@@ -8,20 +8,17 @@ from typing import Any, Dict, List
 from bson import ObjectId
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
+import committed_prescription
 import fulfilment_line
 from catalogue import format_power
 from db import aggregate_list, get_db
 from helpers import IST, as_utc, display_date, display_timestamp, iso, ist_day_bounds, now_utc, today_ist_str
 from security import require_admin, require_staff, require_lead
 from serializers import ser_patient
+import queue_stage
 import sms
 
 router = APIRouter(prefix="/api", tags=["reports"])
-
-
-def _pending_query(camp: dict) -> Dict[str, Any]:
-    """The Transcription backlog: printed and not yet seen, on any camp day of the active camp."""
-    return {"camp_id": camp["_id"], "queue_status": "arrived", "printed_at": {"$type": "date"}}
 
 
 @router.get("/kpis")
@@ -32,8 +29,8 @@ async def kpis(actor: dict = Depends(require_staff)) -> Dict[str, Any]:
         return {"active_camp": None, "registered": 0, "seen": 0, "pending": 0}
     registered, seen, pending = await asyncio.gather(
         db.patients.count_documents({"camp_id": camp["_id"]}),
-        db.patients.count_documents({"camp_id": camp["_id"], "queue_status": "seen"}),
-        db.patients.count_documents(_pending_query(camp)),
+        db.patients.count_documents(queue_stage.doctor_seen(camp["_id"])),
+        db.patients.count_documents(queue_stage.pending(camp["_id"])),
     )
     return {
         "active_camp": {"id": str(camp["_id"]), "name": camp["name"]},
@@ -47,7 +44,7 @@ async def kpis(actor: dict = Depends(require_staff)) -> Dict[str, Any]:
 async def pending_patients(actor: dict = Depends(require_staff)) -> Dict[str, Any]:
     db = get_db()
     camp = await db.camps.find_one({"is_active": True})
-    rows = await db.patients.find(_pending_query(camp)).sort("printed_at", 1).to_list(None) if camp else []
+    rows = await db.patients.find(queue_stage.pending(camp["_id"])).sort(queue_stage.PENDING_SORT).to_list(None) if camp else []
     return {"today": today_ist_str(), "patients": [ser_patient(p) for p in rows]}
 
 
@@ -150,10 +147,10 @@ def _hospital_outcome(ot: dict, revision: dict) -> str:
     return ""
 
 
-def _diagnosis(t: dict) -> str:
-    parts = list(t.get("diagnosis_options") or [])
-    if t.get("diagnosis_other"):
-        parts.append(t["diagnosis_other"])
+def _diagnosis(revision: dict) -> str:
+    parts = list(revision.get("diagnosis_options") or [])
+    if revision.get("diagnosis_other"):
+        parts.append(revision["diagnosis_other"])
     return ";".join(parts)
 
 
@@ -168,15 +165,15 @@ def _power_cell(value: Any) -> str:
     return "" if value is None else format_power(value)
 
 
-def _medicine_cells(t: dict, medicine: dict) -> List[str]:
-    prescribed = t.get("prescribed_medicines") or []
+def _medicine_cells(revision: dict, medicine: dict) -> List[str]:
+    prescribed = revision.get("prescribed_medicines") or []
     given = {o.get("medicine_id") for o in (medicine.get("medicine_outcomes") or []) if o.get("given")}
     not_given = [m.get("name", "") for m in prescribed if m.get("medicine_id") not in given] if medicine else []
     return [";".join(m.get("name", "") for m in prescribed), ";".join(not_given)]
 
 
-def _export_row(p: dict, t: dict, fulfilments: dict, day_dates: dict, revision: dict) -> List[Any]:
-    m = t.get("specs_measurements") or {}
+def _export_row(p: dict, fulfilments: dict, day_dates: dict, revision: dict) -> List[Any]:
+    m = revision.get("specs_measurements") or {}
     ot = fulfilments.get("ot", {})
     hospital = _hospital_outcome(ot, revision)
     scheduled = ot if hospital == "scheduled" else {}
@@ -191,10 +188,10 @@ def _export_row(p: dict, t: dict, fulfilments: dict, day_dates: dict, revision: 
         display_date(day_dates.get(p.get("camp_day_id"))),
         display_timestamp(p.get("created_at")), display_timestamp(p.get("arrived_at")),
         display_timestamp(p.get("seen_at")),
-        _diagnosis(t), t.get("bp", "") or "", t.get("blood_sugar", "") or "",
+        _diagnosis(revision), revision.get("bp", "") or "", revision.get("blood_sugar", "") or "",
         *[m.get(k, "") or "" for k in ("r_sph", "r_cyl", "r_axis", "l_sph", "l_cyl", "l_axis", "add")],
-        *_medicine_cells(t, fulfilments.get("medicine", {})),
-        _power_cell(t.get("fixed_power_r")), _power_cell(t.get("fixed_power_l")),
+        *_medicine_cells(revision, fulfilments.get("medicine", {})),
+        _power_cell(revision.get("fixed_power_r")), _power_cell(revision.get("fixed_power_l")),
         _power_cell(fixed.get("issued_power_r")), _power_cell(fixed.get("issued_power_l")),
         *_line_statuses(fulfilments), hospital,
         display_date(scheduled.get("collection_date")), scheduled.get("collection_venue", "") or "",
@@ -217,26 +214,20 @@ def _csv_chunk(rows: List[List[Any]]) -> str:
 
 
 async def _export_batch(db: Any, patients: List[dict], day_dates: Dict[Any, Any]) -> str:
-    rev_ids = [p["committed_revision_id"] for p in patients if p.get("committed_revision_id")]
+    revisions = await committed_prescription.of_patients(db, patients)
     pids = [p["_id"] for p in patients]
-    rev_rows = await db.prescription_revisions.find({"_id": {"$in": rev_ids}}).to_list(len(rev_ids) or 1) if rev_ids else []
-    tx_rows = await db.transcriptions.find({"patient_id": {"$in": pids}}).to_list(len(pids) or 1) if pids else []
-    tx_by_patient = {t["patient_id"]: t for t in tx_rows}
-    tx_ids = [t["_id"] for t in tx_rows]
-    fulfil_rows = await db.fulfilments.find({"transcription_id": {"$in": tx_ids}}).to_list(None) if tx_ids else []
+    tx_rows = await db.transcriptions.find({"patient_id": {"$in": pids}}, {"_id": 1, "patient_id": 1}).to_list(len(pids))
+    tx_by_patient = {t["patient_id"]: t["_id"] for t in tx_rows}
+    fulfil_rows = await db.fulfilments.find({"transcription_id": {"$in": list(tx_by_patient.values())}}).to_list(None) if tx_rows else []
     fulfil_by_tx: Dict[Any, Dict[str, dict]] = {}
     for row in fulfil_rows:
         fulfil_by_tx.setdefault(row["transcription_id"], {})[row["item_type"]] = row
-    rev_by_id = {row["_id"]: row for row in rev_rows}
-    lines = []
-    for patient in patients:
-        transcription = tx_by_patient.get(patient["_id"]) or {}
-        lines.append(_export_row(
-            patient, transcription,
-            fulfil_by_tx.get(transcription["_id"], {}) if transcription else {},
-            day_dates, rev_by_id.get(patient.get("committed_revision_id")) or {},
-        ))
-    return _csv_chunk(lines)
+    return _csv_chunk([
+        _export_row(
+            patient, fulfil_by_tx.get(tx_by_patient.get(patient["_id"]), {}), day_dates, revisions.get(patient["_id"]) or {},
+        )
+        for patient in patients
+    ])
 
 
 async def _camp_record_chunks(db: Any, camp: dict | None):
@@ -272,14 +263,7 @@ def _empty_board(as_of: str, state: str) -> Dict[str, Any]:
         "state": state,
         "camp": None,
         "day": None,
-        "stages": {
-            "arrived": 0,
-            "awaiting_print": 0,
-            "awaiting_seen": 0,
-            "seen": 0,
-            "transcription_backlog": 0,
-            "earlier_days": {"awaiting_print": 0, "awaiting_seen": 0, "transcription_backlog": 0},
-        },
+        "stages": {"arrived": 0, "seen": 0, **queue_stage.board_stages([])},
         "fulfilment": {
             item_type: {status: 0 for status in statuses} for item_type, statuses in fulfilment_line.STATUSES.items()
         },
@@ -336,20 +320,7 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
                 "last_60m": {"$sum": {"$cond": [{"$gte": ["$arrived_at", hour_cutoff]}, 1, 0]}},
             }},
         ]),
-        aggregate_list(db.patients, [
-            {"$match": {"camp_id": camp_id, "queue_status": "arrived"}},
-            {"$group": {
-                "_id": None,
-                "unprinted": {"$sum": {"$cond": [{"$lte": ["$printed_at", None]}, 1, 0]}},
-                "unprinted_earlier": {"$sum": {"$cond": [
-                    {"$and": [{"$lte": ["$printed_at", None]}, {"$lt": ["$arrived_at", start]}]}, 1, 0,
-                ]}},
-                "printed": {"$sum": {"$cond": [{"$gt": ["$printed_at", None]}, 1, 0]}},
-                "printed_earlier": {"$sum": {"$cond": [
-                    {"$and": [{"$gt": ["$printed_at", None]}, {"$lt": ["$arrived_at", start]}]}, 1, 0,
-                ]}},
-            }},
-        ]),
+        aggregate_list(db.patients, queue_stage.board_pipeline(camp_id, start)),
         db.patients.count_documents({"camp_id": camp_id, "seen_at": {"$gte": start, "$lt": end}}),
         asyncio.gather(*[
             db.fulfilments.count_documents({
@@ -378,9 +349,6 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
         return empty
 
     arrived = sum(row["arrived"] for row in volunteer_rows)
-    queue = queue_rows[0] if queue_rows else {}
-    unprinted, printed = queue.get("unprinted", 0), queue.get("printed", 0)
-    unprinted_earlier, printed_earlier = queue.get("unprinted_earlier", 0), queue.get("printed_earlier", 0)
     by_vol = {row["_id"]: row for row in volunteer_rows if row["_id"]}
     vol_ids = [ObjectId(v) for v in by_vol if ObjectId.is_valid(v)]
     volunteers = await db.users.find({"_id": {"$in": vol_ids}}).to_list(None) if vol_ids else []
@@ -438,18 +406,7 @@ async def camp_day_board(actor: dict = Depends(require_lead)) -> Dict[str, Any]:
         "backups_failing": backups_failing,
         "camp": {"id": str(camp["_id"]), "name": camp["name"]},
         "day": {"id": str(day["_id"]), "day_date": day["day_date"]},
-        "stages": {
-            "arrived": arrived,
-            "awaiting_print": unprinted,
-            "awaiting_seen": printed,
-            "seen": seen_today,
-            "transcription_backlog": printed,
-            "earlier_days": {
-                "awaiting_print": unprinted_earlier,
-                "awaiting_seen": printed_earlier,
-                "transcription_backlog": printed_earlier,
-            },
-        },
+        "stages": {"arrived": arrived, **queue_stage.board_stages(queue_rows), "seen": seen_today},
         "fulfilment": fulfil_counts,
         "activity": activity,
         "quiet_count": quiet_count,
