@@ -4,7 +4,7 @@ import api, { formatApiError, errorPayload } from "../lib/api";
 import { Button, Card, Select, Field, Alert } from "../components/ui";
 import AadhaarScanner from "../components/AadhaarScanner";
 import { Stethoscope, CheckCircle2, Lock } from "lucide-react";
-import { v4 } from "../lib/uuid";
+import { useRegistrationRequest } from "../lib/useRegistrationRequest";
 import { normalizePhone } from "../lib/phone";
 import { PhoneInput } from "../components/PhoneInput";
 import { displayDate } from "../lib/dates";
@@ -28,7 +28,7 @@ export default function SelfRegister() {
   const [receipt, setReceipt] = useState(null);
   const [loadErr, setLoadErr] = useState("");
   const [loadingCamp, setLoadingCamp] = useState(true);
-  const [reqId, setReqId] = useState("");
+  const request = useRegistrationRequest();
   const [readFailed, setReadFailed] = useState(false);
   const [retry, setRetry] = useState(false);
   const canonicalPhone = normalizePhone(phone);
@@ -38,16 +38,16 @@ export default function SelfRegister() {
 
   const onScanned = useCallback((card, raw) => {
     setScanned({ ...card, qr_payload: raw || card.qr_payload });
-    setReqId(v4());
+    request.reset();
     setRetry(false);
-  }, []);
+  }, [request]);
 
   const onCaptureStart = useCallback(() => {
     setScanned(null);
-    setReqId("");
+    request.reset();
     setReadFailed(false);
     setRetry(false);
-  }, []);
+  }, [request]);
 
   const onFailure = useCallback((outcome) => {
     const unreadable = outcome === "garbage" || outcome === "not-aadhaar";
@@ -70,17 +70,20 @@ export default function SelfRegister() {
   useEffect(() => { loadCamp(); }, [loadCamp]);
 
   const submit = useCallback(async () => {
-    if (!scanned || !chosenDay || !reqId || !canonicalPhone) return;
+    if (!scanned || !chosenDay || !canonicalPhone) return;
     setBusy(true); setError("");
     try {
-      const { data } = await api.post("/self-register", {
+      const body = {
         qr_payload: scanned.qr_payload,
         phone: canonicalPhone,
         camp_day_id: chosenDay,
-        is_self_registered: true,
-        registration_request_id: reqId,
         full_name: scanned.full_name,
-      });
+      };
+      const { data } = await request.send(body, (id) => api.post("/self-register", {
+        ...body,
+        is_self_registered: true,
+        registration_request_id: id,
+      }));
       setReceipt(data.receipt);
     } catch (err) {
       setError(formatApiError(err));
@@ -88,12 +91,12 @@ export default function SelfRegister() {
     } finally {
       setBusy(false);
     }
-  }, [scanned, canonicalPhone, chosenDay, reqId, loadCamp]);
+  }, [scanned, canonicalPhone, chosenDay, request, loadCamp]);
 
   const registerAnother = () => {
     setReceipt(null);
     setScanned(null);
-    setReqId("");
+    request.reset();
     setReadFailed(false);
     setRetry(false);
     loadCamp();

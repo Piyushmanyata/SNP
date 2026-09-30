@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
-import api, { formatApiError, errorPayload } from "../lib/api";
+import api, { formatApiError } from "../lib/api";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import AadhaarScanner from "../components/AadhaarScanner";
@@ -10,15 +10,13 @@ import { PaperCheck } from "../components/desk/PaperCheck";
 import { PendingStat } from "../components/desk/Pending";
 import { Lookalikes } from "../components/desk/Lookalikes";
 import { EMPTY_REASON, ManualReason, cardInHand, reasonReady } from "../components/desk/ManualReason";
-import { REQUEST_CONFLICT, hasAge, registerPatient, registrationError } from "../components/desk/register";
 import { useDeskSession } from "../components/desk/useDeskSession";
+import { useRegisterForm } from "../components/desk/useRegisterForm";
 import { AWAITING_SCAN_LINE, PRINT_WINDOW_CLOSED_LINE, alreadyPrintedLine, printedLine } from "../components/desk/printed";
 import { PrescriptionSheet } from "../components/print/PrescriptionSheet";
 import { printDocument, IMAGE_WAIT_MS } from "../lib/printJob";
 import { loadLogos } from "../lib/logoCache";
 import { PhoneInput } from "../components/PhoneInput";
-import { v4 } from "../lib/uuid";
-import { normalizePhone } from "../lib/phone";
 import { displayDate } from "../lib/dates";
 import {
   Button, Card, Input, Field, Alert, Modal, Stat, StatusBadge, Badge, ErrorCard, Spinner, Select,
@@ -26,16 +24,6 @@ import {
 import {
   UserPlus, Search, Printer, ScanLine,
 } from "lucide-react";
-
-const EMPTY_REG_FORM = Object.freeze({
-  full_name: "",
-  age: "",
-  phone: "",
-  gender: "",
-  address: "",
-  aadhaar_last4: "",
-  dob: "",
-});
 
 const REFRESH_MS = 30000;
 
@@ -361,162 +349,32 @@ export function PatientRow({ p, onPrint, printingOpen, reprint = false, onNoCard
 }
 
 export function RegisterModal({ open, atDoor = false, doorDayId, onClose, initialPayload, days, onDone, setBanner, onRegistered }) {
-  const [form, setForm] = useState(EMPTY_REG_FORM);
-  const [qrPayload, setQrPayload] = useState("");
-  const [manualMode, setManualMode] = useState(false);
-  const [dayId, setDayId] = useState("");
-  const scanRequest = useRef(0);
   const phoneRef = useRef(null);
-  const [reason, setReason] = useState(EMPTY_REASON);
-  const [error, setError] = useState("");
-  const [review, setReview] = useState(null);
-  const [lookalikeRows, setLookalikeRows] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [wedgeReading, setWedgeReading] = useState(false);
-  const [reqId, setReqId] = useState(v4());
-  const prevOpenRef = useRef(false);
-
-  const reset = useCallback(() => {
-    setForm(EMPTY_REG_FORM);
-    setQrPayload("");
-    setManualMode(atDoor);
-    setReason(EMPTY_REASON);
-    setError("");
-    setReview(null);
-    setLookalikeRows(null);
-    setReqId(v4());
-  }, [atDoor]);
-
-  useEffect(() => {
-    scanRequest.current += 1;
-    setWedgeReading(false);
-    return () => { scanRequest.current += 1; };
-  }, [open, manualMode]);
-
-  useEffect(() => {
-    if (open && !prevOpenRef.current) {
-      reset();
-      const today = days.find((d) => d.is_today);
-      setDayId(today ? today.id : (days[0]?.id || ""));
-    } else if (open && !dayId && days.length > 0) {
-      const today = days.find((d) => d.is_today);
-      setDayId(today ? today.id : (days[0]?.id || ""));
-    }
-    prevOpenRef.current = open;
-  }, [open, days, dayId, reset]);
+  const [view, actions] = useRegisterForm({
+    open, atDoor, doorDayId, days, initialPayload, onClose, onDone, onRegistered, setBanner,
+  });
+  const {
+    form, qrPayload, manualMode, dayId, reason, error, review, lookalikeRows, busy, wedgeReading, receiving,
+    scanned, showForm, dirty, canSubmit, locked,
+  } = view;
 
   useEffect(() => {
     if (qrPayload) phoneRef.current?.focus();
   }, [qrPayload]);
 
-  const scanned = Boolean(qrPayload);
-
-  const onScan = useCallback((data, payload) => {
-    setForm((prev) => ({
-      full_name: data.full_name,
-      age: data.age ?? "",
-      phone: prev.phone,
-      gender: data.gender,
-      address: data.address,
-      aadhaar_last4: data.aadhaar_last4,
-      dob: data.dob,
-    }));
-    setQrPayload(payload || "");
-    setManualMode(false);
-    setError("");
-    setReview(null);
-    setReqId(v4());
-  }, []);
-
-  const readCard = useCallback(async (payload) => {
-    const request = ++scanRequest.current;
-    setError("");
-    setWedgeReading(true);
-    try {
-      const { data } = await api.post("/aadhaar/decode", { payload });
-      if (request !== scanRequest.current) return;
-      if (data.outcome === "card") onScan(data.data, payload);
-      else setError(data.message || "Could not read that card. Scan it again.");
-    } catch (err) {
-      if (request !== scanRequest.current) return;
-      setError(formatApiError(err));
-    } finally {
-      if (request === scanRequest.current) setWedgeReading(false);
-    }
-  }, [onScan]);
-
-  useEffect(() => {
-    if (open && initialPayload) readCard(initialPayload);
-  }, [open, initialPayload, readCard]);
-
-  const { receiving } = useWedgeBurst({
-    enabled: open && !atDoor && !manualMode && !busy,
-    onBurst: readCard,
-    onInterrupted: () => setError("The USB scan was cut off. Scan the card again."),
-  });
-
-  const bookedDay = atDoor ? doorDayId : dayId;
-  const showForm = scanned || manualMode;
-  const dirty = showForm && (Object.values(form).some((value) => String(value ?? "") !== "") || Boolean(reason.code));
-  const manualReady = reasonReady(reason) && Boolean(form.gender)
-    && (!cardInHand(reason) || String(form.aadhaar_last4 ?? "").length === 4);
-  const canSubmit = !busy && Boolean(form.full_name) && hasAge(form.age) && Boolean(normalizePhone(form.phone))
-    && Boolean(bookedDay) && (scanned || manualReady);
-  const locked = (field) => scanned && form[field] !== "" && form[field] != null;
-  const edit = (change) => { setLookalikeRows(null); setForm(change); };
-  const setField = (field) => (e) => edit((prev) => ({ ...prev, [field]: e.target.value }));
-  const setDigits = (field, max) => (e) => edit((prev) => ({ ...prev, [field]: digitsOnly(e.target.value, max) }));
-  const chooseReason = (next) => { setLookalikeRows(null); setReason(next); };
+  const setField = (field) => (e) => actions.setField(field, e.target.value);
   const openLookalike = (reg) => { onRegistered?.(reg); onClose(); };
-
-  const save = async ({ next = false, reviewConfirmedId = null, differentPerson = false } = {}) => {
-    if (!canSubmit) return;
-    setBusy(true); setError("");
-    try {
-      const data = await registerPatient({
-        form,
-        qrPayload,
-        dayId: bookedDay,
-        reqId,
-        reason,
-        atDoor,
-        reviewConfirmedId,
-        differentPerson,
-      });
-      const reg = data.registration;
-      setBanner(atDoor
-        ? `Registered and arrived: #${reg.reg_no} — ${reg.full_name}`
-        : `Registered #${reg.reg_no} — ${reg.full_name}. SMS sent.`);
-      onRegistered?.(reg);
-      onDone(data);
-      if (next) reset();
-      else onClose();
-    } catch (err) {
-      const payload = errorPayload(err);
-      if (payload?.code === "MISMATCH_REVIEW_REQUIRED") {
-        setReview(payload);
-        return;
-      }
-      if (payload?.code === "LOOKALIKES") {
-        setLookalikeRows(payload.registrations);
-        return;
-      }
-      if (payload?.code === REQUEST_CONFLICT) setReqId(v4());
-      setError(registrationError(err));
-    } finally { setBusy(false); }
-  };
 
   const submit = (e) => {
     e.preventDefault();
-    save();
+    actions.save();
   };
 
   return (
     <Modal open={open} onClose={onClose} dirty={dirty} title={atDoor ? "Manual entry" : "New Registration"} size="lg">
       <div className="space-y-4">
         {!atDoor && (
-          <AadhaarScanner onScanned={onScan} disabled={busy || manualMode}
-            onCaptureStart={() => { scanRequest.current += 1; setWedgeReading(false); setQrPayload(""); setReview(null); setForm((prev) => ({ ...EMPTY_REG_FORM, phone: prev.phone })); }} />
+          <AadhaarScanner onScanned={actions.onScanned} disabled={busy || manualMode} onCaptureStart={actions.captureStarted} />
         )}
         {(receiving || wedgeReading) && (
           <div role="status" aria-live="polite" className="flex items-center gap-2 min-h-[44px] font-semibold text-slate-900" data-testid="reg-wedge-status">
@@ -525,20 +383,20 @@ export function RegisterModal({ open, atDoor = false, doorDayId, onClose, initia
           </div>
         )}
         {!atDoor && !scanned && (
-          <Button type="button" variant="outline" disabled={busy} data-testid="reg-manual-toggle" onClick={() => setManualMode(!manualMode)}>
+          <Button type="button" variant="outline" disabled={busy} data-testid="reg-manual-toggle" onClick={actions.toggleManual}>
             {manualMode ? "Use scanner" : <><UserPlus className="w-4 h-4" /> Manual entry</>}
           </Button>
         )}
 
         {showForm && (
           <form id="register-form" onSubmit={submit} className="space-y-4">
-            {!scanned && <ManualReason reason={reason} onChange={chooseReason} />}
+            {!scanned && <ManualReason reason={reason} onChange={actions.chooseReason} />}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Field label="Full name" required>
                 <Input value={form.full_name} onChange={setField("full_name")} readOnly={locked("full_name")} className={locked("full_name") ? "bg-slate-100" : ""} autoComplete="off" maxLength={100} data-testid="reg-fullname-input" />
               </Field>
               <Field label="Age" required>
-                <Input type="text" inputMode="numeric" value={form.age} onChange={setDigits("age", 3)} readOnly={locked("age")} className={locked("age") ? "bg-slate-100" : ""} data-testid="reg-age-input" />
+                <Input type="text" inputMode="numeric" value={form.age} onChange={setField("age")} readOnly={locked("age")} className={locked("age") ? "bg-slate-100" : ""} data-testid="reg-age-input" />
               </Field>
               <Field label="Gender" required={!scanned}>
                 <Select value={form.gender ?? ""} onChange={setField("gender")} disabled={locked("gender")} data-testid="reg-gender-select">
@@ -546,14 +404,14 @@ export function RegisterModal({ open, atDoor = false, doorDayId, onClose, initia
                 </Select>
               </Field>
               <Field label="Phone (household)" required hint="10-digit mobile">
-                <PhoneInput ref={phoneRef} value={form.phone} onChange={(phone) => edit((prev) => ({ ...prev, phone }))} data-testid="reg-phone-input" />
+                <PhoneInput ref={phoneRef} value={form.phone} onChange={(phone) => actions.setField("phone", phone)} data-testid="reg-phone-input" />
               </Field>
               <Field label="Aadhaar last-4" required={!scanned && cardInHand(reason)}>
-                <Input value={form.aadhaar_last4 ?? ""} onChange={setDigits("aadhaar_last4", 4)} readOnly={locked("aadhaar_last4")} className={locked("aadhaar_last4") ? "bg-slate-100" : ""} inputMode="numeric" data-testid="reg-last4-input" />
+                <Input value={form.aadhaar_last4 ?? ""} onChange={setField("aadhaar_last4")} readOnly={locked("aadhaar_last4")} className={locked("aadhaar_last4") ? "bg-slate-100" : ""} inputMode="numeric" data-testid="reg-last4-input" />
               </Field>
               {!atDoor && (
                 <Field label="Camp day">
-                  <Select value={dayId} onChange={(e) => setDayId(e.target.value)} data-testid="reg-day-select">
+                  <Select value={dayId} onChange={(e) => actions.chooseDay(e.target.value)} data-testid="reg-day-select">
                     {days.map((d) => <option key={d.id} value={d.id}>{displayDate(d.day_date)}{d.is_today ? " (today)" : ""}</option>)}
                   </Select>
                 </Field>
@@ -570,12 +428,12 @@ export function RegisterModal({ open, atDoor = false, doorDayId, onClose, initia
             registration={review.registration}
             diff={review.diff}
             busy={busy}
-            onConfirm={() => save({ reviewConfirmedId: review.registration.id })}
+            onConfirm={() => actions.save({ reviewConfirmedId: review.registration.id })}
           />
         )}
 
         {lookalikeRows && (
-          <Lookalikes rows={lookalikeRows} busy={busy} onOpen={openLookalike} onDifferent={() => save({ differentPerson: true })} />
+          <Lookalikes rows={lookalikeRows} busy={busy} onOpen={openLookalike} onDifferent={() => actions.save({ differentPerson: true })} />
         )}
 
         <Alert>{error}</Alert>
@@ -586,7 +444,7 @@ export function RegisterModal({ open, atDoor = false, doorDayId, onClose, initia
             {!review && !lookalikeRows && (
               <>
                 {!atDoor && (
-                  <Button type="button" variant="outline" disabled={!canSubmit} onClick={() => save({ next: true })} data-testid="patient-register-next">
+                  <Button type="button" variant="outline" disabled={!canSubmit} onClick={() => actions.save({ next: true })} data-testid="patient-register-next">
                     Register &amp; next
                   </Button>
                 )}
