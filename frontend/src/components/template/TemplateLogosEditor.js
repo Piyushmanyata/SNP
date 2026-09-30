@@ -10,14 +10,14 @@ export function TemplateLogosEditor({ logos, onAddLogo, onMoveLogo, onRemoveLogo
       <div className="flex items-center justify-between mb-1">
         <h3 className="font-display font-bold text-slate-900">Sponsor Logos</h3>
         <label
-          className={`inline-flex items-center gap-2 min-h-[44px] px-4 rounded-xl bg-slate-900 text-white text-sm font-semibold ${full ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:bg-slate-800"}`}
+          className={`inline-flex items-center gap-2 min-h-[44px] px-4 rounded-xl bg-slate-900 text-white text-sm font-semibold focus-within:ring-2 focus-within:ring-emerald-500 focus-within:ring-offset-2 ${full ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:bg-slate-800"}`}
           data-testid="tpl-add-logo-label"
         >
           <ImagePlus className="w-4 h-4" /> Add logo
           <input
             type="file"
             accept="image/png,image/jpeg,image/webp"
-            className="hidden"
+            className="sr-only"
             disabled={full}
             onChange={(e) => {
               onAddLogo(e.target.files?.[0]);
