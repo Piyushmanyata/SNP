@@ -102,7 +102,12 @@ _Avoid_: OT slot, surgery day, OT appointment
 
 **Prescription transcription**:
 The operator copies the doctor's paper prescription at any Fulfilment line, then issues supplies or schedules hospital treatment or collection at the same desk. It runs as a wizard: one question per screen, the same sequence for every operator, with a step for each prescribed line only and a read-back before commit. Corrections after fulfilment require an audit reason and use their own form, not the wizard.
+The transcription is the wizard's editable draft, plus a mirror of the last commit written in the same transaction. It is never the source of what was prescribed.
 _Avoid_: Doctor's Rx line, separate transcription desk, prescription form (it is no longer one screen)
+
+**Committed prescription**:
+The prescription as of the patient's committed revision (ADR 0100): what every reader other than the wizard treats as prescribed. A patient with no committed revision has none, so the Camp records export shows blank prescription columns for a patient who was never completed or whose completion was undone, whatever the draft holds. Read through one module, never from the transcription.
+_Avoid_: saved prescription (a draft is saved too), current transcription, the mirror
 
 **Medicine catalogue**:
 The single global list of medicines the trust carries, maintained by an admin. The clinical desk can prescribe nothing else; a medicine the camp does not stock is recorded as not available at the desk. Retiring an entry hides it from operators without touching prescriptions already committed.
@@ -309,7 +314,7 @@ Patients in the active camp who have Print Prescription but are not yet Doctor s
 _Avoid_: registered minus seen, waiting (ambiguous with the physical queue)
 
 **Doctor seen**:
-A clinical desk operator's attestation that consultation is complete, committed with whole-prescription completion after arrival and print. Drafts, reprints and volunteer mark-seen cannot confer it. Undo completion withdraws it, with a reason, only while no line has been issued; the patient returns to Arrived and can print again, and a printed patient is Pending again. Entering and leaving Doctor seen are one pair of exact-inverse fields in `queue_stage` (queue status, seen time, seen by); the committed prescription revision is a clinical field and not part of the stage.
+A clinical desk operator's attestation that consultation is complete, committed with whole-prescription completion after arrival and print. Drafts, reprints and volunteer mark-seen cannot confer it. Undo completion withdraws it, with a reason, only while no line has been issued; the patient returns to Arrived and can print again, and a printed patient is Pending again. Entering and leaving Doctor seen are one pair of exact-inverse fields in `queue_stage` (queue status, seen time, seen by); the committed prescription revision is a clinical field and not part of the stage. Each fulfilment carries `patient_seen_at`, a fixed copy of the patient's seen time for board counting: undo is refused once a fulfilment exists and a correction never changes the seen time, so the copy cannot drift.
 _Avoid_: arrival, prescription printed, independent mark-seen
 
 **Paper review**:
@@ -317,7 +322,7 @@ The issuing operator's explicit comparison of a fulfilment line with the physica
 _Avoid_: opening the prescription, automatic approval
 
 **Camp records export**:
-The single admin-only CSV for a camp, one row per patient including no-shows. Carries identity (name, age, gender, household phone, address, Aadhaar last-4, reg_no), the Manual entry mark and its reason, the registration / arrival / seen timestamps, diagnosis, BP and blood sugar, each eye's power, the medicines prescribed and any not given, the prescribed and issued fixed powers, the status of each of the four Fulfilment lines with blank meaning the patient was never recorded at that desk, and the assigned clinical day and venue for each deferral. It is a wide file of patient data and is not downloadable by a volunteer.
+The single admin-only CSV for a camp, one row per patient including no-shows. Carries identity (name, age, gender, household phone, address, Aadhaar last-4, reg_no), the Manual entry mark and its reason, the registration / arrival / seen timestamps, diagnosis, BP and blood sugar, each eye's power, the medicines prescribed and any not given, the prescribed and issued fixed powers (all read from the Committed prescription, blank for a patient without one), the status of each of the four Fulfilment lines with blank meaning the patient was never recorded at that desk, and the assigned clinical day and venue for each deferral. It is a wide file of patient data and is not downloadable by a volunteer.
 _Avoid_: camp records, clinical audit, the reports (there is exactly one export)
 
 **Registration request**:

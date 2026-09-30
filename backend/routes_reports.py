@@ -8,6 +8,7 @@ from typing import Any, Dict, List
 from bson import ObjectId
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse, JSONResponse
+import committed_prescription
 import fulfilment_line
 from catalogue import format_power
 from db import aggregate_list, get_db
@@ -146,10 +147,10 @@ def _hospital_outcome(ot: dict, revision: dict) -> str:
     return ""
 
 
-def _diagnosis(t: dict) -> str:
-    parts = list(t.get("diagnosis_options") or [])
-    if t.get("diagnosis_other"):
-        parts.append(t["diagnosis_other"])
+def _diagnosis(revision: dict) -> str:
+    parts = list(revision.get("diagnosis_options") or [])
+    if revision.get("diagnosis_other"):
+        parts.append(revision["diagnosis_other"])
     return ";".join(parts)
 
 
@@ -164,15 +165,15 @@ def _power_cell(value: Any) -> str:
     return "" if value is None else format_power(value)
 
 
-def _medicine_cells(t: dict, medicine: dict) -> List[str]:
-    prescribed = t.get("prescribed_medicines") or []
+def _medicine_cells(revision: dict, medicine: dict) -> List[str]:
+    prescribed = revision.get("prescribed_medicines") or []
     given = {o.get("medicine_id") for o in (medicine.get("medicine_outcomes") or []) if o.get("given")}
     not_given = [m.get("name", "") for m in prescribed if m.get("medicine_id") not in given] if medicine else []
     return [";".join(m.get("name", "") for m in prescribed), ";".join(not_given)]
 
 
-def _export_row(p: dict, t: dict, fulfilments: dict, day_dates: dict, revision: dict) -> List[Any]:
-    m = t.get("specs_measurements") or {}
+def _export_row(p: dict, fulfilments: dict, day_dates: dict, revision: dict) -> List[Any]:
+    m = revision.get("specs_measurements") or {}
     ot = fulfilments.get("ot", {})
     hospital = _hospital_outcome(ot, revision)
     scheduled = ot if hospital == "scheduled" else {}
@@ -187,10 +188,10 @@ def _export_row(p: dict, t: dict, fulfilments: dict, day_dates: dict, revision: 
         display_date(day_dates.get(p.get("camp_day_id"))),
         display_timestamp(p.get("created_at")), display_timestamp(p.get("arrived_at")),
         display_timestamp(p.get("seen_at")),
-        _diagnosis(t), t.get("bp", "") or "", t.get("blood_sugar", "") or "",
+        _diagnosis(revision), revision.get("bp", "") or "", revision.get("blood_sugar", "") or "",
         *[m.get(k, "") or "" for k in ("r_sph", "r_cyl", "r_axis", "l_sph", "l_cyl", "l_axis", "add")],
-        *_medicine_cells(t, fulfilments.get("medicine", {})),
-        _power_cell(t.get("fixed_power_r")), _power_cell(t.get("fixed_power_l")),
+        *_medicine_cells(revision, fulfilments.get("medicine", {})),
+        _power_cell(revision.get("fixed_power_r")), _power_cell(revision.get("fixed_power_l")),
         _power_cell(fixed.get("issued_power_r")), _power_cell(fixed.get("issued_power_l")),
         *_line_statuses(fulfilments), hospital,
         display_date(scheduled.get("collection_date")), scheduled.get("collection_venue", "") or "",
@@ -213,26 +214,20 @@ def _csv_chunk(rows: List[List[Any]]) -> str:
 
 
 async def _export_batch(db: Any, patients: List[dict], day_dates: Dict[Any, Any]) -> str:
-    rev_ids = [p["committed_revision_id"] for p in patients if p.get("committed_revision_id")]
+    revisions = await committed_prescription.of_patients(db, patients)
     pids = [p["_id"] for p in patients]
-    rev_rows = await db.prescription_revisions.find({"_id": {"$in": rev_ids}}).to_list(len(rev_ids) or 1) if rev_ids else []
-    tx_rows = await db.transcriptions.find({"patient_id": {"$in": pids}}).to_list(len(pids) or 1) if pids else []
-    tx_by_patient = {t["patient_id"]: t for t in tx_rows}
-    tx_ids = [t["_id"] for t in tx_rows]
-    fulfil_rows = await db.fulfilments.find({"transcription_id": {"$in": tx_ids}}).to_list(None) if tx_ids else []
+    tx_rows = await db.transcriptions.find({"patient_id": {"$in": pids}}, {"_id": 1, "patient_id": 1}).to_list(len(pids))
+    tx_by_patient = {t["patient_id"]: t["_id"] for t in tx_rows}
+    fulfil_rows = await db.fulfilments.find({"transcription_id": {"$in": list(tx_by_patient.values())}}).to_list(None) if tx_rows else []
     fulfil_by_tx: Dict[Any, Dict[str, dict]] = {}
     for row in fulfil_rows:
         fulfil_by_tx.setdefault(row["transcription_id"], {})[row["item_type"]] = row
-    rev_by_id = {row["_id"]: row for row in rev_rows}
-    lines = []
-    for patient in patients:
-        transcription = tx_by_patient.get(patient["_id"]) or {}
-        lines.append(_export_row(
-            patient, transcription,
-            fulfil_by_tx.get(transcription["_id"], {}) if transcription else {},
-            day_dates, rev_by_id.get(patient.get("committed_revision_id")) or {},
-        ))
-    return _csv_chunk(lines)
+    return _csv_chunk([
+        _export_row(
+            patient, fulfil_by_tx.get(tx_by_patient.get(patient["_id"]), {}), day_dates, revisions.get(patient["_id"]) or {},
+        )
+        for patient in patients
+    ])
 
 
 async def _camp_record_chunks(db: Any, camp: dict | None):

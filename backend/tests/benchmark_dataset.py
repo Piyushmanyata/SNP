@@ -201,15 +201,14 @@ async def seed(database, *, patients: int = FULL_PATIENTS) -> dict:
             continue
         rows["prescription_revisions"].append({
             "_id": revision_id, "patient_id": patient_id, "camp_id": camp_id, "kind": "complete",
-            "prescribed_lines": lines, "none_prescribed": False,
+            "prescribed_lines": lines, "none_prescribed": False, "diagnosis_options": ["Cataract"], "bp": "120/80",
             "prescribed_medicines": [{"medicine_id": str(medicine_id), "name": "Benchmark eye drop"}],
             "operation_id": f"{MARKER}:revision:{index}", "author_id": volunteer, "created_at": arrival,
         })
         transcription_id = identifier(f"transcription:{index}")
         rows["transcriptions"].append({
             "_id": transcription_id, "patient_id": patient_id, "person_id": person_id, "camp_id": camp_id,
-            "diagnosis_options": ["Cataract"], "bp": "120/80", "locked": True,
-            "created_by": volunteer, "created_at": arrival,
+            "locked": True, "created_by": volunteer, "created_at": arrival,
         })
         if index >= reserved_from:
             fulfil_pool.append({
