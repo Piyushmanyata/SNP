@@ -35,6 +35,7 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
     const isCurrent = (seq) => seq === latest.current.seq;
 
     const resolveDoorScan = async (payload) => {
+      request.reset();
       const { seq } = dispatch({ type: "scanStarted", payload });
       try {
         const { data } = await api.post("/desk/scan", { payload });
@@ -165,8 +166,8 @@ export function useDeskSession({ printPrescription, onCreated, printingOpen, ope
     };
 
     const submitDoorWalkIn = async () => {
-      const { scanResult, scanPayload, doorPhone } = latest.current;
-      if (!scanResult?.card) return;
+      const { scanResult, scanPayload, doorPhone, busy, scanning } = latest.current;
+      if (!scanResult?.card || busy || scanning) return;
       if (!operatingDayId) {
         dispatch({ type: "failed", message: "No operating camp day. Use Pre-registration." });
         return;

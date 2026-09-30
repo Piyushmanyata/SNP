@@ -190,3 +190,33 @@ test("a walk-in with no operating day registers nobody", async () => {
   expect(registerBodies()).toHaveLength(0);
   expect(state().error).toBe("No operating camp day. Use Pre-registration.");
 });
+
+test("a second Register tap in the same tick sends one request", async () => {
+  const saving = deferred();
+  await mount();
+  await scanWalkIn();
+  api.post.mockReturnValueOnce(saving.promise);
+  let first;
+  let second;
+  await act(async () => {
+    first = actions().submitDoorWalkIn();
+    second = actions().submitDoorWalkIn();
+    await second;
+  });
+  expect(registerBodies()).toHaveLength(1);
+  await act(async () => { saving.resolve({ data: { registration: REG, created: true } }); await first; });
+  expect(registerBodies()).toHaveLength(1);
+  expect(state().busy).toBe(false);
+});
+
+test("scanning the same card again after a failed walk-in sends a new id", async () => {
+  await mount();
+  await scanWalkIn();
+  api.post.mockRejectedValueOnce(new Error("Network Error"));
+  await walkIn();
+  await scanWalkIn();
+  api.post.mockRejectedValueOnce(new Error("Network Error"));
+  await walkIn();
+  const [first, second] = requestIds();
+  expect(second).not.toBe(first);
+});

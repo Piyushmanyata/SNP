@@ -17,7 +17,7 @@
 
 - `frontend/src/lib/useRegistrationRequest.js` is the one hook, `send(payload, post)` and `reset()`. The same payload sends the same id until success, a `REGISTRATION_REQUEST_CONFLICT` or `reset()`. A different payload mints a new id, and going back to an old payload does not bring the old id back. A late reply clears the id only if it is still the id that call used. Errors reach the caller unchanged.
 - The registration desk, the Door walk-in and Self-registration send through it. The key is the person and booking being registered (`registrationBody`). Mismatch review and Different person answer server prompts about the same registration, so they stay out of the key and keep the id of the attempt that raised them.
-- `reset()` is called only where the payload can stay equal but the registration is new: the modal opens, a card is read or scanned, Self-registration's Register another or new capture, and Admin New Camp opening. A success already clears the id, so nobody resets after one.
+- `reset()` is called only where the payload can stay equal but the registration is new: the modal opens, a card is read or scanned (the modal's card read and every Door scan), Self-registration's Register another or new capture, and Admin New Camp opening. A success already clears the id, so nobody resets after one.
 - `RegisterModal`'s state moves behind the same seam as the Desk session:
   - `registerForm.js` is a pure reducer. Its `seq` replaces the stale-scan counter. Age and last-4 are stripped to digits there.
   - `registrationView` holds the submit rules: the effective camp day (today's, else the first, so days that arrive after the modal opened need no event), `canSubmit`, `dirty` and `locked`.
